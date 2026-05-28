@@ -1,0 +1,56 @@
+#ifndef GDT_H
+#define GDT_H
+
+#include <stdint.h>
+
+/* GDT selectors */
+#define GDT_NULL_SEL    0x00
+#define GDT_CODE_SEL    0x08
+#define GDT_DATA_SEL    0x10
+#define GDT_USER_CODE   0x18
+#define GDT_USER_DATA   0x20
+#define GDT_TSS_SEL     0x28
+
+/* GDT entry structure (8 bytes for code/data, 16 for TSS) */
+struct gdt_entry {
+    uint16_t limit_low;
+    uint16_t base_low;
+    uint8_t  base_middle;
+    uint8_t  access_byte;
+    uint8_t  flags_limit_high;
+    uint8_t  base_high;
+} __attribute__((packed));
+
+/* TSS descriptor (16 bytes, spans two GDT slots) */
+struct tss_descriptor {
+    uint16_t limit_low;
+    uint16_t base_low;
+    uint8_t  base_mid_low;
+    uint8_t  access_byte;
+    uint8_t  flags_limit_high;
+    uint8_t  base_mid_high;
+    uint32_t base_high;
+    uint32_t reserved;
+} __attribute__((packed));
+
+/* Task State Segment */
+struct tss {
+    uint32_t reserved0;
+    uint64_t rsp[3];       /* RSP0, RSP1, RSP2 */
+    uint64_t reserved1;
+    uint64_t ist[7];       /* IST1-IST7 */
+    uint64_t reserved2;
+    uint16_t reserved3;
+    uint16_t iomap_base;
+} __attribute__((packed));
+
+/* GDTR */
+struct gdtr {
+    uint16_t limit;
+    uint64_t base;
+} __attribute__((packed));
+
+void gdt_init(void);
+struct tss *get_tss(void);
+
+#endif /* GDT_H */
