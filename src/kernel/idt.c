@@ -1,4 +1,5 @@
 #include "idt.h"
+#include "pic.h"
 #include "../include/io.h"
 
 static struct idt_entry idt[IDT_ENTRIES];
@@ -23,6 +24,8 @@ void idt_register_handler(uint8_t num, interrupt_handler_t handler) {
 void interrupt_handler(struct interrupt_frame *frame) {
     if (handlers[frame->int_no]) {
         handlers[frame->int_no](frame);
+    } else if (frame->int_no >= 32 && frame->int_no < 48) {
+        pic_send_eoi(frame->int_no - 32);
     }
 }
 

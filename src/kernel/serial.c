@@ -37,3 +37,12 @@ void serial_puts(uint16_t port, const char *str) {
         serial_putchar(port, *str++);
     }
 }
+
+int serial_has_data(uint16_t port) {
+    return inb(port + 5) & 0x01;
+}
+
+char serial_getchar(uint16_t port) {
+    while (!serial_has_data(port));
+    return inb(port);
+}

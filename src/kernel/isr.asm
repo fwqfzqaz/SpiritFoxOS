@@ -3,6 +3,8 @@
 
 bits 64
 
+default rel   ; Use RIP-relative addressing for PIC compatibility
+
 section .text
 
 extern interrupt_handler
@@ -109,8 +111,9 @@ isr_common:
     ; Pass pointer to interrupt frame as argument
     mov rdi, rsp
 
-    ; Call C handler
-    call interrupt_handler
+    ; Call C handler (RIP-relative for PIC)
+    lea rax, [rel interrupt_handler]
+    call rax
 
     ; Restore data segment
     pop rax

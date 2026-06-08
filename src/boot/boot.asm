@@ -3,7 +3,7 @@
 
 bits 32
 
-section .multiboot2_header align(8)
+section .multiboot2_header progbits align=8
 
 mb2_header_start:
     dd 0xE85250D6              ; magic
@@ -27,7 +27,7 @@ mb2_header_start:
 mb2_header_end:
 
 
-section .bss align(4096)
+section .bss nobits align=4096
 
 ; Temporary page tables for switching to long mode
 pml4: resb 4096
@@ -212,7 +212,7 @@ enable_paging:
     ret
 
 
-section .rodata align(8)
+section .rodata progbits align=8
 
 ; GDT for 64-bit mode
 gdt64:

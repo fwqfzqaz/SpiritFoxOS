@@ -1,0 +1,15 @@
+# Build artifacts
+build/
+
+# Disk images
+*.img
+
+# ISO images (generated from build)
+iso/
+
+# Logs
+*.log
+
+# Linker scripts for EFI builds (if you want to keep these, remove from gitignore)
+# linker_efi.ld
+# linker_efi_mingw.ld

@@ -3,12 +3,12 @@
 
 #include <stdint.h>
 #include "idt.h"
+#include "perm.h"
 
 #define MAX_PROCESSES  64
-#define STACK_SIZE     (4 * PAGE_SIZE)  /* 16KB */
-#define TIME_SLICE     10               /* 10 ticks at 100Hz = 100ms */
+#define STACK_SIZE     (4 * PAGE_SIZE)
+#define TIME_SLICE     10
 
-/* Forward declaration from pmm.h */
 #define PAGE_SIZE 4096
 
 typedef enum {
@@ -22,18 +22,24 @@ typedef enum {
 typedef struct process {
     uint64_t pid;
     proc_state_t state;
-    uint64_t rsp;              /* Saved kernel stack pointer */
-    uint64_t cr3;              /* Page table (PML4 physical address) */
-    uint64_t stack_top;        /* Stack top for deallocation */
-    uint64_t remaining_ticks;  /* Remaining time slice */
-    struct process *next;      /* Queue link */
+    uint64_t rsp;
+    uint64_t cr3;
+    uint64_t stack_top;
+    uint64_t remaining_ticks;
+    struct process *next;
+    uint64_t app_id;
+    perm_session_t perm_session;
+    int has_permissions;
 } process_t;
 
 void scheduler_init(void);
 uint64_t scheduler_create_process(void (*entry)(void));
+uint64_t scheduler_create_process_with_app(void (*entry)(void), uint64_t app_id);
 void scheduler_tick(struct interrupt_frame *frame);
 void scheduler_block(void);
 void scheduler_unblock(uint64_t pid);
 process_t *scheduler_current(void);
+int scheduler_check_perm(perm_flag_t perm);
+void scheduler_set_enabled(int enabled);
 
-#endif /* SCHEDULER_H */
+#endif

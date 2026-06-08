@@ -23,6 +23,7 @@ void fb_draw_rect(uint32_t x, uint32_t y, uint32_t w, uint32_t h, uint32_t color
 void fb_draw_line(uint32_t x0, uint32_t y0, uint32_t x1, uint32_t y1, uint32_t color);
 void fb_clear(uint32_t color);
 void fb_swap_buffers(void);  /* Double buffering */
+uint32_t *fb_get_draw_buffer(void);  /* Returns back buffer or front buffer */
 
 /* Color macros - 0xRRGGBB format */
 #define FB_RGB(r, g, b) (((uint32_t)(r) << 16) | ((uint32_t)(g) << 8) | (uint32_t)(b))

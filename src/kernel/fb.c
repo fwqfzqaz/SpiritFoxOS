@@ -98,10 +98,9 @@ void fb_clear(uint32_t color) {
 void fb_swap_buffers(void) {
     if (!back_buffer) return;
     uint64_t total_bytes = (uint64_t)fb.height * fb.pitch;
-    uint32_t *dst = fb.buffer;
-    uint32_t *src = back_buffer;
-    uint64_t words = total_bytes / 4;
-    for (uint64_t i = 0; i < words; i++) {
-        dst[i] = src[i];
-    }
+    memcpy(fb.buffer, back_buffer, (size_t)total_bytes);
+}
+
+uint32_t *fb_get_draw_buffer(void) {
+    return back_buffer ? back_buffer : fb.buffer;
 }

@@ -1,9 +1,12 @@
 #include "pmm.h"
-#include "vga.h"
+#include "log.h"
+#include "../include/bootinfo.h"
+#include "../include/efi.h"
 #include "../include/stddef.h"
 #include <stdint.h>
 
 static uint64_t *pmm_bitmap = NULL;
+static int pmm_bitmap_set = 0;
 static uint64_t pmm_total_frames = 0;
 static uint64_t pmm_free_frames = 0;
 static uint64_t pmm_bitmap_size = 0; /* Number of qwords in bitmap */
@@ -34,15 +37,39 @@ static void pmm_mark_used(uint64_t base, uint64_t length) {
     }
 }
 
-void pmm_init(struct multiboot2_tag_mmap *mmap, uint64_t kernel_start, uint64_t kernel_end) {
+/*
+ * Convert EFI memory type to availability flag.
+ * Returns 1 if memory is available for general use, 0 if reserved.
+ */
+static int efi_type_is_available(uint32_t efi_type) {
+    switch (efi_type) {
+        case EFI_CONVENTIONAL_MEMORY:
+            return 1;
+        case EFI_ACPI_RECLAIM_MEMORY:   /* Can be reclaimed after ACPI reads tables */
+        case EFI_ACPI_MEMORY_NVS:       /* Can be used but must preserve across sleeps */
+            return 1; /* Treat as available - OS can manage these */
+        default:
+            return 0; /* Reserved, unusable, MMIO, etc. */
+    }
+}
+
+void pmm_init(bootinfo_t *bootinfo, uint64_t kernel_start, uint64_t kernel_end) {
+    /*
+     * Memory map from UEFI: array of EFI_MEMORY_DESCRIPTOR at bootinfo->mmap_addr.
+     * Each descriptor is bootinfo->mmap_entry_size bytes (may be larger than struct).
+     */
+    uint8_t *mmap_base = (uint8_t *)(uintptr_t)bootinfo->mmap_addr;
+    uint64_t entry_count = bootinfo->mmap_entry_count;
+    uint64_t entry_size = bootinfo->mmap_entry_size;
+
     /* Step 1: Find the highest available physical address */
     uint64_t max_addr = 0;
-    uint64_t mmap_entries = (mmap->size - sizeof(*mmap)) / mmap->entry_size;
 
-    for (uint64_t i = 0; i < mmap_entries; i++) {
-        struct multiboot2_mmap_entry *entry = &mmap->entries[i];
-        if (entry->type == MULTIBOOT2_MEMORY_AVAILABLE) {
-            uint64_t end = entry->base_addr + entry->length;
+    for (uint64_t i = 0; i < entry_count; i++) {
+        EFI_MEMORY_DESCRIPTOR *desc =
+            (EFI_MEMORY_DESCRIPTOR *)(mmap_base + i * entry_size);
+        if (efi_type_is_available(desc->type)) {
+            uint64_t end = desc->physical_start + (desc->number_of_pages * PAGE_SIZE);
             if (end > max_addr) max_addr = end;
         }
     }
@@ -52,29 +79,46 @@ void pmm_init(struct multiboot2_tag_mmap *mmap, uint64_t kernel_start, uint64_t 
     pmm_bitmap_size = (pmm_total_frames + BITS_PER_QWORD - 1) / BITS_PER_QWORD;
     uint64_t bitmap_bytes = pmm_bitmap_size * sizeof(uint64_t);
 
+    LOG_D("pmm", "bitmap: %u bytes, max_addr=%p", (uint32_t)bitmap_bytes, max_addr);
+
     /* Step 3: Find a region to place the bitmap itself */
     pmm_bitmap = NULL;
-    for (uint64_t i = 0; i < mmap_entries; i++) {
-        struct multiboot2_mmap_entry *entry = &mmap->entries[i];
-        if (entry->type == MULTIBOOT2_MEMORY_AVAILABLE &&
-            entry->length >= bitmap_bytes + PAGE_SIZE) {
-            /* Place bitmap at the start of this region, page-aligned */
-            uint64_t bitmap_addr = (entry->base_addr + PAGE_SIZE - 1) & ~(PAGE_SIZE - 1);
-            /* Make sure it doesn't overlap with kernel */
-            if (bitmap_addr >= kernel_end || bitmap_addr + bitmap_bytes <= kernel_start) {
-                pmm_bitmap = (uint64_t *)bitmap_addr;
-                break;
-            }
-            /* Try after kernel */
-            if (kernel_end + bitmap_bytes <= entry->base_addr + entry->length) {
-                pmm_bitmap = (uint64_t *)((kernel_end + PAGE_SIZE - 1) & ~(PAGE_SIZE - 1));
-                break;
-            }
+    for (uint64_t i = 0; i < entry_count; i++) {
+        EFI_MEMORY_DESCRIPTOR *desc =
+            (EFI_MEMORY_DESCRIPTOR *)(mmap_base + i * entry_size);
+        if (!efi_type_is_available(desc->type))
+            continue;
+
+        uint64_t region_start = desc->physical_start;
+        uint64_t region_len = desc->number_of_pages * PAGE_SIZE;
+        uint64_t region_end = region_start + region_len;
+
+        /* Page-align the start */
+        uint64_t aligned_start = (region_start + PAGE_SIZE - 1) & ~(PAGE_SIZE - 1);
+
+        /* Skip if region is too small */
+        if (region_end <= aligned_start || region_end - aligned_start < bitmap_bytes) {
+            continue;
+        }
+
+        /* Try before the kernel */
+        if (aligned_start + bitmap_bytes <= kernel_start) {
+            pmm_bitmap = (uint64_t *)aligned_start;
+            pmm_bitmap_set = 1;
+            break;
+        }
+
+        /* Try after the kernel */
+        uint64_t after_kernel = (kernel_end + PAGE_SIZE - 1) & ~(PAGE_SIZE - 1);
+        if (after_kernel + bitmap_bytes <= region_end) {
+            pmm_bitmap = (uint64_t *)after_kernel;
+            pmm_bitmap_set = 1;
+            break;
         }
     }
 
-    if (!pmm_bitmap) {
-        vga_puts("PMM: Failed to find space for bitmap!\n");
+    if (!pmm_bitmap_set) {
+        LOG_E("pmm", "Failed to find space for bitmap!\n");
         return;
     }
 
@@ -85,10 +129,11 @@ void pmm_init(struct multiboot2_tag_mmap *mmap, uint64_t kernel_start, uint64_t 
     pmm_free_frames = 0;
 
     /* Step 5: Mark available memory as free */
-    for (uint64_t i = 0; i < mmap_entries; i++) {
-        struct multiboot2_mmap_entry *entry = &mmap->entries[i];
-        if (entry->type == MULTIBOOT2_MEMORY_AVAILABLE) {
-            pmm_mark_free(entry->base_addr, entry->length);
+    for (uint64_t i = 0; i < entry_count; i++) {
+        EFI_MEMORY_DESCRIPTOR *desc =
+            (EFI_MEMORY_DESCRIPTOR *)(mmap_base + i * entry_size);
+        if (efi_type_is_available(desc->type)) {
+            pmm_mark_free(desc->physical_start, desc->number_of_pages * PAGE_SIZE);
         }
     }
 
@@ -98,7 +143,7 @@ void pmm_init(struct multiboot2_tag_mmap *mmap, uint64_t kernel_start, uint64_t 
     /* Step 7: Mark bitmap as used */
     pmm_mark_used((uint64_t)pmm_bitmap, bitmap_bytes);
 
-    vga_printf("PMM: %u MB available (%u pages)\n",
+    LOG_I("pmm", "%u MB available (%u pages)\n",
                (uint32_t)(pmm_free_frames * PAGE_SIZE / (1024 * 1024)),
                (uint32_t)pmm_free_frames);
 }

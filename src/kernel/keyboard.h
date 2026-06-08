@@ -36,5 +36,10 @@ void keyboard_init(void);
 void keyboard_handler(struct interrupt_frame *frame);
 char keyboard_getchar(void);
 uint16_t keyboard_getkey(void);
+int keyboard_has_key(void);
+uint16_t keyboard_try_getkey(void);
+
+/* USB HID keyboard integration */
+void usb_kb_push(uint8_t hid_keycode, uint8_t modifiers);
 
 #endif /* KEYBOARD_H */

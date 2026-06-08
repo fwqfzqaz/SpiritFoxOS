@@ -22,8 +22,17 @@ struct idtr {
     uint64_t base;
 } __attribute__((packed));
 
-/* Interrupt frame (pushed by CPU + our handler) */
+/* Interrupt frame (pushed by CPU + our handler)
+ * Stack layout from low to high address (RSP points here):
+ *   ds          <- last pushed by isr_common (push rax with ds value)
+ *   r15-r8      <- pushed in order: r15 last, r8 first of this group
+ *   rdi,rsi,rbp,rdx,rcx,rbx,rax
+ *   int_no      <- pushed by ISR_NOERR/ISR_ERR macro
+ *   err_code    <- pushed by ISR_NOERR (dummy 0) or CPU (ISR_ERR)
+ *   rip,cs,rflags,rsp,ss  <- pushed by CPU
+ */
 struct interrupt_frame {
+    uint64_t ds;
     uint64_t r15, r14, r13, r12, r11, r10, r9, r8;
     uint64_t rdi, rsi, rbp, rdx, rcx, rbx, rax;
     uint64_t int_no, err_code;

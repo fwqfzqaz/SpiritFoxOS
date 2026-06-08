@@ -9,5 +9,7 @@
 void serial_init(uint16_t port);
 void serial_putchar(uint16_t port, char c);
 void serial_puts(uint16_t port, const char *str);
+int serial_has_data(uint16_t port);
+char serial_getchar(uint16_t port);
 
 #endif /* SERIAL_H */

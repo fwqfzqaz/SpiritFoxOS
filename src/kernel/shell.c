@@ -38,6 +38,18 @@ static vga_color_t prompt_path_color  = VGA_LIGHT_BLUE;
 static vga_color_t prompt_sym_color   = VGA_WHITE;
 
 /* ============================================================
+ * Q1: Terminal initialization
+ * ============================================================ */
+
+void shell_terminal_init(void) {
+    /* Reset shell state */
+    cmd_pos = 0;
+    cmd_buf[0] = '\0';
+    history_count = 0;
+    history_view = 0;
+}
+
+/* ============================================================
  * Output helpers
  * ============================================================ */
 

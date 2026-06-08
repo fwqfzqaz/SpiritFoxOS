@@ -62,7 +62,7 @@ void keyboard_handler(struct interrupt_frame *frame) {
         uint8_t key = scancode & 0x7F;
         if (extended_scancode) {
             extended_scancode = 0;
-            return; /* Ignore extended key releases */
+            goto done; /* Ignore extended key releases but still send EOI */
         }
         if (key == 0x2A || key == 0x36) shift_pressed = 0;
         if (key == 0x1D) ctrl_pressed = 0;
@@ -133,4 +133,113 @@ uint16_t keyboard_getkey(void) {
     uint16_t key = kb_buffer[kb_buffer_tail];
     kb_buffer_tail = (kb_buffer_tail + 1) % KB_BUFFER_SIZE;
     return key;
+}
+
+int keyboard_has_key(void) {
+    return kb_buffer_tail != kb_buffer_head;
+}
+
+uint16_t keyboard_try_getkey(void) {
+    if (kb_buffer_tail == kb_buffer_head) return 0xFFFF;
+    uint16_t key = kb_buffer[kb_buffer_tail];
+    kb_buffer_tail = (kb_buffer_tail + 1) % KB_BUFFER_SIZE;
+    return key;
+}
+
+/* ============================================================
+ * USB HID Keyboard Support
+ *
+ * Converts HID boot protocol usage codes (0x04-0x39) to
+ * our internal key codes, then pushes them into the same
+ * ring buffer used by PS/2 keyboard.
+ * ============================================================ */
+
+/* HID Usage ID → ASCII mapping for printable keys.
+ * Maps HID codes 0x04 ('a') through 0x39 ('~') to characters. */
+static const char hid_to_ascii[] = {
+    /* 0x00-0x03: reserved */
+    0, 0, 0, 0,
+    /* 0x04-0x27: a-z, 1-0 */
+    'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j',
+    'k', 'l', 'm', 'n', 'o', 'p', 'q', 'r', 's', 't',
+    'u', 'v', 'w', 'x', 'y', 'z', '1', '2', '3', '4',
+    '5', '6', '7', '8', '9', '0',
+    /* 0x28-0x2D: Enter, Escape, Backspace, Tab, Space, -, = */
+    '\n', 0x1B, '\b', '\t', ' ', '-', '=',
+    /* 0x2E-0x37: [, ], \, #, ;, `, ,, . */
+    '[', ']', '\\', '#', ';', '\'', ',', '.', '/',
+    /* 0x38-0x39: CapsLock, PrintScreen etc - handled specially */
+    0, 0,
+};
+
+/* HID Usage ID → special key code mapping */
+static uint16_t hid_to_special(uint8_t hid_code) {
+    switch (hid_code) {
+        case 0x28: return '\n';           /* Enter */
+        case 0x29: return KEY_ESCAPE;     /* Escape */
+        case 0x2A: return '\b';           /* Backspace */
+        case 0x2B: return KEY_TAB;        /* Tab */
+        case 0x2C: return ' ';            /* Space */
+        case 0x2D: return '-';            /* - */
+        case 0x2E: return '=';            /* = */
+        case 0x2F: return '[';            /* [ */
+        case 0x30: return ']';            /* ] */
+        case 0x31: return '\\';           /* \ */
+        case 0x33: return ';';            /* ; */
+        case 0x34: return '\'';           /* ' */
+        case 0x35: return '`';            /* ` */
+        case 0x36: return ',';            /* , */
+        case 0x37: return '.';            /* . */
+        case 0x38: return '/';            /* / */
+        /* Modifier keys - we handle these via modifier byte separately */
+        case 0xE0: return KEY_CTRL_C;     /* Ctrl (left) */
+        case 0xE4: return KEY_TAB;        /* (not really tab but skip) */
+        default:   return 0xFFFF;
+    }
+}
+
+/* Called by usb_hid_poll_keyboard() with a HID usage code and modifier state */
+void usb_kb_push(uint8_t hid_keycode, uint8_t modifiers) {
+    (void)modifiers;  /* TODO: handle shift/ctrl/alt from USB modifiers */
+
+    if (hid_keycode < 0x04 || hid_keycode > 0x65) return;
+
+    /* Check for special keys first */
+    if (hid_keycode >= 0x4A && hid_keycode <= 0x53) {
+        /* Arrow keys, Home, End, Page Up/Down */
+        static const uint16_t arrow_map[] = {
+            KEY_RIGHT,      /* 0x4F Right */
+            KEY_LEFT,       /* 0x50 Left */
+            KEY_DOWN,       /* 0x51 Down */
+            KEY_UP,         /* 0x52 Up */
+            0xFFFF,         /* 0x53 NumLock? */
+        };
+        if (hid_keycode >= 0x4F && hid_keycode <= 0x52) {
+            kb_push(arrow_map[hid_keycode - 0x4F]);
+        }
+        return;
+    }
+
+    if (hid_keycode >= 0x3A && hid_keycode <= 0x45) {
+        /* F1-F12 range starts at 0x3A */
+        if (hid_keycode >= 0x3A && hid_keycode <= 0x45) {
+            kb_push(KEY_F1 + (hid_keycode - 0x3A));
+        }
+        return;
+    }
+
+    /* Try special key mapping */
+    uint16_t special = hid_to_special(hid_keycode);
+    if (special != 0xFFFF) {
+        kb_push(special);
+        return;
+    }
+
+    /* Printable character from HID code */
+    if (hid_keycode < sizeof(hid_to_ascii)) {
+        char c = hid_to_ascii[hid_keycode];
+        if (c != 0) {
+            kb_push((uint16_t)c);
+        }
+    }
 }

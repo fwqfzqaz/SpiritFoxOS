@@ -1,9 +1,10 @@
 #include "scheduler.h"
 #include "pmm.h"
 #include "vmm.h"
-#include "vga.h"
+#include "log.h"
 #include "gdt.h"
 #include "../include/stddef.h"
+#include "../include/string.h"
 #include <stdint.h>
 
 static process_t processes[MAX_PROCESSES];
@@ -11,9 +12,13 @@ static process_t *current_proc = NULL;
 static process_t *ready_head = NULL;
 static process_t *ready_tail = NULL;
 static uint64_t next_pid = 1;
+static int scheduler_enabled = 1;
 
-/* Context switch assembly (defined in context.asm) */
 extern void context_switch(uint64_t *old_rsp, uint64_t new_rsp);
+
+void scheduler_set_enabled(int enabled) {
+    scheduler_enabled = enabled;
+}
 
 static void enqueue(process_t *proc) {
     proc->next = NULL;
@@ -39,6 +44,9 @@ void scheduler_init(void) {
         processes[i].state = PROC_UNUSED;
         processes[i].pid = 0;
         processes[i].next = NULL;
+        processes[i].app_id = 0;
+        processes[i].has_permissions = 0;
+        memset(&processes[i].perm_session, 0, sizeof(perm_session_t));
     }
     current_proc = NULL;
     ready_head = NULL;
@@ -46,7 +54,7 @@ void scheduler_init(void) {
     next_pid = 1;
 }
 
-uint64_t scheduler_create_process(void (*entry)(void)) {
+static uint64_t create_process_internal(void (*entry)(void), uint64_t app_id) {
     process_t *proc = NULL;
     for (int i = 0; i < MAX_PROCESSES; i++) {
         if (processes[i].state == PROC_UNUSED) {
@@ -59,8 +67,26 @@ uint64_t scheduler_create_process(void (*entry)(void)) {
     proc->pid = next_pid++;
     proc->state = PROC_READY;
     proc->remaining_ticks = TIME_SLICE;
+    proc->app_id = app_id;
+    proc->has_permissions = 0;
+    memset(&proc->perm_session, 0, sizeof(perm_session_t));
 
-    /* Allocate kernel stack */
+    if (app_id > 0) {
+        perm_app_entry_t *app = perm_find_app(app_id);
+        if (app) {
+            if (app->type == APP_SYSTEM) {
+                proc->has_permissions = 1;
+                proc->perm_session.app_id = app_id;
+                proc->perm_session.granted_perms = app->granted_perms;
+            } else if (app->active) {
+                int rc = perm_app_start(app_id, NULL, &proc->perm_session);
+                if (rc == 0) {
+                    proc->has_permissions = 1;
+                }
+            }
+        }
+    }
+
     uint64_t stack_phys = pmm_alloc_pages(STACK_SIZE / PAGE_SIZE);
     if (!stack_phys) {
         proc->state = PROC_UNUSED;
@@ -69,38 +95,44 @@ uint64_t scheduler_create_process(void (*entry)(void)) {
     uint64_t stack_virt = phys_to_virt(stack_phys);
     proc->stack_top = stack_virt + STACK_SIZE;
 
-    /* Set up initial stack frame for context_switch restore */
     uint64_t *sp = (uint64_t *)proc->stack_top;
 
-    /* Push initial register state (callee-saved registers) */
-    *--sp = (uint64_t)entry;   /* Return address -> process entry */
-    *--sp = 0; /* rbp */
-    *--sp = 0; /* rsi */
-    *--sp = 0; /* rdi */
-    *--sp = 0; /* rbx */
-    *--sp = 0; /* r12 */
-    *--sp = 0; /* r13 */
-    *--sp = 0; /* r14 */
-    *--sp = 0; /* r15 */
+    *--sp = (uint64_t)entry;
+    *--sp = 0;
+    *--sp = 0;
+    *--sp = 0;
+    *--sp = 0;
+    *--sp = 0;
+    *--sp = 0;
+    *--sp = 0;
+    *--sp = 0;
 
     proc->rsp = (uint64_t)sp;
 
-    /* Use kernel page table for now */
     proc->cr3 = virt_to_phys((uint64_t)vmm_get_kernel_pml4());
 
-    /* Set RSP0 in TSS for this process */
     struct tss *tss = get_tss();
     tss->rsp[0] = proc->stack_top;
 
     enqueue(proc);
 
-    vga_printf("Scheduler: Created process PID=%u\n", (uint32_t)proc->pid);
+    LOG_I("sched", "Scheduler: Created process PID=%u app=%u\n",
+               (uint32_t)proc->pid, (uint32_t)app_id);
     return proc->pid;
 }
 
+uint64_t scheduler_create_process(void (*entry)(void)) {
+    return create_process_internal(entry, 0);
+}
+
+uint64_t scheduler_create_process_with_app(void (*entry)(void), uint64_t app_id) {
+    return create_process_internal(entry, app_id);
+}
+
 void scheduler_tick(struct interrupt_frame *frame) {
+    if (!scheduler_enabled) return;
+
     if (!current_proc) {
-        /* No process running, try to schedule one */
         process_t *next = dequeue();
         if (next) {
             current_proc = next;
@@ -113,36 +145,29 @@ void scheduler_tick(struct interrupt_frame *frame) {
     current_proc->remaining_ticks--;
     if (current_proc->remaining_ticks > 0) return;
 
-    /* Time slice expired - save context and switch */
     process_t *prev = current_proc;
     process_t *next = dequeue();
 
     if (!next) {
-        /* No other process ready, continue current */
         prev->remaining_ticks = TIME_SLICE;
         return;
     }
 
-    /* Save current process RSP from interrupt frame */
     prev->rsp = frame->rsp;
     prev->state = PROC_READY;
     enqueue(prev);
 
-    /* Switch to next process */
     current_proc = next;
     next->state = PROC_RUNNING;
     next->remaining_ticks = TIME_SLICE;
 
-    /* Update TSS RSP0 */
     struct tss *tss = get_tss();
     tss->rsp[0] = next->stack_top;
 
-    /* Switch page table if needed */
     if (prev->cr3 != next->cr3) {
         __asm__ volatile ("mov %0, %%cr3" : : "r"(next->cr3) : "memory");
     }
 
-    /* Restore next process RSP */
     frame->rsp = next->rsp;
 }
 
@@ -150,7 +175,6 @@ void scheduler_block(void) {
     if (!current_proc) return;
     current_proc->state = PROC_BLOCKED;
 
-    /* Force a reschedule */
     process_t *next = dequeue();
     if (next) {
         process_t *prev = current_proc;
@@ -180,4 +204,10 @@ void scheduler_unblock(uint64_t pid) {
 
 process_t *scheduler_current(void) {
     return current_proc;
+}
+
+int scheduler_check_perm(perm_flag_t perm) {
+    if (!current_proc) return 0;
+    if (!current_proc->has_permissions) return 0;
+    return perm_check_session(&current_proc->perm_session, perm);
 }
