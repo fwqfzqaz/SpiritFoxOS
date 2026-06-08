@@ -63,7 +63,6 @@ static void phase_kernel_boot(bootinfo_t *bootinfo) {
     {
         const char *msg = "[PKB] phase_kernel_boot entered\r\n";
         for (const char *p = msg; *p; p++) {
-            __asm__ volatile("outb %0, %1" : : "a"((unsigned char)*p), "Nd"(0x3F8));
             for (volatile int d = 0; d < 10000; d++);
         }
     }
@@ -113,18 +112,15 @@ static void phase_kernel_boot(bootinfo_t *bootinfo) {
     pmm_init(bootinfo, kernel_start, kernel_end);
     LOG_I("kernel", "[I2] PMM initialized (kernel %p-%p)", kernel_start, kernel_end);
     /* Debug checkpoint after PMM */
-    { const char *m = "[PKB] PMM done\r\n"; for (const char *p = m; *p; p++) { __asm__ volatile("outb %0, %1" : : "a"((unsigned char)*p), "Nd"(0x3F8)); for (volatile int d = 0; d < 10000; d++) {} } }
 
     vmm_init();
     LOG_I("kernel", "[I2] VMM initialized (MMU ready)");
     /* Debug checkpoint after VMM */
-    { const char *m = "[PKB] VMM done\r\n"; for (const char *p = m; *p; p++) { __asm__ volatile("outb %0, %1" : : "a"((unsigned char)*p), "Nd"(0x3F8)); for (volatile int d = 0; d < 10000; d++) {} } }
 
     /* I4: Initialize Interrupt Descriptor Table (IDT) */
     idt_init();
     LOG_I("kernel", "[I4] IDT initialized");
     /* Debug checkpoint after IDT */
-    { const char *m = "[PKB] IDT done\r\n"; for (const char *p = m; *p; p++) { __asm__ volatile("outb %0, %1" : : "a"((unsigned char)*p), "Nd"(0x3F8)); for (volatile int d = 0; d < 10000; d++) {} } }
 
     /* Initialize PIC (required before IDT is useful for hardware interrupts) */
     pic_init();
@@ -136,7 +132,6 @@ static void phase_kernel_boot(bootinfo_t *bootinfo) {
     gdt_init();
     LOG_I("kernel", "[I5] GDT initialized (with TSS)");
     /* Debug checkpoint after GDT */
-    { const char *m = "[PKB] GDT done\r\n"; for (const char *p = m; *p; p++) { __asm__ volatile("outb %0, %1" : : "a"((unsigned char)*p), "Nd"(0x3F8)); for (volatile int d = 0; d < 10000; d++) {} } }
 
     /* Initialize PIT timer at 100Hz (safe now that GDT/TSS are loaded) */
     pit_init(100);
@@ -430,14 +425,16 @@ static void phase_start_cli(void) {
  * ============================================================ */
 #define MB2_MAGIC 0x36D76289
 
-/* Multiboot2 tag types */
+/* Multiboot2 tag types (from GNU multiboot2.h) */
 #define MB2_TAG_END         0
 #define MB2_TAG_CMDLINE     1
 #define MB2_TAG_BOOT_LOADER_NAME 2
 #define MB2_TAG_MODULE      3
-#define MB2_TAG_FRAMEBUFFER 4
-#define MB2_TAG_ACP_OLD     5  /* deprecated */
+#define MB2_TAG_BASIC_MEMINFO 4
+#define MB2_TAG_BOOTDEV     5
 #define MB2_TAG_MMAP        6
+#define MB2_TAG_VBE         7
+#define MB2_TAG_FRAMEBUFFER 8
 
 /* Multiboot2 info header */
 typedef struct {
@@ -496,38 +493,42 @@ static int parse_multiboot2(uint32_t mb2_magic, void *mb2_info,
     uint8_t *tags = (uint8_t *)info + sizeof(mb2_info_t);
     uint8_t *end = (uint8_t *)info + info->total_size;
 
+
+
+
     while ((uint8_t*)tags + sizeof(mb2_tag_t) <= end) {
         mb2_tag_t *tag = (mb2_tag_t *)tags;
         if (tag->type == MB2_TAG_END) break;
         if (tag->size < sizeof(mb2_tag_t)) break;
 
+
+
+
         switch (tag->type) {
             case MB2_TAG_FRAMEBUFFER: {
-                /* Read fields at known offsets from tag start (no struct packing issues):
-                 * offset 8:  u64 framebuffer_addr
-                 * offset 16: u32 pitch
-                 * offset 20: u32 width
-                 * offset 24: u32 height
-                 * offset 28: u8  bpp
-                 * offset 29: u8  type (0=indexed, 1=RGB, 2=text)
-                 */
-                uint8_t *raw = (uint8_t *)tag;
-                uint64_t fb_addr = *(uint64_t *)(raw + 8);
-                uint32_t fb_pitch = *(uint32_t *)(raw + 16);
-                uint32_t fb_width = *(uint32_t *)(raw + 20);
-                uint32_t fb_height = *(uint32_t *)(raw + 24);
-                uint8_t fb_bpp = *(uint8_t *)(raw + 28);
-                uint8_t fb_type_raw = *(uint8_t *)(raw + 29);
+                /* Use packed struct cast for reliable field access */
+                typedef struct __attribute__((packed)) {
+                    uint32_t type;
+                    uint32_t size;
+                    uint64_t fb_addr;
+                    uint32_t fb_pitch;
+                    uint32_t fb_width;
+                    uint32_t fb_height;
+                    uint8_t  fb_bpp;
+                    uint8_t  fb_type;
+                    uint8_t  reserved[2];
+                } fb_tag_raw_t;
+                fb_tag_raw_t *fb = (fb_tag_raw_t *)tag;
 
-                out->framebuffer.address = fb_addr;
-                out->framebuffer.pitch = fb_pitch;
-                out->framebuffer.width = fb_width;
-                out->framebuffer.height = fb_height;
-                out->framebuffer.bpp = fb_bpp;
-                out->framebuffer.type = (fb_type_raw == 1) ? BOOTINFO_FB_RGB : BOOTINFO_FB_TEXT;
+                out->framebuffer.address = fb->fb_addr;
+                out->framebuffer.pitch = fb->fb_pitch;
+                out->framebuffer.width = fb->fb_width;
+                out->framebuffer.height = fb->fb_height;
+                out->framebuffer.bpp = fb->fb_bpp;
+                out->framebuffer.type = (fb->fb_type == 1) ? BOOTINFO_FB_RGB : BOOTINFO_FB_TEXT;
 
-                /* If we have a valid-looking framebuffer address, force RGB mode */
-                if (fb_addr != 0 && fb_width > 0 && fb_height > 0) {
+                /* Force RGB if we have valid dimensions */
+                if (fb->fb_addr != 0 && fb->fb_width > 0 && fb->fb_height > 0) {
                     out->framebuffer.type = BOOTINFO_FB_RGB;
                 }
                 break;
@@ -609,12 +610,11 @@ static int convert_mmap_mb2_to_efi(bootinfo_t *bootinfo) {
  * UEFI mode: rdi=bootinfo_t*, rsi=unused
  * ============================================================ */
 
-void kernel_main(bootinfo_t *bootinfo_param) {
+void __attribute__((used)) kernel_main(bootinfo_t *bootinfo_param) {
     /* Debug: direct COM1 output to verify we reached kernel_main */
     {
         const char *msg = "[KM] kernel_main entered\r\n";
         for (const char *p = msg; *p; p++) {
-            __asm__ volatile("outb %0, %1" : : "a"((unsigned char)*p), "Nd"(0x3F8));
             for (volatile int d = 0; d < 10000; d++);
         }
     }
@@ -629,7 +629,6 @@ void kernel_main(bootinfo_t *bootinfo_param) {
     if (bootinfo_param && bootinfo_param->magic == BOOTINFO_MAGIC) {
         /* UEFI mode: bootinfo is valid, copy it */
         __builtin_memcpy(&bootinfo, bootinfo_param, sizeof(bootinfo_t));
-        { const char *m = "[KM] UEFI mode detected\r\n"; for (const char *p = m; *p; p++) { __asm__ volatile("outb %0, %1" : : "a"((unsigned char)*p), "Nd"(0x3F8)); for (volatile int d = 0; d < 10000; d++) {} } }
     } else {
         /* BIOS mode: parse Multiboot2 info from RDI/RSI registers */
         uint32_t mb2_magic;
@@ -637,28 +636,23 @@ void kernel_main(bootinfo_t *bootinfo_param) {
         __asm__ volatile("mov %%edi, %0" : "=r"(mb2_magic));
         __asm__ volatile("mov %%rsi, %0" : "=r"(mb2_info));
 
-        { const char *m = "[KM] BIOS mode detected, parsing MB2\r\n"; for (const char *p = m; *p; p++) { __asm__ volatile("outb %0, %1" : : "a"((unsigned char)*p), "Nd"(0x3F8)); for (volatile int d = 0; d < 10000; d++) {} } }
 
         if (parse_multiboot2(mb2_magic, mb2_info, &bootinfo) != 0) {
             const char *err = "[ERR] Failed to parse Multiboot2 info!\r\n";
             for (const char *p = err; *p; p++) {
-                __asm__ volatile("outb %0, %1" : : "a"((unsigned char)*p), "Nd"(0x3F8));
                 for (volatile int d = 0; d < 10000; d++);
             }
             hlt();
         }
-        { const char *m = "[KM] MB2 parsed OK\r\n"; for (const char *p = m; *p; p++) { __asm__ volatile("outb %0, %1" : : "a"((unsigned char)*p), "Nd"(0x3F8)); for (volatile int d = 0; d < 10000; d++) {} } }
 
         /* Convert MB2 memory map entries to EFI format for PMM */
         if (convert_mmap_mb2_to_efi(&bootinfo) != 0) {
             const char *err = "[ERR] Failed to convert MB2 mmap!\r\n";
             for (const char *p = err; *p; p++) {
-                __asm__ volatile("outb %0, %1" : : "a"((unsigned char)*p), "Nd"(0x3F8));
                 for (volatile int d = 0; d < 10000; d++);
             }
             hlt();
         }
-        { const char *m = "[KM] MB2 mmap converted\r\n"; for (const char *p = m; *p; p++) { __asm__ volatile("outb %0, %1" : : "a"((unsigned char)*p), "Nd"(0x3F8)); for (volatile int d = 0; d < 10000; d++) {} } }
     }
 
     /* Phase I: 系统内核启动 */
