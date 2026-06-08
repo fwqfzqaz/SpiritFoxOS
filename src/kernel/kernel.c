@@ -130,17 +130,19 @@ static void phase_kernel_boot(bootinfo_t *bootinfo) {
     pic_init();
     LOG_I("kernel", "[I4] PIC initialized");
 
-    /* Initialize PIT timer at 100Hz */
-    pit_init(100);
-    idt_register_handler(32, timer_handler);
-    pic_unmask_irq(0);
-    LOG_I("kernel", "[I4] PIT timer at 100Hz");
-
-    /* I5: Initialize Global Descriptor Table (GDT) with TSS */
+    /* I5: Initialize Global Descriptor Table with TSS BEFORE enabling interrupts!
+     * 64-bit long mode requires a valid TSS for interrupt handling (iretq).
+     * The boot GDT in boot.asm has no TSS entry. */
     gdt_init();
     LOG_I("kernel", "[I5] GDT initialized (with TSS)");
     /* Debug checkpoint after GDT */
     { const char *m = "[PKB] GDT done\r\n"; for (const char *p = m; *p; p++) { __asm__ volatile("outb %0, %1" : : "a"((unsigned char)*p), "Nd"(0x3F8)); for (volatile int d = 0; d < 10000; d++) {} } }
+
+    /* Initialize PIT timer at 100Hz (safe now that GDT/TSS are loaded) */
+    pit_init(100);
+    idt_register_handler(32, timer_handler);
+    pic_unmask_irq(0);
+    LOG_I("kernel", "[I4] PIT timer at 100Hz");
 
     /* I6: Initialize System Call Interface */
     syscall_init();
@@ -424,11 +426,190 @@ static void phase_start_cli(void) {
 }
 
 /* ============================================================
- * Main kernel entry point (called from efi_boot.c)
- * Receives unified bootinfo from EFI bootloader
+ * Multiboot2 definitions for BIOS boot path
+ * ============================================================ */
+#define MB2_MAGIC 0x36D76289
+
+/* Multiboot2 tag types */
+#define MB2_TAG_END         0
+#define MB2_TAG_CMDLINE     1
+#define MB2_TAG_BOOT_LOADER_NAME 2
+#define MB2_TAG_MODULE      3
+#define MB2_TAG_FRAMEBUFFER 4
+#define MB2_TAG_ACP_OLD     5  /* deprecated */
+#define MB2_TAG_MMAP        6
+
+/* Multiboot2 info header */
+typedef struct {
+    uint32_t total_size;
+    uint32_t reserved;
+} mb2_info_t;
+
+/* Generic Multiboot2 tag header */
+typedef struct {
+    uint32_t type;
+    uint32_t size;
+} mb2_tag_t;
+
+/* Framebuffer tag (type 4) */
+typedef struct {
+    uint32_t type;
+    uint32_t size;
+    uint64_t fb_addr;
+    uint32_t fb_pitch;
+    uint32_t fb_width;
+    uint32_t fb_height;
+    uint8_t  fb_bpp;
+    uint8_t  fb_type;
+    uint8_t  reserved[2];
+} mb2_fb_tag_t;
+
+/* Memory map entry (within mmap tag) */
+typedef struct {
+    uint64_t base_addr;
+    uint64_t length;
+    uint32_t type;
+    uint32_t zero;
+} mb2_mmap_entry_t;
+
+/* Memory map tag (type 6) */
+typedef struct {
+    uint32_t type;
+    uint32_t size;
+    uint32_t entry_size;
+    uint32_t entry_version;
+    /* entries follow */
+} mb2_mmap_tag_t;
+
+/* ============================================================
+ * Parse Multiboot2 info into unified bootinfo structure
+ * Called in BIOS mode when bootinfo magic doesn't match.
+ * ============================================================ */
+static int parse_multiboot2(uint32_t mb2_magic, void *mb2_info,
+                             bootinfo_t *out) {
+    if (mb2_magic != MB2_MAGIC || !mb2_info) return -1;
+
+    __builtin_memset(out, 0, sizeof(bootinfo_t));
+    out->magic = BOOTINFO_MAGIC;
+
+    mb2_info_t *info = (mb2_info_t *)mb2_info;
+    uint8_t *tags = (uint8_t *)info + sizeof(mb2_info_t);
+    uint8_t *end = (uint8_t *)info + info->total_size;
+
+    while ((uint8_t*)tags + sizeof(mb2_tag_t) <= end) {
+        mb2_tag_t *tag = (mb2_tag_t *)tags;
+        if (tag->type == MB2_TAG_END) break;
+        if (tag->size < sizeof(mb2_tag_t)) break;
+
+        switch (tag->type) {
+            case MB2_TAG_FRAMEBUFFER: {
+                /* Read fields at known offsets from tag start (no struct packing issues):
+                 * offset 8:  u64 framebuffer_addr
+                 * offset 16: u32 pitch
+                 * offset 20: u32 width
+                 * offset 24: u32 height
+                 * offset 28: u8  bpp
+                 * offset 29: u8  type (0=indexed, 1=RGB, 2=text)
+                 */
+                uint8_t *raw = (uint8_t *)tag;
+                uint64_t fb_addr = *(uint64_t *)(raw + 8);
+                uint32_t fb_pitch = *(uint32_t *)(raw + 16);
+                uint32_t fb_width = *(uint32_t *)(raw + 20);
+                uint32_t fb_height = *(uint32_t *)(raw + 24);
+                uint8_t fb_bpp = *(uint8_t *)(raw + 28);
+                uint8_t fb_type_raw = *(uint8_t *)(raw + 29);
+
+                out->framebuffer.address = fb_addr;
+                out->framebuffer.pitch = fb_pitch;
+                out->framebuffer.width = fb_width;
+                out->framebuffer.height = fb_height;
+                out->framebuffer.bpp = fb_bpp;
+                out->framebuffer.type = (fb_type_raw == 1) ? BOOTINFO_FB_RGB : BOOTINFO_FB_TEXT;
+
+                /* If we have a valid-looking framebuffer address, force RGB mode */
+                if (fb_addr != 0 && fb_width > 0 && fb_height > 0) {
+                    out->framebuffer.type = BOOTINFO_FB_RGB;
+                }
+                break;
+            }
+            case MB2_TAG_MMAP: {
+                mb2_mmap_tag_t *mmap_tag = (mb2_mmap_tag_t *)tag;
+                out->mmap_entry_size = mmap_tag->entry_size ?
+                                       mmap_tag->entry_size : sizeof(mb2_mmap_entry_t);
+                /* First entry starts right after the mmap tag header fields */
+                out->mmap_addr = (uint64_t)(uintptr_t)(tags + sizeof(mb2_mmap_tag_t));
+                /* Count entries */
+                uint32_t data_size = tag->size - sizeof(mb2_mmap_tag_t);
+                out->mmap_entry_count = data_size / out->mmap_entry_size;
+                break;
+            }
+            default:
+                break;
+        }
+
+        /* Advance to next tag (8-byte aligned) */
+        tags += (tag->size + 7) & ~7;
+    }
+
+    /* Set kernel bounds from linker symbols */
+    out->kernel_start = (uint64_t)(uintptr_t)_start;
+    out->kernel_end = (uint64_t)(uintptr_t)_end;
+
+    return 0;
+}
+
+/* Static buffer for converting Multiboot2 mmap entries to EFI format.
+ * Max 128 entries should be enough for typical systems. */
+#define MAX_MMAP_ENTRIES 128
+static EFI_MEMORY_DESCRIPTOR mb2_to_efi_buf[MAX_MMAP_ENTRIES];
+
+/*
+ * Convert Multiboot2 memory map entries to EFI_MEMORY_DESCRIPTOR format
+ * so that pmm_init() can process them without changes.
+ */
+static int convert_mmap_mb2_to_efi(bootinfo_t *bootinfo) {
+    if (!bootinfo->mmap_addr || !bootinfo->mmap_entry_count) return -1;
+    if (bootinfo->mmap_entry_count > MAX_MMAP_ENTRIES) return -1;
+
+    uint8_t *entries = (uint8_t *)(uintptr_t)bootinfo->mmap_addr;
+    uint64_t entry_size = bootinfo->mmap_entry_size;
+    uint64_t count = bootinfo->mmap_entry_count;
+
+    for (uint64_t i = 0; i < count && i < MAX_MMAP_ENTRIES; i++) {
+        mb2_mmap_entry_t *mb2_ent =
+            (mb2_mmap_entry_t *)(entries + i * entry_size);
+        EFI_MEMORY_DESCRIPTOR *efi_desc = &mb2_to_efi_buf[i];
+
+        /* Map MB2 types to EFI types */
+        switch (mb2_ent->type) {
+            case 1: efi_desc->type = 7;  break;  /* Available → Conventional */
+            case 2: efi_desc->type = 11; break;  /* Reserved → MMIO */
+            case 3: efi_desc->type = 9;  break;  /* ACPI → ACPI Reclaimable */
+            case 4: efi_desc->type = 10; break;  /* NVS → ACPI NVS */
+            case 5: efi_desc->type = 15; break;  /* Bad → Unusable */
+            default: efi_desc->type = 11; break;  /* Unknown → Reserved */
+        }
+
+        efi_desc->physical_start = mb2_ent->base_addr;
+        efi_desc->virtual_start = 0;
+        efi_desc->number_of_pages = mb2_ent->length / PAGE_SIZE;
+        efi_desc->attribute = 0;
+    }
+
+    /* Point bootinfo to the converted buffer */
+    bootinfo->mmap_addr = (uint64_t)(uintptr_t)mb2_to_efi_buf;
+    bootinfo->mmap_entry_size = sizeof(EFI_MEMORY_DESCRIPTOR);
+
+    return 0;
+}
+
+/* ============================================================
+ * Main kernel entry point
+ * BIOS mode:  rdi=MB2_MAGIC(0x36D76289), rsi=multiboot2_info_ptr
+ * UEFI mode: rdi=bootinfo_t*, rsi=unused
  * ============================================================ */
 
-void kernel_main(bootinfo_t *bootinfo) {
+void kernel_main(bootinfo_t *bootinfo_param) {
     /* Debug: direct COM1 output to verify we reached kernel_main */
     {
         const char *msg = "[KM] kernel_main entered\r\n";
@@ -437,8 +618,51 @@ void kernel_main(bootinfo_t *bootinfo) {
             for (volatile int d = 0; d < 10000; d++);
         }
     }
+
+    /*
+     * Detect boot mode and prepare unified bootinfo structure.
+     * In BIOS mode, bootinfo_param is actually the Multiboot2 magic number
+     * (passed in RDI from boot.asm), not a valid pointer.
+     */
+    static bootinfo_t bootinfo;
+
+    if (bootinfo_param && bootinfo_param->magic == BOOTINFO_MAGIC) {
+        /* UEFI mode: bootinfo is valid, copy it */
+        __builtin_memcpy(&bootinfo, bootinfo_param, sizeof(bootinfo_t));
+        { const char *m = "[KM] UEFI mode detected\r\n"; for (const char *p = m; *p; p++) { __asm__ volatile("outb %0, %1" : : "a"((unsigned char)*p), "Nd"(0x3F8)); for (volatile int d = 0; d < 10000; d++) {} } }
+    } else {
+        /* BIOS mode: parse Multiboot2 info from RDI/RSI registers */
+        uint32_t mb2_magic;
+        void *mb2_info;
+        __asm__ volatile("mov %%edi, %0" : "=r"(mb2_magic));
+        __asm__ volatile("mov %%rsi, %0" : "=r"(mb2_info));
+
+        { const char *m = "[KM] BIOS mode detected, parsing MB2\r\n"; for (const char *p = m; *p; p++) { __asm__ volatile("outb %0, %1" : : "a"((unsigned char)*p), "Nd"(0x3F8)); for (volatile int d = 0; d < 10000; d++) {} } }
+
+        if (parse_multiboot2(mb2_magic, mb2_info, &bootinfo) != 0) {
+            const char *err = "[ERR] Failed to parse Multiboot2 info!\r\n";
+            for (const char *p = err; *p; p++) {
+                __asm__ volatile("outb %0, %1" : : "a"((unsigned char)*p), "Nd"(0x3F8));
+                for (volatile int d = 0; d < 10000; d++);
+            }
+            hlt();
+        }
+        { const char *m = "[KM] MB2 parsed OK\r\n"; for (const char *p = m; *p; p++) { __asm__ volatile("outb %0, %1" : : "a"((unsigned char)*p), "Nd"(0x3F8)); for (volatile int d = 0; d < 10000; d++) {} } }
+
+        /* Convert MB2 memory map entries to EFI format for PMM */
+        if (convert_mmap_mb2_to_efi(&bootinfo) != 0) {
+            const char *err = "[ERR] Failed to convert MB2 mmap!\r\n";
+            for (const char *p = err; *p; p++) {
+                __asm__ volatile("outb %0, %1" : : "a"((unsigned char)*p), "Nd"(0x3F8));
+                for (volatile int d = 0; d < 10000; d++);
+            }
+            hlt();
+        }
+        { const char *m = "[KM] MB2 mmap converted\r\n"; for (const char *p = m; *p; p++) { __asm__ volatile("outb %0, %1" : : "a"((unsigned char)*p), "Nd"(0x3F8)); for (volatile int d = 0; d < 10000; d++) {} } }
+    }
+
     /* Phase I: 系统内核启动 */
-    phase_kernel_boot(bootinfo);
+    phase_kernel_boot(&bootinfo);
 
     /* Phase J: 自检设备信息 */
     phase_device_selfcheck();
