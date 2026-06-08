@@ -151,7 +151,16 @@ void mouse_handler(struct interrupt_frame *frame) {
     if (mouse_cycle == 0) {
         /* First byte of 3-byte packet: bits [3:0] must have bit 3 set */
         if (!(data & 0x08)) {
-            /* Out of sync — discard this byte, wait for valid packet start */
+            /*
+             * Out of sync — discard this byte and reset the cycle counter.
+             *
+             * IMPORTANT: We must reset mouse_cycle to 0 (not leave it or increment).
+             * If we don't reset, a dropped byte could cause permanent desync where
+             * byte 2 is treated as byte 0, byte 0 as byte 1, etc., causing Y
+             * displacement to be misinterpreted as button state (the root cause
+             * of "button triggers during movement" bug).
+             */
+            mouse_cycle = 0;  /* Stay at 0, keep looking for valid packet start */
             pic_send_eoi(12);
             return;
         }
@@ -163,7 +172,48 @@ void mouse_handler(struct interrupt_frame *frame) {
         /* Third byte: Y displacement — full packet received */
         mouse_cycle = 0;
 
-        state.buttons = data & 0x07;
+        /*
+         * PS/2 Mouse Packet Format (3 bytes):
+         *   Byte 0: [Yovf][Xovf][Ysgn][Xsgn][1][Mid][Rgt][Lft]
+         *   Byte 1: X displacement (signed, sign-extended from byte 0 bits 4-5)
+         *   Byte 2: Y displacement (signed, sign-extended from byte 0 bits 6-7)
+         *
+         * Button state is in BYTE 0 low 3 bits, NOT in byte 2.
+         * Reading buttons from byte 2 (Y displacement) causes spurious
+         * button events during every mouse movement — the root cause of
+         * "auto-click on move" bug.
+         */
+        uint8_t new_buttons = mouse_bytes[0] & 0x07;
+        if (new_buttons != state.buttons) {
+            /*
+             * Additional sanity check: if both X and Y displacement are zero
+             * but buttons changed, it's likely a genuine button event.
+             * If there IS movement and buttons changed, verify the change is
+             * plausible (not all bits flipping wildly).
+             */
+            int8_t dx_raw = (int8_t)mouse_bytes[1];
+            int8_t dy_raw = (int8_t)mouse_bytes[2];
+
+            uint8_t changed = new_buttons ^ state.buttons;
+            if (dx_raw != 0 || dy_raw != 0) {
+                /*
+                 * Movement + button change: use conservative filtering.
+                 * Only allow single-bit changes during movement to filter out
+                 * corruption where multiple bits flip simultaneously (which
+                 * is physically impossible for a real mouse — you can't press
+                 * and release multiple buttons in the same sample period).
+                 */
+                if ((changed & (changed - 1)) == 0) {
+                    /* Single bit changed — likely legitimate */
+                    state.buttons = new_buttons;
+                }
+                /* Else: multiple bits changed during movement → ignore (noise) */
+            } else {
+                /* No movement, only buttons changed → accept (genuine event) */
+                state.buttons = new_buttons;
+            }
+        }
+        /* If new_buttons == state.buttons, no update needed (optimization) */
 
         int32_t dx = (int32_t)(int8_t)mouse_bytes[1];
         int32_t dy = (int32_t)(int8_t)mouse_bytes[2];

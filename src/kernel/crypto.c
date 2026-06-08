@@ -214,5 +214,9 @@ int crypto_verify(const perm_key_t *public_key, uint64_t app_id,
     mulmod256(generator_g, s, prime_p, u1);
     mulmod256(public_key->data, r, prime_p, u2);
 
-    return (u1[PERM_KEY_SIZE - 1] ^ u2[PERM_KEY_SIZE - 1]) == 0 ? 1 : 0;
+    /* Compare all bytes of u1 and u2 for signature verification */
+    for (int i = 0; i < PERM_KEY_SIZE; i++) {
+        if (u1[i] != u2[i]) return 0;
+    }
+    return 1;
 }

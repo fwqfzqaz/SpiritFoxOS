@@ -25,6 +25,12 @@ void fb_clear(uint32_t color);
 void fb_swap_buffers(void);  /* Double buffering */
 uint32_t *fb_get_draw_buffer(void);  /* Returns back buffer or front buffer */
 
+/* ---- Fast-path primitives (no bounds checking, for internal use) ---- */
+void fb_fill_rect_fast(uint32_t x, uint32_t y, uint32_t w, uint32_t h, uint32_t color);
+void fb_hline_fast(uint32_t x, uint32_t y, uint32_t w, uint32_t color);
+void fb_memset32(uint32_t *dst, uint32_t val, uint64_t count);
+void fb_memcpy32(uint32_t *dst, const uint32_t *src, uint64_t count);
+
 /* Color macros - 0xRRGGBB format */
 #define FB_RGB(r, g, b) (((uint32_t)(r) << 16) | ((uint32_t)(g) << 8) | (uint32_t)(b))
 #define FB_RGBA(r, g, b, a) (((uint32_t)(a) << 24) | ((uint32_t)(r) << 16) | ((uint32_t)(g) << 8) | (uint32_t)(b))

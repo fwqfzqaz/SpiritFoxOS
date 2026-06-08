@@ -355,11 +355,13 @@ static int init_single_hid_device(xhci_device_t *xdev) {
     if (total_cfg_len > 512) total_cfg_len = 512;  /* Safety limit */
 
     /* Step 2b: Read full configuration descriptor */
-    uint8_t *full_cfg = (uint8_t *)phys_to_virt(pmm_alloc_pages(1));
+    uint64_t full_cfg_phys = pmm_alloc_pages(1);
+    uint8_t *full_cfg = (uint8_t *)phys_to_virt(full_cfg_phys);
     memset(full_cfg, 0, PAGE_SIZE);
     rc = usb_get_descriptor(slot_id, USB_DESC_CONFIG, 0, full_cfg, total_cfg_len);
     if (rc <= 0) {
         LOG_W("usb", "Slot %d: cannot read full config descriptor\n", slot_id);
+        pmm_free_page(full_cfg_phys);
         return -1;
     }
 
@@ -368,6 +370,7 @@ static int init_single_hid_device(xhci_device_t *xdev) {
     rc = usb_set_configuration(slot_id, config_val);
     if (rc < 0) {
         LOG_W("usb", "Slot %d: set configuration failed (rc=%d)\n", slot_id, rc);
+        pmm_free_page(full_cfg_phys);
         return -1;
     }
 
@@ -406,6 +409,7 @@ static int init_single_hid_device(xhci_device_t *xdev) {
                tname, slot_id, hd->ep_in_addr & 0x0F, hd->max_packet);
     }
 
+    pmm_free_page(full_cfg_phys);
     return 0;
 }
 
@@ -561,7 +565,11 @@ void usb_init(void) {
     /* Enumerate all devices and try to initialize HID devices */
     for (int i = 1; i <= XHCI_MAX_SLOTS; i++) {
         if (ctrl->devices[i].active) {
-            /* Register in general device list */
+            /* Register in general device list (with bounds check) */
+            if (usb_device_count >= USB_MAX_DEVICES) {
+                LOG_W("usb", "Too many USB devices, skipping slot %d\n", i);
+                continue;
+            }
             usb_device_info_t *udev = &usb_devices[usb_device_count];
             memset(udev, 0, sizeof(usb_device_info_t));
 

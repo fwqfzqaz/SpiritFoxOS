@@ -72,6 +72,7 @@ UEFI_LDFLAGS = -T linker_efi.ld -nostdlib -static
 BIOS_TARGET = $(BUILDDIR)/kernel.elf
 UEFI_ELF    = $(BUILDDIR)/kernel_efi.elf
 UEFI_TARGET = $(BUILDDIR)/BOOTX64.EFI
+MINGW_TEMPLATE = $(BUILDDIR)/test_mingw2.EFI
 
 # ============================================================
 # Object Files
@@ -110,9 +111,16 @@ $(UEFI_ELF): $(UEFI_OBJS)
 	$(LD) $(UEFI_LDFLAGS) -o $@ $(UEFI_OBJS)
 	@echo "Built UEFI ELF intermediate: $@"
 
-$(UEFI_TARGET): $(UEFI_ELF)
+$(UEFI_TARGET): $(UEFI_ELF) $(MINGW_TEMPLATE)
 	python3 scripts/elf2pe.py $< $@
 	@echo "Built UEFI executable: $@"
+
+# Mingw PE template (required by elf2pe.py as structural base)
+$(MINGW_TEMPLATE): $(SRCDIR)/boot/test_mingw2.c
+	@mkdir -p $(BUILDDIR)
+	x86_64-w64-mingw32-gcc -nostdlib -nostartfiles -o $@ $< \
+		-Wl,-e,efi_main -Wl,--subsystem,10
+	@echo "Built mingw template: $@"
 
 # ---- Compile C sources ----
 $(BUILDDIR)/kernel/%.o: $(SRCDIR)/kernel/%.c
@@ -124,6 +132,16 @@ $(BUILDDIR)/boot/efi_boot.o: $(SRCDIR)/boot/efi_boot.c
 	$(CC) $(UEFI_CFLAGS) -mabi=ms -c -o $@ $<
 
 $(BUILDDIR)/kernel/isr.o: $(SRCDIR)/kernel/isr.asm
+	@mkdir -p $(dir $@)
+	$(NASM) -f elf64 -o $@ $<
+
+# BIOS boot assembly (Multiboot2 entry + long mode switch)
+$(BUILDDIR)/boot/boot.o: $(SRCDIR)/boot/boot.asm
+	@mkdir -p $(dir $@)
+	$(NASM) -f elf64 -o $@ $<
+
+# Other kernel assembly (shared between BIOS and UEFI)
+$(BUILDDIR)/kernel/%.o: $(SRCDIR)/kernel/%.asm
 	@mkdir -p $(dir $@)
 	$(NASM) -f elf64 -o $@ $<
 

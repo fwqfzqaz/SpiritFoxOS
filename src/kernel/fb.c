@@ -27,15 +27,27 @@ void fb_init(uint64_t addr, uint32_t width, uint32_t height,
     if (bb_phys && bb_phys < 0x100000000ULL) {
         /* Back buffer is within identity-mapped 4GB range */
         back_buffer = (uint32_t *)bb_phys;
-        /* Clear back buffer */
-        for (uint64_t i = 0; i < fb_size / 4; i++) {
-            back_buffer[i] = 0;
-        }
+        /* Clear back buffer using fast fill */
+        fb_memset32(back_buffer, 0, fb_size / 4);
     } else {
         back_buffer = NULL;
         /* If allocation failed, we'll draw directly to the front buffer */
     }
 }
+
+/* ---- Fast 32-bit memset: fill count uint32_t words with value ---- */
+void fb_memset32(uint32_t *dst, uint32_t val, uint64_t count) {
+    for (uint64_t i = 0; i < count; i++)
+        dst[i] = val;
+}
+
+/* ---- Fast block copy: copy count uint32_t words from src to dst ---- */
+void fb_memcpy32(uint32_t *dst, const uint32_t *src, uint64_t count) {
+    for (uint64_t i = 0; i < count; i++)
+        dst[i] = src[i];
+}
+
+/* ---- Pixel-level operations (with bounds checking, kept for compatibility) ---- */
 
 void fb_draw_pixel(uint32_t x, uint32_t y, uint32_t color) {
     if (x >= fb.width || y >= fb.height) return;
@@ -51,19 +63,73 @@ uint32_t fb_get_pixel(uint32_t x, uint32_t y) {
     return *pixel;
 }
 
+/* ---- Optimized fill rect: uses word-size stores instead of per-pixel loop ---- */
 void fb_fill_rect(uint32_t x, uint32_t y, uint32_t w, uint32_t h, uint32_t color) {
+    /* Clamp to screen bounds */
+    if (x >= fb.width || y >= fb.height) return;
     if (x + w > fb.width) w = fb.width - x;
     if (y + h > fb.height) h = fb.height - y;
+    if (w == 0 || h == 0) return;
 
     uint32_t *target = back_buffer ? back_buffer : fb.buffer;
-    uint32_t bytes_per_pixel = fb.bpp / 8;
+    uint32_t stride = fb.pitch / 4;  /* stride in uint32_t units */
+
+    /* Fill each row using sequential 32-bit writes.
+     * GCC -O2 will unroll this loop and use rep stos or similar. */
+    for (uint32_t dy = 0; dy < h; dy++) {
+        uint32_t *row = target + ((y + dy) * stride) + x;
+        /* Unrolled 4-at-a-time fill for maximum throughput */
+        uint32_t dx = 0;
+        uint32_t w4 = w & ~3u;
+        for (; dx < w4; dx += 4) {
+            row[dx]     = color;
+            row[dx + 1] = color;
+            row[dx + 2] = color;
+            row[dx + 3] = color;
+        }
+        /* Remainder */
+        for (; dx < w; dx++)
+            row[dx] = color;
+    }
+}
+
+/* ---- Fast fill rect: NO bounds checking. Caller guarantees valid coords.
+ * Used by internal rendering where coordinates are pre-clamped. ---- */
+void fb_fill_rect_fast(uint32_t x, uint32_t y, uint32_t w, uint32_t h, uint32_t color) {
+    uint32_t *target = back_buffer ? back_buffer : fb.buffer;
+    uint32_t stride = fb.pitch / 4;
 
     for (uint32_t dy = 0; dy < h; dy++) {
-        uint32_t *row = (uint32_t *)((uint8_t *)target + (y + dy) * fb.pitch + x * bytes_per_pixel);
-        for (uint32_t dx = 0; dx < w; dx++) {
-            row[dx] = color;
+        uint32_t *row = target + ((y + dy) * stride) + x;
+        uint32_t dx = 0;
+        uint32_t w4 = w & ~3u;
+        for (; dx < w4; dx += 4) {
+            row[dx]     = color;
+            row[dx + 1] = color;
+            row[dx + 2] = color;
+            row[dx + 3] = color;
         }
+        for (; dx < w; dx++)
+            row[dx] = color;
     }
+}
+
+/* ---- Fast horizontal line fill (single row, no bounds check) ---- */
+void fb_hline_fast(uint32_t x, uint32_t y, uint32_t w, uint32_t color) {
+    uint32_t *target = back_buffer ? back_buffer : fb.buffer;
+    uint32_t stride = fb.pitch / 4;
+    uint32_t *row = target + (y * stride) + x;
+
+    uint32_t dx = 0;
+    uint32_t w4 = w & ~3u;
+    for (; dx < w4; dx += 4) {
+        row[dx]     = color;
+        row[dx + 1] = color;
+        row[dx + 2] = color;
+        row[dx + 3] = color;
+    }
+    for (; dx < w; dx++)
+        row[dx] = color;
 }
 
 void fb_draw_rect(uint32_t x, uint32_t y, uint32_t w, uint32_t h, uint32_t color) {
@@ -97,8 +163,8 @@ void fb_clear(uint32_t color) {
 
 void fb_swap_buffers(void) {
     if (!back_buffer) return;
-    uint64_t total_bytes = (uint64_t)fb.height * fb.pitch;
-    memcpy(fb.buffer, back_buffer, (size_t)total_bytes);
+    uint64_t total_pixels = (uint64_t)fb.height * (fb.pitch / 4);
+    fb_memcpy32(fb.buffer, back_buffer, total_pixels);
 }
 
 uint32_t *fb_get_draw_buffer(void) {
