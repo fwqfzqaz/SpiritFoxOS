@@ -3,7 +3,7 @@
 **版本**: 1.0.0
 **架构**: x86_64 (Long Mode)
 **引导协议**: Multiboot2 (BIOS) / UEFI (默认)
-**许可证**: 开源爱好项目
+**许可证**: GNU General Public License v3.0 (GPLv3)
 
 SpiritFoxOS 是一个从零编写的 x86_64 操作系统，具备完整的双模式启动流程、硬件抽象层、内存管理、进程调度、图形用户界面（GUI）、文件系统、USB 驱动和交互式 Shell。
 
