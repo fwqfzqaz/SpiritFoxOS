@@ -18,34 +18,34 @@
 #include "../include/io.h"
 
 void pic_init(void) {
-    /* Start initialization in cascade mode */
+    /* 以级联模式开始初始化 */
     outb(PIC1_COMMAND, ICW1_INIT | ICW1_ICW4);
     io_wait();
     outb(PIC2_COMMAND, ICW1_INIT | ICW1_ICW4);
     io_wait();
 
-    /* Set vector offsets: PIC1 at IRQ32, PIC2 at IRQ40 */
+    /* 设置向量偏移：PIC1在IRQ32，PIC2在IRQ40 */
     outb(PIC1_DATA, 32);
     io_wait();
     outb(PIC2_DATA, 40);
     io_wait();
 
-    /* Tell PIC1 there's a slave at IRQ2 */
+    /* 告诉PIC1从片连接在IRQ2上 */
     outb(PIC1_DATA, 4);
     io_wait();
-    /* Tell PIC2 its cascade identity */
+    /* 告诉PIC2其级联标识 */
     outb(PIC2_DATA, 2);
     io_wait();
 
-    /* 8086 mode */
+    /* 8086模式 */
     outb(PIC1_DATA, ICW4_8086);
     io_wait();
     outb(PIC2_DATA, ICW4_8086);
     io_wait();
 
-    /* Mask all IRQs except cascade (IRQ2) */
-    outb(PIC1_DATA, 0xFB); /* Unmask IRQ2 (cascade) */
-    outb(PIC2_DATA, 0xFF); /* Mask all */
+    /* 屏蔽除级联（IRQ2）外的所有IRQ */
+    outb(PIC1_DATA, 0xFB); /* 解除IRQ2屏蔽（级联） */
+    outb(PIC2_DATA, 0xFF); /* 屏蔽全部 */
 }
 
 void pic_send_eoi(uint8_t irq) {

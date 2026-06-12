@@ -14,89 +14,89 @@
 ; You should have received a copy of the GNU General Public License
 ; along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-; SpiritFoxOS - Interrupt Service Routines
-; Common ISR/IRQ stubs that save context and call C handler
+; SpiritFoxOS - 中断服务例程
+; 通用ISR/IRQ存根，保存上下文并调用C语言处理函数
 
 bits 64
 
-default rel   ; Use RIP-relative addressing for PIC compatibility
+default rel   ; 使用RIP相对寻址以兼容PIC
 
 section .text
 
 extern interrupt_handler
 
-; Macro for CPU exception handlers (some push error code, some don't)
+; CPU异常处理宏（部分会压入错误码，部分不会）
 %macro ISR_NOERR 1
 global isr%1
 isr%1:
-    push 0                 ; Push dummy error code
-    push %1                ; Push interrupt number
+    push 0                 ; 压入虚拟错误码
+    push %1                ; 压入中断号
     jmp isr_common
 %endmacro
 
 %macro ISR_ERR 1
 global isr%1
 isr%1:
-    ; Error code already pushed by CPU
-    push %1                ; Push interrupt number
+    ; CPU已压入错误码
+    push %1                ; 压入中断号
     jmp isr_common
 %endmacro
 
-; CPU Exception handlers (0-31)
-ISR_NOERR 0    ; #DE Divide by Zero
-ISR_NOERR 1    ; #DB Debug
-ISR_NOERR 2    ; NMI
-ISR_NOERR 3    ; #BP Breakpoint
-ISR_NOERR 4    ; #OF Overflow
-ISR_NOERR 5    ; #BR BOUND Range Exceeded
-ISR_NOERR 6    ; #UD Invalid Opcode
-ISR_NOERR 7    ; #NM Device Not Available
-ISR_ERR   8    ; #DF Double Fault
-ISR_NOERR 9    ; Coprocessor Segment Overrun
-ISR_ERR   10   ; #TS Invalid TSS
-ISR_ERR   11   ; #NP Segment Not Present
-ISR_ERR   12   ; #SS Stack Segment Fault
-ISR_ERR   13   ; #GP General Protection Fault
-ISR_ERR   14   ; #PF Page Fault
-ISR_NOERR 15   ; Reserved
-ISR_NOERR 16   ; #MF x87 FPU Error
-ISR_ERR   17   ; #AC Alignment Check
-ISR_NOERR 18   ; #MC Machine Check
-ISR_NOERR 19   ; #XM SIMD Floating-Point
-ISR_NOERR 20   ; #VE Virtualization Exception
-ISR_NOERR 21   ; #CP Control Protection
-ISR_NOERR 22   ; Reserved
-ISR_NOERR 23   ; Reserved
-ISR_NOERR 24   ; Reserved
-ISR_NOERR 25   ; Reserved
-ISR_NOERR 26   ; Reserved
-ISR_NOERR 27   ; Reserved
-ISR_NOERR 28   ; Reserved
-ISR_NOERR 29   ; #VC VMM Communication
-ISR_ERR   30   ; #HX Security Exception
-ISR_NOERR 31   ; Reserved
+; CPU异常处理函数 (0-31)
+ISR_NOERR 0    ; #DE 除零错误
+ISR_NOERR 1    ; #DB 调试异常
+ISR_NOERR 2    ; NMI 不可屏蔽中断
+ISR_NOERR 3    ; #BP 断点陷阱
+ISR_NOERR 4    ; #OF 溢出
+ISR_NOERR 5    ; #BR BOUND范围越界
+ISR_NOERR 6    ; #UD 无效操作码
+ISR_NOERR 7    ; #NM 设备不可用（x87/FPU）
+ISR_ERR   8    ; #DF 双重故障
+ISR_NOERR 9    ; 协处理器段越界
+ISR_ERR   10   ; #TS 无效TSS
+ISR_ERR   11   ; #NP 段不存在
+ISR_ERR   12   ; #SS 栈段错误
+ISR_ERR   13   ; #GP 一般保护故障
+ISR_ERR   14   ; #PF 页错误
+ISR_NOERR 15   ; 保留
+ISR_NOERR 16   ; #MF x87 FPU浮点错误
+ISR_ERR   17   ; #AC 对齐检查
+ISR_NOERR 18   ; #MC 机器检查
+ISR_NOERR 19   ; #XM SIMD浮点异常
+ISR_NOERR 20   ; #VE 虚拟化异常
+ISR_NOERR 21   ; #CP 控制保护异常
+ISR_NOERR 22   ; 保留
+ISR_NOERR 23   ; 保留
+ISR_NOERR 24   ; 保留
+ISR_NOERR 25   ; 保留
+ISR_NOERR 26   ; 保留
+ISR_NOERR 27   ; 保留
+ISR_NOERR 28   ; 保留
+ISR_NOERR 29   ; #VC VMM通信
+ISR_ERR   30   ; #HX 安全异常
+ISR_NOERR 31   ; 保留
 
-; IRQ handlers (32-47)
-ISR_NOERR 32   ; IRQ0  - PIT Timer
-ISR_NOERR 33   ; IRQ1  - Keyboard
-ISR_NOERR 34   ; IRQ2  - Cascade
-ISR_NOERR 35   ; IRQ3  - COM2
-ISR_NOERR 36   ; IRQ4  - COM1
-ISR_NOERR 37   ; IRQ5  - LPT2
-ISR_NOERR 38   ; IRQ6  - Floppy
-ISR_NOERR 39   ; IRQ7  - LPT1
-ISR_NOERR 40   ; IRQ8  - RTC
-ISR_NOERR 41   ; IRQ9  - Free
-ISR_NOERR 42   ; IRQ10 - Free
-ISR_NOERR 43   ; IRQ11 - Free
-ISR_NOERR 44   ; IRQ12 - Mouse
-ISR_NOERR 45   ; IRQ13 - FPU
-ISR_NOERR 46   ; IRQ14 - Primary ATA
-ISR_NOERR 47   ; IRQ15 - Secondary ATA
+; IRQ中断处理函数 (32-47)
+ISR_NOERR 32   ; IRQ0  - PIT定时器
+ISR_NOERR 33   ; IRQ1  - 键盘
+ISR_NOERR 34   ; IRQ2  - 级联（从片连接）
+ISR_NOERR 35   ; IRQ3  - COM2串口
+ISR_NOERR 36   ; IRQ4  - COM1串口
+ISR_NOERR 37   ; IRQ5  - LPT2并口
+ISR_NOERR 38   ; IRQ6  - 软盘
+ISR_NOERR 39   ; IRQ7  - LPT1并口
+ISR_NOERR 40   ; IRQ8  - RTC实时时钟
+ISR_NOERR 41   ; IRQ9  - 空闲/重定向
+ISR_NOERR 42   ; IRQ10 - 空闲
+ISR_NOERR 43   ; IRQ11 - 空闲
+ISR_NOERR 44   ; IRQ12 - 鼠标
+ISR_NOERR 45   ; IRQ13 - FPU/Coprocessor
+ISR_NOERR 46   ; IRQ14 - 主ATA通道
+ISR_NOERR 47   ; IRQ15 - 从ATA通道
 
-; Common ISR handler
+; 通用ISR处理函数
 isr_common:
-    ; Save all general-purpose registers
+    ; 保存所有通用寄存器
     push rax
     push rbx
     push rcx
@@ -113,32 +113,32 @@ isr_common:
     push r14
     push r15
 
-    ; Save data segment
+    ; 保存数据段
     mov ax, ds
     push rax
 
-    ; Load kernel data segment
+    ; 加载内核数据段
     mov ax, 0x10
     mov ds, ax
     mov es, ax
     mov fs, ax
     mov gs, ax
 
-    ; Pass pointer to interrupt frame as argument
+    ; 将中断帧指针作为参数传递
     mov rdi, rsp
 
-    ; Call C handler (RIP-relative for PIC)
+    ; 调用C语言处理函数（使用RIP相对寻址以兼容PIC）
     lea rax, [rel interrupt_handler]
     call rax
 
-    ; Restore data segment
+    ; 恢复数据段
     pop rax
     mov ds, ax
     mov es, ax
     mov fs, ax
     mov gs, ax
 
-    ; Restore general-purpose registers
+    ; 恢复所有通用寄存器
     pop r15
     pop r14
     pop r13
@@ -155,13 +155,13 @@ isr_common:
     pop rbx
     pop rax
 
-    ; Remove interrupt number and error code
+    ; 弹出中断号和错误码
     add rsp, 16
 
-    ; Return from interrupt
+    ; 中断返回
     iretq
 
-; ISR table for IDT initialization
+; 用于IDT初始化的ISR表
 section .data
 global isr_table
 isr_table:

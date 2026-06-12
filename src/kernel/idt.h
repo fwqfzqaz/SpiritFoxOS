@@ -21,31 +21,31 @@
 
 #define IDT_ENTRIES 256
 
-/* IDT entry (16 bytes in 64-bit mode) */
+/* IDT表项（64位模式下16字节） */
 struct idt_entry {
-    uint16_t offset_low;     /* Offset [15:0] */
-    uint16_t selector;       /* Code segment selector */
-    uint8_t  ist;            /* IST offset (0 = don't use IST) */
-    uint8_t  type_attr;      /* Type and attributes */
-    uint16_t offset_mid;     /* Offset [31:16] */
-    uint32_t offset_high;    /* Offset [63:32] */
-    uint32_t reserved;       /* Must be zero */
+    uint16_t offset_low;     /* 偏移量 [15:0] */
+    uint16_t selector;       /* 代码段选择子 */
+    uint8_t  ist;            /* IST偏移（0 = 不使用IST） */
+    uint8_t  type_attr;      /* 类型和属性 */
+    uint16_t offset_mid;     /* 偏移量 [31:16] */
+    uint32_t offset_high;    /* 偏移量 [63:32] */
+    uint32_t reserved;       /* 必须为零 */
 } __attribute__((packed));
 
-/* IDTR */
+/* IDTR寄存器 */
 struct idtr {
     uint16_t limit;
     uint64_t base;
 } __attribute__((packed));
 
-/* Interrupt frame (pushed by CPU + our handler)
- * Stack layout from low to high address (RSP points here):
- *   ds          <- last pushed by isr_common (push rax with ds value)
- *   r15-r8      <- pushed in order: r15 last, r8 first of this group
+/* 中断帧（由CPU和我们的处理程序压入栈）
+ * 栈布局从低地址到高地址（RSP指向此处）：
+ *   ds          <- 最后由isr_common压入（用ds值push rax）
+ *   r15-r8      <- 按顺序压入：r15最后，r8最先
  *   rdi,rsi,rbp,rdx,rcx,rbx,rax
- *   int_no      <- pushed by ISR_NOERR/ISR_ERR macro
- *   err_code    <- pushed by ISR_NOERR (dummy 0) or CPU (ISR_ERR)
- *   rip,cs,rflags,rsp,ss  <- pushed by CPU
+ *   int_no      <- 由ISR_NOERR/ISR_ERR宏压入
+ *   err_code    <- 由ISR_NOERR压入（虚拟0）或CPU压入（ISR_ERR）
+ *   rip,cs,rflags,rsp,ss  <- 由CPU压入
  */
 struct interrupt_frame {
     uint64_t ds;
@@ -55,14 +55,14 @@ struct interrupt_frame {
     uint64_t rip, cs, rflags, rsp, ss;
 };
 
-/* Interrupt handler type */
+/* 中断处理函数类型 */
 typedef void (*interrupt_handler_t)(struct interrupt_frame *frame);
 
 void idt_init(void);
 void idt_set_gate(uint8_t num, uint64_t handler, uint16_t selector, uint8_t type_attr);
 void idt_register_handler(uint8_t num, interrupt_handler_t handler);
 
-/* ISR declarations (defined in isr.asm) */
+/* ISR声明（定义在isr.asm中） */
 extern uint64_t isr_table[];
 
 #endif /* IDT_H */

@@ -17,10 +17,10 @@
 #ifndef SHELL_H
 #define SHELL_H
 
-/* Q1: Initialize terminal driver state */
+/* Q1: 初始化终端驱动状态 */
 void shell_terminal_init(void);
 
-/* Q2-Q3: Start shell interpreter with prompt */
+/* Q2-Q3: 启动带提示符的Shell解释器 */
 void shell_run(void);
 
 #endif /* SHELL_H */

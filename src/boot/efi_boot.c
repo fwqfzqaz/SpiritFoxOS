@@ -15,37 +15,37 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 /* ============================================================
- * SpiritFoxOS EFI Bootloader
- * UEFI entry point - collects system info and jumps to kernel
+ * SpiritFoxOS EFI 引导加载器
+ * UEFI入口点 - 收集系统信息并跳转到内核
  *
- * Entry: EFIAPI efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
- * Exit:  Calls kernel_main(bootinfo_t *) and never returns
+ * 入口: EFIAPI efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
+ * 退出:  调用 kernel_main(bootinfo_t *) 且永不返回
  *
- * This ENTIRE file is compiled with -mabi=ms (Microsoft x64 calling
- * convention) to match UEFI's ABI on x86_64. All internal function
- * calls use rcx/rdx/r8/r9 parameter passing.
+ * 本文件整体使用 -mabi=ms（Microsoft x64调用约定）编译，
+ * 以匹配x86_64上UEFI的ABI。所有内部函数调用使用
+ * rcx/rdx/r8/r9 参数传递。
  *
- * EXCEPTION: kernel_main() is declared sysv_abi because it lives in
- * a separate compilation unit (kernel.c) built with default SysV ABI.
+ * 异常: kernel_main() 声明为 sysv_abi，因为它位于单独的
+ * 编译单元（kernel.c）中，使用默认的SysV ABI构建。
  * ============================================================ */
 
 #include <stddef.h>
 #include "../include/efi.h"
 #include "../include/bootinfo.h"
 
-/* GUID comparisons (simplified) */
+/* GUID比较（简化版） */
 static const EFI_GUID gop_guid = EFI_GRAPHICS_OUTPUT_PROTOCOL_GUID;
 static const EFI_GUID acpi_20_guid = ACPI_20_RSDP_GUID;
 
-/* External kernel entry point (compiled with SysV ABI in kernel.c) */
+/* 外部内核入口点（在kernel.c中以SysV ABI编译） */
 extern void kernel_main(bootinfo_t *bootinfo) __attribute__((sysv_abi));
 
-/* Kernel start/end from linker */
+/* 来自链接器的内核起始/结束地址 */
 extern char _start[];
 extern char _end[];
 
 /* ============================================================
- * Helper: Compare two GUIDs
+ * 辅助函数：比较两个GUID
  * ============================================================ */
 static int guid_eq(const EFI_GUID *a, const EFI_GUID *b) {
     if (a->data1 != b->data1 || a->data2 != b->data2 || a->data3 != b->data3)
@@ -56,7 +56,7 @@ static int guid_eq(const EFI_GUID *a, const EFI_GUID *b) {
 }
 
 /* ============================================================
- * BS / Console / GOP wrappers (all EFIAPI for MS ABI indirect calls)
+ * 引导服务/控制台/GOP封装函数（均为EFIAPI，用于MS ABI间接调用）
  * ============================================================ */
 
 static EFIAPI EFI_STATUS bs_allocate_pool(EFI_BOOT_SERVICES *bs, uint32_t pool_type,
@@ -123,7 +123,7 @@ static EFIAPI EFI_STATUS gop_set_mode(EFI_GRAPHICS_OUTPUT_PROTOCOL *gop, uint32_
 }
 
 /* ============================================================
- * Serial output helper (works before/after ExitBootServices)
+ * 串口输出辅助函数（在ExitBootServices前后均可工作）
  * ============================================================ */
 static void serial_puts(const char *str) {
     for (const char *p = str; *p; p++) {
@@ -133,7 +133,7 @@ static void serial_puts(const char *str) {
 }
 
 /* ============================================================
- * Print string to UEFI console
+ * 向UEFI控制台打印字符串
  * ============================================================ */
 static void efi_print(EFI_SYSTEM_TABLE *st, const char *str) {
     static uint16_t buf[256];
@@ -144,7 +144,7 @@ static void efi_print(EFI_SYSTEM_TABLE *st, const char *str) {
 }
 
 /* ============================================================
- * Get memory map from UEFI boot services
+ * 从UEFI引导服务获取内存映射
  * ============================================================ */
 static int get_efi_memory_map(EFI_SYSTEM_TABLE *st, bootinfo_t *bootinfo,
                                uint64_t *mmap_key) {
@@ -154,22 +154,22 @@ static int get_efi_memory_map(EFI_SYSTEM_TABLE *st, bootinfo_t *bootinfo,
     uint32_t desc_version = 0;
     EFI_STATUS status;
 
-    /* First call: get required buffer size */
+    /* 第一次调用：获取所需缓冲区大小 */
     status = bs_get_memory_map(bs, &mmap_size, NULL, mmap_key,
                                 &desc_size, &desc_version);
 
     if (status != EFI_BUFFER_TOO_SMALL && status != EFI_SUCCESS)
         return -1;
 
-    /* Add extra space for new entries between calls */
+    /* 为调用间新增的条目预留额外空间 */
     mmap_size += desc_size * 4;
 
-    /* Allocate pool for memory map */
+    /* 为内存映射分配内存池 */
     EFI_MEMORY_DESCRIPTOR *mmap = NULL;
     status = bs_allocate_pool(bs, EFI_LOADER_DATA, mmap_size, (void **)&mmap);
     if (status != EFI_SUCCESS) return -1;
 
-    /* Get actual memory map */
+    /* 获取实际内存映射 */
     status = bs_get_memory_map(bs, &mmap_size, mmap, mmap_key,
                                 &desc_size, &desc_version);
     if (status != EFI_SUCCESS) { bs_free_pool(bs, mmap); return -1; }
@@ -183,7 +183,7 @@ static int get_efi_memory_map(EFI_SYSTEM_TABLE *st, bootinfo_t *bootinfo,
 }
 
 /* ============================================================
- * Set up framebuffer via Graphics Output Protocol
+ * 通过图形输出协议（GOP）设置帧缓冲区
  * ============================================================ */
 static int setup_framebuffer(EFI_SYSTEM_TABLE *st, bootinfo_t *bootinfo) {
     EFI_BOOT_SERVICES *bs = st->boot;
@@ -230,7 +230,7 @@ static int setup_framebuffer(EFI_SYSTEM_TABLE *st, bootinfo_t *bootinfo) {
 }
 
 /* ============================================================
- * Find ACPI RSDP from configuration tables
+ * 从配置表中查找ACPI RSDP
  * ============================================================ */
 static void find_acpi_rsdp(EFI_SYSTEM_TABLE *st, bootinfo_t *bootinfo) {
     uint64_t count = st->number_of_table_entries;
@@ -247,7 +247,7 @@ static void find_acpi_rsdp(EFI_SYSTEM_TABLE *st, bootinfo_t *bootinfo) {
 }
 
 /* ============================================================
- * Get image base via Loaded Image Protocol
+ * 通过已加载镜像协议获取镜像基址
  * ============================================================ */
 static uint64_t get_image_base(EFI_HANDLE ImageHandle __attribute__((unused)), EFI_BOOT_SERVICES *bs) {
     static const EFI_GUID loaded_image_guid = EFI_LOADED_IMAGE_PROTOCOL_GUID;
@@ -262,10 +262,10 @@ static uint64_t get_image_base(EFI_HANDLE ImageHandle __attribute__((unused)), E
 }
 
 /* ============================================================
- * EFI Main Entry Point (EFIAPI = Microsoft x64 calling convention)
- * Called by UEFI firmware when loading this executable.
+ * EFI主入口点（EFIAPI = Microsoft x64调用约定）
+ * 由UEFI固件在加载此可执行文件时调用。
  *
- * Parameter passing (Microsoft x64 ABI):
+ * 参数传递（Microsoft x64 ABI）：
  *   rcx = ImageHandle   rdx = SystemTable
  * ============================================================ */
 EFIAPI EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable) {
@@ -273,37 +273,37 @@ EFIAPI EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable
     EFI_SYSTEM_TABLE *st = SystemTable;
     EFI_BOOT_SERVICES *bs = st->boot;
 
-    /* Validate critical pointers */
+    /* 验证关键指针 */
     if (!st->con_out) { serial_puts("[ERR] con_out is NULL!\r\n"); return EFI_LOAD_ERROR; }
     if (!bs) { serial_puts("[ERR] bs is NULL!\r\n"); return EFI_LOAD_ERROR; }
 
-    /* Initialize console */
+    /* 初始化控制台 */
     con_clear_screen(st->con_out);
 
     efi_print(st, "SpiritFoxOS UEFI Bootloader v1.0\r\n");
     efi_print(st, "================================\r\n\r\n");
 
-    /* Set up bootinfo structure */
+    /* 设置bootinfo结构体 */
     static bootinfo_t bootinfo;
     __builtin_memset(&bootinfo, 0, sizeof(bootinfo));
     bootinfo.magic = BOOTINFO_MAGIC;
 
-    /* Get image base for correct address calculation */
+    /* 获取镜像基址以进行正确的地址计算 */
     uint64_t image_base = get_image_base(ImageHandle, bs);
     bootinfo.kernel_start = image_base + 0x1000;
     bootinfo.kernel_end = image_base + 0xB5B18;
 
     efi_print(st, "[EFI] Kernel image loaded\r\n");
 
-    /* Step 1: Set up framebuffer via GOP */
+    /* 步骤1：通过GOP设置帧缓冲区 */
     efi_print(st, "[EFI] Initializing framebuffer...\r\n");
     setup_framebuffer(st, &bootinfo);
 
-    /* Step 2: Find ACPI RSDP */
+    /* 步骤2：查找ACPI RSDP */
     efi_print(st, "[EFI] Locating ACPI tables...\r\n");
     find_acpi_rsdp(st, &bootinfo);
 
-    /* Step 3: Get memory map */
+    /* 步骤3：获取内存映射 */
     efi_print(st, "[EFI] Getting memory map...\r\n");
     uint64_t mmap_key = 0;
     int mmap_entries = get_efi_memory_map(st, &bootinfo, &mmap_key);
@@ -313,19 +313,19 @@ EFIAPI EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable
     }
     efi_print(st, "[EFI] Memory map acquired\r\n");
 
-    /* Step 4: Exit UEFI Boot Services */
+    /* 步骤4：退出UEFI引导服务 */
     efi_print(st, "[EFI] About to exit boot services...\r\n");
     EFI_STATUS status = bs_exit_boot_services(bs, ImageHandle, mmap_key);
     if (status != EFI_SUCCESS) {
-        /* After EBS failure, can't use console anymore */
+        /* EBS失败后，不能再使用控制台 */
         serial_puts("[ERR] ExitBootServices failed\r\n");
         return EFI_UNSUPPORTED;
     }
 
-    /* After EBS, must use direct I/O only */
+    /* EBS后，只能使用直接I/O */
     serial_puts("[EFI] Jumping to kernel\r\n");
 
-    /* Jump to kernel main - never returns */
+    /* 跳转到内核主函数 - 永不返回 */
     kernel_main(&bootinfo);
 
     return EFI_SUCCESS;

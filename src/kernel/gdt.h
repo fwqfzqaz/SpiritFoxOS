@@ -19,7 +19,7 @@
 
 #include <stdint.h>
 
-/* GDT selectors */
+/* GDT选择子 */
 #define GDT_NULL_SEL    0x00
 #define GDT_CODE_SEL    0x08
 #define GDT_DATA_SEL    0x10
@@ -27,7 +27,7 @@
 #define GDT_USER_DATA   0x20
 #define GDT_TSS_SEL     0x28
 
-/* GDT entry structure (8 bytes for code/data, 16 for TSS) */
+/* GDT条目结构（代码/数据段8字节，TSS 16字节） */
 struct gdt_entry {
     uint16_t limit_low;
     uint16_t base_low;
@@ -37,7 +37,7 @@ struct gdt_entry {
     uint8_t  base_high;
 } __attribute__((packed));
 
-/* TSS descriptor (16 bytes, spans two GDT slots) */
+/* TSS描述符（16字节，跨越两个GDT槽位） */
 struct tss_descriptor {
     uint16_t limit_low;
     uint16_t base_low;
@@ -49,10 +49,10 @@ struct tss_descriptor {
     uint32_t reserved;
 } __attribute__((packed));
 
-/* Task State Segment */
+/* 任务状态段 */
 struct tss {
     uint32_t reserved0;
-    uint64_t rsp[3];       /* RSP0, RSP1, RSP2 */
+    uint64_t rsp[3];       /* RSP0、RSP1、RSP2 */
     uint64_t reserved1;
     uint64_t ist[7];       /* IST1-IST7 */
     uint64_t reserved2;
@@ -60,7 +60,7 @@ struct tss {
     uint16_t iomap_base;
 } __attribute__((packed));
 
-/* GDTR */
+/* GDTR（全局描述符表寄存器） */
 struct gdtr {
     uint16_t limit;
     uint64_t base;

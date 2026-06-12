@@ -36,7 +36,7 @@ void idt_register_handler(uint8_t num, interrupt_handler_t handler) {
     handlers[num] = handler;
 }
 
-/* Common interrupt handler called from assembly */
+/* 从汇编调用的通用中断处理函数 */
 void interrupt_handler(struct interrupt_frame *frame) {
     if (handlers[frame->int_no]) {
         handlers[frame->int_no](frame);
@@ -46,7 +46,7 @@ void interrupt_handler(struct interrupt_frame *frame) {
 }
 
 void idt_init(void) {
-    /* Zero out IDT */
+    /* 清零IDT */
     for (int i = 0; i < IDT_ENTRIES; i++) {
         idt[i].offset_low  = 0;
         idt[i].selector    = 0;
@@ -57,12 +57,12 @@ void idt_init(void) {
         idt[i].reserved    = 0;
     }
 
-    /* Set up ISR gates (0-31: CPU exceptions, 32-255: IRQs/syscalls) */
+    /* 设置ISR门（0-31: CPU异常，32-255: IRQ/系统调用） */
     for (int i = 0; i < 48; i++) {
-        idt_set_gate(i, isr_table[i], 0x08, 0x8E); /* Present, DPL=0, Interrupt Gate */
+        idt_set_gate(i, isr_table[i], 0x08, 0x8E); /* 存在、DPL=0、中断门 */
     }
 
-    /* Load IDTR */
+    /* 加载IDTR */
     idt_ptr.limit = sizeof(idt) - 1;
     idt_ptr.base = (uint64_t)&idt;
     __asm__ volatile ("lidt %0" : : "m"(idt_ptr));

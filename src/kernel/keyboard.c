@@ -20,7 +20,7 @@
 #include "vga.h"
 #include "../include/io.h"
 
-/* US keyboard scancode table (Set 1) */
+/* 美式键盘扫描码表（Set 1） */
 static const char scancode_to_ascii[128] = {
     0, 27, '1', '2', '3', '4', '5', '6', '7', '8', '9', '0', '-', '=', '\b',
     '\t', 'q', 'w', 'e', 'r', 't', 'y', 'u', 'i', 'o', 'p', '[', ']', '\n',
@@ -41,13 +41,13 @@ static int shift_pressed = 0;
 static int ctrl_pressed = 0;
 static int alt_pressed = 0;
 
-/* Ring buffer for key codes (16-bit to support special keys) */
+/* 键码环形缓冲区（16位以支持特殊键） */
 #define KB_BUFFER_SIZE 256
 static uint16_t kb_buffer[KB_BUFFER_SIZE];
 static volatile uint32_t kb_buffer_head = 0;
 static volatile uint32_t kb_buffer_tail = 0;
 
-/* Extended scancode state */
+/* 扩展扫描码状态 */
 static int extended_scancode = 0;
 
 static void kb_push(uint16_t key) {
@@ -67,27 +67,27 @@ void keyboard_handler(struct interrupt_frame *frame) {
     (void)frame;
     uint8_t scancode = inb(0x60);
 
-    /* Extended key prefix (0xE0) */
+    /* 扩展键前缀（0xE0） */
     if (scancode == 0xE0) {
         extended_scancode = 1;
         goto done;
     }
 
     if (scancode & 0x80) {
-        /* Key release */
+        /* 键释放 */
         uint8_t key = scancode & 0x7F;
         if (extended_scancode) {
             extended_scancode = 0;
-            goto done; /* Ignore extended key releases but still send EOI */
+            goto done; /* 忽略扩展键释放但仍发送EOI */
         }
         if (key == 0x2A || key == 0x36) shift_pressed = 0;
         if (key == 0x1D) ctrl_pressed = 0;
         if (key == 0x38) alt_pressed = 0;
     } else {
-        /* Key press */
+        /* 键按下 */
         if (extended_scancode) {
             extended_scancode = 0;
-            /* Extended key press */
+            /* 扩展键按下 */
             switch (scancode) {
                 case 0x48: kb_push(KEY_UP);       goto done;
                 case 0x50: kb_push(KEY_DOWN);     goto done;
@@ -101,7 +101,7 @@ void keyboard_handler(struct interrupt_frame *frame) {
             }
         }
 
-        /* Modifier keys */
+        /* 修饰键 */
         if (scancode == 0x2A || scancode == 0x36) { shift_pressed = 1; goto done; }
         if (scancode == 0x1D) { ctrl_pressed = 1; goto done; }
         if (scancode == 0x38) { alt_pressed = 1; goto done; }
@@ -112,13 +112,13 @@ void keyboard_handler(struct interrupt_frame *frame) {
             goto done;
         }
 
-        /* Tab */
+        /* Tab键 */
         if (scancode == 0x0F) {
             kb_push(KEY_TAB);
             goto done;
         }
 
-        /* Regular ASCII key */
+        /* 普通ASCII键 */
         char c = shift_pressed ? scancode_shift[scancode] : scancode_to_ascii[scancode];
         if (c) {
             kb_push((uint16_t)c);
@@ -135,9 +135,9 @@ char keyboard_getchar(void) {
     }
     uint16_t key = kb_buffer[kb_buffer_tail];
     kb_buffer_tail = (kb_buffer_tail + 1) % KB_BUFFER_SIZE;
-    /* If it's a special key, skip it for getchar */
+    /* 如果是特殊键，getchar时跳过 */
     if (IS_SPECIAL_KEY(key)) {
-        return keyboard_getchar(); /* Recurse to get next printable key */
+        return keyboard_getchar(); /* 递归获取下一个可打印键 */
     }
     return (char)key;
 }
@@ -163,17 +163,17 @@ uint16_t keyboard_try_getkey(void) {
 }
 
 /* ============================================================
- * USB HID Keyboard Support
+ * USB HID键盘支持
  *
- * Converts HID boot protocol usage codes (0x04-0x39) to
- * our internal key codes, then pushes them into the same
- * ring buffer used by PS/2 keyboard.
+ * 将HID引导协议使用码（0x04-0x39）转换为
+ * 我们的内部键码，然后推入PS/2键盘使用的
+ * 同一个环形缓冲区。
  * ============================================================ */
 
-/* HID Usage ID → ASCII mapping for printable keys.
- * Maps HID codes 0x04 ('a') through 0x39 ('~') to characters. */
+/* HID使用ID → 可打印键的ASCII映射。
+ * 将HID码0x04('a')到0x39('~')映射为字符。 */
 static const char hid_to_ascii[] = {
-    /* 0x00-0x03: reserved */
+    /* 0x00-0x03: 保留 */
     0, 0, 0, 0,
     /* 0x04-0x27: a-z, 1-0 */
     'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j',
@@ -188,7 +188,7 @@ static const char hid_to_ascii[] = {
     0, 0,
 };
 
-/* HID Usage ID → special key code mapping */
+/* HID使用ID → 特殊键码映射 */
 static uint16_t hid_to_special(uint8_t hid_code) {
     switch (hid_code) {
         case 0x28: return '\n';           /* Enter */
@@ -207,22 +207,22 @@ static uint16_t hid_to_special(uint8_t hid_code) {
         case 0x36: return ',';            /* , */
         case 0x37: return '.';            /* . */
         case 0x38: return '/';            /* / */
-        /* Modifier keys - we handle these via modifier byte separately */
+        /* 修饰键 - 我们通过修饰符字节单独处理 */
         case 0xE0: return KEY_CTRL_C;     /* Ctrl (left) */
         case 0xE4: return KEY_TAB;        /* (not really tab but skip) */
         default:   return 0xFFFF;
     }
 }
 
-/* Called by usb_hid_poll_keyboard() with a HID usage code and modifier state */
+/* 由usb_hid_poll_keyboard()调用，传入HID使用码和修饰符状态 */
 void usb_kb_push(uint8_t hid_keycode, uint8_t modifiers) {
     (void)modifiers;  /* TODO: handle shift/ctrl/alt from USB modifiers */
 
     if (hid_keycode < 0x04 || hid_keycode > 0x65) return;
 
-    /* Check for special keys first */
+    /* 先检查特殊键 */
     if (hid_keycode >= 0x4A && hid_keycode <= 0x53) {
-        /* Arrow keys, Home, End, Page Up/Down */
+        /* 方向键、Home、End、Page Up/Down */
         static const uint16_t arrow_map[] = {
             KEY_RIGHT,      /* 0x4F Right */
             KEY_LEFT,       /* 0x50 Left */
@@ -237,21 +237,21 @@ void usb_kb_push(uint8_t hid_keycode, uint8_t modifiers) {
     }
 
     if (hid_keycode >= 0x3A && hid_keycode <= 0x45) {
-        /* F1-F12 range starts at 0x3A */
+        /* F1-F12范围从0x3A开始 */
         if (hid_keycode >= 0x3A && hid_keycode <= 0x45) {
             kb_push(KEY_F1 + (hid_keycode - 0x3A));
         }
         return;
     }
 
-    /* Try special key mapping */
+    /* 尝试特殊键映射 */
     uint16_t special = hid_to_special(hid_keycode);
     if (special != 0xFFFF) {
         kb_push(special);
         return;
     }
 
-    /* Printable character from HID code */
+    /* 从HID码获取可打印字符 */
     if (hid_keycode < sizeof(hid_to_ascii)) {
         char c = hid_to_ascii[hid_keycode];
         if (c != 0) {

@@ -32,7 +32,7 @@ void mouse_init(uint32_t screen_w, uint32_t screen_h);
 void mouse_handler(struct interrupt_frame *frame);
 mouse_state_t mouse_get_state(void);
 
-/* USB HID mouse integration */
+/* USB HID鼠标集成 */
 void usb_mouse_update(int8_t dx, int8_t dy, uint8_t buttons);
 
 #endif /* MOUSE_H */

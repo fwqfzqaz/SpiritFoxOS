@@ -19,7 +19,7 @@
 
 #include <stdint.h>
 
-/* System call numbers */
+/* 系统调用号 */
 #define SYS_READ     0
 #define SYS_WRITE    1
 #define SYS_OPEN     2
@@ -34,17 +34,17 @@
 #define SYS_MUNMAP   11
 #define SYS_INFO     12
 
-/* Maximum number of syscall handlers */
+/* 系统调用处理函数最大数量 */
 #define SYSCALL_MAX  32
 
-/* Syscall handler type: takes syscall number + up to 4 args, returns result */
+/* 系统调用处理函数类型：接收系统调用号和最多4个参数，返回结果 */
 typedef int64_t (*syscall_handler_t)(uint64_t arg0, uint64_t arg1,
                                      uint64_t arg2, uint64_t arg3);
 
-/* Initialize the system call interface (register int 0x80 handler) */
+/* 初始化系统调用接口（注册中断0x80处理函数） */
 void syscall_init(void);
 
-/* Register a handler for a specific syscall number */
+/* 为指定系统调用号注册处理函数 */
 void syscall_register(uint64_t syscall_num, syscall_handler_t handler);
 
 #endif /* SYSCALL_H */

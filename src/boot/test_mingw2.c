@@ -14,7 +14,7 @@
  * You should have received a copy of the GNU General Public License
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
-/* Minimal UEFI app for mingw - no external dependencies */
+/* 适用于mingw的最小化UEFI应用 - 无外部依赖 */
 typedef unsigned long long UINTN;
 typedef unsigned long long EFI_STATUS;
 typedef void *EFI_HANDLE;
@@ -22,7 +22,7 @@ typedef struct _EFI_SYSTEM_TABLE { void *dummy; } EFI_SYSTEM_TABLE;
 
 #define EFI_SUCCESS 0
 
-/* UEFI image entry point convention for mingw */
+/* UEFI镜像入口点约定（适用于mingw） */
 EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable) {
     return EFI_SUCCESS;
 }

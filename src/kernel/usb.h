@@ -120,10 +120,10 @@ int usb_hid_get_report(uint8_t slot_id, uint8_t *buf, uint16_t len);
 const char *usb_class_name(uint8_t class_code);
 const char *usb_speed_name(uint8_t speed);
 
-/* USB HID polling (called from GUI main loop) */
+/* USB HID轮询（从GUI主循环调用） */
 void usb_hid_poll_all(void);
 
-/* Check if USB HID keyboard/mouse devices are available */
+/* 检查USB HID键盘/鼠标设备是否可用 */
 int usb_has_keyboard(void);
 int usb_has_mouse(void);
 

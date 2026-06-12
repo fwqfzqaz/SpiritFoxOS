@@ -20,9 +20,9 @@
 
 static uint8_t cursor_x = 0;
 static uint8_t cursor_y = 0;
-static uint8_t current_color = 0x07; /* Light grey on black */
+static uint8_t current_color = 0x07; /* 浅灰色黑底 */
 
-/* Forward declaration */
+/* 前向声明 */
 void vga_update_hw_cursor(void);
 
 static inline uint16_t vga_entry(char c, uint8_t color) {
@@ -48,13 +48,13 @@ void vga_clear(void) {
 }
 
 static void vga_scroll(void) {
-    /* Move all rows up by one */
+    /* 将所有行上移一行 */
     for (int y = 0; y < VGA_ROWS - 1; y++) {
         for (int x = 0; x < VGA_COLS; x++) {
             VGA_BUFFER[y * VGA_COLS + x] = VGA_BUFFER[(y + 1) * VGA_COLS + x];
         }
     }
-    /* Clear last row */
+    /* 清除最后一行 */
     for (int x = 0; x < VGA_COLS; x++) {
         VGA_BUFFER[(VGA_ROWS - 1) * VGA_COLS + x] = vga_entry(' ', current_color);
     }
@@ -118,7 +118,7 @@ void vga_get_cursor(uint8_t *col, uint8_t *row) {
     *row = cursor_y;
 }
 
-/* Simple printf implementation */
+/* 简单的printf实现 */
 static void vga_print_dec(int64_t val) {
     if (val < 0) {
         vga_putchar('-');
@@ -147,7 +147,7 @@ static void vga_print_hex(uint64_t val, int width) {
         buf[i] = hex[val & 0xF];
         val >>= 4;
     }
-    /* Skip leading zeros but keep at least 'width' digits */
+    /* 跳过前导零但保留至少'width'位数字 */
     int start = 16 - width;
     if (start < 0) start = 0;
     while (start < 15 && buf[start] == '0' && (16 - start) > width) {

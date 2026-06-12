@@ -19,22 +19,22 @@
 #include "log.h"
 #include "../include/io.h"
 
-/* Syscall handler table */
+/* 系统调用处理函数表 */
 static syscall_handler_t syscall_handlers[SYSCALL_MAX];
 
-/* Default syscall handler - returns -1 (ENOSYS) */
+/* 默认系统调用处理函数 - 返回-1（ENOSYS） */
 static int64_t syscall_default(uint64_t arg0, uint64_t arg1,
                                uint64_t arg2, uint64_t arg3) {
     (void)arg0; (void)arg1; (void)arg2; (void)arg3;
     return -1;
 }
 
-/* Interrupt 0x80 handler - dispatch system calls */
+/* 中断0x80处理函数 - 分发系统调用 */
 static void syscall_interrupt_handler(struct interrupt_frame *frame) {
-    /* Syscall convention:
-     * RAX = syscall number
+    /* 系统调用约定：
+     * RAX = 系统调用号
      * RDI = arg0, RSI = arg1, RDX = arg2, RCX = arg3
-     * Return value in RAX
+     * 返回值在RAX中
      */
     uint64_t syscall_num = frame->rax;
     uint64_t arg0 = frame->rdi;
@@ -51,25 +51,25 @@ static void syscall_interrupt_handler(struct interrupt_frame *frame) {
     frame->rax = (uint64_t)result;
 }
 
-/* Basic syscall implementations */
+/* 基本系统调用实现 */
 static int64_t sys_write(uint64_t arg0, uint64_t arg1, uint64_t arg2, uint64_t arg3) {
     (void)arg1; (void)arg2; (void)arg3;
-    /* arg0 = fd (0=stdout), buffer pointed by arg1, length in arg2 */
-    /* Simplified: just return success */
+    /* arg0 = 文件描述符(0=stdout), arg1指向缓冲区, arg2为长度 */
+    /* 简化实现：直接返回成功 */
     (void)arg0;
     return 0;
 }
 
 static int64_t sys_exit(uint64_t arg0, uint64_t arg1, uint64_t arg2, uint64_t arg3) {
     (void)arg1; (void)arg2; (void)arg3;
-    /* arg0 = exit code */
+    /* arg0 = 退出码 */
     LOG_I("syscall", "Process exit with code %u", (uint32_t)arg0);
     return 0;
 }
 
 static int64_t sys_getpid(uint64_t arg0, uint64_t arg1, uint64_t arg2, uint64_t arg3) {
     (void)arg0; (void)arg1; (void)arg2; (void)arg3;
-    return 0; /* Kernel shell always PID 0 for now */
+    return 0; /* 内核shell目前总是PID 0 */
 }
 
 static int64_t sys_yield(uint64_t arg0, uint64_t arg1, uint64_t arg2, uint64_t arg3) {
@@ -79,7 +79,7 @@ static int64_t sys_yield(uint64_t arg0, uint64_t arg1, uint64_t arg2, uint64_t a
 
 static int64_t sys_sleep(uint64_t arg0, uint64_t arg1, uint64_t arg2, uint64_t arg3) {
     (void)arg1; (void)arg2; (void)arg3;
-    /* arg0 = milliseconds */
+    /* arg0 = 毫秒数 */
     extern volatile uint64_t timer_ticks;
     uint64_t target = timer_ticks + (arg0 / 10);
     while (timer_ticks < target) hlt();
@@ -87,19 +87,19 @@ static int64_t sys_sleep(uint64_t arg0, uint64_t arg1, uint64_t arg2, uint64_t a
 }
 
 void syscall_init(void) {
-    /* Initialize all handlers to default */
+    /* 将所有处理函数初始化为默认处理函数 */
     for (int i = 0; i < SYSCALL_MAX; i++) {
         syscall_handlers[i] = syscall_default;
     }
 
-    /* Register basic syscall handlers */
+    /* 注册基本系统调用处理函数 */
     syscall_handlers[SYS_WRITE]   = sys_write;
     syscall_handlers[SYS_EXIT]    = sys_exit;
     syscall_handlers[SYS_GETPID]  = sys_getpid;
     syscall_handlers[SYS_YIELD]   = sys_yield;
     syscall_handlers[SYS_SLEEP]   = sys_sleep;
 
-    /* Register interrupt 0x80 handler */
+    /* 注册中断0x80处理函数 */
     idt_register_handler(0x80, syscall_interrupt_handler);
 
     LOG_I("syscall", "System call interface initialized (int 0x80, %d syscalls)", SYSCALL_MAX);

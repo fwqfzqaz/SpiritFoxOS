@@ -28,12 +28,12 @@ static page_table_t *get_or_create_table(page_table_t *parent, uint64_t idx, uin
         return (page_table_t *)phys_to_virt(entry & PTE_ADDR_MASK);
     }
 
-    /* Allocate new page table */
+    /* 分配新页表 */
     uint64_t phys = pmm_alloc_page();
     if (!phys) return NULL;
 
     page_table_t *table = (page_table_t *)phys_to_virt(phys);
-    /* Zero out the new table */
+    /* 将新表清零 */
     for (int i = 0; i < 512; i++) {
         table->entries[i] = 0;
     }
@@ -82,7 +82,7 @@ uint64_t vmm_unmap_page(page_table_t *pml4, uint64_t virt) {
     uint64_t pte = pt->entries[pt_idx];
     pt->entries[pt_idx] = 0;
 
-    /* Invalidate TLB entry */
+    /* 使TLB条目失效 */
     __asm__ volatile ("invlpg (%0)" : : "r"(virt) : "memory");
 
     if (pte & PTE_PRESENT) {
@@ -107,7 +107,7 @@ uint64_t vmm_get_physical(page_table_t *pml4, uint64_t virt) {
 
     entry = pd->entries[pd_idx];
     if (!(entry & PTE_PRESENT)) return 0;
-    /* Check for 2MB huge page */
+    /* 检查2MB大页 */
     if (entry & PTE_HUGE) {
         return (entry & 0x000FFFFFC0000000ULL) + (virt & 0x1FFFFF);
     }
@@ -127,7 +127,7 @@ page_table_t *vmm_create_pml4(void) {
         pml4->entries[i] = 0;
     }
 
-    /* Copy kernel mappings (higher-half entries) */
+    /* 复制内核映射（高半部分条目） */
     if (kernel_pml4) {
         for (int i = 256; i < 512; i++) {
             pml4->entries[i] = kernel_pml4->entries[i];
@@ -138,7 +138,7 @@ page_table_t *vmm_create_pml4(void) {
 }
 
 void vmm_destroy_pml4(page_table_t *pml4) {
-    /* Free user-space page tables only (lower 256 entries) */
+    /* 仅释放用户空间页表（低256个条目） */
     for (int pml4_idx = 0; pml4_idx < 256; pml4_idx++) {
         uint64_t pdpt_entry = pml4->entries[pml4_idx];
         if (!(pdpt_entry & PTE_PRESENT)) continue;
@@ -162,8 +162,10 @@ void vmm_destroy_pml4(page_table_t *pml4) {
 }
 
 void vmm_init(void) {
-    /* The boot code already set up identity mapping for first 1GB using 2MB pages.
-     * We use the current CR3 as our kernel PML4. */
+    /*
+     * 引导代码已经使用2MB页为前1GB建立了恒等映射。
+     * 我们使用当前的CR3作为内核PML4。
+     */
     uint64_t cr3;
     __asm__ volatile ("mov %%cr3, %0" : "=r"(cr3));
     kernel_pml4 = (page_table_t *)phys_to_virt(cr3);

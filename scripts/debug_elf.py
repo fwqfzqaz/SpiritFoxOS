@@ -18,7 +18,7 @@ def get_str(off):
     end = strtab.index(b'\x00', off)
     return strtab[off:end].decode('ascii')
 
-print(f"ELF: {e_shnum} sections, shoff=0x{e_shoff:x}, shentsz={e_shentsz}")
+print(f"ELF: {e_shnum} 个节, shoff=0x{e_shoff:x}, shentsz={e_shentsz}")
 type_names = {0:'NULL',1:'PROGBITS',2:'SYMTAB',3:'STRTAB',4:'RELA',
               7:'NOTE',8:'NOBITS',11:'DYNSYM'}
 

@@ -23,7 +23,7 @@ typedef struct {
     uint32_t *buffer;
     uint32_t width;
     uint32_t height;
-    uint32_t pitch;       /* bytes per row */
+    uint32_t pitch;       /* 每行字节数 */
     uint32_t bpp;
     uint64_t phys_addr;
 } framebuffer_t;
@@ -38,20 +38,20 @@ void fb_fill_rect(uint32_t x, uint32_t y, uint32_t w, uint32_t h, uint32_t color
 void fb_draw_rect(uint32_t x, uint32_t y, uint32_t w, uint32_t h, uint32_t color);
 void fb_draw_line(uint32_t x0, uint32_t y0, uint32_t x1, uint32_t y1, uint32_t color);
 void fb_clear(uint32_t color);
-void fb_swap_buffers(void);  /* Double buffering */
-uint32_t *fb_get_draw_buffer(void);  /* Returns back buffer or front buffer */
+void fb_swap_buffers(void);  /* 双缓冲 */
+uint32_t *fb_get_draw_buffer(void);  /* 返回后缓冲区或前缓冲区 */
 
-/* ---- Fast-path primitives (no bounds checking, for internal use) ---- */
+/* ---- 快速路径原语（无边界检查，供内部使用） ---- */
 void fb_fill_rect_fast(uint32_t x, uint32_t y, uint32_t w, uint32_t h, uint32_t color);
 void fb_hline_fast(uint32_t x, uint32_t y, uint32_t w, uint32_t color);
 void fb_memset32(uint32_t *dst, uint32_t val, uint64_t count);
 void fb_memcpy32(uint32_t *dst, const uint32_t *src, uint64_t count);
 
-/* Color macros - 0xRRGGBB format */
+/* 颜色宏 - 0xRRGGBB格式 */
 #define FB_RGB(r, g, b) (((uint32_t)(r) << 16) | ((uint32_t)(g) << 8) | (uint32_t)(b))
 #define FB_RGBA(r, g, b, a) (((uint32_t)(a) << 24) | ((uint32_t)(r) << 16) | ((uint32_t)(g) << 8) | (uint32_t)(b))
 
-/* Common colors */
+/* 常用颜色 */
 #define FB_BLACK     FB_RGB(0, 0, 0)
 #define FB_WHITE     FB_RGB(255, 255, 255)
 #define FB_RED       FB_RGB(220, 50, 50)
@@ -65,7 +65,7 @@ void fb_memcpy32(uint32_t *dst, const uint32_t *src, uint64_t count);
 #define FB_DARK_GREY FB_RGB(64, 64, 64)
 #define FB_LIGHT_GREY FB_RGB(192, 192, 192)
 
-/* SpiritFoxOS theme colors */
+/* SpiritFoxOS 主题颜色 */
 #define FB_SF_ORANGE  FB_RGB(255, 140, 50)
 #define FB_SF_DARK    FB_RGB(30, 30, 40)
 #define FB_SF_PANEL   FB_RGB(45, 45, 60)

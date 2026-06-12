@@ -57,7 +57,7 @@ static xhci_controller_t xhci_ctrl;
 #define ERSTBA  0x10
 #define ERDP    0x18
 
-/* ---- Ring management ---- */
+/* ---- 环管理 ---- */
 
 void xhci_ring_init(xhci_ring_t *ring, uint32_t size) {
     uint64_t pages = (size * sizeof(xhci_trb_t) + PAGE_SIZE - 1) / PAGE_SIZE;
@@ -99,13 +99,13 @@ static void xhci_db_ring(volatile uint32_t *db_reg, uint32_t slot_id, uint32_t t
     *db_reg = (slot_id << 8) | target;
 }
 
-/* ---- Event handling ---- */
+/* ---- 事件处理 ---- */
 
 static uint32_t xhci_wait_event(xhci_controller_t *ctrl, xhci_trb_t *out,
                                    int timeout_count) {
     volatile uint64_t *erdp = &XHCI_REG64(ctrl->mmio_base, ctrl->rts_offset + 0x20 + 0x18);
 
-    /* Use controller's event ring consumer state (not static!) */
+    /* 使用控制器的事件环消费者状态（非静态变量！） */
     uint32_t dequeue_idx = ctrl->event_dequeue_idx;
     uint8_t event_ccs = ctrl->event_ccs;
 
@@ -121,7 +121,7 @@ static uint32_t xhci_wait_event(xhci_controller_t *ctrl, xhci_trb_t *out,
                 event_ccs = !event_ccs;
             }
 
-            /* Save updated state back to controller */
+            /* 将更新后的状态保存回控制器 */
             ctrl->event_dequeue_idx = dequeue_idx;
             ctrl->event_ccs = event_ccs;
 
@@ -133,7 +133,7 @@ static uint32_t xhci_wait_event(xhci_controller_t *ctrl, xhci_trb_t *out,
         __asm__ volatile("pause");
     }
 
-    /* Timeout: save current position anyway */
+    /* 超时：无论如何保存当前位置 */
     ctrl->event_dequeue_idx = dequeue_idx;
     ctrl->event_ccs = event_ccs;
     return 0;
@@ -153,7 +153,7 @@ static int xhci_send_command(xhci_controller_t *ctrl, xhci_trb_t *cmd, xhci_trb_
     return 0;
 }
 
-/* ---- Command helpers ---- */
+/* ---- 命令辅助函数 ---- */
 
 static int xhci_enable_slot(xhci_controller_t *ctrl, uint8_t *slot_id) {
     xhci_trb_t cmd = {0};
@@ -188,14 +188,14 @@ static void xhci_port_reset(xhci_controller_t *ctrl, uint8_t port) {
     }
 }
 
-/* Set endpoint context pointer in device context at given EP index */
+/* 在给定EP索引的设备上下文中设置端点上下文指针 */
 void xhci_dev_ctx_set_ep_ptr(void *dev_ctx, int ep_index, uint64_t tr_phys) {
     volatile uint64_t *ep_ptr = (volatile uint64_t *)((uint8_t *)dev_ctx + 32 + ep_index * 32);
     ep_ptr[0] = tr_phys;
     ep_ptr[1] = 0;
 }
 
-/* ---- Device detection ---- */
+/* ---- 设备检测 ---- */
 
 static void xhci_detect_devices(xhci_controller_t *ctrl) {
     for (int port = 0; port < ctrl->max_ports; port++) {
@@ -225,40 +225,40 @@ static void xhci_detect_devices(xhci_controller_t *ctrl) {
 
         LOG_I("xhci", "Slot %d enabled for port %d\n", slot_id, port);
 
-        /* Allocate input context (1 page) */
+        /* 分配输入上下文（1页） */
         uint64_t input_ctx_phys = pmm_alloc_pages(1);
         void *input_ctx = (void *)phys_to_virt(input_ctx_phys);
         memset(input_ctx, 0, PAGE_SIZE);
 
-        /* Allocate device context (1 page) */
+        /* 分配设备上下文（1页） */
         uint64_t dev_ctx_phys = pmm_alloc_pages(1);
         void *dev_ctx = (void *)phys_to_virt(dev_ctx_phys);
         memset(dev_ctx, 0, PAGE_SIZE);
 
-        /* Build input context:
-         * Offset 0: Input Control Context (64 bytes)
-         * Offset 32: Slot Context (32 bytes)
-         * Offset 64: EP0 Context (32 bytes)
+        /* 构建输入上下文：
+         * 偏移0: 输入控制上下文（64字节）
+         * 偏移32: 槽位上下文（32字节）
+         * 偏移64: EP0上下文（32字节）
          */
         uint8_t *slot_ctx = (uint8_t *)input_ctx + 32;
-        slot_ctx[0] = speed;       /* Route string = speed field */
-        slot_ctx[1] = 0;           /* Context entries = 0 (set by A1 flag) */
-        slot_ctx[2] = port + 1;    /* Root hub port number */
+        slot_ctx[0] = speed;       /* 路由字符串 = 速度字段 */
+        slot_ctx[1] = 0;           /* 上下文条目数 = 0（由A1标志设置） */
+        slot_ctx[2] = port + 1;    /* 根集线器端口号 */
         slot_ctx[3] = 0;
 
         uint8_t *ep0_ctx = (uint8_t *)input_ctx + 64;
-        ep0_ctx[0] = 0x07;         /* EP type=4(control), max burst=0, CErr=3 */
-        ep0_ctx[1] = 0;            /* Max packet size [7:0] - will be corrected later */
-        ep0_ctx[2] = 0;            /* Max packet size [15:8] */
-        ep0_ctx[3] = 8;            /* Initial max packet size = 8 bytes */
-        ep0_ctx[4] = 1;            /* Max PStreams=0, interval=0, mult=0 */
+        ep0_ctx[0] = 0x07;         /* EP类型=4(控制), 最大突发=0, CErr=3 */
+        ep0_ctx[1] = 0;            /* 最大包大小 [7:0] - 稍后修正 */
+        ep0_ctx[2] = 0;            /* 最大包大小 [15:8] */
+        ep0_ctx[3] = 8;            /* 初始最大包大小 = 8字节 */
+        ep0_ctx[4] = 1;            /* MaxPStreams=0, interval=0, mult=0 */
 
-        /* Input control context: set A0(slot) and A1(ep0) flags */
+        /* 输入控制上下文：设置A0(槽位)和A1(ep0)标志 */
         uint64_t *ictrl = (uint64_t *)input_ctx;
-        ictrl[0] = 0;              /* Drop context flags = 0 */
-        ictrl[1] = 3;              /* Add context flags: bit0=slot, bit1=ep0 */
+        ictrl[0] = 0;              /* 丢弃上下文标志 = 0 */
+        ictrl[1] = 3;              /* 添加上下文标志：bit0=槽位, bit1=ep0 */
 
-        /* Register device context in DCBAAP */
+        /* 在DCBAAP中注册设备上下文 */
         ctrl->dcbaa[slot_id] = dev_ctx_phys;
         ctrl->dcbaa_contexts[slot_id] = dev_ctx;
 
@@ -275,7 +275,7 @@ static void xhci_detect_devices(xhci_controller_t *ctrl) {
         dev->input_ctx = input_ctx;
         dev->device_ctx = dev_ctx;
 
-        /* Initialize EP0 transfer ring and point device context to it */
+        /* 初始化EP0传输环并将设备上下文指向它 */
         xhci_ring_init(&dev->transfer_rings[1], XHCI_RING_SIZE);  /* index 1 = EP0 */
         xhci_dev_ctx_set_ep_ptr(dev_ctx, 1,
                            virt_to_phys((uint64_t)dev->transfer_rings[1].ring));
@@ -285,8 +285,8 @@ static void xhci_detect_devices(xhci_controller_t *ctrl) {
 }
 
 /* ============================================================
- * Control Transfer on EP0
- * Sends SETUP [+ DATA_IN/OUT] + STATUS TRB chain.
+ * EP0上的控制传输
+ * 发送SETUP [+ DATA_IN/OUT] + STATUS TRB链。
  * ============================================================ */
 
 int xhci_control_transfer(xhci_controller_t *ctrl, uint8_t slot_id,
@@ -298,24 +298,24 @@ int xhci_control_transfer(xhci_controller_t *ctrl, uint8_t slot_id,
     if (!ctrl->devices[slot_id].active) return -1;
 
     xhci_device_t *dev = &ctrl->devices[slot_id];
-    xhci_ring_t *ep0_ring = &dev->transfer_rings[1];  /* EP0 = ring index 1 */
+    xhci_ring_t *ep0_ring = &dev->transfer_rings[1];  /* EP0 = 环索引1 */
 
     int direction_in = (bmRequestType & 0x80) ? 1 : 0;
     int has_data_stage = (wLength > 0 && data_buf != NULL) ? 1 : 0;
 
-    /* SETUP stage TRB */
+    /* SETUP阶段TRB */
     xhci_trb_t setup = {0};
     setup.parameter_low = bmRequestType | (bRequest << 8) |
                           ((wValue & 0xFF) << 16);
     setup.parameter_high = ((wValue >> 8) & 0xFF) |
                            ((wIndex & 0xFF) << 8) | ((wIndex >> 8) << 24);
-    setup.status = wLength;          /* wLength in setup packet */
+    setup.status = wLength;          /* SETUP数据包中的wLength */
     setup.control = (TRB_TYPE_SETUP_STAGE << 10) | TRB_IDT;
-    /* TRT bits [17:16]: 0=no data stage, 2=IN, 3=OUT */
+    /* TRT位 [17:16]: 0=无数据阶段, 2=IN, 3=OUT */
     if (has_data_stage)
         setup.control |= direction_in ? (2u << 16) : (3u << 16);
 
-    /* DATA stage TRB (optional) */
+    /* DATA阶段TRB（可选） */
     xhci_trb_t data = {0};
     if (has_data_stage) {
         uint64_t buf_phys = virt_to_phys((uint64_t)data_buf);
@@ -323,24 +323,23 @@ int xhci_control_transfer(xhci_controller_t *ctrl, uint8_t slot_id,
         data.parameter_high = (uint32_t)(buf_phys >> 32);
         data.status = wLength;
         data.control = (TRB_TYPE_DATA_STAGE << 10) | TRB_IOC;
-        data.control |= direction_in ? (1u << 16) : (2u << 16);  /* IN/OUT dir */
-    }
+        data.control |= direction_in ? (1u << 16) : (2u << 16);  /* IN/OUT方向 */
 
-    /* STATUS stage TRB: direction opposite to DATA */
+    /* STATUS阶段TRB：方向与DATA阶段相反 */
     xhci_trb_t status = {0};
     status.control = (TRB_TYPE_STATUS_STAGE << 10) | TRB_IOC;
     status.control |= direction_in ? (2u << 16) : (1u << 16);  /* OUT/IN */
 
-    /* Push all TRBs onto EP0 transfer ring */
+    /* 将所有TRB推入EP0传输环 */
     xhci_ring_push(ep0_ring, &setup);
     if (has_data_stage)
         xhci_ring_push(ep0_ring, &data);
     xhci_ring_push(ep0_ring, &status);
 
-    /* Ring doorbell for EP0 (target=1) */
+    /* 按响EP0的门铃（target=1） */
     xhci_db_ring(ctrl->db_reg, slot_id, 1);
 
-    /* Wait for completion event */
+    /* 等待完成事件 */
     xhci_trb_t evt;
     uint32_t evt_type = xhci_wait_event(ctrl, &evt, 500000);
 
@@ -349,8 +348,8 @@ int xhci_control_transfer(xhci_controller_t *ctrl, uint8_t slot_id,
     }
 
     uint32_t comp_code = (evt.status >> 24) & 0xFF;
-    if (comp_code == 1) {  /* Success */
-        /* For IN transfers, actual length = requested - residual */
+    if (comp_code == 1) {  /* 成功 */
+        /* 对于IN传输，实际长度 = 请求长度 - 残留 */
         if (direction_in && has_data_stage) {
             return (int)(wLength - (evt.status & 0xFFFFFF));
         }
@@ -361,7 +360,7 @@ int xhci_control_transfer(xhci_controller_t *ctrl, uint8_t slot_id,
 }
 
 /* ============================================================
- * Configure Endpoint command
+ * 配置端点命令
  * ============================================================ */
 
 int xhci_configure_endpoint(xhci_controller_t *ctrl, uint8_t slot_id,
@@ -378,7 +377,7 @@ int xhci_configure_endpoint(xhci_controller_t *ctrl, uint8_t slot_id,
 }
 
 /* ============================================================
- * Evaluate Context command
+ * 评估上下文命令
  * ============================================================ */
 
 int xhci_evaluate_context(xhci_controller_t *ctrl, uint8_t slot_id,
@@ -393,7 +392,7 @@ int xhci_evaluate_context(xhci_controller_t *ctrl, uint8_t slot_id,
 }
 
 /* ============================================================
- * Normal / Interrupt Transfer on a non-EP0 endpoint
+ * 非EP0端点上的常规/中断传输
  * ============================================================ */
 
 int xhci_transfer_data(xhci_controller_t *ctrl, uint8_t slot_id,
@@ -418,12 +417,12 @@ int xhci_transfer_data(xhci_controller_t *ctrl, uint8_t slot_id,
 
     xhci_ring_push(ring, &trb);
 
-    /* Ring doorbell for this endpoint */
+    /* 按响此端点的门铃 */
     xhci_db_ring(ctrl->db_reg, slot_id, ep_index);
 
-    /* Wait for transfer event (short timeout for polling) */
+    /* 等待传输事件（轮询用短超时） */
     xhci_trb_t evt;
-    uint32_t evt_type = xhci_wait_event(ctrl, &evt, 1000);  /* Short timeout for polling */
+    uint32_t evt_type = xhci_wait_event(ctrl, &evt, 1000);  /* 轮询用短超时 */
 
     if (evt_type != TRB_TYPE_TRANSFER_EVENT) {
         return -2;
@@ -431,14 +430,14 @@ int xhci_transfer_data(xhci_controller_t *ctrl, uint8_t slot_id,
 
     uint32_t comp_code = (evt.status >> 24) & 0xFF;
     if (comp_code == 1) {
-        return (int)(len - (evt.status & 0xFFFFFF));  /* actual = req - residual */
+        return (int)(len - (evt.status & 0xFFFFFF));  /* 实际长度 = 请求长度 - 残留 */
     }
 
     return -(int)comp_code;
 }
 
 /* ============================================================
- * Controller initialization
+ * 控制器初始化
  * ============================================================ */
 
 int xhci_init(pci_device_t *pci_dev) {
@@ -451,7 +450,7 @@ int xhci_init(pci_device_t *pci_dev) {
     xhci_ctrl.mmio_size = pci_dev->bar_size[0];
 
     if (xhci_ctrl.mmio_phys == 0) {
-        LOG_E("xhci", "No MMIO BAR found\n");
+        LOG_E("xhci", "未找到MMIO BAR\n");
         return -1;
     }
 
@@ -486,7 +485,7 @@ int xhci_init(pci_device_t *pci_dev) {
     volatile uint32_t *usbsts = &XHCI_REG32(xhci_ctrl.mmio_base, xhci_ctrl.op_offset + USBSTS);
     volatile uint32_t *usbcmd = &XHCI_REG32(xhci_ctrl.mmio_base, xhci_ctrl.op_offset + USBCMD);
 
-    /* Stop controller if running */
+    /* 如果控制器正在运行则停止 */
     if (!(*usbsts & (1 << 0))) {
         *usbcmd &= ~1;
         for (int i = 0; i < 100000; i++) {
@@ -495,7 +494,7 @@ int xhci_init(pci_device_t *pci_dev) {
         }
     }
 
-    /* Reset controller */
+    /* 复位控制器 */
     *usbcmd |= (1 << 1);
     for (int i = 0; i < 100000; i++) {
         if (!(*usbcmd & (1 << 1))) break;
@@ -506,11 +505,11 @@ int xhci_init(pci_device_t *pci_dev) {
         __asm__ volatile("pause");
     }
 
-    /* Set number of device slots enabled */
+    /* 设置启用的设备槽数量 */
     volatile uint32_t *config = &XHCI_REG32(xhci_ctrl.mmio_base, xhci_ctrl.op_offset + CONFIG);
     *config = (*config & 0xFFFFFF00) | (xhci_ctrl.max_slots & 0xFF);
 
-    /* Setup DCBAAP (Device Context Base Address Array Pointer) */
+    /* 设置DCBAAP（设备上下文基地址数组指针） */
     uint64_t dcbaa_pages = ((XHCI_MAX_SLOTS + 1) * sizeof(uint64_t) + PAGE_SIZE - 1) / PAGE_SIZE;
     uint64_t dcbaa_phys = pmm_alloc_pages(dcbaa_pages);
     xhci_ctrl.dcbaa = (uint64_t *)phys_to_virt(dcbaa_phys);
@@ -519,12 +518,12 @@ int xhci_init(pci_device_t *pci_dev) {
     volatile uint64_t *dcbaap = &XHCI_REG64(xhci_ctrl.mmio_base, xhci_ctrl.op_offset + DCBAAP);
     *dcbaap = dcbaa_phys;
 
-    /* Command ring */
+    /* 命令环 */
     xhci_ring_init(&xhci_ctrl.cmd_ring, XHCI_RING_SIZE);
     volatile uint64_t *crcr = &XHCI_REG64(xhci_ctrl.mmio_base, xhci_ctrl.op_offset + CRCR);
     *crcr = ((uint64_t)virt_to_phys((uint64_t)xhci_ctrl.cmd_ring.ring)) | 1;
 
-    /* Event ring */
+    /* 事件环 */
     xhci_ring_init(&xhci_ctrl.event_ring, XHCI_EVENT_RING_SIZE);
 
     uint64_t erst_phys = pmm_alloc_pages(1);
@@ -542,11 +541,11 @@ int xhci_init(pci_device_t *pci_dev) {
     volatile uint64_t *erdp = &XHCI_REG64(xhci_ctrl.mmio_base, xhci_ctrl.rts_offset + 0x20 + ERDP);
     *erdp = virt_to_phys((uint64_t)xhci_ctrl.event_ring.ring);
 
-    /* Enable interrupter */
+    /* 启用中断器 */
     volatile uint32_t *iman = &XHCI_REG32(xhci_ctrl.mmio_base, xhci_ctrl.rts_offset + 0x20 + IMAN);
     *iman |= 3;
 
-    /* Start controller (Run/Stop = 1) */
+    /* 启动控制器（Run/Stop = 1） */
     *usbcmd |= 1;
     for (int i = 0; i < 100000; i++) {
         if (!(*usbsts & (1 << 0))) break;
@@ -556,9 +555,9 @@ int xhci_init(pci_device_t *pci_dev) {
     xhci_ctrl.initialized = 1;
     xhci_ctrl.running = 1;
 
-    /* Initialize event ring consumer state */
+    /* 初始化事件环消费者状态 */
     xhci_ctrl.event_dequeue_idx = 0;
-    xhci_ctrl.event_ccs = 1;  /* Event ring starts with cycle bit = 1 */
+    xhci_ctrl.event_ccs = 1;  /* 事件环以周期位=1开始 */
 
     LOG_I("xhci", "Controller started successfully\n");
 

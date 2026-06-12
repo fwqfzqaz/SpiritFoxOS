@@ -19,10 +19,10 @@
 
 #include <stdint.h>
 
-/* Run the init process (first user-space process) */
+/* 运行init进程（第一个用户空间进程） */
 void init_process(void);
 
-/* Run safe mode (minimal environment when critical devices fail) */
+/* 运行安全模式（关键设备失败时的最小化环境） */
 void safe_mode_run(void);
 
 #endif /* INIT_H */

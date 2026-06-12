@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Byte-level comparison: working mingw PE vs broken elf2pe.py PE
+字节级比较：正常工作的mingw PE vs 有问题的elf2pe.py生成的PE
 """
 import struct
 
@@ -15,7 +15,7 @@ def parse_pe(path):
 
     result = {'data': data, 'size': len(data), 'e_lfanew': e_lfanew}
 
-    # COFF header fields (all of them)
+    # COFF头字段（全部）
     result['coff_machine']  = struct.unpack_from('<H', data, coff_off)[0]
     result['coff_sections'] = struct.unpack_from('<H', data, coff_off + 2)[0]
     result['coff_timestamp'] = struct.unpack_from('<I', data, coff_off + 4)[0]
@@ -24,7 +24,7 @@ def parse_pe(path):
     result['coff_opt_size'] = struct.unpack_from('<H', data, coff_off + 16)[0]
     result['coff_chars']    = struct.unpack_from('<H', data, coff_off + 18)[0]
 
-    # Optional header key fields
+    # 可选头关键字段
     if magic == 0x20b:
         o = opt_off
         result['opt_magic']      = magic
@@ -52,9 +52,9 @@ def parse_pe(path):
         result['opt_heap_com']   = struct.unpack_from('<Q', data, o+96)[0]
         result['opt_loader_fls'] = struct.unpack_from('<I', data, o+104)[0]
         result['opt_num_rva']    = struct.unpack_from('<I', data, o+108)[0]
-        result['opt_checksum']   = struct.unpack_from('<I', data, o+64)[0]  # same as win32_val
+        result['opt_checksum']   = struct.unpack_from('<I', data, opt_off + 64)[0]  # 与win32_val相同
 
-    # Section headers
+    # 节头
     nsec = result['coff_sections']
     sect_off = opt_off + result['coff_opt_size']
     result['sections'] = []
@@ -79,8 +79,8 @@ mingw = parse_pe('build/test_mingw2.EFI')
 elf2pe = parse_pe('build/test_minimal.EFI.fixed')
 
 print("=" * 80)
-print("COMPARISON: mingw (WORKS) vs elf2pe.py (FAILS)")
-print(f"{'Field':<30} {'MINGW':<25} {'ELF2PE':<25} {'DIFF?'}")
+print("比较：mingw（正常） vs elf2pe.py（失败）")
+print(f"{'字段':<30} {'MINGW':<25} {'ELF2PE':<25} {'差异?'}")
 print("-" * 80)
 
 fields = [
@@ -122,9 +122,9 @@ for name, mv, ev in fields:
     diff = " ***" if mv != ev else ""
     print(f"{name:<30} {str(mv):<25} {str(ev):<25}{diff}")
 
-# Compare sections
+# 比较各节
 print("\n" + "=" * 80)
-print("SECTION COMPARISON")
+print("节比较")
 print("-" * 80)
 max_sec = max(len(mingw['sections']), len(elf2pe['sections']))
 for i in range(max_sec):
@@ -138,13 +138,13 @@ for i in range(max_sec):
         dstr = " *** " + ", ".join(diffs) if diffs else ""
         print(f"  [{i}] {ms['name']:8s} VA={ms['va']:08x} RSz={ms['raw_size']:06x} RP={ms['raw_ptr']:06x} Ch={ms['chars']:08x}{dstr}")
     elif ms:
-        print(f"  [{i}] {ms['name']:8s} (ONLY IN MINGW)")
+        print(f"  [{i}] {ms['name']:8s} (仅存在于MINGW)")
     elif es:
-        print(f"  [{i}] {es['name']:8s} (ONLY IN ELF2PE)")
+        print(f"  [{i}] {es['name']:8s} (仅存在于ELF2PE)")
 
-# Hex dump first 512 bytes comparison
+# 前512字节十六进制差异比较
 print("\n" + "=" * 80)
-print("FIRST 256 BYTES HEX DIFF")
+print("前256字节十六进制差异")
 md = mingw['data']
 ed = elf2pe['data']
 for off in range(0, min(len(md), len(ed)), 16):

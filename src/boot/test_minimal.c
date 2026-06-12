@@ -14,8 +14,8 @@
  * You should have received a copy of the GNU General Public License
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
-/* Minimal UEFI test - returns immediately */
+/* 最小化UEFI测试 - 立即返回 */
 void efi_main(void) {
-    /* Just return; entry point will do RET = return to caller */
-    __asm__ volatile("movl $0x80000003, %eax");  /* EFI_SUCCESS-ish, actually just ret */
+    /* 直接返回；入口点会执行RET = 返回给调用者 */
+    __asm__ volatile("movl $0x80000003, %eax");  /* 类似EFI_SUCCESS，实际上只是ret */
 }

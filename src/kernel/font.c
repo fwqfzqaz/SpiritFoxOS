@@ -150,17 +150,17 @@ static const uint8_t font_data[128][16] = {
 };
 
 /* ============================================================
- * Optimized font rendering — writes directly to framebuffer
- * instead of calling fb_draw_pixel() per pixel.
- * Eliminates ~128 function calls per character.
+ * 优化的字体渲染 — 直接写入帧缓冲区
+ * 而非逐像素调用fb_draw_pixel()。
+ * 消除了每个字符约128次函数调用。
  * ============================================================ */
 
-/* Helper: get the draw buffer base address (inlineable) */
+/* 辅助函数：获取绘制缓冲区基地址（可内联） */
 static inline uint32_t *font_buf(void) {
     extern framebuffer_t fb;
     static uint32_t *back_buffer = NULL;
     if (!back_buffer) {
-        /* Cache the back buffer pointer on first use */
+        /* 首次使用时缓存后缓冲区指针 */
         uint32_t *buf = fb_get_draw_buffer();
         if (buf) back_buffer = buf;
         else       back_buffer = fb.buffer;
@@ -168,15 +168,15 @@ static inline uint32_t *font_buf(void) {
     return back_buffer;
 }
 
-/* Helper: get stride in uint32_t units */
+/* 辅助函数：获取以uint32_t为单位的步长 */
 static inline uint32_t font_stride(void) {
     extern framebuffer_t fb;
     return fb.pitch / 4;
 }
 
-/* ---- Draw a single character with foreground + background (fast path) ----
- * Writes directly to draw buffer. No bounds checking — caller ensures valid coords.
- * This is the hot path: called ~1000+ times per frame for terminal content. */
+/* ---- 绘制单个字符（带前景色和背景色，快速路径） ----
+ * 直接写入绘制缓冲区。无边界检查 — 调用者确保坐标有效。
+ * 这是热路径：每帧对终端内容调用约1000+次。 */
 void font_draw_char(uint32_t x, uint32_t y, char c, uint32_t fg, uint32_t bg)
 {
     uint8_t ch = (uint8_t)c;
@@ -189,7 +189,7 @@ void font_draw_char(uint32_t x, uint32_t y, char c, uint32_t fg, uint32_t bg)
     for (uint32_t row = 0; row < FONT_HEIGHT; row++) {
         uint8_t glyph = font_data[ch][row];
         uint32_t *pixel = row_base;
-        /* Unrolled bit test & write: process all 8 columns */
+        /* 展开的位测试与写入：处理全部8列 */
         if (glyph & 0x80) pixel[0] = fg; else pixel[0] = bg;
         if (glyph & 0x40) pixel[1] = fg; else pixel[1] = bg;
         if (glyph & 0x20) pixel[2] = fg; else pixel[2] = bg;
@@ -198,11 +198,11 @@ void font_draw_char(uint32_t x, uint32_t y, char c, uint32_t fg, uint32_t bg)
         if (glyph & 0x04) pixel[5] = fg; else pixel[5] = bg;
         if (glyph & 0x02) pixel[6] = fg; else pixel[6] = bg;
         if (glyph & 0x01) pixel[7] = fg; else pixel[7] = bg;
-        row_base += stride;  /* Advance to next row */
+        row_base += stride;  /* 前进到下一行 */
     }
 }
 
-/* ---- Draw string with opaque background (fast path) ---- */
+/* ---- 绘制字符串（带不透明背景，快速路径） ---- */
 void font_draw_string(uint32_t x, uint32_t y, const char *str, uint32_t fg, uint32_t bg)
 {
     uint32_t cx = x;
@@ -232,8 +232,8 @@ void font_draw_string(uint32_t x, uint32_t y, const char *str, uint32_t fg, uint
     }
 }
 
-/* ---- Draw string with transparent background (fast path) ----
- * Only writes foreground pixels; leaves background untouched. */
+/* ---- 绘制字符串（带透明背景，快速路径） ----
+ * 只写入前景像素；保持背景不变。 */
 void font_draw_string_transparent(uint32_t x, uint32_t y, const char *str, uint32_t fg)
 {
     uint32_t cx = x;
@@ -248,7 +248,7 @@ void font_draw_string_transparent(uint32_t x, uint32_t y, const char *str, uint3
         for (uint32_t row = 0; row < FONT_HEIGHT; row++) {
             uint8_t glyph = font_data[ch][row];
             uint32_t *pixel = row_base;
-            /* Only write foreground pixels — skip background */
+            /* 只写入前景像素 — 跳过背景 */
             if (glyph & 0x80) pixel[0] = fg;
             if (glyph & 0x40) pixel[1] = fg;
             if (glyph & 0x20) pixel[2] = fg;

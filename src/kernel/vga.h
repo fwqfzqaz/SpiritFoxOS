@@ -23,7 +23,7 @@
 #define VGA_ROWS 25
 #define VGA_BUFFER ((volatile uint16_t *)0xB8000)
 
-/* VGA colors */
+/* VGA颜色 */
 typedef enum {
     VGA_BLACK       = 0,
     VGA_BLUE        = 1,

@@ -18,23 +18,23 @@
 #include "../include/io.h"
 
 void serial_init(uint16_t port) {
-    /* Disable all interrupts */
+    /* 禁用所有中断 */
     outb(port + 1, 0x00);
 
-    /* Enable DLAB (set baud rate divisor) */
+    /* 启用DLAB（设置波特率分频值） */
     outb(port + 3, 0x80);
 
-    /* Set divisor to 1 (115200 baud) */
+    /* 设置分频值为1（115200波特率） */
     outb(port + 0, 0x01);
     outb(port + 1, 0x00);
 
-    /* 8 bits, no parity, one stop bit */
+    /* 8位数据位，无校验，1位停止位 */
     outb(port + 3, 0x03);
 
-    /* Enable FIFO, clear them, 14-byte threshold */
+    /* 启用FIFO，清除FIFO，14字节阈值 */
     outb(port + 2, 0xC7);
 
-    /* IRQs enabled, RTS/DSR set */
+    /* 启用IRQ，设置RTS/DSR */
     outb(port + 4, 0x0B);
 }
 

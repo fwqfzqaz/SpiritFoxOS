@@ -87,13 +87,13 @@ static inline int strncmp(const char *s1, const char *s2, size_t n) {
     return *(const uint8_t *)s1 - *(const uint8_t *)s2;
 }
 
-/* Skip leading whitespace */
+/* 跳过前导空白字符 */
 static inline const char *skip_spaces(const char *s) {
     while (*s == ' ' || *s == '\t') s++;
     return s;
 }
 
-/* Helper: write an unsigned integer in given base with zero-padding */
+/* 辅助函数：按指定进制写入无符号整数，支持零填充 */
 static inline int snprintf_write_uint(char *buf, size_t size, int pos,
                                        uint32_t v, int base, int width, int zeropad) {
     const char digits[] = "0123456789abcdef";
@@ -107,7 +107,7 @@ static inline int snprintf_write_uint(char *buf, size_t size, int pos,
             v /= base;
         }
     }
-    /* Pad with zeros/spaces if needed */
+    /* 如需要则用零或空格填充 */
     int pad = width - ni;
     if (pad > 0) {
         for (int p = 0; p < pad && (size_t)pos < size - 1; p++) {
@@ -120,7 +120,7 @@ static inline int snprintf_write_uint(char *buf, size_t size, int pos,
     return pos;
 }
 
-/* Simple snprintf - supports %s, %d, %u, %x, %c, %p, %% and width like %02x */
+/* 简易 snprintf - 支持 %s、%d、%u、%x、%c、%p、%% 以及宽度格式如 %02x */
 static inline int snprintf(char *buf, size_t size, const char *fmt, ...) {
     va_list args;
     va_start(args, fmt);
@@ -128,7 +128,7 @@ static inline int snprintf(char *buf, size_t size, const char *fmt, ...) {
     while (*fmt && (size_t)pos < size - 1) {
         if (*fmt == '%') {
             fmt++;
-            /* Parse width and zero-pad */
+            /* 解析宽度和零填充标志 */
             int zeropad = 0;
             int width = 0;
             if (*fmt == '0') { zeropad = 1; fmt++; }

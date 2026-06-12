@@ -20,7 +20,7 @@
 #include <stdint.h>
 #include "idt.h"
 
-/* Special key codes (returned by keyboard_getkey) */
+/* 特殊键码（由keyboard_getkey返回） */
 #define KEY_ESCAPE    0x100
 #define KEY_UP        0x101
 #define KEY_DOWN      0x102
@@ -45,7 +45,7 @@
 #define KEY_TAB       0x116
 #define KEY_CTRL_C    0x117
 
-/* Check if a key code is a special (non-printable) key */
+/* 检查键码是否为特殊键（不可打印） */
 #define IS_SPECIAL_KEY(k) ((k) >= 0x100)
 
 void keyboard_init(void);
@@ -55,7 +55,7 @@ uint16_t keyboard_getkey(void);
 int keyboard_has_key(void);
 uint16_t keyboard_try_getkey(void);
 
-/* USB HID keyboard integration */
+/* USB HID键盘集成 */
 void usb_kb_push(uint8_t hid_keycode, uint8_t modifiers);
 
 #endif /* KEYBOARD_H */

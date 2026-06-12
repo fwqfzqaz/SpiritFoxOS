@@ -40,11 +40,11 @@ static const char *level_tags[] = {
 };
 
 static const vga_color_t level_colors[] = {
-    VGA_DARK_GREY,    /* DEBUG: grey */
-    VGA_LIGHT_GREY,   /* INFO:  light grey */
-    VGA_YELLOW,       /* WARN:  yellow */
-    VGA_LIGHT_RED,    /* ERROR: light red */
-    VGA_RED            /* FATAL: red on white bg */
+    VGA_DARK_GREY,    /* DEBUG: 灰色 */
+    VGA_LIGHT_GREY,   /* INFO:  浅灰色 */
+    VGA_YELLOW,       /* WARN:  黄色 */
+    VGA_LIGHT_RED,    /* ERROR: 浅红色 */
+    VGA_RED            /* FATAL: 红色（白底） */
 };
 
 const char *log_level_name(log_level_t level) {
@@ -116,7 +116,7 @@ void log_write(log_level_t level, const char *module, const char *fmt, ...) {
         emitters[emit_count++].fn = emit_vga;
     }
 
-    /* Timestamp */
+    /* 时间戳 */
     char prefix[64];
     int plen = 0;
     {
@@ -141,7 +141,7 @@ void log_write(log_level_t level, const char *module, const char *fmt, ...) {
     for (int i = 0; i < plen; i++) multi_emit(prefix[i], emitters, emit_count);
     multi_emit(' ', emitters, emit_count);
 
-    /* Level tag */
+    /* 级别标签 */
     const char *tag = level_tags[level];
     if (level >= LOG_WARN && emit_count > 2) {
         vga_set_color(level_colors[level], VGA_BLACK);
@@ -154,7 +154,7 @@ void log_write(log_level_t level, const char *module, const char *fmt, ...) {
         vga_set_color(VGA_LIGHT_GREY, VGA_BLACK);
     }
 
-    /* Module name */
+    /* 模块名 */
     if (module) {
         multi_emit('[', emitters, emit_count);
         for (int i = 0; module[i]; i++) multi_emit(module[i], emitters, emit_count);
@@ -162,11 +162,11 @@ void log_write(log_level_t level, const char *module, const char *fmt, ...) {
         multi_emit(' ', emitters, emit_count);
     }
 
-    /* Message */
+    /* 消息 */
     va_list args;
     va_start(args, fmt);
 
-    /* We need a format function that uses multi_emit */
+    /* 我们需要一个使用multi_emit的格式化函数 */
     while (*fmt) {
         if (*fmt == '%') {
             fmt++;
@@ -226,7 +226,7 @@ void log_write(log_level_t level, const char *module, const char *fmt, ...) {
 
     multi_emit('\n', emitters, emit_count);
 
-    /* Auto-save to disk every N log lines */
+    /* 每N行日志自动保存到磁盘 */
     if (auto_save) {
         save_counter++;
         if (save_counter >= LOG_AUTO_SAVE_INTERVAL) {

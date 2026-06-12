@@ -44,20 +44,20 @@
 #include "devtree.h"
 #include "init.h"
 
-/* Kernel start/end symbols from linker script */
+/* 内核起始/结束符号（来自链接脚本） */
 extern char _start[];
 extern char _end[];
 
-/* Timer tick counter */
+/* 定时器tick计数器 */
 volatile uint64_t timer_ticks = 0;
 
-/* Flag: are we in graphical mode? */
+/* 标志：是否处于图形模式？ */
 static int graphical_mode = 0;
 
-/* Bootinfo framebuffer (saved for GUI init later) */
+/* Bootinfo帧缓冲区信息（保存供后续GUI初始化使用） */
 static bootinfo_fb_t saved_fb_info;
 
-/* Timer interrupt handler */
+/* 定时器中断处理函数 */
 static void timer_handler(struct interrupt_frame *frame) {
     timer_ticks++;
     scheduler_tick(frame);
@@ -75,49 +75,49 @@ static void timer_handler(struct interrupt_frame *frame) {
  * ============================================================ */
 
 static void phase_kernel_boot(bootinfo_t *bootinfo) {
-    /* Debug: direct COM1 output ASAP */
+    /* 调试：尽快直接输出到COM1串口 */
     {
         const char *msg = "[PKB] phase_kernel_boot entered\r\n";
         for (const char *p = msg; *p; p++) {
             for (volatile int d = 0; d < 10000; d++);
         }
     }
-    /* Validate bootinfo magic */
+    /* 验证bootinfo魔数 */
     if (bootinfo->magic != BOOTINFO_MAGIC) {
-        /* Halt if no valid boot info */
+        /* 无有效启动信息则停机 */
         hlt();
     }
 
-    /* Early debug output */
+    /* 早期调试输出 */
     serial_init(COM1);
     log_init();
     LOG_I("kernel", "SpiritFoxOS starting (UEFI mode)...");
 
     /*
-     * Parse bootinfo for framebuffer and memory map.
-     * The memory map from UEFI uses EFI_MEMORY_DESCRIPTOR entries.
-     * We convert them to a format compatible with our PMM.
+     * 解析bootinfo获取帧缓冲区和内存映射信息。
+     * 来自UEFI的内存映射使用EFI_MEMORY_DESCRIPTOR条目。
+     * 我们将其转换为与PMM兼容的格式。
      */
 
-    /* Extract framebuffer info */
+    /* 提取帧缓冲区信息 */
     if (bootinfo->framebuffer.type == BOOTINFO_FB_RGB) {
         graphical_mode = 1;
         __builtin_memcpy(&saved_fb_info, &bootinfo->framebuffer, sizeof(bootinfo_fb_t));
     }
 
     /*
-     * Memory map: bootinfo contains raw EFI memory descriptors.
-     * Convert EFI memory types to PMM-compatible types:
+     * 内存映射：bootinfo包含原始EFI内存描述符。
+     * 将EFI内存类型转换为PMM兼容类型：
      *   EFI_CONVENTIONAL_MEMORY (7) -> AVAILABLE
      *   EFI_UNUSABLE_MEMORY (8)  -> UNUSABLE
      *   EFI_ACPI_RECLAIM_MEMORY (9) -> ACPI_RECLAIMABLE
      *   EFI_ACPI_MEMORY_NVS (10)   -> NVS
-     *   Everything else             -> RESERVED
+     *   其他所有类型               -> RESERVED
      *
-     * We pass the EFI memory map directly; pmm_init_efi() handles conversion.
+     * 我们直接传递EFI内存映射；pmm_init_efi()负责转换。
      */
 
-    /* I2: Initialize Memory Management Unit (PMM + VMM) */
+    /* I2: 初始化内存管理单元（PMM + VMM） */
     if (!bootinfo->mmap_addr || !bootinfo->mmap_entry_count) {
         LOG_F("kernel", "No memory map from bootloader!");
         hlt();
@@ -127,35 +127,35 @@ static void phase_kernel_boot(bootinfo_t *bootinfo) {
     uint64_t kernel_end = bootinfo->kernel_end;
     pmm_init(bootinfo, kernel_start, kernel_end);
     LOG_I("kernel", "[I2] PMM initialized (kernel %p-%p)", kernel_start, kernel_end);
-    /* Debug checkpoint after PMM */
+    /* PMM之后的调试检查点 */
 
     vmm_init();
     LOG_I("kernel", "[I2] VMM initialized (MMU ready)");
-    /* Debug checkpoint after VMM */
+    /* VMM之后的调试检查点 */
 
-    /* I4: Initialize Interrupt Descriptor Table (IDT) */
+    /* I4: 初始化中断描述符表（IDT） */
     idt_init();
     LOG_I("kernel", "[I4] IDT initialized");
-    /* Debug checkpoint after IDT */
+    /* IDT之后的调试检查点 */
 
-    /* Initialize PIC (required before IDT is useful for hardware interrupts) */
+    /* 初始化PIC（IDT对硬件中断有效前必须先初始化PIC） */
     pic_init();
     LOG_I("kernel", "[I4] PIC initialized");
 
-    /* I5: Initialize Global Descriptor Table with TSS BEFORE enabling interrupts!
-     * 64-bit long mode requires a valid TSS for interrupt handling (iretq).
-     * The boot GDT in boot.asm has no TSS entry. */
+    /* I5: 在启用中断之前初始化带TSS的全局描述符表！
+     * 64位长模式需要有效的TSS用于中断处理（iretq）。
+     * boot.asm中的启动GDT没有TSS条目。 */
     gdt_init();
     LOG_I("kernel", "[I5] GDT initialized (with TSS)");
-    /* Debug checkpoint after GDT */
+    /* GDT之后的调试检查点 */
 
-    /* Initialize PIT timer at 100Hz (safe now that GDT/TSS are loaded) */
+    /* 初始化PIT定时器为100Hz（GDT/TSS已加载，现在安全） */
     pit_init(100);
     idt_register_handler(32, timer_handler);
     pic_unmask_irq(0);
     LOG_I("kernel", "[I4] PIT timer at 100Hz");
 
-    /* I6: Initialize System Call Interface */
+    /* I6: 初始化系统调用接口 */
     syscall_init();
     LOG_I("kernel", "[I6] System call interface initialized");
 }
@@ -173,19 +173,19 @@ static void phase_kernel_boot(bootinfo_t *bootinfo) {
  * ============================================================ */
 
 static void phase_device_selfcheck(void) {
-    /* Initialize device tree first (J8 preparation) */
+    /* 首先初始化设备树（为J8做准备） */
     devtree_init();
 
-    /* J1: Scan PCI bus */
+    /* J1: 扫描PCI总线 */
     pci_init();
     LOG_I("kernel", "[J1] PCI bus enumerated (%d devices)", pci_get_device_count());
 
-    /* Register PCI devices into device tree */
+    /* 将PCI设备注册到设备树 */
     for (int i = 0; i < pci_get_device_count(); i++) {
         pci_device_t *d = pci_get_device(i);
         if (!d) continue;
         char name[DEV_NAME_MAX];
-        /* Build a descriptive name from PCI class */
+        /* 根据PCI类代码构建描述性名称 */
         const char *class_name = "pci-dev";
         if (d->class_code == 0x01) class_name = "ata-controller";
         else if (d->class_code == 0x02) class_name = "net-controller";
@@ -197,7 +197,7 @@ static void phase_device_selfcheck(void) {
                          NULL, d->vendor_id, d->device_id);
     }
 
-    /* J2: Initialize CPU cores (single core for now, detect features) */
+    /* J2: 初始化CPU核心（目前单核，检测特性） */
     {
         uint32_t eax, ebx, ecx, edx;
         __asm__ volatile ("cpuid" : "=a"(eax), "=b"(ebx), "=c"(ecx), "=d"(edx) : "a"(0));
@@ -211,7 +211,7 @@ static void phase_device_selfcheck(void) {
         LOG_I("kernel", "[J2] BSP CPU initialized (vendor: %s)", vendor);
     }
 
-    /* J3: Initialize memory controller (already configured by hardware/firmware) */
+    /* J3: 初始化内存控制器（已由硬件/固件配置） */
     {
         uint64_t total_pages = pmm_total_count();
         char info[DEV_INFO_MAX];
@@ -221,7 +221,7 @@ static void phase_device_selfcheck(void) {
         LOG_I("kernel", "[J3] Memory controller ready (%s)", info);
     }
 
-    /* J4: Initialize storage device drivers (ATA) */
+    /* J4: 初始化存储设备驱动（ATA） */
     ata_init();
     {
         int ata_count = ata_get_device_count();
@@ -246,7 +246,7 @@ static void phase_device_selfcheck(void) {
         }
     }
 
-    /* J5: Initialize input device drivers (keyboard/mouse) */
+    /* J5: 初始化输入设备驱动（键盘/鼠标） */
     keyboard_init();
     devtree_register("ps2-keyboard", DEV_TYPE_INPUT, DEV_STATUS_OK, DEV_CRITICAL_YES,
                      "PS/2 keyboard", 0, 0);
@@ -262,7 +262,7 @@ static void phase_device_selfcheck(void) {
                          "No framebuffer for mouse", 0, 0);
     }
 
-    /* J6: Initialize display device drivers (VGA/Framebuffer) */
+    /* J6: 初始化显示设备驱动（VGA/帧缓冲区） */
     if (!graphical_mode) {
         vga_init();
         vga_set_color(VGA_WHITE, VGA_BLUE);
@@ -278,9 +278,9 @@ static void phase_device_selfcheck(void) {
         LOG_I("kernel", "[J6] Framebuffer display available (GUI will init later)");
     }
 
-    /* J7: Detect and initialize network devices */
+    /* J7: 检测并初始化网络设备 */
     {
-        /* Check PCI devices for network controllers (class 0x02) */
+        /* 检查PCI设备中的网络控制器（类代码0x02） */
         pci_device_t net_devs[16];
         int net_count = pci_find_all_class(0x02, 0xFF, net_devs, 16);
         if (net_count > 0) {
@@ -299,7 +299,7 @@ static void phase_device_selfcheck(void) {
         }
     }
 
-    /* Initialize xHCI USB controller (part of J1/J7 device detection) */
+    /* 初始化xHCI USB控制器（属于J1/J7设备检测的一部分） */
     {
         pci_device_t xhci_dev;
         if (pci_find_device(PCI_CLASS_SERIAL_BUS, PCI_SUBCLASS_USB,
@@ -321,10 +321,10 @@ static void phase_device_selfcheck(void) {
         }
     }
 
-    /* J8: Device tree summary */
+    /* J8: 设备树汇总 */
     LOG_I("kernel", "[J8] Device tree: %d devices registered", devtree_get_count());
 
-    /* Enable interrupts after all devices are initialized */
+    /* 所有设备初始化完成后启用中断 */
     sti();
     LOG_I("kernel", "Interrupts enabled");
 }
@@ -339,19 +339,19 @@ static void phase_device_selfcheck(void) {
 
 static int phase_device_check(void) {
     if (!devtree_check_critical()) {
-        /* K: NO - critical device check failed */
+        /* K: 否 - 关键设备自检失败 */
         LOG_E("kernel", "[K] Critical device self-check FAILED");
 
-        /* L: Output device error information to console */
+        /* L: 将设备错误信息输出到控制台 */
         devtree_print_errors();
 
-        /* M: Enter minimal safe mode */
+        /* M: 进入最小化安全模式 */
         LOG_W("kernel", "[M] Entering safe mode");
         safe_mode_run();
-        return 0; /* Never returns in safe mode, but for completeness */
+        return 0; /* 安全模式不会返回，但为了完整性 */
     }
 
-    /* K: YES - all critical devices passed */
+    /* K: 是 - 所有关键设备自检通过 */
     LOG_I("kernel", "[K] All critical devices passed self-check");
     return 1;
 }
@@ -364,7 +364,7 @@ static int phase_device_check(void) {
  * ============================================================ */
 
 static void phase_filesystem_and_processes(void) {
-    /* N: Mount root filesystem */
+    /* N: 挂载根文件系统 */
     sfs_init();
     if (sfs_is_formatted()) {
         LOG_I("kernel", "[N] Root filesystem mounted");
@@ -372,7 +372,7 @@ static void phase_filesystem_and_processes(void) {
         LOG_I("kernel", "[N] No filesystem available (will be initialized by init)");
     }
 
-    /* O: Initialize process management system */
+    /* O: 初始化进程管理系统 */
     scheduler_init();
     LOG_I("kernel", "[O] Process scheduler initialized");
 
@@ -388,9 +388,9 @@ static void phase_filesystem_and_processes(void) {
                              PERM_PROCESS_MGMT | PERM_MEMORY_MGMT);
     LOG_I("kernel", "[O] Permission manager initialized (3 system apps)");
 
-    /* P: Create first user process (init) */
-    /* For now, init runs in kernel context. When user mode is implemented,
-     * this will become a true user-space process. */
+    /* P: 创建第一个用户进程（init） */
+    /* 目前init在内核上下文中运行。当用户模式实现后，
+     * 这将变为真正的用户空间进程。 */
     LOG_I("kernel", "[P] Init process ready");
 }
 
@@ -405,7 +405,7 @@ static void phase_filesystem_and_processes(void) {
 
 static void phase_start_cli(void) {
     if (graphical_mode) {
-        /* Q1: Initialize terminal driver (GUI framebuffer terminal) */
+        /* Q1: 初始化终端驱动（GUI帧缓冲区终端） */
         LOG_I("kernel", "[Q] Launching GUI (%ux%u %ubpp)",
               saved_fb_info.width, saved_fb_info.height,
               saved_fb_info.bpp);
@@ -416,11 +416,11 @@ static void phase_start_cli(void) {
                  saved_fb_info.pitch,
                  saved_fb_info.bpp);
 
-        /* Q2-Q3: Start shell interpreter in GUI terminal */
-        scheduler_set_enabled(0);  /* Disable scheduler during GUI to prevent context switch */
+        /* Q2-Q3: 在GUI终端中启动shell解释器 */
+        scheduler_set_enabled(0);  /* GUI期间禁用调度器以防止上下文切换 */
         gui_run();
 
-        /* If gui_run() returned (e.g. force-exit shortcut), switch to text shell */
+        /* 如果gui_run()返回（例如强制退出快捷键），切换到文本shell */
         LOG_I("kernel", "GUI exited, switching to VGA text shell");
         vga_init();
         vga_set_color(VGA_WHITE, VGA_BLUE);
@@ -429,8 +429,8 @@ static void phase_start_cli(void) {
         vga_puts("\n\n");
         init_process();
     } else {
-        /* Q1: Terminal driver already initialized (VGA text mode) */
-        /* Q2-Q3: Start shell interpreter with prompt */
+        /* Q1: 终端驱动已初始化（VGA文本模式） */
+        /* Q2-Q3: 启动带提示符的shell解释器 */
         LOG_I("kernel", "[Q] Starting text shell");
         init_process();
     }
@@ -441,7 +441,7 @@ static void phase_start_cli(void) {
  * ============================================================ */
 #define MB2_MAGIC 0x36D76289
 
-/* Multiboot2 tag types (from GNU multiboot2.h) */
+/* Multiboot2标签类型（来自GNU multiboot2.h） */
 #define MB2_TAG_END         0
 #define MB2_TAG_CMDLINE     1
 #define MB2_TAG_BOOT_LOADER_NAME 2
@@ -452,19 +452,19 @@ static void phase_start_cli(void) {
 #define MB2_TAG_VBE         7
 #define MB2_TAG_FRAMEBUFFER 8
 
-/* Multiboot2 info header */
+/* Multiboot2信息头 */
 typedef struct {
     uint32_t total_size;
     uint32_t reserved;
 } mb2_info_t;
 
-/* Generic Multiboot2 tag header */
+/* 通用Multiboot2标签头 */
 typedef struct {
     uint32_t type;
     uint32_t size;
 } mb2_tag_t;
 
-/* Framebuffer tag (type 4) */
+/* 帧缓冲区标签（类型8） */
 typedef struct {
     uint32_t type;
     uint32_t size;
@@ -477,7 +477,7 @@ typedef struct {
     uint8_t  reserved[2];
 } mb2_fb_tag_t;
 
-/* Memory map entry (within mmap tag) */
+/* 内存映射条目（在mmap标签内） */
 typedef struct {
     uint64_t base_addr;
     uint64_t length;
@@ -485,7 +485,7 @@ typedef struct {
     uint32_t zero;
 } mb2_mmap_entry_t;
 
-/* Memory map tag (type 6) */
+/* 内存映射标签（类型6） */
 typedef struct {
     uint32_t type;
     uint32_t size;
@@ -495,8 +495,8 @@ typedef struct {
 } mb2_mmap_tag_t;
 
 /* ============================================================
- * Parse Multiboot2 info into unified bootinfo structure
- * Called in BIOS mode when bootinfo magic doesn't match.
+ * 将Multiboot2信息解析到统一的bootinfo结构中
+ * 在BIOS模式下当bootinfo魔数不匹配时调用。
  * ============================================================ */
 static int parse_multiboot2(uint32_t mb2_magic, void *mb2_info,
                              bootinfo_t *out) {
@@ -522,7 +522,7 @@ static int parse_multiboot2(uint32_t mb2_magic, void *mb2_info,
 
         switch (tag->type) {
             case MB2_TAG_FRAMEBUFFER: {
-                /* Use packed struct cast for reliable field access */
+                /* 使用紧缩结构体转换以可靠地访问字段 */
                 typedef struct __attribute__((packed)) {
                     uint32_t type;
                     uint32_t size;
@@ -543,7 +543,7 @@ static int parse_multiboot2(uint32_t mb2_magic, void *mb2_info,
                 out->framebuffer.bpp = fb->fb_bpp;
                 out->framebuffer.type = (fb->fb_type == 1) ? BOOTINFO_FB_RGB : BOOTINFO_FB_TEXT;
 
-                /* Force RGB if we have valid dimensions */
+                /* 如果有有效尺寸则强制设为RGB */
                 if (fb->fb_addr != 0 && fb->fb_width > 0 && fb->fb_height > 0) {
                     out->framebuffer.type = BOOTINFO_FB_RGB;
                 }
@@ -553,9 +553,9 @@ static int parse_multiboot2(uint32_t mb2_magic, void *mb2_info,
                 mb2_mmap_tag_t *mmap_tag = (mb2_mmap_tag_t *)tag;
                 out->mmap_entry_size = mmap_tag->entry_size ?
                                        mmap_tag->entry_size : sizeof(mb2_mmap_entry_t);
-                /* First entry starts right after the mmap tag header fields */
+                /* 第一个条目紧跟在mmap标签头字段之后 */
                 out->mmap_addr = (uint64_t)(uintptr_t)(tags + sizeof(mb2_mmap_tag_t));
-                /* Count entries */
+                /* 统计条目数 */
                 uint32_t data_size = tag->size - sizeof(mb2_mmap_tag_t);
                 out->mmap_entry_count = data_size / out->mmap_entry_size;
                 break;
@@ -564,25 +564,25 @@ static int parse_multiboot2(uint32_t mb2_magic, void *mb2_info,
                 break;
         }
 
-        /* Advance to next tag (8-byte aligned) */
+        /* 前进到下一个标签（8字节对齐） */
         tags += (tag->size + 7) & ~7;
     }
 
-    /* Set kernel bounds from linker symbols */
+    /* 从链接器符号设置内核边界 */
     out->kernel_start = (uint64_t)(uintptr_t)_start;
     out->kernel_end = (uint64_t)(uintptr_t)_end;
 
     return 0;
 }
 
-/* Static buffer for converting Multiboot2 mmap entries to EFI format.
- * Max 128 entries should be enough for typical systems. */
+/* 用于将Multiboot2内存映射条目转换为EFI格式的静态缓冲区。
+ * 最多128个条目对典型系统来说应该足够了。 */
 #define MAX_MMAP_ENTRIES 128
 static EFI_MEMORY_DESCRIPTOR mb2_to_efi_buf[MAX_MMAP_ENTRIES];
 
 /*
- * Convert Multiboot2 memory map entries to EFI_MEMORY_DESCRIPTOR format
- * so that pmm_init() can process them without changes.
+ * 将Multiboot2内存映射条目转换为EFI_MEMORY_DESCRIPTOR格式
+ * 以便pmm_init()无需修改即可处理。
  */
 static int convert_mmap_mb2_to_efi(bootinfo_t *bootinfo) {
     if (!bootinfo->mmap_addr || !bootinfo->mmap_entry_count) return -1;
@@ -597,7 +597,7 @@ static int convert_mmap_mb2_to_efi(bootinfo_t *bootinfo) {
             (mb2_mmap_entry_t *)(entries + i * entry_size);
         EFI_MEMORY_DESCRIPTOR *efi_desc = &mb2_to_efi_buf[i];
 
-        /* Map MB2 types to EFI types */
+        /* 将MB2类型映射到EFI类型 */
         switch (mb2_ent->type) {
             case 1: efi_desc->type = 7;  break;  /* Available → Conventional */
             case 2: efi_desc->type = 11; break;  /* Reserved → MMIO */
@@ -613,7 +613,7 @@ static int convert_mmap_mb2_to_efi(bootinfo_t *bootinfo) {
         efi_desc->attribute = 0;
     }
 
-    /* Point bootinfo to the converted buffer */
+    /* 将bootinfo指向转换后的缓冲区 */
     bootinfo->mmap_addr = (uint64_t)(uintptr_t)mb2_to_efi_buf;
     bootinfo->mmap_entry_size = sizeof(EFI_MEMORY_DESCRIPTOR);
 
@@ -621,13 +621,13 @@ static int convert_mmap_mb2_to_efi(bootinfo_t *bootinfo) {
 }
 
 /* ============================================================
- * Main kernel entry point
- * BIOS mode:  rdi=MB2_MAGIC(0x36D76289), rsi=multiboot2_info_ptr
- * UEFI mode: rdi=bootinfo_t*, rsi=unused
+ * 内核主入口点
+ * BIOS模式:  rdi=MB2_MAGIC(0x36D76289), rsi=multiboot2_info_ptr
+ * UEFI模式: rdi=bootinfo_t*, rsi=未使用
  * ============================================================ */
 
 void __attribute__((used)) kernel_main(bootinfo_t *bootinfo_param) {
-    /* Debug: direct COM1 output to verify we reached kernel_main */
+    /* 调试：直接输出到COM1以确认已到达kernel_main */
     {
         const char *msg = "[KM] kernel_main entered\r\n";
         for (const char *p = msg; *p; p++) {
@@ -636,17 +636,17 @@ void __attribute__((used)) kernel_main(bootinfo_t *bootinfo_param) {
     }
 
     /*
-     * Detect boot mode and prepare unified bootinfo structure.
-     * In BIOS mode, bootinfo_param is actually the Multiboot2 magic number
-     * (passed in RDI from boot.asm), not a valid pointer.
+     * 检测启动模式并准备统一的bootinfo结构。
+     * 在BIOS模式下，bootinfo_param实际上是Multiboot2魔数
+     *（从boot.asm通过RDI传入），不是有效指针。
      */
     static bootinfo_t bootinfo;
 
     if (bootinfo_param && bootinfo_param->magic == BOOTINFO_MAGIC) {
-        /* UEFI mode: bootinfo is valid, copy it */
+        /* UEFI模式：bootinfo有效，复制它 */
         __builtin_memcpy(&bootinfo, bootinfo_param, sizeof(bootinfo_t));
     } else {
-        /* BIOS mode: parse Multiboot2 info from RDI/RSI registers */
+        /* BIOS模式：从RDI/RSI寄存器解析Multiboot2信息 */
         uint32_t mb2_magic;
         void *mb2_info;
         __asm__ volatile("mov %%edi, %0" : "=r"(mb2_magic));
@@ -661,7 +661,7 @@ void __attribute__((used)) kernel_main(bootinfo_t *bootinfo_param) {
             hlt();
         }
 
-        /* Convert MB2 memory map entries to EFI format for PMM */
+        /* 将MB2内存映射条目转换为EFI格式供PMM使用 */
         if (convert_mmap_mb2_to_efi(&bootinfo) != 0) {
             const char *err = "[ERR] Failed to convert MB2 mmap!\r\n";
             for (const char *p = err; *p; p++) {
@@ -679,7 +679,7 @@ void __attribute__((used)) kernel_main(bootinfo_t *bootinfo_param) {
 
     /* Phase K: 设备自检结果检查 (may enter safe mode) */
     if (!phase_device_check()) {
-        /* Safe mode took over, should not reach here */
+        /* 安全模式已接管，不应到达此处 */
         while (1) hlt();
     }
 

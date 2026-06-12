@@ -11,7 +11,7 @@ SECTIONS {
 
     .text ALIGN(4K) : {
         *(.multiboot2_header)
-        _start = .;           /* Entry point AFTER the header */
+        _start = .;           /* 头之后的入口点 */
         *(.text .text.*)
     } :text
 

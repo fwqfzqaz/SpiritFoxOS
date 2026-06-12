@@ -19,7 +19,7 @@
 
 #include <stdint.h>
 
-/* Device types */
+/* 设备类型 */
 typedef enum {
     DEV_TYPE_CPU = 0,
     DEV_TYPE_MEMORY,
@@ -32,7 +32,7 @@ typedef enum {
     DEV_TYPE_OTHER
 } dev_type_t;
 
-/* Device status */
+/* 设备状态 */
 typedef enum {
     DEV_STATUS_UNKNOWN = 0,
     DEV_STATUS_OK,
@@ -41,13 +41,13 @@ typedef enum {
     DEV_STATUS_DISABLED
 } dev_status_t;
 
-/* Device criticality */
+/* 设备关键性 */
 typedef enum {
     DEV_CRITICAL_NO = 0,
     DEV_CRITICAL_YES
 } dev_critical_t;
 
-/* Device tree entry */
+/* 设备树条目 */
 #define DEV_NAME_MAX 32
 #define DEV_INFO_MAX 64
 
@@ -63,33 +63,33 @@ typedef struct {
 
 #define DEVTREE_MAX_ENTRIES 64
 
-/* Initialize the device tree */
+/* 初始化设备树 */
 void devtree_init(void);
 
-/* Register a device in the tree */
+/* 在设备树中注册一个设备 */
 int devtree_register(const char *name, dev_type_t type, dev_status_t status,
                      dev_critical_t critical, const char *info,
                      uint32_t vendor_id, uint32_t device_id);
 
-/* Update a device's status */
+/* 更新设备状态 */
 int devtree_update_status(const char *name, dev_status_t status);
 
-/* Check if all critical devices are OK (returns 1 if pass, 0 if fail) */
+/* 检查所有关键设备是否正常（返回1表示通过，0表示失败） */
 int devtree_check_critical(void);
 
-/* Get the number of failed critical devices */
+/* 获取失败的关键设备数量 */
 int devtree_get_critical_fail_count(void);
 
-/* Print all device errors to console */
+/* 将所有设备错误打印到控制台 */
 void devtree_print_errors(void);
 
-/* Print the full device tree */
+/* 打印完整的设备树 */
 void devtree_print_all(void);
 
-/* Get device count */
+/* 获取设备数量 */
 int devtree_get_count(void);
 
-/* Get device entry by index */
+/* 根据索引获取设备条目 */
 devtree_entry_t *devtree_get_entry(int index);
 
 #endif /* DEVTREE_H */

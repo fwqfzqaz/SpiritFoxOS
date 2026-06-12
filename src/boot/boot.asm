@@ -14,8 +14,8 @@
 ; You should have received a copy of the GNU General Public License
 ; along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-; SpiritFoxOS - Multiboot2 Header and 32-bit Entry Point
-; GRUB loads kernel at 1MB in 32-bit protected mode, we switch to long mode
+; SpiritFoxOS - Multiboot2头与32位入口点
+; GRUB在32位保护模式下将内核加载到1MB处，我们切换到长模式
 
 bits 32
 
@@ -27,25 +27,25 @@ mb2_header_start:
     dd mb2_header_end - mb2_header_start  ; header length
     dd -(0xE85250D6 + 0 + (mb2_header_end - mb2_header_start)) ; checksum
 
-    ; Framebuffer tag (type=5, request graphical mode)
+    ; 帧缓冲区标签（type=5，请求图形模式）
     dw 5                       ; type = MULTIBOOT_HEADER_TAG_FRAMEBUFFER
-    dw 0                       ; flags
-    dd 24                      ; size (padded to 8-byte alignment)
-    dd 1024                    ; width
-    dd 768                     ; height
-    dd 32                      ; bpp (32-bit true color)
-    dd 0                       ; padding to 8-byte boundary
+    dw 0                       ; 标志位
+    dd 24                      ; 大小（填充到8字节对齐）
+    dd 1024                    ; 宽度
+    dd 768                     ; 高度
+    dd 32                      ; 色深（32位真彩色）
+    dd 0                       ; 填充到8字节边界
 
-    ; End tag
-    dw 0                       ; type
-    dw 0                       ; flags
-    dd 8                       ; size
+    ; 结束标签
+    dw 0                       ; 类型
+    dw 0                       ; 标志位
+    dd 8                       ; 大小
 mb2_header_end:
 
 
 section .bss nobits align=4096
 
-; Temporary page tables for switching to long mode
+; 用于切换到长模式的临时页表
 pml4: resb 4096
 pdpt: resb 4096
 pd0:  resb 4096
@@ -53,13 +53,13 @@ pd1:  resb 4096
 pd2:  resb 4096
 pd3:  resb 4096
 
-; Stack for 32-bit mode
+; 32位模式栈
 stack32: resb 16384
 stack32_top:
 
 section .data
 
-; Saved Multiboot2 values (in .data, not .bss, to avoid zeroing issues)
+; 保存的Multiboot2值（放在.data而非.bss中，以避免清零问题）
 saved_magic: dd 0
 saved_info:  dd 0
 
@@ -70,34 +70,34 @@ global _start
 extern kernel_main
 
 _start:
-    ; Save Multiboot2 magic and info pointer to fixed memory locations
-    ; EAX = 0x36D76289 (Multiboot2 magic), EBX = info structure address
+    ; 保存Multiboot2魔数和信息指针到固定内存位置
+    ; EAX = 0x36D76289 (Multiboot2魔数), EBX = 信息结构体地址
     mov [saved_magic], eax
     mov [saved_info], ebx
 
-    ; Set up 32-bit stack
+    ; 设置32位栈
     mov esp, stack32_top
 
-    ; Check for CPUID support
+    ; 检查CPUID支持
     call check_cpuid
-    ; Check for long mode support
+    ; 检查长模式支持
     call check_long_mode
 
-    ; Set up page tables
+    ; 设置页表
     call setup_page_tables
 
-    ; Enable PAE
+    ; 启用PAE（物理地址扩展）
     call enable_paging
 
-    ; Load 64-bit GDT
+    ; 加载64位GDT（全局描述符表）
     lgdt [gdt64.pointer]
 
-    ; Far jump to 64-bit code segment
+    ; 远跳转到64位代码段
     jmp gdt64.code_seg:long_mode_entry
 
 
 check_cpuid:
-    ; Flip ID bit in EFLAGS
+    ; 翻转EFLAGS中的ID位
     pushfd
     pop eax
     mov ecx, eax
@@ -116,13 +116,13 @@ check_cpuid:
 
 
 check_long_mode:
-    ; Check if extended CPUID is available
+    ; 检查扩展CPUID是否可用
     mov eax, 0x80000000
     cpuid
     cmp eax, 0x80000001
     jb .no_long_mode
 
-    ; Check long mode bit
+    ; 检查长模式位
     mov eax, 0x80000001
     cpuid
     test edx, 1 << 29
@@ -133,47 +133,47 @@ check_long_mode:
 
 
 setup_page_tables:
-    ; Map PML4[0] -> PDPT (identity mapping low 4GB)
+    ; 映射 PML4[0] -> PDPT（低4GB恒等映射）
     mov eax, pdpt
-    or  eax, 0x03              ; Present + Writable
+    or  eax, 0x03              ; 存在 + 可写
     mov [pml4], eax
 
-    ; Map PML4[256] -> PDPT (higher-half kernel at 0xFFFFFFFF80000000)
+    ; 映射 PML4[256] -> PDPT（高半部分内核位于 0xFFFFFFFF80000000）
     mov [pml4 + 256 * 8], eax
 
-    ; Map PDPT[0] -> PD0 (first 1GB: 0x00000000 - 0x3FFFFFFF)
+    ; 映射 PDPT[0] -> PD0（第一个1GB: 0x00000000 - 0x3FFFFFFF）
     mov eax, pd0
     or  eax, 0x03
     mov [pdpt], eax
 
-    ; Map PDPT[1] -> PD1 (second 1GB: 0x40000000 - 0x7FFFFFFF)
+    ; 映射 PDPT[1] -> PD1（第二个1GB: 0x40000000 - 0x7FFFFFFF）
     mov eax, pd1
     or  eax, 0x03
     mov [pdpt + 8], eax
 
-    ; Map PDPT[2] -> PD2 (third 1GB: 0x80000000 - 0xBFFFFFFF)
+    ; 映射 PDPT[2] -> PD2（第三个1GB: 0x80000000 - 0xBFFFFFFF）
     mov eax, pd2
     or  eax, 0x03
     mov [pdpt + 16], eax
 
-    ; Map PDPT[3] -> PD3 (fourth 1GB: 0xC0000000 - 0xFFFFFFFF)
+    ; 映射 PDPT[3] -> PD3（第四个1GB: 0xC0000000 - 0xFFFFFFFF）
     mov eax, pd3
     or  eax, 0x03
     mov [pdpt + 24], eax
 
-    ; Fill PD0 with 512 x 2MB pages (maps 0 - 1GB)
+    ; 用512个2MB页面填充PD0（映射 0 - 1GB）
     mov ecx, 0
-    mov eax, 0x83              ; Present + Writable + Huge (2MB page)
+    mov eax, 0x83              ; 存在 + 可写 + 巨页（2MB页面）
 .fill_pd0:
     mov [pd0 + ecx * 8], eax
-    add eax, 0x200000          ; Next 2MB
+    add eax, 0x200000          ; 下一个2MB
     inc ecx
     cmp ecx, 512
     jne .fill_pd0
 
-    ; Fill PD1 with 512 x 2MB pages (maps 1GB - 2GB)
+    ; 用512个2MB页面填充PD1（映射 1GB - 2GB）
     mov ecx, 0
-    mov eax, 0x40000083        ; Start at 1GB
+    mov eax, 0x40000083        ; 从1GB开始
 .fill_pd1:
     mov [pd1 + ecx * 8], eax
     add eax, 0x200000
@@ -181,9 +181,9 @@ setup_page_tables:
     cmp ecx, 512
     jne .fill_pd1
 
-    ; Fill PD2 with 512 x 2MB pages (maps 2GB - 3GB)
+    ; 用512个2MB页面填充PD2（映射 2GB - 3GB）
     mov ecx, 0
-    mov eax, 0x80000083        ; Start at 2GB
+    mov eax, 0x80000083        ; 从2GB开始
 .fill_pd2:
     mov [pd2 + ecx * 8], eax
     add eax, 0x200000
@@ -191,9 +191,9 @@ setup_page_tables:
     cmp ecx, 512
     jne .fill_pd2
 
-    ; Fill PD3 with 512 x 2MB pages (maps 3GB - 4GB)
+    ; 用512个2MB页面填充PD3（映射 3GB - 4GB）
     mov ecx, 0
-    mov eax, 0xC0000083        ; Start at 3GB
+    mov eax, 0xC0000083        ; 从3GB开始
 .fill_pd3:
     mov [pd3 + ecx * 8], eax
     add eax, 0x200000
@@ -205,22 +205,22 @@ setup_page_tables:
 
 
 enable_paging:
-    ; Load PML4 into CR3
+    ; 将PML4加载到CR3
     mov eax, pml4
     mov cr3, eax
 
-    ; Enable PAE (CR4 bit 5)
+    ; 启用PAE（CR4第5位）
     mov eax, cr4
     or  eax, 1 << 5
     mov cr4, eax
 
-    ; Enable long mode (IA32_EFER.LME = 1, MSR 0xC0000080)
+    ; 启用长模式（IA32_EFER.LME = 1，MSR 0xC0000080）
     mov ecx, 0xC0000080
     rdmsr
     or  eax, 1 << 8
     wrmsr
 
-    ; Enable paging (CR0 bit 31)
+    ; 启用分页（CR0第31位）
     mov eax, cr0
     or  eax, 1 << 31
     mov cr0, eax
@@ -230,16 +230,16 @@ enable_paging:
 
 section .rodata progbits align=8
 
-; GDT for 64-bit mode
+; 64位模式GDT（全局描述符表）
 gdt64:
-    dq 0                                    ; Null descriptor
+    dq 0                                    ; 空描述符
 .code_seg: equ $ - gdt64
-    dq (1<<43) | (1<<44) | (1<<47) | (1<<53) ; Code segment: Execute/Read, Code/Data, Present, Long mode
+    dq (1<<43) | (1<<44) | (1<<47) | (1<<53) ; 代码段：可执行/可读，代码/数据，存在，长模式
 .data_seg: equ $ - gdt64
-    dq (1<<44) | (1<<47) | (1<<41)           ; Data segment: Read/Write, Code/Data, Present
+    dq (1<<44) | (1<<47) | (1<<41)           ; 数据段：可读/可写，代码/数据，存在
 .pointer:
-    dw $ - gdt64 - 1                         ; Limit
-    dq gdt64                                 ; Base address
+    dw $ - gdt64 - 1                         ; 段限长
+    dq gdt64                                 ; 基地址
 
 
 bits 64
@@ -247,7 +247,7 @@ bits 64
 section .text
 
 long_mode_entry:
-    ; Load 64-bit data segments
+    ; 加载64位数据段
     mov ax, gdt64.data_seg
     mov ds, ax
     mov es, ax
@@ -255,22 +255,22 @@ long_mode_entry:
     mov gs, ax
     mov ss, ax
 
-    ; Set up 64-bit stack (use lower area of 32-bit stack since it's in low memory)
+    ; 设置64位栈（使用32位栈的低区域，因为它位于低内存中）
     mov rsp, stack32_top
 
-    ; Retrieve Multiboot2 magic and info from the stack
-    ; They were pushed in 32-bit mode: push ebx, push eax
-    ; Stack layout: [eax(magic)] [ebx(info)] <- stack32_top points above
-    ; But we reset RSP to stack32_top, so we need to adjust
-    ; Actually, the pushes happened before the stack was used for other things,
-    ; so the values might be lost. Let's use the BSS variables instead.
+    ; 从栈中获取Multiboot2魔数和信息
+    ; 它们在32位模式下被压入：push ebx, push eax
+    ; 栈布局：[eax(魔数)] [ebx(信息)] <- stack32_top指向其上方
+    ; 但我们将RSP重置为stack32_top，所以需要调整
+    ; 实际上，这些压入操作在栈被用于其他用途之前就发生了，
+    ; 所以值可能已丢失。我们改用BSS变量。
 
-    ; Call kernel main with multiboot2 magic and info
+    ; 调用kernel_main，传入multiboot2魔数和信息
     mov edi, [rel saved_magic]
     mov esi, [rel saved_info]
     call kernel_main
 
-    ; Halt if kernel returns
+    ; 如果内核返回则停机
 .halt:
     cli
     hlt

@@ -111,7 +111,7 @@ typedef struct {
     int initialized;
     int running;
 
-    /* Event ring consumer state (replaces static variables) */
+    /* 事件环消费端状态（替代静态变量） */
     uint32_t event_dequeue_idx;
     uint8_t  event_ccs;
 } xhci_controller_t;
@@ -122,26 +122,26 @@ xhci_controller_t *xhci_get_controller(void);
 int xhci_get_device_count(void);
 xhci_device_t *xhci_get_device_info(int slot_id);
 
-/* Control transfer on EP0 */
+/* EP0上的控制传输 */
 int xhci_control_transfer(xhci_controller_t *ctrl, uint8_t slot_id,
                           uint8_t bmRequestType, uint8_t bRequest,
                           uint16_t wValue, uint16_t wIndex, uint16_t wLength,
                           void *data_buf);
 
-/* Configure endpoint (CONFIG_EP command) */
+/* 配置端点（CONFIG_EP命令） */
 int xhci_configure_endpoint(xhci_controller_t *ctrl, uint8_t slot_id,
                             uint64_t input_ctx_phys);
 
-/* Evaluate context (EVAL_CTX command) */
+/* 评估上下文（EVAL_CTX命令） */
 int xhci_evaluate_context(xhci_controller_t *ctrl, uint8_t slot_id,
                            uint64_t input_ctx_phys);
 
-/* Normal/interrupt data transfer on non-EP0 endpoint */
+/* 非EP0端点上的常规/中断数据传输 */
 int xhci_transfer_data(xhci_controller_t *ctrl, uint8_t slot_id,
                        uint8_t ep_index, void *buf, uint32_t len,
                        int direction_in);
 
-/* Ring management (needed by USB HID for endpoint configuration) */
+/* 环管理（USB HID端点配置需要） */
 void xhci_ring_init(xhci_ring_t *ring, uint32_t size);
 void xhci_dev_ctx_set_ep_ptr(void *dev_ctx, int ep_index, uint64_t tr_phys);
 

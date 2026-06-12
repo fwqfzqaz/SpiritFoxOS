@@ -20,12 +20,12 @@
 #include <stdint.h>
 
 /* ============================================================
- * Unified Boot Information Structure
- * Replaces Multiboot2 info for UEFI boot path.
- * Contains all data the kernel needs from the bootloader/firmware.
+ * 统一启动信息结构
+ * 用于 UEFI 启动路径，替代 Multiboot2 信息。
+ * 包含内核从引导加载程序/固件获取的所有数据。
  * ============================================================ */
 
-/* Memory map entry - compatible layout with both UEFI and Multiboot2 */
+/* 内存映射条目 - 兼容UEFI和Multiboot2布局 */
 typedef struct {
     uint64_t base_addr;
     uint64_t length;
@@ -33,59 +33,59 @@ typedef struct {
     uint32_t reserved;
 } bootinfo_mmap_entry_t;
 
-/* Memory types (matches UEFI and common conventions) */
+/* 内存类型（匹配UEFI和通用约定） */
 #define BOOTINFO_MEM_AVAILABLE       1
 #define BOOTINFO_MEM_RESERVED        2
 #define BOOTINFO_MEM_ACPI_RECLAIMABLE 3
 #define BOOTINFO_MEM_NVS             4
 #define BOOTINFO_MEM_UNUSABLE        5
 
-/* Framebuffer types */
-#define BOOTINFO_FB_RGB     1   /* RGB framebuffer */
-#define BOOTINFO_FB_TEXT    2   /* Text mode (no framebuffer) */
+/* 帧缓冲区类型 */
+#define BOOTINFO_FB_RGB     1   /* RGB 帧缓冲区 */
+#define BOOTINFO_FB_TEXT    2   /* 文本模式（无帧缓冲区） */
 
-/* Framebuffer information */
+/* 帧缓冲区信息 */
 typedef struct {
-    uint64_t address;          /* Physical address of framebuffer */
-    uint32_t pitch;            /* Bytes per scanline */
-    uint32_t width;            /* Horizontal resolution */
-    uint32_t height;           /* Vertical resolution */
-    uint8_t  bpp;              /* Bits per pixel (16/24/32) */
-    uint8_t  type;             /* FB type: RGB or TEXT */
+    uint64_t address;          /* 帧缓冲区物理地址 */
+    uint32_t pitch;            /* 每行字节数 */
+    uint32_t width;            /* 水平分辨率 */
+    uint32_t height;           /* 垂直分辨率 */
+    uint8_t  bpp;              /* 每像素位数（16/24/32） */
+    uint8_t  type;             /* 帧缓冲区类型：RGB或文本 */
     uint8_t  reserved[2];
 } bootinfo_fb_t;
 
-/* ACPI RSDP pointer */
+/* ACPI RSDP指针 */
 typedef struct {
-    uint64_t address;          /* Physical address of RSDP */
-    uint8_t  revision;         /* ACPI revision (1 or 2) */
+    uint64_t address;          /* RSDP物理地址 */
+    uint8_t  revision;         /* ACPI版本（1或2） */
 } bootinfo_acpi_t;
 
-/* Unified boot information - passed to kernel_main */
+/* 统一启动信息 - 传递给kernel_main */
 typedef struct {
-    /* Magic number for validation */
+    /* 用于验证的魔数 */
     uint32_t magic;
 
-    /* Memory map */
-    uint64_t mmap_addr;        /* Physical address of memory map entries */
-    uint64_t mmap_entry_count; /* Number of entries in memory map */
-    uint64_t mmap_entry_size;  /* Size of each entry (bytes) */
+    /* 内存映射 */
+    uint64_t mmap_addr;        /* 内存映射条目物理地址 */
+    uint64_t mmap_entry_count; /* 内存映射条目数量 */
+    uint64_t mmap_entry_size;  /* 每个条目大小（字节） */
 
-    /* Framebuffer */
+    /* 帧缓冲区 */
     bootinfo_fb_t framebuffer;
 
     /* ACPI */
     bootinfo_acpi_t acpi;
 
-    /* Kernel image bounds (set by bootloader) */
+    /* 内核映像边界（由引导加载程序设置） */
     uint64_t kernel_start;
     uint64_t kernel_end;
 
-    /* Reserved for future use */
+    /* 保留供未来使用 */
     uint64_t reserved[8];
 } bootinfo_t;
 
-/* Bootinfo magic value */
+/* Bootinfo魔数值 */
 #define BOOTINFO_MAGIC 0x534F584F  /* "SOXO" = SpiritFox OS */
 
 #endif /* BOOTINFO_H */

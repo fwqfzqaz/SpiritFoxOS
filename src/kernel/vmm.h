@@ -20,7 +20,7 @@
 #include <stdint.h>
 #include "pmm.h"
 
-/* Page table entry flags */
+/* 页表项标志 */
 #define PTE_PRESENT   (1ULL << 0)
 #define PTE_WRITABLE  (1ULL << 1)
 #define PTE_USER      (1ULL << 2)
@@ -32,7 +32,7 @@
 
 #define PTE_ADDR_MASK 0x000FFFFFFFFFF000ULL
 
-/* Page table structure */
+/* 页表结构 */
 typedef struct {
     uint64_t entries[512];
 } page_table_t __attribute__((aligned(4096)));
@@ -44,13 +44,13 @@ uint64_t vmm_get_physical(page_table_t *pml4, uint64_t virt);
 page_table_t *vmm_create_pml4(void);
 void vmm_destroy_pml4(page_table_t *pml4);
 
-/* Physical to virtual conversion (identity mapped in first 1GB) */
+/* 物理地址到虚拟地址转换（前1GB恒等映射） */
 static inline uint64_t phys_to_virt(uint64_t phys) {
-    return phys; /* Identity mapping for first 1GB */
+    return phys; /* 前1GB恒等映射 */
 }
 
 static inline uint64_t virt_to_phys(uint64_t virt) {
-    return virt; /* Identity mapping for first 1GB */
+    return virt; /* 前1GB恒等映射 */
 }
 
 page_table_t *vmm_get_kernel_pml4(void);

@@ -24,7 +24,7 @@
 #define PIT_CHANNEL2  0x42
 #define PIT_COMMAND   0x43
 
-#define PIT_FREQ      1193182  /* Base frequency in Hz */
+#define PIT_FREQ      1193182  /* 基准频率（Hz） */
 
 void pit_init(uint32_t freq);
 void pit_set_frequency(uint32_t freq);

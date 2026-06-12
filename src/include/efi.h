@@ -20,21 +20,21 @@
 #include <stdint.h>
 
 /* ============================================================
- * UEFI Type Definitions (simplified for x86_64)
- * Based on UEFI Specification 2.10
+ * UEFI类型定义（x86_64简化版）
+ * 基于UEFI规范 2.10
  *
- * CRITICAL: UEFI on x86_64 uses Microsoft x64 calling convention.
- * All EFI entry points and service function pointers must use
- * the __attribute__((ms_abi)) calling convention (EFIAPI macro).
+ * 关键说明：x86_64上的UEFI使用Microsoft x64调用约定。
+ * 所有UEFI入口点和服务函数指针必须使用
+ * __attribute__((ms_abi)) 调用约定（EFIAPI宏）。
  * ============================================================ */
 
-/* EFIAPI: Microsoft x64 calling convention for UEFI */
+/* EFIAPI：用于UEFI的Microsoft x64调用约定 */
 #define EFIAPI __attribute__((ms_abi))
 
-/* char16_t equivalent for UEFI */
+/* UEFI的char16_t等价类型 */
 typedef uint16_t char16_t;
 
-/* EFI status codes */
+/* EFI状态码 */
 typedef int64_t EFI_STATUS;
 #define EFI_SUCCESS             0
 #define EFI_LOAD_ERROR          (1 | (1LL << 63))
@@ -44,17 +44,17 @@ typedef int64_t EFI_STATUS;
 #define EFI_BUFFER_TOO_SMALL    (5 | (1LL << 63))
 #define EFI_NOT_FOUND           (6 | (1LL << 63))
 
-/* Handle types */
+/* 句柄类型 */
 typedef void *EFI_HANDLE;
 typedef uint64_t EFI_EVENT;
 typedef uintptr_t EFI_PHYSICAL_ADDRESS;
 typedef uintptr_t EFI_VIRTUAL_ADDRESS;
 
-/* Console handle types (must be defined before EFI_SYSTEM_TABLE) */
+/* 控制台句柄类型（必须在 之前定义）
 typedef void *EFI_SIMPLE_TEXT_INPUT_PROTOCOL;
 typedef void *EFI_SIMPLE_TEXT_OUTPUT_PROTOCOL;
 
-/* Memory types */
+/* 内存类型 */
 #define EFI_RESERVED_MEMORY_TYPE        0
 #define EFI_LOADER_CODE                 1
 #define EFI_LOADER_DATA                 2
@@ -71,7 +71,7 @@ typedef void *EFI_SIMPLE_TEXT_OUTPUT_PROTOCOL;
 #define EFI_PAL_CODE                   13
 #define EFI_PERSISTENT_MEMORY           14
 
-/* Memory attribute flags */
+/* 内存属性标志 */
 #define EFI_MEMORY_UC      0x0000000000000001ULL
 #define EFI_MEMORY_WC      0x0000000000000002ULL
 #define EFI_MEMORY_WT      0x0000000000000004ULL
@@ -88,7 +88,7 @@ typedef void *EFI_SIMPLE_TEXT_OUTPUT_PROTOCOL;
 #define EFI_MEMORY_RUNTIME 0x8000000000000000ULL
 #define EFI_MEMORY_BS      0x0080000000000000ULL
 
-/* GUID structure */
+/* GUID结构体 */
 typedef struct {
     uint32_t data1;
     uint16_t data2;
@@ -96,14 +96,14 @@ typedef struct {
     uint8_t  data4[8];
 } EFI_GUID;
 
-/* Standard EFI GUIDs */
+/* 标准EFI GUID定义 */
 #define EFI_LOADED_IMAGE_PROTOCOL_GUID \
     {0x5B1B31A1, 0x9562, 0x11D2, {0x8E, 0x3F, 0x00, 0xA0, 0xC9, 0x69, 0x72, 0x3B}}
 
 #define EFI_GRAPHICS_OUTPUT_PROTOCOL_GUID \
     {0x9042A9DE, 0x23DC, 0x4A38, {0x96, 0xFB, 0x7A, 0xDE, 0xD0, 0x80, 0x51, 0x6A}}
 
-/* Table header */
+/* 表头 */
 typedef struct {
     uint64_t signature;
     uint32_t revision;
@@ -112,7 +112,7 @@ typedef struct {
     uint32_t reserved;
 } EFI_TABLE_HEADER;
 
-/* Memory descriptor */
+/* 内存描述符 */
 typedef struct {
     uint32_t type;
     uint64_t physical_start;
@@ -121,13 +121,13 @@ typedef struct {
     uint64_t attribute;
 } EFI_MEMORY_DESCRIPTOR;
 
-/* EFI Input Key */
+/* EFI 输入按键 */
 typedef struct {
     uint16_t scan_code;
     char16_t unicode_char;
 } EFI_INPUT_KEY;
 
-/* Graphics Output Protocol - Mode Information */
+/* 图形输出协议 - 模式信息 */
 typedef struct {
     uint32_t version;
     uint32_t horizontal_resolution;
@@ -137,13 +137,13 @@ typedef struct {
     uint32_t pixel_shift;
 } EFI_GRAPHICS_OUTPUT_MODE_INFORMATION;
 
-/* Pixel formats */
+/* 像素格式 */
 #define PIXEL_RED_GREEN_BLUE_RESERVED_8BIT_PER_COLOR  0
 #define PIXEL_BLUE_GREEN_RED_RESERVED_8BIT_PER_COLOR   1
 #define PIXEL_BIT_MASK                                  2
 #define PIXEL_BLT_ONLY                                  3
 
-/* GOP mode structure */
+/* GOP模式结构体 */
 typedef struct {
     uint32_t max_mode;
     uint32_t mode;
@@ -153,7 +153,7 @@ typedef struct {
     uint32_t frame_buffer_size;
 } EFI_GRAPHICS_OUTPUT_PROTOCOL_MODE;
 
-/* Graphics Output Protocol (simplified - function pointers as uint64_t) */
+/* 图形输出协议（简化版 - 函数指针用uint64_t表示） */
 typedef struct {
     uint64_t query_mode;
     uint64_t set_mode;
@@ -161,7 +161,7 @@ typedef struct {
     void *mode;  /* EFI_GRAPHICS_OUTPUT_PROTOCOL_MODE * */
 } EFI_GRAPHICS_OUTPUT_PROTOCOL;
 
-/* Simple text output protocol (function pointers as uint64_t) */
+/* 简单文本输出协议（函数指针用 uint64_t 表示） */
 typedef struct {
     uint64_t reset;
     uint64_t output_string;
@@ -175,7 +175,7 @@ typedef struct {
     void *mode;
 } EFI_SIMPLE_TEXT_OUTPUT_PROTOCOL_T;
 
-/* Loaded Image Protocol (simplified) */
+/* 已加载映像协议（简化版） */
 typedef struct {
     uint32_t revision;
     void *parent_handle;
@@ -191,24 +191,24 @@ typedef struct {
     void *unload;
 } EFI_LOADED_IMAGE_PROTOCOL;
 
-/* Boot Services table (simplified - function pointers as uint64_t)
- * IMPORTANT: Must match UEFI Spec 2.10 layout exactly!
- * No reserved/padding fields between protocol handler services! */
+/* 引导服务表（简化版 - 函数指针用uint64_t表示）
+ * 重要说明：必须与UEFI规范2.10的布局完全匹配！
+ * 协议处理服务之间无保留/填充字段！ */
 typedef struct {
     EFI_TABLE_HEADER hdr;
 
-    /* Task Priority Services */
+    /* 任务优先级服务 */
     void *raise_tpl;
     void *restore_tpl;
 
-    /* Memory Services */
+    /* 内存服务 */
     uint64_t allocate_pages;
     uint64_t free_pages;
     uint64_t get_memory_map;
     uint64_t allocate_pool;
     uint64_t free_pool;
 
-    /* Event & Timer Services */
+    /* 事件与定时器服务 */
     void *create_event;
     void *set_timer;
     void *wait_for_event;
@@ -216,21 +216,21 @@ typedef struct {
     void *close_event;
     void *check_event;
 
-    /* Protocol Handler Services */
+    /* 协议处理服务 */
     void *install_protocol_interface;
     void *reinstall_protocol_interface;
     void *uninstall_protocol_interface;
     uint64_t handle_protocol;
-    void *register_protocol_notify;       /* +0xA0 (was: reserved_service - REMOVED!) */
+    void *register_protocol_notify;       /* +0xA0（原为：reserved_service - 已移除！） */
     uint64_t locate_handle;               /* +0xA8 */
-    uint64_t locate_protocol;             /* +0xB0 (was: 0xB8 - FIXED!) */
+    uint64_t locate_protocol;             /* +0xB0（原为：0xB8 - 已修正！） */
     void *open_protocol;
     void *close_protocol;
     void *protocols_per_page;
     void *register_handle;
     void *unregister_handle;
 
-    /* Image Services */
+    /* 映像服务 */
     uint64_t load_image;
     uint64_t start_image;
     void *exit;
@@ -238,7 +238,7 @@ typedef struct {
     uint64_t exit_boot_services;
 } EFI_BOOT_SERVICES;
 
-/* Runtime Services table */
+/* 运行时服务表 */
 typedef struct {
     EFI_TABLE_HEADER hdr;
     void *get_time;
@@ -254,19 +254,19 @@ typedef struct {
     void *reset_system;
 } EFI_RUNTIME_SERVICES;
 
-/* Configuration Table entry */
+/* 配置表条目 */
 typedef struct {
     EFI_GUID vendor_guid;
     void *vendor_table;
 } EFI_CONFIGURATION_TABLE;
 
-/* ACPI RSDP signatures */
+/* ACPI RSDP签名 */
 #define ACPI_20_RSDP_GUID \
     {0x8868E871, 0xE4F1, 0x11D3, {0xBC, 0x22, 0x00, 0x80, 0xC7, 0x3C, 0x88, 0x81}}
 
-/* System Table (defined last, after all dependent types)
- * IMPORTANT: Must match UEFI Spec 2.10 layout exactly!
- * Each Handle field is 8 bytes on x86_64 (EFI_HANDLE = void*). */
+/* 系统表（在所有依赖类型之后定义）
+ * 重要说明：必须与 UEFI 规范 2.10 的布局完全匹配！
+ * 在 x86_64 上每个 Handle 字段为 8 字节（EFI_HANDLE = void*）。 */
 typedef struct {
     EFI_TABLE_HEADER hdr;                        /* +0x00 (24 bytes) */
     uint16_t *firmware_vendor;                   /* +0x18  (8 bytes)  */

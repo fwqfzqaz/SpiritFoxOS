@@ -19,10 +19,10 @@
 
 #include <stdint.h>
 
-/* Multiboot2 magic */
+/* Multiboot2魔数 */
 #define MULTIBOOT2_MAGIC 0x36D76289
 
-/* Multiboot2 tag types */
+/* Multiboot2标签类型 */
 #define MULTIBOOT2_TAG_END              0
 #define MULTIBOOT2_TAG_CMDLINE          1
 #define MULTIBOOT2_TAG_BOOTLOADER_NAME  2
@@ -32,20 +32,20 @@
 #define MULTIBOOT2_TAG_MMAP             6
 #define MULTIBOOT2_TAG_FRAMEBUFFER      8
 
-/* Memory types */
+/* 内存类型
 #define MULTIBOOT2_MEMORY_AVAILABLE     1
 #define MULTIBOOT2_MEMORY_RESERVED      2
 #define MULTIBOOT2_MEMORY_ACPI_RECLAIMABLE 3
 #define MULTIBOOT2_MEMORY_NVS           4
 #define MULTIBOOT2_MEMORY_UNUSABLE      5
 
-/* Multiboot2 tag header */
+/* Multiboot2标签头 */
 struct multiboot2_tag {
     uint32_t type;
     uint32_t size;
 } __attribute__((packed));
 
-/* Basic memory info tag */
+/* 基本内存信息标签 */
 struct multiboot2_tag_basic_meminfo {
     uint32_t type;
     uint32_t size;
@@ -53,7 +53,7 @@ struct multiboot2_tag_basic_meminfo {
     uint32_t mem_upper;
 } __attribute__((packed));
 
-/* Memory map entry */
+/* 内存映射条目 */
 struct multiboot2_mmap_entry {
     uint64_t base_addr;
     uint64_t length;
@@ -61,7 +61,7 @@ struct multiboot2_mmap_entry {
     uint32_t reserved;
 } __attribute__((packed));
 
-/* Memory map tag */
+/* 内存映射标签 */
 struct multiboot2_tag_mmap {
     uint32_t type;
     uint32_t size;
@@ -70,7 +70,7 @@ struct multiboot2_tag_mmap {
     struct multiboot2_mmap_entry entries[];
 } __attribute__((packed));
 
-/* Framebuffer tag */
+/* 帧缓冲区标签 */
 struct multiboot2_tag_framebuffer {
     uint32_t type;
     uint32_t size;
@@ -83,7 +83,7 @@ struct multiboot2_tag_framebuffer {
     uint8_t  color_info[];
 } __attribute__((packed));
 
-/* Iterate over multiboot2 tags */
+/* 遍历Multiboot2标签 */
 #define FOR_EACH_TAG(tag, mbi) \
     for ((tag) = (struct multiboot2_tag *)((uint8_t *)(mbi) + 8); \
          (tag)->type != MULTIBOOT2_TAG_END; \
