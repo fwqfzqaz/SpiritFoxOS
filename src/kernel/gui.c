@@ -106,6 +106,7 @@ static void __attribute__((used)) rtc_get_time(uint8_t *hour, uint8_t *min, uint
 #define WIN_SHADOW      FB_RGBA(0, 0, 0, 80)
 #define WIN_CLOSE       FB_RGB(220, 60, 60)
 #define WIN_CLOSE_HOVER FB_RGB(240, 90, 90)
+#define WIN_MAXIMIZE    FB_RGB(60, 140, 80)
 
 /* 终端 */
 #define TERM_FG         FB_RGB(0, 230, 118)
@@ -134,12 +135,16 @@ typedef struct {
     int     open;       /* 1 = 可见（已打开但可能已最小化） */
     int     active;     /* 1 = 聚焦 */
     int     minimized;   /* 1 = 隐藏在任务栏中 */
+    int     maximized;  /* 1 = 最大化状态（铺满桌面） */
     uint32_t z_order;   /* 值越大 = 渲染在越上层 */
     int32_t x, y;
     uint32_t w, h;
     int32_t drag_ox, drag_oy;   /* 拖拽偏移 */
     int     dragging;
     const char *title;
+    /* 最大化前的位置和尺寸（用于恢复） */
+    int32_t  saved_x, saved_y;
+    uint32_t saved_w, saved_h;
 } window_t;
 
 #define MAX_WINDOWS 8
@@ -149,7 +154,7 @@ static uint32_t next_z_order = 0;  /* 单调递增的Z计数器 */
 /* ---- 动画系统 ----
  * 定点数（16.16）缓动，用于平滑窗口过渡。
  * 参考：ToaruOS anim.c、SerenityOS 动画模式 */
-typedef enum { ANIM_NONE, ANIM_OPEN, ANIM_CLOSE, ANIM_MINIMIZE, ANIM_RESTORE } anim_type_t;
+typedef enum { ANIM_NONE, ANIM_OPEN, ANIM_CLOSE, ANIM_MINIMIZE, ANIM_RESTORE, ANIM_MAXIMIZE } anim_type_t;
 
 /* 本文件后续定义的全局变量的前向声明 */
 extern volatile uint64_t timer_ticks;
@@ -234,6 +239,7 @@ static int __attribute__((used)) anim_get_visual(anim_t *a, window_t *vis_out) {
     vis_out->open   = 1;
     vis_out->active = windows[a->win_id].active;
     vis_out->minimized = 0;
+    vis_out->maximized = windows[a->win_id].maximized;
     vis_out->title  = windows[a->win_id].title;
     return 1;
 }
@@ -637,9 +643,17 @@ static void draw_window(window_t *win) {
     draw_rounded_rect(close_x, close_y, 20, 20, 4, WIN_CLOSE);
     font_draw_string(close_x + 6, close_y + 2, "X", FB_WHITE, WIN_CLOSE);
 
+    /* 最大化按钮 */
+    int max_x = close_x - 26;
+    draw_rounded_rect(max_x, close_y, 20, 20, 4,
+                      win->maximized ? TB_BTN_ACTIVE : WIN_MAXIMIZE);
+    /* 最大化时显示恢复图标"□"，未最大化时显示方形图标"□" */
+    font_draw_string(max_x + 5, close_y + 2, win->maximized ? "[]" : "[]",
+                     FB_WHITE, win->maximized ? TB_BTN_ACTIVE : WIN_MAXIMIZE);
+
     /* 最小化按钮 */
-    draw_rounded_rect(close_x - 26, close_y, 20, 20, 4, TB_BTN_NORMAL);
-    font_draw_string(close_x - 26 + 6, close_y + 2, "_", FB_WHITE, TB_BTN_NORMAL);
+    draw_rounded_rect(max_x - 26, close_y, 20, 20, 4, TB_BTN_NORMAL);
+    font_draw_string(max_x - 26 + 6, close_y + 2, "_", FB_WHITE, TB_BTN_NORMAL);
 
     /* 边框 */
     fb_draw_rect(win->x, win->y, win->w, win->h, WIN_BORDER);
@@ -827,6 +841,9 @@ static void win_open(int id, const char *title, uint32_t w, uint32_t h) {
         break;
     }
     win->dragging = 0;
+    win->maximized = 0;
+    win->saved_x = 0; win->saved_y = 0;
+    win->saved_w = 0; win->saved_h = 0;
 
     /* 取消其他窗口的激活状态 */
     for (int i = 0; i < MAX_WINDOWS; i++)
@@ -851,7 +868,7 @@ static void win_close(int id) {
     anim_start(ANIM_CLOSE, id,
               w->x, w->y, (uint16_t)w->w, (uint16_t)w->h, 255,   /* 起始：当前状态 */
               cx, cy, (uint16_t)(w->w / 4), (uint16_t)(w->h / 4), 64,  /* 目标：小，淡出 */
-    /* 暂不设置open=0 — anim_finalize在完成时处理 */
+              20);  /* 暂不设置open=0 — anim_finalize在完成时处理 */
 }
 
 static void win_minimize(int id) {
@@ -875,6 +892,65 @@ static void win_restore(int id) {
 
     windows[id].minimized = 0;
     win_focus(id);
+}
+
+/* 最大化窗口：铺满桌面区域（留出任务栏） */
+static void win_maximize(int id) {
+    if (id >= MAX_WINDOWS || !windows[id].open || windows[id].minimized) return;
+    window_t *w = &windows[id];
+
+    if (w->maximized) return;  /* 已经最大化 */
+
+    /* 保存当前位置和尺寸 */
+    w->saved_x = w->x;
+    w->saved_y = w->y;
+    w->saved_w = w->w;
+    w->saved_h = w->h;
+
+    /* 计算目标尺寸：铺满桌面（留出任务栏高度TB_H） */
+    int32_t tx = 0;
+    int32_t ty = 0;
+    uint32_t tw = fb.width;
+    uint32_t th = fb.height - TB_H;
+
+    /* 动画：从当前尺寸平滑过渡到最大化 */
+    anim_start(ANIM_MAXIMIZE, id,
+              w->x, w->y, (uint16_t)w->w, (uint16_t)w->h, 255,
+              tx, ty, (uint16_t)tw, (uint16_t)th, 255,
+              20);  /* 200ms */
+
+    /* 立即设置最大化状态和目标尺寸 */
+    w->maximized = 1;
+    w->x = tx;  w->y = ty;
+    w->w = tw;  w->h = th;
+}
+
+/* 从最大化状态恢复 */
+static void win_restore_from_max(int id) {
+    if (id >= MAX_WINDOWS || !windows[id].open || !windows[id].maximized) return;
+    window_t *w = &windows[id];
+
+    /* 动画：从最大化恢复到原始尺寸 */
+    anim_start(ANIM_MAXIMIZE, id,
+              0, 0, (uint16_t)fb.width, (uint16_t)(fb.height - TB_H), 255,
+              w->saved_x, w->saved_y, (uint16_t)w->saved_w, (uint16_t)w->saved_h, 255,
+              20);
+
+    /* 恢复原始位置和尺寸 */
+    w->maximized = 0;
+    w->x = w->saved_x;
+    w->y = w->saved_y;
+    w->w = w->saved_w;
+    w->h = w->saved_h;
+}
+
+/* 切换最大化状态 */
+static void win_toggle_maximize(int id) {
+    if (id >= MAX_WINDOWS || !windows[id].open || windows[id].minimized) return;
+    if (windows[id].maximized)
+        win_restore_from_max(id);
+    else
+        win_maximize(id);
 }
 
 /* 获取给定Z位置的窗口ID（0=底层，count-1=顶层）。
@@ -931,7 +1007,17 @@ static int win_close_hit(int id, int32_t mx, int32_t my) {
 static int win_minimize_hit(int id, int32_t mx, int32_t my) {
     window_t *w = &windows[id];
     if (!w->open || w->minimized) return 0;
-    /* 最小化按钮在关闭按钮左侧 */
+    /* 最小化按钮在最大化按钮左侧：close-24, max-26, min-26 */
+    int32_t cx = w->x + w->w - 24 - 26 - 26;
+    int32_t cy = w->y + 4;
+    return mx >= cx && mx < cx + 20 && my >= cy && my < cy + 20;
+}
+
+/* 最大化按钮命中测试（位于关闭按钮和最小化按钮之间） */
+static int win_maximize_hit(int id, int32_t mx, int32_t my) {
+    window_t *w = &windows[id];
+    if (!w->open || w->minimized) return 0;
+    /* 最大化按钮在关闭按钮左侧：close-24, max-26 */
     int32_t cx = w->x + w->w - 24 - 26;
     int32_t cy = w->y + 4;
     return mx >= cx && mx < cx + 20 && my >= cy && my < cy + 20;
@@ -1482,6 +1568,12 @@ void gui_run(void) {
                           int i = get_window_by_z(p);
                           if (win_close_hit(i, mx, my)) { win_close(i); hit = -2; }
                       }}
+                    /* 检查最大化按钮 */
+                    if (hit >= -1) { int n = count_open_windows();
+                      for (int p = n - 1; p >= 0 && hit < 0; p--) {
+                          int i = get_window_by_z(p);
+                          if (win_maximize_hit(i, mx, my)) { win_toggle_maximize(i); hit = -2; }
+                      }}
                     /* 检查最小化按钮 */
                     if (hit >= -1) { int n = count_open_windows();
                       for (int p = n - 1; p >= 0 && hit < 0; p--) {
@@ -1495,9 +1587,17 @@ void gui_run(void) {
                           if (win_hit_test(i, mx, my)) {
                               win_focus(i);
                               if (win_titlebar_hit(i, mx, my)) {
+                                  /* 最大化状态下拖拽标题栏：先取消最大化 */
+                                  if (windows[i].maximized) {
+                                      win_restore_from_max(i);
+                                      /* 拖拽偏移基于恢复后的窗口位置 */
+                                      drag_ox = mx - windows[i].x;
+                                      drag_oy = my - windows[i].y;
+                                  } else {
+                                      drag_ox = mx - windows[i].x;
+                                      drag_oy = my - windows[i].y;
+                                  }
                                   drag_win = i;
-                                  drag_ox = mx - windows[i].x;
-                                  drag_oy = my - windows[i].y;
                                   mouse_state = MOUSE_DRAGGING;  /* 跳过PRESSED状态，直接进入拖拽 */
                               } else {
                                   mouse_state = MOUSE_PRESSED;

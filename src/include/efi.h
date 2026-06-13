@@ -50,7 +50,7 @@ typedef uint64_t EFI_EVENT;
 typedef uintptr_t EFI_PHYSICAL_ADDRESS;
 typedef uintptr_t EFI_VIRTUAL_ADDRESS;
 
-/* 控制台句柄类型（必须在 之前定义）
+/* 控制台句柄类型（必须在之前定义） */
 typedef void *EFI_SIMPLE_TEXT_INPUT_PROTOCOL;
 typedef void *EFI_SIMPLE_TEXT_OUTPUT_PROTOCOL;
 

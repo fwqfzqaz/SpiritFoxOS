@@ -325,6 +325,8 @@ int xhci_control_transfer(xhci_controller_t *ctrl, uint8_t slot_id,
         data.control = (TRB_TYPE_DATA_STAGE << 10) | TRB_IOC;
         data.control |= direction_in ? (1u << 16) : (2u << 16);  /* IN/OUT方向 */
 
+    }  /* end has_data_stage */
+
     /* STATUS阶段TRB：方向与DATA阶段相反 */
     xhci_trb_t status = {0};
     status.control = (TRB_TYPE_STATUS_STAGE << 10) | TRB_IOC;
@@ -363,7 +365,7 @@ int xhci_control_transfer(xhci_controller_t *ctrl, uint8_t slot_id,
  * 配置端点命令
  * ============================================================ */
 
-int xhci_configure_endpoint(xhci_controller_t *ctrl, uint8_t slot_id,
+int __attribute__((used)) xhci_configure_endpoint(xhci_controller_t *ctrl, uint8_t slot_id,
                             uint64_t input_ctx_phys) {
     if (!ctrl || !ctrl->initialized) return -1;
 
@@ -380,7 +382,7 @@ int xhci_configure_endpoint(xhci_controller_t *ctrl, uint8_t slot_id,
  * 评估上下文命令
  * ============================================================ */
 
-int xhci_evaluate_context(xhci_controller_t *ctrl, uint8_t slot_id,
+int __attribute__((used)) xhci_evaluate_context(xhci_controller_t *ctrl, uint8_t slot_id,
                            uint64_t input_ctx_phys) {
     xhci_trb_t cmd = {0};
     cmd.parameter_low = (uint32_t)(input_ctx_phys & 0xFFFFFFFF);
@@ -395,7 +397,7 @@ int xhci_evaluate_context(xhci_controller_t *ctrl, uint8_t slot_id,
  * 非EP0端点上的常规/中断传输
  * ============================================================ */
 
-int xhci_transfer_data(xhci_controller_t *ctrl, uint8_t slot_id,
+int __attribute__((used)) xhci_transfer_data(xhci_controller_t *ctrl, uint8_t slot_id,
                        uint8_t ep_index, void *buf, uint32_t len,
                        int direction_in) {
     if (!ctrl || !ctrl->initialized || slot_id < 1 || slot_id > XHCI_MAX_SLOTS)
@@ -440,7 +442,7 @@ int xhci_transfer_data(xhci_controller_t *ctrl, uint8_t slot_id,
  * 控制器初始化
  * ============================================================ */
 
-int xhci_init(pci_device_t *pci_dev) {
+int __attribute__((used)) xhci_init(pci_device_t *pci_dev) {
     memset(&xhci_ctrl, 0, sizeof(xhci_controller_t));
     xhci_ctrl.pci_dev = *pci_dev;
 
@@ -566,7 +568,7 @@ int xhci_init(pci_device_t *pci_dev) {
     return 0;
 }
 
-void xhci_handler(struct interrupt_frame *frame) {
+void __attribute__((used)) xhci_handler(struct interrupt_frame *frame) {
     (void)frame;
     volatile uint32_t *iman = &XHCI_REG32(xhci_ctrl.mmio_base, xhci_ctrl.rts_offset + 0x20 + IMAN);
     *iman |= 1;
@@ -574,12 +576,12 @@ void xhci_handler(struct interrupt_frame *frame) {
     pic_send_eoi(11);
 }
 
-xhci_controller_t *xhci_get_controller(void) {
+xhci_controller_t * __attribute__((used)) xhci_get_controller(void) {
     if (xhci_ctrl.initialized) return &xhci_ctrl;
     return NULL;
 }
 
-int xhci_get_device_count(void) {
+int __attribute__((used)) xhci_get_device_count(void) {
     int count = 0;
     for (int i = 1; i <= XHCI_MAX_SLOTS; i++) {
         if (xhci_ctrl.devices[i].active) count++;
@@ -587,7 +589,7 @@ int xhci_get_device_count(void) {
     return count;
 }
 
-xhci_device_t *xhci_get_device_info(int slot_id) {
+xhci_device_t * __attribute__((used)) xhci_get_device_info(int slot_id) {
     if (slot_id < 1 || slot_id > XHCI_MAX_SLOTS) return NULL;
     if (!xhci_ctrl.devices[slot_id].active) return NULL;
     return &xhci_ctrl.devices[slot_id];
