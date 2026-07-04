@@ -1,0 +1,34 @@
+# SpiritFoxOS - .gitignore
+
+# Build output
+build/
+
+# Generated header (from logo.png)
+kernel/include/logo_data.h
+
+# Binary packages
+cs/*.deb
+cs/*.jar
+
+# Disk images
+*.img
+*.iso
+
+# Object files
+*.o
+*.elf
+*.bin
+
+# Log files
+*.log
+
+# IDE / Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
