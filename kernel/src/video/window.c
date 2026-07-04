@@ -14,6 +14,11 @@
 #include "string.h"
 #include "boot.h"
 #include "logo_data.h"
+#include "memory.h"
+#include "pci.h"
+#include "blkdev.h"
+#include "apic.h"
+#include "hal.h"
 
 extern BootInfo *g_boot_info;
 
@@ -43,8 +48,8 @@ extern BootInfo *g_boot_info;
  *  APP DEFINITIONS
  * ================================================================ */
 
-#define NUM_APPS 7
-/* 0-4: main apps, 5: Home, 6: Trash */
+#define NUM_APPS 8
+/* 0-4: main apps, 5: Home, 6: Trash, 7: Minesweeper */
 
 static const char *app_names[NUM_APPS] = {
     "Terminal",       /* 0 */
@@ -53,7 +58,8 @@ static const char *app_names[NUM_APPS] = {
     "Settings",       /* 3 */
     "About",          /* 4 */
     "Home",           /* 5 */
-    "Trash"           /* 6 */
+    "Trash",          /* 6 */
+    "Minesweeper"     /* 7 */
 };
 
 /* ================================================================
@@ -169,37 +175,155 @@ static void term_print(const char *s)
     }
 }
 
+/* Integer to string helper */
+static void int_to_str(int n, char *buf)
+{
+    int pos = 0;
+    char tmp[12];
+    int t = 0;
+    if (n == 0) { buf[0] = '0'; buf[1] = '\0'; return; }
+    if (n < 0) { buf[pos++] = '-'; n = -n; }
+    while (n > 0) { tmp[t++] = '0' + (n % 10); n /= 10; }
+    for (int j = t - 1; j >= 0; j--) buf[pos++] = tmp[j];
+    buf[pos] = '\0';
+}
+
+static void uint_to_str(unsigned int n, char *buf)
+{
+    int pos = 0;
+    char tmp[12];
+    int t = 0;
+    if (n == 0) { buf[0] = '0'; buf[1] = '\0'; return; }
+    while (n > 0) { tmp[t++] = '0' + (n % 10); n /= 10; }
+    for (int j = t - 1; j >= 0; j--) buf[pos++] = tmp[j];
+    buf[pos] = '\0';
+}
+
 static void term_execute(const char *cmd)
 {
+    /* Skip leading spaces */
+    while (*cmd == ' ') cmd++;
+    if (*cmd == '\0') return;
+
     term_print("> ");
     term_print(cmd);
     term_print("\n");
-    if (strcmp(cmd, "help") == 0) {
-        term_print("SpiritFoxOS Terminal v0.2\n");
-        term_print("Commands: help, clear, version, sysinfo\n");
-    } else if (strcmp(cmd, "clear") == 0) {
+
+    /* Simple argument parsing */
+    char cmd_copy[TERM_BUF_COLS];
+    strncpy(cmd_copy, cmd, TERM_BUF_COLS - 1);
+    cmd_copy[TERM_BUF_COLS - 1] = '\0';
+
+    char *argv[8];
+    int argc = 0;
+    char *tok = cmd_copy;
+    while (*tok && argc < 8) {
+        while (*tok == ' ') tok++;
+        if (*tok == '\0') break;
+        argv[argc++] = tok;
+        while (*tok && *tok != ' ') tok++;
+        if (*tok) *tok++ = '\0';
+    }
+
+    if (argc == 0) return;
+
+    char nbuf[32];
+
+    if (strcmp(argv[0], "help") == 0) {
+        term_print("SpiritFoxOS Terminal v0.3\n");
+        term_print("General:\n");
+        term_print("  help         - Show this help\n");
+        term_print("  clear        - Clear terminal\n");
+        term_print("  version      - Show OS version\n");
+        term_print("  echo [text]  - Print text\n");
+        term_print("  about        - About SpiritFoxOS\n");
+        term_print("System:\n");
+        term_print("  sysinfo      - System information\n");
+        term_print("  meminfo      - Memory information\n");
+        term_print("  uptime       - System uptime\n");
+        term_print("  pcilist      - List PCI devices\n");
+        term_print("  blklist      - List block devices\n");
+        term_print("  reboot       - Reboot system\n");
+    } else if (strcmp(argv[0], "clear") == 0) {
         term_clear();
-    } else if (strcmp(cmd, "version") == 0) {
+    } else if (strcmp(argv[0], "version") == 0) {
         term_print("SpiritFoxOS v0.5.0 - Multi-Window GUI\n");
-    } else if (strcmp(cmd, "sysinfo") == 0) {
-        term_print("Screen: ");
-        uint32_t w = fb_get_width(), h = fb_get_height();
-        char buf[32]; int pos = 0; int n = (int)w;
-        char tmp[12]; int t = 0;
-        if (n == 0) buf[pos++] = '0';
-        else { while (n > 0) { tmp[t++] = '0' + (n % 10); n /= 10; }
-            for (int j = t - 1; j >= 0; j--) buf[pos++] = tmp[j]; }
-        buf[pos++] = 'x'; n = (int)h; t = 0;
-        if (n == 0) buf[pos++] = '0';
-        else { while (n > 0) { tmp[t++] = '0' + (n % 10); n /= 10; }
-            for (int j = t - 1; j >= 0; j--) buf[pos++] = tmp[j]; }
-        buf[pos] = '\0';
-        term_print(buf);
-        term_print(" 32bpp\n");
-    } else if (cmd[0] != '\0') {
-        term_print("Unknown: ");
-        term_print(cmd);
+    } else if (strcmp(argv[0], "about") == 0) {
+        term_print("SpiritFoxOS v0.5.0\n");
+        term_print("A hobby x86_64 operating system\n");
+        term_print("Multi-Window GUI with mouse support\n");
+        term_print("32-bit double-buffered framebuffer\n");
+    } else if (strcmp(argv[0], "echo") == 0) {
+        for (int i = 1; i < argc; i++) {
+            if (i > 1) term_print(" ");
+            term_print(argv[i]);
+        }
         term_print("\n");
+    } else if (strcmp(argv[0], "sysinfo") == 0) {
+        term_print("Screen: ");
+        uint_to_str((unsigned int)fb_get_width(), nbuf);
+        term_print(nbuf);
+        term_print("x");
+        uint_to_str((unsigned int)fb_get_height(), nbuf);
+        term_print(nbuf);
+        term_print(" 32bpp\n");
+        term_print("GUI: Multi-Window Manager\n");
+        term_print("Windows: ");
+        int_to_str(num_wins, nbuf);
+        term_print(nbuf);
+        term_print("\n");
+    } else if (strcmp(argv[0], "meminfo") == 0) {
+        uint64_t total = pmm_total_pages();
+        uint64_t used  = pmm_used_pages();
+        term_print("Memory Information:\n");
+        term_print("  Total pages : ");
+        uint_to_str((unsigned int)total, nbuf);
+        term_print(nbuf);
+        term_print("\n  Used pages  : ");
+        uint_to_str((unsigned int)used, nbuf);
+        term_print(nbuf);
+        term_print("\n  Free pages  : ");
+        uint_to_str((unsigned int)(total - used), nbuf);
+        term_print(nbuf);
+        term_print("\n  Total memory: ");
+        uint_to_str((unsigned int)(total * 4), nbuf);
+        term_print(nbuf);
+        term_print(" KB\n  Used memory : ");
+        uint_to_str((unsigned int)(used * 4), nbuf);
+        term_print(nbuf);
+        term_print(" KB\n");
+    } else if (strcmp(argv[0], "uptime") == 0) {
+        uint64_t ms = timer_get_ms();
+        uint64_t sec = ms / 1000;
+        uint64_t rem = ms % 1000;
+        term_print("Uptime: ");
+        uint_to_str((unsigned int)sec, nbuf);
+        term_print(nbuf);
+        term_print(".");
+        uint_to_str((unsigned int)rem, nbuf);
+        term_print(nbuf);
+        term_print(" seconds\nLAPIC ID: ");
+        uint_to_str((unsigned int)apic_get_lapic_id(), nbuf);
+        term_print(nbuf);
+        term_print("\n");
+    } else if (strcmp(argv[0], "pcilist") == 0) {
+        term_print("PCI devices:\n");
+        pci_list_devices();
+    } else if (strcmp(argv[0], "blklist") == 0) {
+        term_print("Block devices:\n");
+        blkdev_list();
+    } else if (strcmp(argv[0], "reboot") == 0) {
+        term_print("Rebooting...\n");
+        uint8_t val = hal_inb(0x61);
+        hal_outb(0x61, (uint8_t)(val | 0x80));
+        hal_io_wait();
+        hal_outb(0x61, val);
+        hal_outb(0x64, 0xFE);
+        for (;;) __asm__ volatile ("hlt");
+    } else {
+        term_print("Unknown command: ");
+        term_print(argv[0]);
+        term_print("\nType 'help' for available commands.\n");
     }
 }
 
@@ -273,6 +397,261 @@ static void fill_rounded_rect(int x, int y, int w, int h, int r, fb_color_t colo
         int dx = i + 1;
         fb_fill_rect(x + dx, y + h - r + i, w - 2 * dx, 1, color);
     }
+}
+
+/* ================================================================
+ *  MINESWEEPER GAME
+ * ================================================================ */
+
+/* Forward declaration - draw_window_frame is defined later */
+static void draw_window_frame(int x, int y, int w, int h, const char *title,
+                              int active, int maximized);
+
+#define MS_ROWS 9
+#define MS_COLS 9
+#define MS_MINES 10
+#define MS_CELL_SIZE 24
+
+/* Cell states */
+#define MS_HIDDEN   0
+#define MS_REVEALED 1
+#define MS_FLAGGED  2
+
+static int ms_board[MS_ROWS][MS_COLS];      /* -1=mine, 0-8=adjacent count */
+static int ms_state[MS_ROWS][MS_COLS];       /* MS_HIDDEN/REVEALED/FLAGGED */
+static int ms_game_over;   /* 0=playing, 1=lost, 2=won */
+static int ms_started;     /* 0=not started, 1=started */
+static int ms_flags;       /* number of flags placed */
+static int ms_revealed;    /* number of cells revealed */
+static int ms_first_click; /* 1=first click hasn't happened yet */
+
+static void ms_init(void)
+{
+    for (int r = 0; r < MS_ROWS; r++)
+        for (int c = 0; c < MS_COLS; c++) {
+            ms_board[r][c] = 0;
+            ms_state[r][c] = MS_HIDDEN;
+        }
+    ms_game_over = 0;
+    ms_started = 0;
+    ms_flags = 0;
+    ms_revealed = 0;
+    ms_first_click = 1;
+}
+
+static void ms_place_mines(int safe_r, int safe_c)
+{
+    /* Place mines randomly, avoiding the first-clicked cell and its neighbors */
+    int placed = 0;
+    while (placed < MS_MINES) {
+        int r = 0, c = 0;
+        /* Simple LCG pseudo-random using a static state */
+        static unsigned int ms_seed = 12345;
+        ms_seed = ms_seed * 1103515245 + 12345;
+        r = (ms_seed >> 16) % MS_ROWS;
+        ms_seed = ms_seed * 1103515245 + 12345;
+        c = (ms_seed >> 16) % MS_COLS;
+        if (ms_board[r][c] == -1) continue;
+        if (r >= safe_r - 1 && r <= safe_r + 1 &&
+            c >= safe_c - 1 && c <= safe_c + 1) continue;
+        ms_board[r][c] = -1;
+        placed++;
+    }
+    /* Calculate adjacency numbers */
+    for (int r = 0; r < MS_ROWS; r++) {
+        for (int c = 0; c < MS_COLS; c++) {
+            if (ms_board[r][c] == -1) continue;
+            int count = 0;
+            for (int dr = -1; dr <= 1; dr++)
+                for (int dc = -1; dc <= 1; dc++) {
+                    int nr = r + dr, nc = c + dc;
+                    if (nr >= 0 && nr < MS_ROWS && nc >= 0 && nc < MS_COLS &&
+                        ms_board[nr][nc] == -1)
+                        count++;
+                }
+            ms_board[r][c] = count;
+        }
+    }
+}
+
+static void ms_reveal(int r, int c)
+{
+    if (r < 0 || r >= MS_ROWS || c < 0 || c >= MS_COLS) return;
+    if (ms_state[r][c] != MS_HIDDEN) return;
+    ms_state[r][c] = MS_REVEALED;
+    ms_revealed++;
+    if (ms_board[r][c] == 0) {
+        /* Flood-fill reveal for empty cells */
+        for (int dr = -1; dr <= 1; dr++)
+            for (int dc = -1; dc <= 1; dc++)
+                ms_reveal(r + dr, c + dc);
+    }
+}
+
+static void ms_check_win(void)
+{
+    if (ms_revealed == MS_ROWS * MS_COLS - MS_MINES)
+        ms_game_over = 2;
+}
+
+static void ms_handle_click(int r, int c, int is_right)
+{
+    if (ms_game_over) return;
+    if (r < 0 || r >= MS_ROWS || c < 0 || c >= MS_COLS) return;
+
+    if (is_right) {
+        /* Toggle flag */
+        if (ms_state[r][c] == MS_HIDDEN) {
+            ms_state[r][c] = MS_FLAGGED;
+            ms_flags++;
+        } else if (ms_state[r][c] == MS_FLAGGED) {
+            ms_state[r][c] = MS_HIDDEN;
+            ms_flags--;
+        }
+        return;
+    }
+
+    /* Left click */
+    if (ms_state[r][c] != MS_HIDDEN) return;
+
+    if (ms_first_click) {
+        ms_first_click = 0;
+        ms_place_mines(r, c);
+        ms_started = 1;
+    }
+
+    if (ms_board[r][c] == -1) {
+        /* Hit a mine - game over */
+        ms_state[r][c] = MS_REVEALED;
+        ms_game_over = 1;
+        /* Reveal all mines */
+        for (int rr = 0; rr < MS_ROWS; rr++)
+            for (int cc = 0; cc < MS_COLS; cc++)
+                if (ms_board[rr][cc] == -1)
+                    ms_state[rr][cc] = MS_REVEALED;
+        return;
+    }
+
+    ms_reveal(r, c);
+    ms_check_win();
+}
+
+/* Number colors for minesweeper (1-8) */
+static const fb_color_t ms_num_colors[9] = {
+    0x00000000,   /* 0 - unused */
+    0x002050D0,   /* 1 - blue */
+    0x00208020,   /* 2 - green */
+    0x00D02020,   /* 3 - red */
+    0x00102080,   /* 4 - dark blue */
+    0x00801010,   /* 5 - dark red */
+    0x00208080,   /* 6 - teal */
+    0x00000000,   /* 7 - black */
+    0x00808080,   /* 8 - gray */
+};
+
+static void draw_minesweeper_window(WinSlot *ws)
+{
+    draw_window_frame(ws->x, ws->y, ws->w, ws->h, "Minesweeper",
+                      ws == &wins[focus_win], ws->maximized);
+
+    int grid_w = MS_COLS * MS_CELL_SIZE;
+    int grid_h = MS_ROWS * MS_CELL_SIZE;
+    int gx = ws->x + (ws->w - grid_w) / 2;
+    int gy = ws->y + TITLE_BAR_HEIGHT + 28;
+
+    /* Info bar: mines remaining / game status */
+    {
+        int bar_y = ws->y + TITLE_BAR_HEIGHT + 4;
+        fb_color_t info_bg = 0x00101C30;
+        fb_fill_rect(ws->x + 8, bar_y, ws->w - 16, 20, info_bg);
+        fb_draw_rect(ws->x + 8, bar_y, ws->w - 16, 20, COLOR_TASKBAR_LINE);
+
+        char buf[32];
+        if (ms_game_over == 1) {
+            fb_draw_string(ws->x + 16, bar_y + 4, "Game Over! - Click to restart",
+                           COLOR_DANGER, info_bg);
+        } else if (ms_game_over == 2) {
+            fb_draw_string(ws->x + 16, bar_y + 4, "You Win! - Click to restart",
+                           COLOR_SUCCESS, info_bg);
+        } else {
+            int_to_str(MS_MINES - ms_flags, buf);
+            fb_draw_string(ws->x + 16, bar_y + 4, "Mines: ", COLOR_TEXT_BRIGHT, info_bg);
+            fb_draw_string(ws->x + 64, bar_y + 4, buf, COLOR_WARNING, info_bg);
+            if (!ms_started) {
+                fb_draw_string(ws->x + 110, bar_y + 4, "Click to start",
+                               COLOR_TEXT_DIM, info_bg);
+            }
+        }
+    }
+
+    /* Draw grid */
+    for (int r = 0; r < MS_ROWS; r++) {
+        for (int c = 0; c < MS_COLS; c++) {
+            int cx = gx + c * MS_CELL_SIZE;
+            int cy = gy + r * MS_CELL_SIZE;
+
+            if (ms_state[r][c] == MS_HIDDEN) {
+                /* Unrevealed cell - raised 3D look */
+                fb_fill_rect(cx, cy, MS_CELL_SIZE, MS_CELL_SIZE, 0x00607898);
+                /* Highlight (top-left) */
+                fb_fill_rect(cx, cy, MS_CELL_SIZE, 2, 0x0080A0C0);
+                fb_fill_rect(cx, cy, 2, MS_CELL_SIZE, 0x0080A0C0);
+                /* Shadow (bottom-right) */
+                fb_fill_rect(cx, cy + MS_CELL_SIZE - 2, MS_CELL_SIZE, 2, 0x00405060);
+                fb_fill_rect(cx + MS_CELL_SIZE - 2, cy, 2, MS_CELL_SIZE, 0x00405060);
+            } else if (ms_state[r][c] == MS_FLAGGED) {
+                /* Flagged cell - same as hidden but with flag */
+                fb_fill_rect(cx, cy, MS_CELL_SIZE, MS_CELL_SIZE, 0x00607898);
+                fb_fill_rect(cx, cy, MS_CELL_SIZE, 2, 0x0080A0C0);
+                fb_fill_rect(cx, cy, 2, MS_CELL_SIZE, 0x0080A0C0);
+                fb_fill_rect(cx, cy + MS_CELL_SIZE - 2, MS_CELL_SIZE, 2, 0x00405060);
+                fb_fill_rect(cx + MS_CELL_SIZE - 2, cy, 2, MS_CELL_SIZE, 0x00405060);
+                /* Flag icon */
+                int fcx = cx + MS_CELL_SIZE / 2;
+                int fcy = cy + MS_CELL_SIZE / 2;
+                /* Pole */
+                fb_fill_rect(fcx + 1, fcy - 7, 2, 14, 0x00202020);
+                /* Flag triangle (red) */
+                fb_fill_rect(fcx - 5, fcy - 7, 6, 3, COLOR_DANGER);
+                fb_fill_rect(fcx - 4, fcy - 4, 5, 2, COLOR_DANGER);
+                fb_fill_rect(fcx - 3, fcy - 2, 4, 1, COLOR_DANGER);
+                /* Base */
+                fb_fill_rect(fcx - 4, fcy + 5, 10, 2, 0x00202020);
+            } else {
+                /* Revealed cell */
+                fb_fill_rect(cx, cy, MS_CELL_SIZE, MS_CELL_SIZE, 0x00C0C8D0);
+                fb_draw_rect(cx, cy, MS_CELL_SIZE, MS_CELL_SIZE, 0x00909898);
+
+                if (ms_board[r][c] == -1) {
+                    /* Mine */
+                    int mcx = cx + MS_CELL_SIZE / 2;
+                    int mcy = cy + MS_CELL_SIZE / 2;
+                    /* Body */
+                    fb_fill_rect(mcx - 4, mcy - 4, 8, 8, 0x00202020);
+                    /* Spikes */
+                    fb_fill_rect(mcx - 6, mcy - 1, 12, 2, 0x00202020);
+                    fb_fill_rect(mcx - 1, mcy - 6, 2, 12, 0x00202020);
+                    /* Highlight */
+                    fb_fill_rect(mcx - 2, mcy - 2, 2, 2, 0x00D0D0D0);
+                    /* Red background if this was the clicked mine */
+                    if (ms_game_over == 1 && r == (ms_game_over >> 8) && c == (ms_game_over & 0xFF)) {
+                        /* nothing extra - the whole grid is revealed anyway */
+                    }
+                } else if (ms_board[r][c] > 0) {
+                    /* Number */
+                    char num_str[2] = { '0' + ms_board[r][c], '\0' };
+                    fb_draw_string(cx + MS_CELL_SIZE / 2 - 4,
+                                   cy + MS_CELL_SIZE / 2 - 8,
+                                   num_str,
+                                   ms_num_colors[ms_board[r][c]],
+                                   0x00C0C8D0);
+                }
+            }
+        }
+    }
+
+    /* Grid outer border */
+    fb_draw_rect(gx - 1, gy - 1, grid_w + 2, grid_h + 2, COLOR_TASKBAR_LINE);
 }
 
 /* ================================================================
@@ -422,6 +801,31 @@ static void draw_icon_trash(int ix, int iy, int hover, int pressed)
     fb_draw_line(bx + 15, by + 6, bx + 15, by + 20, 0x00909898);
 }
 
+static void draw_icon_minesweeper(int ix, int iy, int hover, int pressed)
+{
+    fb_color_t bg = pressed ? COLOR_PRIMARY_DARK :
+                    hover  ? COLOR_PRIMARY_LIGHT : COLOR_PRIMARY;
+    fill_rounded_rect(ix, iy, ICON_SIZE, ICON_SIZE, 6, bg);
+    /* Mine icon */
+    int cx = ix + ICON_SIZE / 2, cy = iy + ICON_SIZE / 2;
+    /* Mine body */
+    fb_fill_rect(cx - 5, cy - 5, 10, 10, 0x00202020);
+    /* Spikes */
+    fb_fill_rect(cx - 8, cy - 1, 16, 2, 0x00202020);
+    fb_fill_rect(cx - 1, cy - 8, 2, 16, 0x00202020);
+    /* Diagonal spikes */
+    for (int d = -6; d <= -4; d++) {
+        fb_put_pixel(cx + d, cy + d, 0x00202020);
+        fb_put_pixel(cx - d - 1, cy + d, 0x00202020);
+    }
+    for (int d = 4; d <= 6; d++) {
+        fb_put_pixel(cx + d, cy + d, 0x00202020);
+        fb_put_pixel(cx - d - 1, cy + d, 0x00202020);
+    }
+    /* Highlight */
+    fb_fill_rect(cx - 2, cy - 3, 2, 2, 0x00D0D0D0);
+}
+
 typedef void (*icon_draw_fn)(int, int, int, int);
 
 static const icon_draw_fn icon_drawers[NUM_APPS] = {
@@ -431,7 +835,8 @@ static const icon_draw_fn icon_drawers[NUM_APPS] = {
     draw_icon_settings,
     draw_icon_about,
     draw_icon_home,
-    draw_icon_trash
+    draw_icon_trash,
+    draw_icon_minesweeper
 };
 
 static void draw_desktop_icon(int idx, int hover, int pressed)
@@ -496,6 +901,9 @@ static void draw_mouse_cursor(int cx, int cy)
     }
 }
 
+/* Forward declaration - defined in start menu section */
+static void draw_fox_face(int x, int y, int size);
+
 /* ================================================================
  *  TASKBAR - Three zones: Start | Window list | System tray
  * ================================================================ */
@@ -527,13 +935,8 @@ static void draw_taskbar(void)
         int btn_w = START_BTN_W, btn_h = TASKBAR_HEIGHT - 10;
         fb_color_t btn_bg = start_menu_open ? COLOR_PRIMARY_DARK : COLOR_PRIMARY;
         fill_rounded_rect(btn_x, btn_y, btn_w, btn_h, 4, btn_bg);
-        /* Fox icon - simple diamond */
-        int cx = btn_x + btn_w / 2, cy = btn_y + btn_h / 2;
-        fb_fill_rect(cx - 2, cy - 6, 4, 4, COLOR_TEXT_BRIGHT);
-        fb_fill_rect(cx - 4, cy - 2, 8, 4, COLOR_TEXT_BRIGHT);
-        fb_fill_rect(cx - 6, cy + 2, 4, 4, COLOR_TEXT_BRIGHT);
-        fb_fill_rect(cx + 2, cy + 2, 4, 4, COLOR_TEXT_BRIGHT);
-        fb_fill_rect(cx - 2, cy + 6, 4, 2, COLOR_TEXT_BRIGHT);
+        /* Fox face icon */
+        draw_fox_face(btn_x + (btn_w - 20) / 2, btn_y + (btn_h - 20) / 2, 20);
     }
 
     /* === MIDDLE: Window list === */
@@ -602,84 +1005,363 @@ static void draw_taskbar(void)
 }
 
 /* ================================================================
- *  START MENU
+ *  START MENU - Enhanced with sections, mini icons, power options
  * ================================================================ */
 
-#define START_MENU_W     220
-#define START_MENU_ITEM_H 30
-#define START_MENU_ITEMS  (NUM_APPS + 2)  /* apps + separator + shutdown */
+#define START_MENU_W          260
+#define START_MENU_ITEM_H     26
+#define START_MENU_HEADER_H   38
+#define START_MENU_SECTION_H  20
+#define START_MENU_SEP_H      6
+#define START_MENU_POWER_H    30
+#define START_MENU_USER_H     32
+#define START_MENU_BOTTOM_PAD 4
+
+/* Menu item indices:
+ * 0-5: Applications (Terminal..Minesweeper)
+ * 6-7: Places (Home, Trash)
+ * 8:   Shutdown
+ * 9:   Restart
+ */
+#define SM_ITEM_SHUTDOWN  8
+#define SM_ITEM_RESTART   9
+
+static int start_menu_height(void)
+{
+    return START_MENU_HEADER_H
+         + START_MENU_SECTION_H + 6 * START_MENU_ITEM_H
+         + START_MENU_SEP_H
+         + START_MENU_SECTION_H + 2 * START_MENU_ITEM_H
+         + START_MENU_SEP_H
+         + START_MENU_POWER_H
+         + START_MENU_USER_H
+         + START_MENU_BOTTOM_PAD;
+}
 
 static int start_menu_top(void)
 {
     int tb_y = (int)fb_get_height() - TASKBAR_HEIGHT;
-    int menu_h = 40 + NUM_APPS * START_MENU_ITEM_H + 12 + START_MENU_ITEM_H + 8;
-    return tb_y - menu_h;
+    return tb_y - start_menu_height();
 }
 
-static int start_menu_height(void)
+/* Y-offset helpers from menu top */
+static int sm_app_y(int i)
 {
-    return 40 + NUM_APPS * START_MENU_ITEM_H + 12 + START_MENU_ITEM_H + 8;
+    return START_MENU_HEADER_H + START_MENU_SECTION_H + i * START_MENU_ITEM_H;
 }
 
+static int sm_place_y(int i)
+{
+    return START_MENU_HEADER_H + START_MENU_SECTION_H + 6 * START_MENU_ITEM_H
+         + START_MENU_SEP_H + START_MENU_SECTION_H + i * START_MENU_ITEM_H;
+}
+
+static int sm_power_y(void)
+{
+    return START_MENU_HEADER_H + START_MENU_SECTION_H + 6 * START_MENU_ITEM_H
+         + START_MENU_SEP_H + START_MENU_SECTION_H + 2 * START_MENU_ITEM_H
+         + START_MENU_SEP_H;
+}
+
+static int sm_user_y(void)
+{
+    return sm_power_y() + START_MENU_POWER_H;
+}
+
+/* --- Mini icon drawing for start menu items --- */
+
+static void draw_mini_icon_terminal(int x, int y, int hovered)
+{
+    fb_color_t bg = hovered ? COLOR_ACCENT : COLOR_PRIMARY;
+    fill_rounded_rect(x, y, 18, 18, 3, bg);
+    fb_fill_rect(x + 3, y + 3, 12, 9, 0x00081018);
+    fb_draw_string(x + 4, y + 3, ">_", 0x0040D060, 0x00081018);
+    fb_fill_rect(x + 2, y + 13, 14, 3, 0x00404050);
+}
+
+static void draw_mini_icon_folder(int x, int y, int hovered)
+{
+    fb_color_t bg = hovered ? 0x006088A0 : 0x00507090;
+    fill_rounded_rect(x, y, 18, 18, 3, bg);
+    fb_fill_rect(x + 3, y + 6, 5, 2, 0x0080B0D0);
+    fb_fill_rect(x + 3, y + 8, 12, 6, 0x0080B0D0);
+    fb_draw_rect(x + 3, y + 5, 12, 9, 0x00A0D0F0);
+}
+
+static void draw_mini_icon_sysmon(int x, int y, int hovered)
+{
+    fb_color_t bg = hovered ? COLOR_ACCENT : COLOR_PRIMARY;
+    fill_rounded_rect(x, y, 18, 18, 3, bg);
+    fb_fill_rect(x + 3, y + 11, 3, 4, 0x0030A0D0);
+    fb_fill_rect(x + 7, y + 7, 3, 8, 0x0020C080);
+    fb_fill_rect(x + 11, y + 9, 3, 6, 0x00D0A020);
+    fb_draw_line(x + 2, y + 15, x + 15, y + 15, 0x0080A0B0);
+}
+
+static void draw_mini_icon_settings(int x, int y, int hovered)
+{
+    fb_color_t bg = hovered ? COLOR_ACCENT : COLOR_PRIMARY;
+    fill_rounded_rect(x, y, 18, 18, 3, bg);
+    int cx = x + 9, cy = y + 9;
+    fb_fill_rect(cx - 3, cy - 3, 6, 6, 0x00B0C0D0);
+    fb_fill_rect(cx - 1, cy - 7, 2, 4, 0x00B0C0D0);
+    fb_fill_rect(cx - 1, cy + 3, 2, 4, 0x00B0C0D0);
+    fb_fill_rect(cx - 7, cy - 1, 4, 2, 0x00B0C0D0);
+    fb_fill_rect(cx + 3, cy - 1, 4, 2, 0x00B0C0D0);
+    fb_fill_rect(cx - 5, cy - 5, 2, 2, 0x00B0C0D0);
+    fb_fill_rect(cx + 3, cy - 5, 2, 2, 0x00B0C0D0);
+    fb_fill_rect(cx - 5, cy + 3, 2, 2, 0x00B0C0D0);
+    fb_fill_rect(cx + 3, cy + 3, 2, 2, 0x00B0C0D0);
+    fb_fill_rect(cx - 2, cy - 2, 4, 4, bg);
+}
+
+static void draw_mini_icon_about(int x, int y, int hovered)
+{
+    fb_color_t bg = hovered ? COLOR_ACCENT : COLOR_PRIMARY;
+    fill_rounded_rect(x, y, 18, 18, 3, bg);
+    int cx = x + 9, cy = y + 9;
+    for (int dy = -6; dy <= 6; dy++)
+        for (int dx = -6; dx <= 6; dx++)
+            if (dx * dx + dy * dy <= 36 && dx * dx + dy * dy > 16)
+                fb_put_pixel(cx + dx, cy + dy, 0x0060B0E0);
+    fb_fill_rect(cx - 1, cy - 4, 2, 2, 0x0060B0E0);
+    fb_fill_rect(cx - 1, cy - 1, 2, 5, 0x0060B0E0);
+}
+
+static void draw_mini_icon_home(int x, int y, int hovered)
+{
+    fb_color_t bg = hovered ? COLOR_ACCENT : COLOR_PRIMARY;
+    fill_rounded_rect(x, y, 18, 18, 3, bg);
+    int bx = x + 3, by = y + 5;
+    for (int i = 0; i < 4; i++) {
+        int hw = i + 1;
+        fb_fill_rect(bx + 6 - i, by + i, hw * 2, 1, 0x00D0A060);
+    }
+    fb_fill_rect(bx + 3, by + 4, 8, 7, 0x0080A0C0);
+    fb_fill_rect(bx + 5, by + 7, 4, 4, 0x00507050);
+}
+
+static void draw_mini_icon_trash(int x, int y, int hovered)
+{
+    fb_color_t bg = hovered ? COLOR_ACCENT : COLOR_PRIMARY;
+    fill_rounded_rect(x, y, 18, 18, 3, bg);
+    int bx = x + 4, by = y + 4;
+    fb_fill_rect(bx, by, 10, 2, 0x00909898);
+    fb_fill_rect(bx + 3, by - 2, 4, 2, 0x00909898);
+    fb_fill_rect(bx + 1, by + 2, 8, 9, 0x00707878);
+    fb_draw_rect(bx + 1, by + 2, 8, 9, 0x00A0A8A8);
+}
+
+static void draw_mini_icon_minesweeper(int x, int y, int hovered)
+{
+    fb_color_t bg = hovered ? COLOR_ACCENT : COLOR_PRIMARY;
+    fill_rounded_rect(x, y, 18, 18, 3, bg);
+    int cx = x + 9, cy = y + 9;
+    fb_fill_rect(cx - 3, cy - 3, 6, 6, 0x00202020);
+    fb_fill_rect(cx - 5, cy - 1, 10, 2, 0x00202020);
+    fb_fill_rect(cx - 1, cy - 5, 2, 10, 0x00202020);
+    fb_fill_rect(cx - 1, cy - 2, 1, 1, 0x00D0D0D0);
+}
+
+typedef void (*mini_icon_draw_fn)(int, int, int);
+
+static const mini_icon_draw_fn mini_icon_drawers[NUM_APPS] = {
+    draw_mini_icon_terminal,
+    draw_mini_icon_folder,
+    draw_mini_icon_sysmon,
+    draw_mini_icon_settings,
+    draw_mini_icon_about,
+    draw_mini_icon_home,
+    draw_mini_icon_trash,
+    draw_mini_icon_minesweeper
+};
+
+/* --- Draw a small fox face for the header --- */
+static void draw_fox_face(int x, int y, int size)
+{
+    fb_color_t fur = 0x00E09040;
+    fb_color_t ear_inner = 0x00F0A050;
+    int ear_w = size / 3;
+    int ear_h = size * 4 / 10;
+    /* Left ear */
+    for (int i = 0; i < ear_h; i++) {
+        int hw = (i * ear_w) / ear_h + 1;
+        fb_fill_rect(x + size / 4 - hw, y + i, hw * 2, 1, fur);
+        if (i > 1) fb_fill_rect(x + size / 4 - hw + 1, y + i, (hw - 1) * 2, 1, ear_inner);
+    }
+    /* Right ear */
+    for (int i = 0; i < ear_h; i++) {
+        int hw = (i * ear_w) / ear_h + 1;
+        fb_fill_rect(x + 3 * size / 4 - hw, y + i, hw * 2, 1, fur);
+        if (i > 1) fb_fill_rect(x + 3 * size / 4 - hw + 1, y + i, (hw - 1) * 2, 1, ear_inner);
+    }
+    /* Face */
+    int face_y = y + ear_h - 2;
+    int face_h = size - ear_h + 2;
+    fb_fill_rect(x + size / 6, face_y, size * 2 / 3, face_h, fur);
+    /* Cheeks - slightly lighter */
+    fb_fill_rect(x + size / 6 + 1, face_y + face_h / 2, 3, face_h / 2, 0x00F0A050);
+    fb_fill_rect(x + size - size / 6 - 4, face_y + face_h / 2, 3, face_h / 2, 0x00F0A050);
+    /* Eyes */
+    int eye_y = face_y + face_h / 4;
+    fb_fill_rect(x + size / 3 - 1, eye_y, 3, 3, 0x00202020);
+    fb_fill_rect(x + 2 * size / 3 - 1, eye_y, 3, 3, 0x00202020);
+    /* Eye highlights */
+    fb_put_pixel(x + size / 3, eye_y, 0x00FFFFFF);
+    fb_put_pixel(x + 2 * size / 3, eye_y, 0x00FFFFFF);
+    /* Nose */
+    fb_fill_rect(x + size / 2 - 1, eye_y + 5, 2, 2, 0x00302020);
+    /* Mouth */
+    fb_put_pixel(x + size / 2 - 1, eye_y + 8, 0x00302020);
+    fb_put_pixel(x + size / 2, eye_y + 8, 0x00302020);
+    fb_put_pixel(x + size / 2 + 1, eye_y + 8, 0x00302020);
+}
+
+/* --- Main start menu drawing --- */
 static void draw_start_menu(void)
 {
     int tb_y = (int)fb_get_height() - TASKBAR_HEIGHT;
     int menu_h = start_menu_height();
-    int menu_x = 4;
-    int menu_y = tb_y - menu_h;
+    int mx = 4;
+    int my = tb_y - menu_h;
 
     /* Shadow */
-    fb_fill_rect(menu_x + 4, menu_y + 4, START_MENU_W, menu_h, 0x00040810);
-    /* Background */
-    fb_fill_rect(menu_x, menu_y, START_MENU_W, menu_h, 0x00142038);
-    draw_rounded_rect(menu_x, menu_y, START_MENU_W, menu_h, 6, COLOR_TASKBAR_LINE);
+    fb_fill_rect(mx + 5, my + 5, START_MENU_W, menu_h, 0x00040810);
 
-    /* Header */
-    fb_fill_rect(menu_x + 1, menu_y + 1, START_MENU_W - 2, 36, COLOR_PRIMARY);
-    fb_draw_string(menu_x + 14, menu_y + 10, "SpiritFoxOS", COLOR_TEXT_BRIGHT, COLOR_PRIMARY);
-    fb_draw_string(menu_x + 14, menu_y + 22, "v0.5.0", COLOR_TEXT_DIM, COLOR_PRIMARY);
+    /* Background with rounded corners */
+    fill_rounded_rect(mx, my, START_MENU_W, menu_h, 8, 0x00142038);
+    draw_rounded_rect(mx, my, START_MENU_W, menu_h, 8, COLOR_TASKBAR_LINE);
 
-    /* App items */
-    int iy = menu_y + 40;
-    for (int i = 0; i < NUM_APPS; i++) {
-        int item_y = iy + i * START_MENU_ITEM_H;
-        int hovered = (start_menu_hover == i);
-
-        if (hovered)
-            fb_fill_rect(menu_x + 4, item_y, START_MENU_W - 8, START_MENU_ITEM_H, COLOR_PRIMARY_LIGHT);
-
-        /* Mini icon */
-        int mini_x = menu_x + 14, mini_y = item_y + 5;
-        fb_color_t mini_bg = hovered ? COLOR_ACCENT : COLOR_PRIMARY;
-        fill_rounded_rect(mini_x, mini_y, 20, 20, 3, mini_bg);
-        fb_draw_string(mini_x + 3, mini_y + 4, app_names[i][0] == 'T' ? ">_" :
-                       app_names[i][0] == 'F' ? "/" :
-                       app_names[i][0] == 'S' && app_names[i][4] == 'M' ? "##" :
-                       app_names[i][0] == 'S' ? "[]" :
-                       app_names[i][0] == 'A' ? "i" :
-                       app_names[i][0] == 'H' ? "^" : "X",
-                       COLOR_TEXT_BRIGHT, mini_bg);
-
-        fb_color_t txt = hovered ? COLOR_TEXT_BRIGHT : COLOR_TEXT;
-        fb_color_t bg = hovered ? COLOR_PRIMARY_LIGHT : 0x00142038;
-        fb_draw_string(menu_x + 40, item_y + 7, app_names[i], txt, bg);
+    /* Left accent strip */
+    {
+        int strip_x = mx + 1;
+        int strip_y = my + START_MENU_HEADER_H + 1;
+        int strip_h = menu_h - START_MENU_HEADER_H - 2;
+        fb_fill_rect(strip_x, strip_y, 3, strip_h, COLOR_ACCENT);
     }
 
-    /* Separator */
-    int sep_y = iy + NUM_APPS * START_MENU_ITEM_H + 2;
-    fb_draw_line(menu_x + 12, sep_y, menu_x + START_MENU_W - 12, sep_y, COLOR_TASKBAR_LINE);
-
-    /* Shutdown */
-    int shutdown_idx = NUM_APPS + 1;
-    int shutdown_y = sep_y + 6;
+    /* ---- Header ---- */
     {
-        int hovered = (start_menu_hover == shutdown_idx);
-        if (hovered)
-            fb_fill_rect(menu_x + 4, shutdown_y, START_MENU_W - 8, START_MENU_ITEM_H, COLOR_DANGER);
+        fill_rounded_rect(mx + 1, my + 1, START_MENU_W - 2, START_MENU_HEADER_H, 7, COLOR_PRIMARY);
+        fb_fill_rect(mx + 1, my + START_MENU_HEADER_H - 3, START_MENU_W - 2, 2, COLOR_PRIMARY_DARK);
 
-        fb_color_t txt = hovered ? COLOR_TEXT_BRIGHT : COLOR_DANGER;
-        fb_color_t bg = hovered ? COLOR_DANGER : 0x00142038;
-        fb_draw_string(menu_x + 14, shutdown_y + 7, "Shutdown", txt, bg);
+        draw_fox_face(mx + 10, my + 5, 26);
+
+        fb_draw_string(mx + 42, my + 7, "SpiritFoxOS", COLOR_TEXT_BRIGHT, COLOR_PRIMARY);
+        fb_draw_string(mx + 42, my + 21, "v0.5.0", COLOR_TEXT_DIM, COLOR_PRIMARY);
+    }
+
+    /* ---- APPLICATIONS section ---- */
+    {
+        int sec_y = my + START_MENU_HEADER_H;
+        fb_draw_string(mx + 14, sec_y + 4, "APPLICATIONS", COLOR_TEXT_DIM, 0x00142038);
+
+        for (int i = 0; i < 6; i++) {
+            int item_y = my + sm_app_y(i);
+            int hovered = (start_menu_hover == i);
+
+            if (hovered)
+                fill_rounded_rect(mx + 6, item_y + 1, START_MENU_W - 12, START_MENU_ITEM_H - 2, 4, COLOR_PRIMARY_LIGHT);
+
+            mini_icon_drawers[i](mx + 14, item_y + 4, hovered);
+
+            fb_color_t txt = hovered ? COLOR_TEXT_BRIGHT : COLOR_TEXT;
+            fb_color_t bg = hovered ? COLOR_PRIMARY_LIGHT : 0x00142038;
+            fb_draw_string(mx + 38, item_y + 6, app_names[i], txt, bg);
+        }
+    }
+
+    /* ---- Separator ---- */
+    {
+        int sep_y = my + sm_place_y(0) - START_MENU_SEP_H + 1;
+        fb_draw_line(mx + 14, sep_y + 2, mx + START_MENU_W - 14, sep_y + 2, COLOR_TASKBAR_LINE);
+    }
+
+    /* ---- PLACES section ---- */
+    {
+        int sec_y = my + sm_place_y(0) - START_MENU_SECTION_H;
+        fb_draw_string(mx + 14, sec_y + 4, "PLACES", COLOR_TEXT_DIM, 0x00142038);
+
+        for (int i = 0; i < 2; i++) {
+            int item_y = my + sm_place_y(i);
+            int hovered = (start_menu_hover == 6 + i);
+
+            if (hovered)
+                fill_rounded_rect(mx + 6, item_y + 1, START_MENU_W - 12, START_MENU_ITEM_H - 2, 4, COLOR_PRIMARY_LIGHT);
+
+            mini_icon_drawers[6 + i](mx + 14, item_y + 4, hovered);
+
+            fb_color_t txt = hovered ? COLOR_TEXT_BRIGHT : COLOR_TEXT;
+            fb_color_t bg = hovered ? COLOR_PRIMARY_LIGHT : 0x00142038;
+            fb_draw_string(mx + 38, item_y + 6, app_names[6 + i], txt, bg);
+        }
+    }
+
+    /* ---- Separator ---- */
+    {
+        int sep_y = my + sm_power_y() - START_MENU_SEP_H + 1;
+        fb_draw_line(mx + 14, sep_y + 2, mx + START_MENU_W - 14, sep_y + 2, COLOR_TASKBAR_LINE);
+    }
+
+    /* ---- Power row ---- */
+    {
+        int pw_y = my + sm_power_y();
+        int half_w = (START_MENU_W - 24) / 2;
+
+        /* Shutdown button */
+        {
+            int hovered = (start_menu_hover == SM_ITEM_SHUTDOWN);
+            fb_color_t bg = hovered ? COLOR_DANGER : COLOR_SURFACE_DIM;
+            fill_rounded_rect(mx + 8, pw_y + 2, half_w, START_MENU_POWER_H - 4, 4, bg);
+            /* Power icon */
+            int icx = mx + 8 + 16, icy = pw_y + START_MENU_POWER_H / 2;
+            for (int dy = -5; dy <= 5; dy++)
+                for (int dx = -5; dx <= 5; dx++)
+                    if (dx * dx + dy * dy <= 25 && dx * dx + dy * dy > 16)
+                        fb_put_pixel(icx + dx, icy + dy, hovered ? COLOR_TEXT_BRIGHT : COLOR_DANGER);
+            fb_fill_rect(icx - 1, icy - 7, 2, 4, hovered ? COLOR_TEXT_BRIGHT : COLOR_DANGER);
+            fb_draw_string(mx + 8 + 30, pw_y + 8, "Shutdown",
+                           hovered ? COLOR_TEXT_BRIGHT : COLOR_DANGER, bg);
+        }
+
+        /* Restart button */
+        {
+            int rx = mx + 8 + half_w + 8;
+            int hovered = (start_menu_hover == SM_ITEM_RESTART);
+            fb_color_t bg = hovered ? COLOR_WARNING : COLOR_SURFACE_DIM;
+            fill_rounded_rect(rx, pw_y + 2, half_w, START_MENU_POWER_H - 4, 4, bg);
+            /* Restart icon - circular arrow */
+            int icx = rx + 16, icy = pw_y + START_MENU_POWER_H / 2;
+            for (int dy = -5; dy <= 5; dy++)
+                for (int dx = -5; dx <= 5; dx++)
+                    if (dx * dx + dy * dy <= 25 && dx * dx + dy * dy > 16)
+                        fb_put_pixel(icx + dx, icy + dy, hovered ? COLOR_TEXT_BRIGHT : COLOR_WARNING);
+            /* Arrow tip */
+            fb_fill_rect(icx + 2, icy - 6, 4, 3, hovered ? COLOR_TEXT_BRIGHT : COLOR_WARNING);
+            fb_fill_rect(icx + 4, icy - 7, 2, 3, hovered ? COLOR_TEXT_BRIGHT : COLOR_WARNING);
+            fb_draw_string(rx + 30, pw_y + 8, "Restart",
+                           hovered ? COLOR_TEXT_BRIGHT : COLOR_WARNING, bg);
+        }
+    }
+
+    /* ---- User bar ---- */
+    {
+        int uy = my + sm_user_y();
+        fb_fill_rect(mx + 1, uy, START_MENU_W - 2, START_MENU_USER_H, 0x00101828);
+        /* Avatar circle */
+        int ax = mx + 20, ay = uy + START_MENU_USER_H / 2;
+        for (int dy = -9; dy <= 9; dy++)
+            for (int dx = -9; dx <= 9; dx++)
+                if (dx * dx + dy * dy <= 81)
+                    fb_put_pixel(ax + dx, ay + dy, COLOR_PRIMARY);
+        /* Face in avatar */
+        fb_fill_rect(ax - 3, ay - 3, 2, 2, COLOR_TEXT_BRIGHT);
+        fb_fill_rect(ax + 1, ay - 3, 2, 2, COLOR_TEXT_BRIGHT);
+        fb_fill_rect(ax - 2, ay + 1, 4, 2, COLOR_ACCENT);
+        /* Username */
+        fb_draw_string(mx + 36, uy + 10, "user", COLOR_TEXT, 0x00101828);
+        /* Separator dot */
+        fb_draw_string(mx + 36, uy + 20, "Administrator", COLOR_TEXT_DIM, 0x00101828);
     }
 }
 
@@ -694,18 +1376,34 @@ static int point_in_start_menu(int px, int py)
 static int start_menu_item_at(int px, int py)
 {
     if (!start_menu_open) return -1;
-    int menu_y = start_menu_top();
-    int iy = menu_y + 40;
+    int menu_x = 4;
+    int menu_top_y = start_menu_top();
 
-    for (int i = 0; i < NUM_APPS; i++) {
-        int item_y = iy + i * START_MENU_ITEM_H;
-        if (px >= 4 && px < 4 + START_MENU_W && py >= item_y && py < item_y + START_MENU_ITEM_H)
+    /* App items (0-5) */
+    for (int i = 0; i < 6; i++) {
+        int item_y = menu_top_y + sm_app_y(i);
+        if (px >= menu_x && px < menu_x + START_MENU_W &&
+            py >= item_y && py < item_y + START_MENU_ITEM_H)
             return i;
     }
 
-    int shutdown_y = iy + NUM_APPS * START_MENU_ITEM_H + 8;
-    if (px >= 4 && px < 4 + START_MENU_W && py >= shutdown_y && py < shutdown_y + START_MENU_ITEM_H)
-        return NUM_APPS + 1;
+    /* Place items (6-7) */
+    for (int i = 0; i < 2; i++) {
+        int item_y = menu_top_y + sm_place_y(i);
+        if (px >= menu_x && px < menu_x + START_MENU_W &&
+            py >= item_y && py < item_y + START_MENU_ITEM_H)
+            return 6 + i;
+    }
+
+    /* Power row */
+    int pw_y = menu_top_y + sm_power_y();
+    int half_w = (START_MENU_W - 24) / 2;
+    if (py >= pw_y && py < pw_y + START_MENU_POWER_H) {
+        if (px >= menu_x + 8 && px < menu_x + 8 + half_w)
+            return SM_ITEM_SHUTDOWN;
+        if (px >= menu_x + 8 + half_w + 8 && px < menu_x + START_MENU_W - 8)
+            return SM_ITEM_RESTART;
+    }
 
     return -1;
 }
@@ -1019,6 +1717,7 @@ static void draw_app_window(WinSlot *ws)
     case 4: draw_about_window(ws); break;
     case 5: draw_home_window(ws); break;
     case 6: draw_trash_window(ws); break;
+    case 7: draw_minesweeper_window(ws); break;
     }
 }
 
@@ -1044,6 +1743,8 @@ static void compute_app_size(int app, int *w, int *h)
             *h = 260; break;
     case 6: *w = sw > 400 ? 380 : (int)sw - 40;
             *h = 200; break;
+    case 7: *w = MS_COLS * MS_CELL_SIZE + 32;
+            *h = MS_ROWS * MS_CELL_SIZE + TITLE_BAR_HEIGHT + 56; break;
     default: *w = (int)sw - 40;
              *h = (int)sh - TASKBAR_HEIGHT - 60; break;
     }
@@ -1142,7 +1843,7 @@ void window_enter(void)
     }
 
     term_clear();
-    term_print("SpiritFoxOS Terminal v0.2\n");
+    term_print("SpiritFoxOS Terminal v0.3\n");
     term_print("Type 'help' for commands.\n\n");
     term_input[0] = '\0';
     term_input_len = 0;
@@ -1255,16 +1956,56 @@ void window_enter(void)
         }
 
         /* ---- Start menu click ---- */
-        if (left_click && start_menu_open) {
+        if (left_click && start_menu_open && mouse_y < tb_y) {
             int item = start_menu_item_at(mouse_x, mouse_y);
             if (item >= 0 && item < NUM_APPS) {
+                /* App items 0-(NUM_APPS-1) */
+                if (item == 7) ms_init();  /* Reset minesweeper on open */
                 open_window(item);
                 start_menu_open = 0; start_menu_hover = -1;
-            } else if (item == NUM_APPS + 1) {
+            } else if (item == SM_ITEM_SHUTDOWN) {
                 window_running = 0;
+            } else if (item == SM_ITEM_RESTART) {
+                /* Restart GUI - close all windows, reset state */
+                num_wins = 0;
+                focus_win = -1;
+                start_menu_open = 0;
+                start_menu_hover = -1;
+                ctx_menu_open = 0;
+                term_clear();
+                term_print("SpiritFoxOS Terminal v0.3\n");
+                term_print("Type 'help' for commands.\n\n");
+                term_input[0] = '\0';
+                term_input_len = 0;
             } else if (!point_in_start_menu(mouse_x, mouse_y)) {
                 start_menu_open = 0; start_menu_hover = -1;
             }
+        }
+
+        /* ---- Minesweeper right-click (flag) ---- */
+        if (right_click && mouse_y < tb_y) {
+            int handled = 0;
+            for (int i = num_wins - 1; i >= 0; i--) {
+                if (wins[i].app == 7 && !wins[i].minimized &&
+                    mouse_x >= wins[i].x && mouse_x < wins[i].x + wins[i].w &&
+                    mouse_y >= wins[i].y && mouse_y < wins[i].y + wins[i].h) {
+                    WinSlot *mws = &wins[i];
+                    int grid_w = MS_COLS * MS_CELL_SIZE;
+                    int grid_h = MS_ROWS * MS_CELL_SIZE;
+                    int mgx = mws->x + (mws->w - grid_w) / 2;
+                    int mgy = mws->y + TITLE_BAR_HEIGHT + 28;
+                    if (mouse_x >= mgx && mouse_x < mgx + grid_w &&
+                        mouse_y >= mgy && mouse_y < mgy + grid_h) {
+                        int mc = (mouse_x - mgx) / MS_CELL_SIZE;
+                        int mr = (mouse_y - mgy) / MS_CELL_SIZE;
+                        if (mc >= 0 && mc < MS_COLS && mr >= 0 && mr < MS_ROWS && !ms_game_over)
+                            ms_handle_click(mr, mc, 1);
+                    }
+                    handled = 1;
+                    break;
+                }
+            }
+            if (handled) goto skip_desktop_rc;
         }
 
         /* ---- Desktop right-click ---- */
@@ -1286,6 +2027,7 @@ void window_enter(void)
                 start_menu_open = 0;
             }
         }
+        skip_desktop_rc:
 
         /* ---- Context menu click ---- */
         if (left_click && ctx_menu_open) {
@@ -1329,6 +2071,7 @@ void window_enter(void)
                 if (mouse_x >= ix && mouse_x < ix + ICON_SIZE &&
                     mouse_y >= iy && mouse_y < iy + ICON_SIZE + 18) {
                     icon_pressed = i;
+                    if (i == 7) ms_init();
                     open_window(i);
                     break;
                 }
@@ -1394,6 +2137,28 @@ void window_enter(void)
                     } else if (mouse_x >= min_btn && mouse_x < min_btn + btn_size) {
                         ws->minimized = 1;
                         dragging = 0; drag_win = -1;
+                    }
+                }
+
+                /* Minesweeper cell click */
+                if (clicked >= 0 && focus_win >= 0 &&
+                    wins[focus_win].app == 7 && !wins[focus_win].minimized) {
+                    WinSlot *mws = &wins[focus_win];
+                    int grid_w = MS_COLS * MS_CELL_SIZE;
+                    int grid_h = MS_ROWS * MS_CELL_SIZE;
+                    int mgx = mws->x + (mws->w - grid_w) / 2;
+                    int mgy = mws->y + TITLE_BAR_HEIGHT + 28;
+                    if (mouse_x >= mgx && mouse_x < mgx + grid_w &&
+                        mouse_y >= mgy && mouse_y < mgy + grid_h) {
+                        int mc = (mouse_x - mgx) / MS_CELL_SIZE;
+                        int mr = (mouse_y - mgy) / MS_CELL_SIZE;
+                        if (mc >= 0 && mc < MS_COLS && mr >= 0 && mr < MS_ROWS) {
+                            if (ms_game_over) {
+                                ms_init();
+                            } else {
+                                ms_handle_click(mr, mc, 0);
+                            }
+                        }
                     }
                 }
 

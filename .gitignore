@@ -22,6 +22,12 @@ cs/*.jar
 # Log files
 *.log
 
+# Auto commit script (local only)
+auto_commit.sh
+
+# Tools / JAR
+*.jar
+
 # IDE / Editor
 .vscode/
 .idea/
@@ -32,4 +38,3 @@ cs/*.jar
 # OS
 .DS_Store
 Thumbs.db
-*.img
