@@ -1,6 +1,9 @@
 /*
- * window.c - Graphical window manager for SpiritFoxOS
- * Multi-window, start menu, desktop icons, right-click menu
+ * window.c - Modern Graphical window manager for SpiritFoxOS
+ * Multi-window, dock taskbar, start menu, desktop icons, right-click menu
+ *
+ * Modern dark theme with frosted glass effects, gradient accents,
+ * and macOS/Windows 11 inspired design.
  *
  * Enter via shell command "window", exit with Escape
  */
@@ -23,43 +26,85 @@
 extern BootInfo *g_boot_info;
 
 /* ================================================================
- *  COLOR SCHEME - Unified blue-based palette
+ *  MODERN COLOR SCHEME - Dark theme with blue-purple accent
  * ================================================================ */
 
-/* Extended palette for window manager */
-#define COLOR_PRIMARY       0x002860B0   /* Main blue */
-#define COLOR_PRIMARY_LIGHT 0x003878CC   /* Lighter blue */
-#define COLOR_PRIMARY_DARK  0x001C4480   /* Darker blue */
-#define COLOR_ACCENT        0x0044A0E0   /* Bright accent blue */
-#define COLOR_BG_TOP        0x000C1628   /* Darker at top */
-#define COLOR_BG_BOT        0x00142240   /* Lighter at bottom */
-#define COLOR_SURFACE       0x00182238   /* Card/window surface */
-#define COLOR_SURFACE_LIGHT 0x00203050   /* Lighter surface (hover) */
-#define COLOR_SURFACE_DIM   0x00101828   /* Dimmer surface */
-#define COLOR_TEXT_BRIGHT   0x00FFFFFF   /* Bright text */
+/* Background gradient endpoints */
+#define COLOR_BG_TL         0x000A0A1A   /* Deep navy top-left */
+#define COLOR_BG_BR         0x001A1040   /* Dark purple-blue bottom-right */
+
+/* Surfaces */
+#define COLOR_SURFACE       0x001A1A2E   /* Card/window surface */
+#define COLOR_SURFACE_LIGHT 0x0024243E   /* Lighter surface (hover) */
+#define COLOR_SURFACE_DIM   0x00121222   /* Dimmer surface */
+#define COLOR_GLASS         0x0016162A   /* Frosted glass background */
+
+/* Accent - vibrant blue-to-purple gradient */
+#define COLOR_ACCENT_START  0x004A6CF7   /* Blue end */
+#define COLOR_ACCENT_END    0x009B59B6   /* Purple end */
+#define COLOR_ACCENT        0x006C5CE7   /* Mid accent */
+#define COLOR_ACCENT_LIGHT  0x007C6CF7   /* Lighter accent */
+
+/* Text */
+#define COLOR_TEXT_BRIGHT   0x00E8E8F0   /* Clean white */
 #define COLOR_TEXT          FB_COLOR_TEXT
 #define COLOR_TEXT_DIM      FB_COLOR_TEXT_DIM
-#define COLOR_TASKBAR_LINE  0x00306090   /* Taskbar accent line */
-#define COLOR_SUCCESS       0x0028A050   /* Green */
-#define COLOR_WARNING       0x00D09020   /* Orange */
-#define COLOR_DANGER        0x00C04040   /* Red */
+
+/* Taskbar / dock */
+#define COLOR_DOCK_BG       0x0016162A   /* Frosted dark glass */
+#define COLOR_DOCK_BORDER   0x00303050   /* Subtle top border glow */
+
+/* Status colors */
+#define COLOR_SUCCESS       0x002ECC71   /* Modern green */
+#define COLOR_WARNING       0x00F39C12   /* Amber */
+#define COLOR_DANGER        0x00E74C3C   /* Soft red */
+
+/* Window specific */
+#define COLOR_WIN_TITLE     0x001C1C32   /* Title bar dark */
+#define COLOR_WIN_BODY      0x00141424   /* Window body */
+#define COLOR_SHADOW1       0x00080810   /* Shadow layer 1 (closest) */
+#define COLOR_SHADOW2       0x0006060C   /* Shadow layer 2 */
+#define COLOR_SHADOW3       0x00040408   /* Shadow layer 3 (farthest) */
+
+/* Terminal */
+#define COLOR_TERM_BG       0x000D0D1A   /* Terminal dark bg */
+#define COLOR_TERM_FG       0x0040E870   /* Green text */
+#define COLOR_TERM_PROMPT   0x0060A0E0   /* Prompt blue */
+
+/* Minesweeper */
+#define COLOR_MS_HIDDEN     0x00383858   /* Hidden cell */
+#define COLOR_MS_HIDDEN_HI  0x00484868   /* Hidden highlight */
+#define COLOR_MS_HIDDEN_SH  0x00282848   /* Hidden shadow */
+#define COLOR_MS_REVEALED   0x00202038   /* Revealed cell */
+#define COLOR_MS_BORDER     0x00303050   /* Cell border */
 
 /* ================================================================
  *  APP DEFINITIONS
  * ================================================================ */
 
 #define NUM_APPS 8
-/* 0-4: main apps, 5: Home, 6: Trash, 7: Minesweeper */
 
 static const char *app_names[NUM_APPS] = {
     "Terminal",       /* 0 */
-    "File Manager",   /* 1 */
-    "System Monitor", /* 2 */
+    "Files",          /* 1 */
+    "Monitor",        /* 2 */
     "Settings",       /* 3 */
     "About",          /* 4 */
     "Home",           /* 5 */
     "Trash",          /* 6 */
     "Minesweeper"     /* 7 */
+};
+
+/* Full names for window titles */
+static const char *app_titles[NUM_APPS] = {
+    "Terminal",
+    "File Manager",
+    "System Monitor",
+    "Settings",
+    "About SpiritFoxOS",
+    "Home",
+    "Trash",
+    "Minesweeper"
 };
 
 /* ================================================================
@@ -89,11 +134,15 @@ static int mouse_prev_x = 0, mouse_prev_y = 0;
 static uint8_t mouse_buttons = 0;
 static uint8_t mouse_prev_buttons = 0;
 
+/* Double-click detection */
+static uint64_t last_click_time = 0;
+static int last_click_x = 0, last_click_y = 0;
+static int double_click = 0;  /* 1 if this click is a double-click */
+
 static int dragging = 0;
 static int drag_win = -1;
 static int drag_off_x = 0, drag_off_y = 0;
 
-/* Resizing state */
 static int resizing = 0;
 static int resize_win = -1;
 static int resize_edge = 0;  /* bitmask: 1=right, 2=bottom, 4=left, 8=top */
@@ -101,35 +150,36 @@ static int resize_start_x = 0, resize_start_y = 0;
 static int resize_orig_w = 0, resize_orig_h = 0;
 static int resize_orig_x = 0, resize_orig_y = 0;
 
-/* Start menu */
 static int start_menu_open = 0;
 static int start_menu_hover = -1;
 
-/* Desktop context menu */
 static int ctx_menu_open = 0;
 static int ctx_menu_x = 0, ctx_menu_y = 0;
 static int ctx_menu_hover = -1;
 
-/* Icon press feedback */
-static int icon_pressed = -1;  /* index of currently pressed icon, -1=none */
+static int icon_pressed = -1;
+
+/* Animation state */
+static uint64_t anim_tick = 0;
 
 /* ================================================================
  *  LAYOUT CONSTANTS
  * ================================================================ */
 
-#define TASKBAR_HEIGHT    44
-#define TITLE_BAR_HEIGHT  30
-#define WIN_SHADOW_OFFSET 4
-#define WIN_BODY_COLOR    COLOR_SURFACE
-#define WIN_SHADOW_COLOR  0x00060A14
+#define TASKBAR_HEIGHT    52
+#define DOCK_FLOAT_GAP    6
+#define DOCK_CORNER_R     12
+#define TITLE_BAR_HEIGHT  36
+#define WIN_CORNER_R      8
+#define WIN_SHADOW_LAYERS 3
 
-/* Desktop icon grid */
-#define ICON_SIZE         40
-#define ICON_CELL_W       80
-#define ICON_CELL_H       86
-#define ICON_GRID_LEFT    16
-#define ICON_GRID_TOP     16
-#define ICON_GRID_COLS    6
+/* Desktop icon grid - 2 columns, larger icons */
+#define ICON_SIZE         48
+#define ICON_CELL_W       88
+#define ICON_CELL_H       96
+#define ICON_GRID_LEFT    20
+#define ICON_GRID_TOP     20
+#define ICON_GRID_COLS    2
 
 /* ================================================================
  *  TERMINAL EMULATOR
@@ -175,7 +225,6 @@ static void term_print(const char *s)
     }
 }
 
-/* Integer to string helper */
 static void int_to_str(int n, char *buf)
 {
     int pos = 0;
@@ -201,7 +250,6 @@ static void uint_to_str(unsigned int n, char *buf)
 
 static void term_execute(const char *cmd)
 {
-    /* Skip leading spaces */
     while (*cmd == ' ') cmd++;
     if (*cmd == '\0') return;
 
@@ -209,7 +257,6 @@ static void term_execute(const char *cmd)
     term_print(cmd);
     term_print("\n");
 
-    /* Simple argument parsing */
     char cmd_copy[TERM_BUF_COLS];
     strncpy(cmd_copy, cmd, TERM_BUF_COLS - 1);
     cmd_copy[TERM_BUF_COLS - 1] = '\0';
@@ -230,7 +277,7 @@ static void term_execute(const char *cmd)
     char nbuf[32];
 
     if (strcmp(argv[0], "help") == 0) {
-        term_print("SpiritFoxOS Terminal v0.3\n");
+        term_print("SpiritFoxOS Terminal v0.5\n");
         term_print("General:\n");
         term_print("  help         - Show this help\n");
         term_print("  clear        - Clear terminal\n");
@@ -247,11 +294,11 @@ static void term_execute(const char *cmd)
     } else if (strcmp(argv[0], "clear") == 0) {
         term_clear();
     } else if (strcmp(argv[0], "version") == 0) {
-        term_print("SpiritFoxOS v0.5.0 - Multi-Window GUI\n");
+        term_print("SpiritFoxOS v0.5.0 - Modern GUI\n");
     } else if (strcmp(argv[0], "about") == 0) {
         term_print("SpiritFoxOS v0.5.0\n");
         term_print("A hobby x86_64 operating system\n");
-        term_print("Multi-Window GUI with mouse support\n");
+        term_print("Modern Multi-Window GUI\n");
         term_print("32-bit double-buffered framebuffer\n");
     } else if (strcmp(argv[0], "echo") == 0) {
         for (int i = 1; i < argc; i++) {
@@ -267,7 +314,7 @@ static void term_execute(const char *cmd)
         uint_to_str((unsigned int)fb_get_height(), nbuf);
         term_print(nbuf);
         term_print(" 32bpp\n");
-        term_print("GUI: Multi-Window Manager\n");
+        term_print("GUI: Modern Window Manager\n");
         term_print("Windows: ");
         int_to_str(num_wins, nbuf);
         term_print(nbuf);
@@ -331,60 +378,49 @@ static void term_execute(const char *cmd)
  *  DRAWING HELPERS
  * ================================================================ */
 
+/* Diagonal gradient background with noise texture and animated hue shift */
 static void draw_gradient_background(void)
 {
     uint32_t sw = fb_get_width(), sh = fb_get_height();
-    /* Simple 2-band gradient for performance */
-    int mid = (int)sh / 2;
-    for (int y = 0; y < mid; y++) {
-        /* Interpolate from BG_TOP to a mid color */
-        int t = y * 256 / mid;
-        int r = (int)(0x0C) + ((0x10 - 0x0C) * t >> 8);
-        int g = (int)(0x16) + ((0x1E - 0x16) * t >> 8);
-        int b = (int)(0x28) + ((0x38 - 0x28) * t >> 8);
-        fb_color_t c = (r << 16) | (g << 8) | b;
-        fb_fill_rect(0, y, sw, 1, c);
-    }
-    for (int y = mid; y < (int)sh; y++) {
-        int t = (y - mid) * 256 / ((int)sh - mid);
-        int r = (int)(0x10) + ((0x14 - 0x10) * t >> 8);
-        int g = (int)(0x1E) + ((0x22 - 0x1E) * t >> 8);
-        int b = (int)(0x38) + ((0x40 - 0x38) * t >> 8);
-        fb_color_t c = (r << 16) | (g << 8) | b;
-        fb_fill_rect(0, y, sw, 1, c);
-    }
-}
+    /* Animated hue shift based on timer - slow rotation */
+    uint64_t phase = (anim_tick / 120) % 360;
 
-/* Draw rounded rectangle outline */
-static void draw_rounded_rect(int x, int y, int w, int h, int r, fb_color_t color)
-{
-    /* Top and bottom edges (excluding corners) */
-    fb_draw_line(x + r, y, x + w - r, y, color);
-    fb_draw_line(x + r, y + h - 1, x + w - r, y + h - 1, color);
-    /* Left and right edges */
-    fb_draw_line(x, y + r, x, y + h - r, color);
-    fb_draw_line(x + w - 1, y + r, x + w - 1, y + h - r, color);
-    /* Corners - approximate with pixels */
-    for (int i = 0; i < r; i++) {
-        int dx = r - i - 1;
-        /* Top-left */
-        fb_put_pixel(x + dx, y + i, color);
-        fb_put_pixel(x + i, y + dx, color);
-        /* Top-right */
-        fb_put_pixel(x + w - 1 - dx, y + i, color);
-        fb_put_pixel(x + w - 1 - i, y + dx, color);
-        /* Bottom-left */
-        fb_put_pixel(x + dx, y + h - 1 - i, color);
-        fb_put_pixel(x + i, y + h - 1 - dx, color);
-        /* Bottom-right */
-        fb_put_pixel(x + w - 1 - dx, y + h - 1 - i, color);
-        fb_put_pixel(x + w - 1 - i, y + h - 1 - dx, color);
+    /* Base colors with subtle hue rotation */
+    /* TL: deep navy #0a0a1a, BR: dark purple-blue #1a1040 */
+    /* Apply a subtle color shift by varying the blue channel */
+    int shift = (int)((phase * 4) / 360); /* 0-3 range, very subtle */
+
+    for (int y = 0; y < (int)sh; y++) {
+        for (int x = 0; x < (int)sw; x += 2) {
+            /* Diagonal interpolation parameter */
+            int t_diag = ((x + y) * 256) / (int)(sw + sh);
+
+            /* Interpolate from TL to BR */
+            int r = 0x0A + ((0x1A - 0x0A) * t_diag >> 8);
+            int g = 0x0A + ((0x10 - 0x0A) * t_diag >> 8);
+            int b = 0x1A + ((0x40 - 0x1A) * t_diag >> 8);
+
+            /* Apply subtle animated hue shift */
+            b += shift;
+
+            /* Noise/dither pattern - every 4th pixel slightly brighter */
+            if (((x ^ y) & 0x3) == 0) {
+                r += 1; g += 1; b += 2;
+            }
+
+            fb_color_t c = ((r & 0xFF) << 16) | ((g & 0xFF) << 8) | (b & 0xFF);
+            fb_fill_rect(x, y, 2, 1, c);
+        }
     }
 }
 
 /* Fill rounded rectangle */
 static void fill_rounded_rect(int x, int y, int w, int h, int r, fb_color_t color)
 {
+    /* Clamp radius */
+    if (r > w / 2) r = w / 2;
+    if (r > h / 2) r = h / 2;
+
     /* Top band (with corners) */
     for (int i = 0; i < r; i++) {
         int dx = r - i;
@@ -399,31 +435,91 @@ static void fill_rounded_rect(int x, int y, int w, int h, int r, fb_color_t colo
     }
 }
 
+/* Draw rounded rectangle outline */
+static void draw_rounded_rect(int x, int y, int w, int h, int r, fb_color_t color)
+{
+    if (r > w / 2) r = w / 2;
+    if (r > h / 2) r = h / 2;
+
+    fb_draw_line(x + r, y, x + w - r, y, color);
+    fb_draw_line(x + r, y + h - 1, x + w - r, y + h - 1, color);
+    fb_draw_line(x, y + r, x, y + h - r, color);
+    fb_draw_line(x + w - 1, y + r, x + w - 1, y + h - r, color);
+
+    for (int i = 0; i < r; i++) {
+        int dx = r - i - 1;
+        fb_put_pixel(x + dx, y + i, color);
+        fb_put_pixel(x + i, y + dx, color);
+        fb_put_pixel(x + w - 1 - dx, y + i, color);
+        fb_put_pixel(x + w - 1 - i, y + dx, color);
+        fb_put_pixel(x + dx, y + h - 1 - i, color);
+        fb_put_pixel(x + i, y + h - 1 - dx, color);
+        fb_put_pixel(x + w - 1 - dx, y + h - 1 - i, color);
+        fb_put_pixel(x + w - 1 - i, y + h - 1 - dx, color);
+    }
+}
+
+/* Fill rounded rect with top corners only */
+static void fill_rounded_rect_top(int x, int y, int w, int h, int r, fb_color_t color)
+{
+    if (r > w / 2) r = w / 2;
+    if (r > h / 2) r = h / 2;
+
+    /* Top band with corners */
+    for (int i = 0; i < r; i++) {
+        int dx = r - i;
+        fb_fill_rect(x + dx, y + i, w - 2 * dx, 1, color);
+    }
+    /* Body - square bottom */
+    fb_fill_rect(x, y + r, w, h - r, color);
+}
+
+/* Clear corners to create rounded top shape (erase with background color) */
+static void clear_top_corners_rounded(int x, int y, int w, int h, int r, fb_color_t bg)
+{
+    if (r > w / 2) r = w / 2;
+    for (int i = 0; i < r && i < h; i++) {
+        int dx = r - i;
+        fb_fill_rect(x, y + i, dx, 1, bg);
+        fb_fill_rect(x + w - dx, y + i, dx, 1, bg);
+    }
+}
+
+/* Draw multi-layer shadow for a window */
+static void draw_window_shadow(int x, int y, int w, int h)
+{
+    /* Layer 3 - farthest, largest, most transparent */
+    fill_rounded_rect(x - 2, y - 2, w + 12, h + 12, WIN_CORNER_R + 2, COLOR_SHADOW3);
+    /* Layer 2 */
+    fill_rounded_rect(x - 1, y - 1, w + 8, h + 8, WIN_CORNER_R + 1, COLOR_SHADOW2);
+    /* Layer 1 - closest */
+    fill_rounded_rect(x, y, w + 4, h + 4, WIN_CORNER_R, COLOR_SHADOW1);
+}
+
 /* ================================================================
  *  MINESWEEPER GAME
  * ================================================================ */
 
-/* Forward declaration - draw_window_frame is defined later */
+/* Forward declaration */
 static void draw_window_frame(int x, int y, int w, int h, const char *title,
                               int active, int maximized);
 
 #define MS_ROWS 9
 #define MS_COLS 9
 #define MS_MINES 10
-#define MS_CELL_SIZE 24
+#define MS_CELL_SIZE 28
 
-/* Cell states */
 #define MS_HIDDEN   0
 #define MS_REVEALED 1
 #define MS_FLAGGED  2
 
-static int ms_board[MS_ROWS][MS_COLS];      /* -1=mine, 0-8=adjacent count */
-static int ms_state[MS_ROWS][MS_COLS];       /* MS_HIDDEN/REVEALED/FLAGGED */
-static int ms_game_over;   /* 0=playing, 1=lost, 2=won */
-static int ms_started;     /* 0=not started, 1=started */
-static int ms_flags;       /* number of flags placed */
-static int ms_revealed;    /* number of cells revealed */
-static int ms_first_click; /* 1=first click hasn't happened yet */
+static int ms_board[MS_ROWS][MS_COLS];
+static int ms_state[MS_ROWS][MS_COLS];
+static int ms_game_over;
+static int ms_started;
+static int ms_flags;
+static int ms_revealed;
+static int ms_first_click;
 
 static void ms_init(void)
 {
@@ -441,11 +537,9 @@ static void ms_init(void)
 
 static void ms_place_mines(int safe_r, int safe_c)
 {
-    /* Place mines randomly, avoiding the first-clicked cell and its neighbors */
     int placed = 0;
     while (placed < MS_MINES) {
         int r = 0, c = 0;
-        /* Simple LCG pseudo-random using a static state */
         static unsigned int ms_seed = 12345;
         ms_seed = ms_seed * 1103515245 + 12345;
         r = (ms_seed >> 16) % MS_ROWS;
@@ -457,7 +551,6 @@ static void ms_place_mines(int safe_r, int safe_c)
         ms_board[r][c] = -1;
         placed++;
     }
-    /* Calculate adjacency numbers */
     for (int r = 0; r < MS_ROWS; r++) {
         for (int c = 0; c < MS_COLS; c++) {
             if (ms_board[r][c] == -1) continue;
@@ -481,7 +574,6 @@ static void ms_reveal(int r, int c)
     ms_state[r][c] = MS_REVEALED;
     ms_revealed++;
     if (ms_board[r][c] == 0) {
-        /* Flood-fill reveal for empty cells */
         for (int dr = -1; dr <= 1; dr++)
             for (int dc = -1; dc <= 1; dc++)
                 ms_reveal(r + dr, c + dc);
@@ -500,7 +592,6 @@ static void ms_handle_click(int r, int c, int is_right)
     if (r < 0 || r >= MS_ROWS || c < 0 || c >= MS_COLS) return;
 
     if (is_right) {
-        /* Toggle flag */
         if (ms_state[r][c] == MS_HIDDEN) {
             ms_state[r][c] = MS_FLAGGED;
             ms_flags++;
@@ -511,7 +602,6 @@ static void ms_handle_click(int r, int c, int is_right)
         return;
     }
 
-    /* Left click */
     if (ms_state[r][c] != MS_HIDDEN) return;
 
     if (ms_first_click) {
@@ -521,10 +611,8 @@ static void ms_handle_click(int r, int c, int is_right)
     }
 
     if (ms_board[r][c] == -1) {
-        /* Hit a mine - game over */
         ms_state[r][c] = MS_REVEALED;
         ms_game_over = 1;
-        /* Reveal all mines */
         for (int rr = 0; rr < MS_ROWS; rr++)
             for (int cc = 0; cc < MS_COLS; cc++)
                 if (ms_board[rr][cc] == -1)
@@ -536,17 +624,16 @@ static void ms_handle_click(int r, int c, int is_right)
     ms_check_win();
 }
 
-/* Number colors for minesweeper (1-8) */
 static const fb_color_t ms_num_colors[9] = {
-    0x00000000,   /* 0 - unused */
-    0x002050D0,   /* 1 - blue */
-    0x00208020,   /* 2 - green */
-    0x00D02020,   /* 3 - red */
-    0x00102080,   /* 4 - dark blue */
-    0x00801010,   /* 5 - dark red */
-    0x00208080,   /* 6 - teal */
-    0x00000000,   /* 7 - black */
-    0x00808080,   /* 8 - gray */
+    0x00000000,   /* 0 */
+    0x004A6CF7,   /* 1 - blue accent */
+    0x002ECC71,   /* 2 - green */
+    0x00E74C3C,   /* 3 - red */
+    0x009B59B6,   /* 4 - purple */
+    0x00E74C3C,   /* 5 - dark red */
+    0x002ECC71,   /* 6 - teal */
+    0x00E8E8F0,   /* 7 - white */
+    0x008888A0,   /* 8 - gray */
 };
 
 static void draw_minesweeper_window(WinSlot *ws)
@@ -557,28 +644,27 @@ static void draw_minesweeper_window(WinSlot *ws)
     int grid_w = MS_COLS * MS_CELL_SIZE;
     int grid_h = MS_ROWS * MS_CELL_SIZE;
     int gx = ws->x + (ws->w - grid_w) / 2;
-    int gy = ws->y + TITLE_BAR_HEIGHT + 28;
+    int gy = ws->y + TITLE_BAR_HEIGHT + 32;
 
-    /* Info bar: mines remaining / game status */
+    /* Info bar */
     {
-        int bar_y = ws->y + TITLE_BAR_HEIGHT + 4;
-        fb_color_t info_bg = 0x00101C30;
-        fb_fill_rect(ws->x + 8, bar_y, ws->w - 16, 20, info_bg);
-        fb_draw_rect(ws->x + 8, bar_y, ws->w - 16, 20, COLOR_TASKBAR_LINE);
+        int bar_y = ws->y + TITLE_BAR_HEIGHT + 6;
+        fb_color_t info_bg = COLOR_SURFACE_DIM;
+        fill_rounded_rect(ws->x + 10, bar_y, ws->w - 20, 22, 4, info_bg);
 
         char buf[32];
         if (ms_game_over == 1) {
-            fb_draw_string(ws->x + 16, bar_y + 4, "Game Over! - Click to restart",
+            fb_draw_string(ws->x + 18, bar_y + 4, "Game Over! - Click to restart",
                            COLOR_DANGER, info_bg);
         } else if (ms_game_over == 2) {
-            fb_draw_string(ws->x + 16, bar_y + 4, "You Win! - Click to restart",
+            fb_draw_string(ws->x + 18, bar_y + 4, "You Win! - Click to restart",
                            COLOR_SUCCESS, info_bg);
         } else {
             int_to_str(MS_MINES - ms_flags, buf);
-            fb_draw_string(ws->x + 16, bar_y + 4, "Mines: ", COLOR_TEXT_BRIGHT, info_bg);
-            fb_draw_string(ws->x + 64, bar_y + 4, buf, COLOR_WARNING, info_bg);
+            fb_draw_string(ws->x + 18, bar_y + 4, "Mines: ", COLOR_TEXT_BRIGHT, info_bg);
+            fb_draw_string(ws->x + 66, bar_y + 4, buf, COLOR_WARNING, info_bg);
             if (!ms_started) {
-                fb_draw_string(ws->x + 110, bar_y + 4, "Click to start",
+                fb_draw_string(ws->x + 112, bar_y + 4, "Click to start",
                                COLOR_TEXT_DIM, info_bg);
             }
         }
@@ -589,73 +675,64 @@ static void draw_minesweeper_window(WinSlot *ws)
         for (int c = 0; c < MS_COLS; c++) {
             int cx = gx + c * MS_CELL_SIZE;
             int cy = gy + r * MS_CELL_SIZE;
+            int cs = MS_CELL_SIZE - 1;
 
             if (ms_state[r][c] == MS_HIDDEN) {
-                /* Unrevealed cell - raised 3D look */
-                fb_fill_rect(cx, cy, MS_CELL_SIZE, MS_CELL_SIZE, 0x00607898);
+                /* Unrevealed cell - modern raised look */
+                fill_rounded_rect(cx, cy, cs, cs, 3, COLOR_MS_HIDDEN);
                 /* Highlight (top-left) */
-                fb_fill_rect(cx, cy, MS_CELL_SIZE, 2, 0x0080A0C0);
-                fb_fill_rect(cx, cy, 2, MS_CELL_SIZE, 0x0080A0C0);
+                fb_fill_rect(cx + 2, cy + 1, cs - 4, 1, COLOR_MS_HIDDEN_HI);
+                fb_fill_rect(cx + 1, cy + 2, 1, cs - 4, COLOR_MS_HIDDEN_HI);
                 /* Shadow (bottom-right) */
-                fb_fill_rect(cx, cy + MS_CELL_SIZE - 2, MS_CELL_SIZE, 2, 0x00405060);
-                fb_fill_rect(cx + MS_CELL_SIZE - 2, cy, 2, MS_CELL_SIZE, 0x00405060);
+                fb_fill_rect(cx + 2, cy + cs - 2, cs - 4, 1, COLOR_MS_HIDDEN_SH);
+                fb_fill_rect(cx + cs - 2, cy + 2, 1, cs - 4, COLOR_MS_HIDDEN_SH);
             } else if (ms_state[r][c] == MS_FLAGGED) {
-                /* Flagged cell - same as hidden but with flag */
-                fb_fill_rect(cx, cy, MS_CELL_SIZE, MS_CELL_SIZE, 0x00607898);
-                fb_fill_rect(cx, cy, MS_CELL_SIZE, 2, 0x0080A0C0);
-                fb_fill_rect(cx, cy, 2, MS_CELL_SIZE, 0x0080A0C0);
-                fb_fill_rect(cx, cy + MS_CELL_SIZE - 2, MS_CELL_SIZE, 2, 0x00405060);
-                fb_fill_rect(cx + MS_CELL_SIZE - 2, cy, 2, MS_CELL_SIZE, 0x00405060);
-                /* Flag icon */
-                int fcx = cx + MS_CELL_SIZE / 2;
-                int fcy = cy + MS_CELL_SIZE / 2;
+                /* Flagged cell */
+                fill_rounded_rect(cx, cy, cs, cs, 3, COLOR_MS_HIDDEN);
+                fb_fill_rect(cx + 2, cy + 1, cs - 4, 1, COLOR_MS_HIDDEN_HI);
+                fb_fill_rect(cx + 1, cy + 2, 1, cs - 4, COLOR_MS_HIDDEN_HI);
+                fb_fill_rect(cx + 2, cy + cs - 2, cs - 4, 1, COLOR_MS_HIDDEN_SH);
+                fb_fill_rect(cx + cs - 2, cy + 2, 1, cs - 4, COLOR_MS_HIDDEN_SH);
+
+                /* Flag icon - modern style */
+                int fcx = cx + cs / 2;
+                int fcy = cy + cs / 2;
                 /* Pole */
-                fb_fill_rect(fcx + 1, fcy - 7, 2, 14, 0x00202020);
-                /* Flag triangle (red) */
+                fb_fill_rect(fcx + 1, fcy - 7, 2, 14, COLOR_TEXT_DIM);
+                /* Flag triangle */
                 fb_fill_rect(fcx - 5, fcy - 7, 6, 3, COLOR_DANGER);
                 fb_fill_rect(fcx - 4, fcy - 4, 5, 2, COLOR_DANGER);
                 fb_fill_rect(fcx - 3, fcy - 2, 4, 1, COLOR_DANGER);
                 /* Base */
-                fb_fill_rect(fcx - 4, fcy + 5, 10, 2, 0x00202020);
+                fb_fill_rect(fcx - 4, fcy + 5, 10, 2, COLOR_TEXT_DIM);
             } else {
                 /* Revealed cell */
-                fb_fill_rect(cx, cy, MS_CELL_SIZE, MS_CELL_SIZE, 0x00C0C8D0);
-                fb_draw_rect(cx, cy, MS_CELL_SIZE, MS_CELL_SIZE, 0x00909898);
+                fill_rounded_rect(cx, cy, cs, cs, 3, COLOR_MS_REVEALED);
+                fb_draw_rect(cx, cy, cs, cs, COLOR_MS_BORDER);
 
                 if (ms_board[r][c] == -1) {
                     /* Mine */
-                    int mcx = cx + MS_CELL_SIZE / 2;
-                    int mcy = cy + MS_CELL_SIZE / 2;
-                    /* Body */
-                    fb_fill_rect(mcx - 4, mcy - 4, 8, 8, 0x00202020);
-                    /* Spikes */
-                    fb_fill_rect(mcx - 6, mcy - 1, 12, 2, 0x00202020);
-                    fb_fill_rect(mcx - 1, mcy - 6, 2, 12, 0x00202020);
-                    /* Highlight */
-                    fb_fill_rect(mcx - 2, mcy - 2, 2, 2, 0x00D0D0D0);
-                    /* Red background if this was the clicked mine */
-                    if (ms_game_over == 1 && r == (ms_game_over >> 8) && c == (ms_game_over & 0xFF)) {
-                        /* nothing extra - the whole grid is revealed anyway */
-                    }
+                    int mcx = cx + cs / 2;
+                    int mcy = cy + cs / 2;
+                    fb_fill_rect(mcx - 4, mcy - 4, 8, 8, COLOR_TEXT_DIM);
+                    fb_fill_rect(mcx - 6, mcy - 1, 12, 2, COLOR_TEXT_DIM);
+                    fb_fill_rect(mcx - 1, mcy - 6, 2, 12, COLOR_TEXT_DIM);
+                    fb_fill_rect(mcx - 2, mcy - 3, 2, 2, COLOR_TEXT_BRIGHT);
                 } else if (ms_board[r][c] > 0) {
-                    /* Number */
                     char num_str[2] = { '0' + ms_board[r][c], '\0' };
-                    fb_draw_string(cx + MS_CELL_SIZE / 2 - 4,
-                                   cy + MS_CELL_SIZE / 2 - 8,
+                    fb_draw_string(cx + cs / 2 - 4,
+                                   cy + cs / 2 - 8,
                                    num_str,
                                    ms_num_colors[ms_board[r][c]],
-                                   0x00C0C8D0);
+                                   COLOR_MS_REVEALED);
                 }
             }
         }
     }
-
-    /* Grid outer border */
-    fb_draw_rect(gx - 1, gy - 1, grid_w + 2, grid_h + 2, COLOR_TASKBAR_LINE);
 }
 
 /* ================================================================
- *  DESKTOP ICONS - Grid layout with detailed pixel art
+ *  DESKTOP ICONS - Modern flat design, 48x48, 2-column grid
  * ================================================================ */
 
 static void icon_grid_pos(int idx, int *ix, int *iy)
@@ -666,164 +743,202 @@ static void icon_grid_pos(int idx, int *ix, int *iy)
     *iy = ICON_GRID_TOP + row * ICON_CELL_H;
 }
 
-/* Draw individual icon shapes using pixel art */
+/* Draw individual icon shapes - modern flat design with bold colors */
 static void draw_icon_terminal(int ix, int iy, int hover, int pressed)
 {
-    fb_color_t bg = pressed ? COLOR_PRIMARY_DARK :
-                    hover  ? COLOR_PRIMARY_LIGHT : COLOR_PRIMARY;
-    fill_rounded_rect(ix, iy, ICON_SIZE, ICON_SIZE, 6, bg);
+    fb_color_t bg = pressed ? 0x00282848 :
+                    hover  ? 0x00383860 : 0x002E2E50;
+    fill_rounded_rect(ix, iy, ICON_SIZE, ICON_SIZE, 10, bg);
+
+    /* Subtle glow under icon on hover */
+    if (hover) {
+        fill_rounded_rect(ix - 2, iy + ICON_SIZE - 4, ICON_SIZE + 4, 8, 4,
+                          0x004A6CF7);
+    }
 
     /* Terminal screen */
-    int sx = ix + 6, sy = iy + 6, sw = ICON_SIZE - 12, sh = ICON_SIZE - 16;
-    fb_fill_rect(sx, sy, sw, sh, 0x00081018);
-    fb_draw_rect(sx, sy, sw, sh, 0x0060A0D0);
+    int sx = ix + 8, sy = iy + 8, sw = ICON_SIZE - 16, sh = ICON_SIZE - 20;
+    fb_fill_rect(sx, sy, sw, sh, COLOR_TERM_BG);
+    fb_draw_rect(sx, sy, sw, sh, COLOR_ACCENT);
     /* Prompt text */
-    fb_draw_string(sx + 2, sy + 2, ">_", 0x0040D060, 0x00081018);
+    fb_draw_string(sx + 3, sy + 2, ">_", COLOR_TERM_FG, COLOR_TERM_BG);
     /* Bottom bar */
-    fb_fill_rect(ix + 4, iy + ICON_SIZE - 8, ICON_SIZE - 8, 4, 0x00404050);
+    fb_fill_rect(ix + 6, iy + ICON_SIZE - 10, ICON_SIZE - 12, 4, 0x00404060);
 }
 
 static void draw_icon_folder(int ix, int iy, int hover, int pressed)
 {
-    fb_color_t bg = pressed ? 0x00406080 :
-                    hover  ? 0x006088A0 : 0x00507090;
-    fill_rounded_rect(ix, iy, ICON_SIZE, ICON_SIZE, 6, bg);
-    /* Folder tab */
-    int fx = ix + 6, fy = iy + 10;
-    fb_fill_rect(fx, fy, 14, 4, 0x0080B0D0);
-    /* Folder body */
-    fb_fill_rect(fx, fy + 3, ICON_SIZE - 12, 20, 0x0080B0D0);
-    fb_draw_rect(fx, fy, ICON_SIZE - 12, 23, 0x00A0D0F0);
+    fb_color_t bg = pressed ? 0x00282848 :
+                    hover  ? 0x00383860 : 0x002E2E50;
+    fill_rounded_rect(ix, iy, ICON_SIZE, ICON_SIZE, 10, bg);
+
+    if (hover) {
+        fill_rounded_rect(ix - 2, iy + ICON_SIZE - 4, ICON_SIZE + 4, 8, 4,
+                          0x004A6CF7);
+    }
+
+    /* Folder - modern flat style */
+    int fx = ix + 7, fy = iy + 12;
+    /* Tab */
+    fill_rounded_rect(fx, fy - 4, 16, 6, 2, COLOR_ACCENT);
+    /* Body */
+    fill_rounded_rect(fx, fy, ICON_SIZE - 14, 22, 3, COLOR_ACCENT);
     /* Inner line */
-    fb_draw_line(fx + 2, fy + 8, fx + ICON_SIZE - 14, fy + 8, 0x006090B0);
+    fb_draw_line(fx + 3, fy + 7, fx + ICON_SIZE - 17, fy + 7, COLOR_ACCENT_START);
 }
 
 static void draw_icon_sysmon(int ix, int iy, int hover, int pressed)
 {
-    fb_color_t bg = pressed ? COLOR_PRIMARY_DARK :
-                    hover  ? COLOR_PRIMARY_LIGHT : COLOR_PRIMARY;
-    fill_rounded_rect(ix, iy, ICON_SIZE, ICON_SIZE, 6, bg);
-    /* Bar chart */
-    int bx = ix + 8, by = iy + 8;
-    int bh[4] = {12, 20, 16, 24};
-    fb_color_t bars[4] = {0x0030A0D0, 0x0020C080, 0x00D0A020, 0x00C04040};
-    for (int i = 0; i < 4; i++) {
-        int bar_y = by + 26 - bh[i];
-        fb_fill_rect(bx + i * 7, bar_y, 5, bh[i], bars[i]);
+    fb_color_t bg = pressed ? 0x00282848 :
+                    hover  ? 0x00383860 : 0x002E2E50;
+    fill_rounded_rect(ix, iy, ICON_SIZE, ICON_SIZE, 10, bg);
+
+    if (hover) {
+        fill_rounded_rect(ix - 2, iy + ICON_SIZE - 4, ICON_SIZE + 4, 8, 4,
+                          0x004A6CF7);
     }
-    /* Axis */
-    fb_draw_line(bx - 2, by + 26, bx + 28, by + 26, 0x0080A0B0);
+
+    /* Bar chart - modern rounded bars */
+    int bx = ix + 8, by = iy + 8;
+    int bh[4] = {14, 24, 18, 28};
+    fb_color_t bars[4] = {COLOR_ACCENT_START, COLOR_SUCCESS, COLOR_WARNING, COLOR_DANGER};
+    for (int i = 0; i < 4; i++) {
+        int bar_y = by + 30 - bh[i];
+        fill_rounded_rect(bx + i * 8, bar_y, 6, bh[i], 2, bars[i]);
+    }
 }
 
 static void draw_icon_settings(int ix, int iy, int hover, int pressed)
 {
-    fb_color_t bg = pressed ? COLOR_PRIMARY_DARK :
-                    hover  ? COLOR_PRIMARY_LIGHT : COLOR_PRIMARY;
-    fill_rounded_rect(ix, iy, ICON_SIZE, ICON_SIZE, 6, bg);
-    /* Gear icon - simplified with a circle and teeth */
-    int cx = ix + ICON_SIZE / 2, cy = iy + ICON_SIZE / 2;
-    /* Outer teeth (8 rectangles rotated) */
-    for (int a = 0; a < 8; a++) {
-        int dx = 8 * ((a & 1) ? 1 : -1);
-        int dy = 8 * ((a & 2) ? 1 : -1);
-        if (a < 4) {
-            fb_fill_rect(cx - 2 + (a % 2 == 0 ? -1 : 1) * 6, cy - 2 + (a < 2 ? -1 : 1) * 6, 5, 5, 0x00B0C0D0);
-        }
+    fb_color_t bg = pressed ? 0x00282848 :
+                    hover  ? 0x00383860 : 0x002E2E50;
+    fill_rounded_rect(ix, iy, ICON_SIZE, ICON_SIZE, 10, bg);
+
+    if (hover) {
+        fill_rounded_rect(ix - 2, iy + ICON_SIZE - 4, ICON_SIZE + 4, 8, 4,
+                          0x004A6CF7);
     }
-    /* Center circle */
-    fb_fill_rect(cx - 5, cy - 5, 10, 10, 0x00B0C0D0);
-    fb_fill_rect(cx - 3, cy - 3, 6, 6, bg);
-    /* Teeth extensions */
-    fb_fill_rect(cx - 2, cy - 10, 4, 5, 0x00B0C0D0);
-    fb_fill_rect(cx - 2, cy + 5, 4, 5, 0x00B0C0D0);
-    fb_fill_rect(cx - 10, cy - 2, 5, 4, 0x00B0C0D0);
-    fb_fill_rect(cx + 5, cy - 2, 5, 4, 0x00B0C0D0);
+
+    /* Gear icon - modern simplified */
+    int cx = ix + ICON_SIZE / 2, cy = iy + ICON_SIZE / 2;
+    /* Center hub */
+    fb_fill_rect(cx - 4, cy - 4, 8, 8, COLOR_TEXT_DIM);
+    fb_fill_rect(cx - 2, cy - 2, 4, 4, bg);
+    /* Teeth */
+    fb_fill_rect(cx - 2, cy - 10, 4, 5, COLOR_TEXT_DIM);
+    fb_fill_rect(cx - 2, cy + 5, 4, 5, COLOR_TEXT_DIM);
+    fb_fill_rect(cx - 10, cy - 2, 5, 4, COLOR_TEXT_DIM);
+    fb_fill_rect(cx + 5, cy - 2, 5, 4, COLOR_TEXT_DIM);
+    /* Diagonal teeth */
+    fb_fill_rect(cx - 7, cy - 7, 4, 4, COLOR_TEXT_DIM);
+    fb_fill_rect(cx + 3, cy - 7, 4, 4, COLOR_TEXT_DIM);
+    fb_fill_rect(cx - 7, cy + 3, 4, 4, COLOR_TEXT_DIM);
+    fb_fill_rect(cx + 3, cy + 3, 4, 4, COLOR_TEXT_DIM);
 }
 
 static void draw_icon_about(int ix, int iy, int hover, int pressed)
 {
-    fb_color_t bg = pressed ? COLOR_PRIMARY_DARK :
-                    hover  ? COLOR_PRIMARY_LIGHT : COLOR_PRIMARY;
-    fill_rounded_rect(ix, iy, ICON_SIZE, ICON_SIZE, 6, bg);
+    fb_color_t bg = pressed ? 0x00282848 :
+                    hover  ? 0x00383860 : 0x002E2E50;
+    fill_rounded_rect(ix, iy, ICON_SIZE, ICON_SIZE, 10, bg);
+
+    if (hover) {
+        fill_rounded_rect(ix - 2, iy + ICON_SIZE - 4, ICON_SIZE + 4, 8, 4,
+                          0x004A6CF7);
+    }
+
     /* Info circle */
     int cx = ix + ICON_SIZE / 2, cy = iy + ICON_SIZE / 2;
-    /* Circle */
-    for (int dy = -10; dy <= 10; dy++) {
-        for (int dx = -10; dx <= 10; dx++) {
-            if (dx * dx + dy * dy <= 100 && dx * dx + dy * dy > 49) {
+    for (int dy = -12; dy <= 12; dy++) {
+        for (int dx = -12; dx <= 12; dx++) {
+            if (dx * dx + dy * dy <= 144 && dx * dx + dy * dy > 64) {
                 int px = cx + dx, py = cy + dy;
                 if (px >= ix && px < ix + ICON_SIZE && py >= iy && py < iy + ICON_SIZE)
-                    fb_put_pixel(px, py, 0x0060B0E0);
+                    fb_put_pixel(px, py, COLOR_ACCENT);
             }
         }
     }
-    /* "i" dot and stem */
-    fb_fill_rect(cx - 1, cy - 6, 3, 3, 0x0060B0E0);
-    fb_fill_rect(cx - 1, cy - 1, 3, 8, 0x0060B0E0);
+    /* "i" */
+    fb_fill_rect(cx - 2, cy - 7, 4, 4, COLOR_TEXT_BRIGHT);
+    fb_fill_rect(cx - 2, cy - 1, 4, 10, COLOR_TEXT_BRIGHT);
 }
 
 static void draw_icon_home(int ix, int iy, int hover, int pressed)
 {
-    fb_color_t bg = pressed ? COLOR_PRIMARY_DARK :
-                    hover  ? COLOR_PRIMARY_LIGHT : COLOR_PRIMARY;
-    fill_rounded_rect(ix, iy, ICON_SIZE, ICON_SIZE, 6, bg);
-    /* House shape */
-    int bx = ix + 7, by = iy + 10;
-    /* Roof (triangle approximation) */
-    for (int i = 0; i < 8; i++) {
+    fb_color_t bg = pressed ? 0x00282848 :
+                    hover  ? 0x00383860 : 0x002E2E50;
+    fill_rounded_rect(ix, iy, ICON_SIZE, ICON_SIZE, 10, bg);
+
+    if (hover) {
+        fill_rounded_rect(ix - 2, iy + ICON_SIZE - 4, ICON_SIZE + 4, 8, 4,
+                          0x004A6CF7);
+    }
+
+    /* House - modern flat */
+    int bx = ix + 8, by = iy + 12;
+    /* Roof triangle */
+    for (int i = 0; i < 10; i++) {
         int hw = i + 1;
-        int rx = bx + 13 - i;
-        fb_fill_rect(rx, by + i, hw * 2, 1, 0x00D0A060);
+        int rx = bx + 16 - i;
+        fb_fill_rect(rx, by + i, hw * 2, 1, COLOR_WARNING);
     }
     /* Body */
-    fb_fill_rect(bx + 5, by + 8, 16, 14, 0x0080A0C0);
-    fb_draw_rect(bx + 5, by + 8, 16, 14, 0x00A0C0E0);
+    fill_rounded_rect(bx + 5, by + 9, 22, 16, 2, COLOR_ACCENT);
     /* Door */
-    fb_fill_rect(bx + 10, by + 14, 6, 8, 0x00507050);
+    fb_fill_rect(bx + 12, by + 15, 8, 10, COLOR_SUCCESS);
 }
 
 static void draw_icon_trash(int ix, int iy, int hover, int pressed)
 {
-    fb_color_t bg = pressed ? COLOR_PRIMARY_DARK :
-                    hover  ? COLOR_PRIMARY_LIGHT : COLOR_PRIMARY;
-    fill_rounded_rect(ix, iy, ICON_SIZE, ICON_SIZE, 6, bg);
-    /* Trash can */
-    int bx = ix + 10, by = iy + 10;
+    fb_color_t bg = pressed ? 0x00282848 :
+                    hover  ? 0x00383860 : 0x002E2E50;
+    fill_rounded_rect(ix, iy, ICON_SIZE, ICON_SIZE, 10, bg);
+
+    if (hover) {
+        fill_rounded_rect(ix - 2, iy + ICON_SIZE - 4, ICON_SIZE + 4, 8, 4,
+                          0x004A6CF7);
+    }
+
+    /* Trash can - modern flat */
+    int bx = ix + 11, by = iy + 10;
     /* Lid */
-    fb_fill_rect(bx - 2, by, 24, 4, 0x00909898);
-    fb_fill_rect(bx + 6, by - 4, 8, 4, 0x00909898);
+    fill_rounded_rect(bx - 3, by, 26, 5, 2, COLOR_TEXT_DIM);
+    fb_fill_rect(bx + 7, by - 5, 8, 5, COLOR_TEXT_DIM);
     /* Body */
-    fb_fill_rect(bx, by + 4, 20, 18, 0x00707878);
-    fb_draw_rect(bx, by + 4, 20, 18, 0x00A0A8A8);
-    /* Lines on body */
-    fb_draw_line(bx + 5, by + 6, bx + 5, by + 20, 0x00909898);
-    fb_draw_line(bx + 10, by + 6, bx + 10, by + 20, 0x00909898);
-    fb_draw_line(bx + 15, by + 6, bx + 15, by + 20, 0x00909898);
+    fill_rounded_rect(bx, by + 5, 20, 20, 3, 0x00404060);
+    /* Lines */
+    fb_draw_line(bx + 5, by + 8, bx + 5, by + 22, COLOR_TEXT_DIM);
+    fb_draw_line(bx + 10, by + 8, bx + 10, by + 22, COLOR_TEXT_DIM);
+    fb_draw_line(bx + 15, by + 8, bx + 15, by + 22, COLOR_TEXT_DIM);
 }
 
 static void draw_icon_minesweeper(int ix, int iy, int hover, int pressed)
 {
-    fb_color_t bg = pressed ? COLOR_PRIMARY_DARK :
-                    hover  ? COLOR_PRIMARY_LIGHT : COLOR_PRIMARY;
-    fill_rounded_rect(ix, iy, ICON_SIZE, ICON_SIZE, 6, bg);
-    /* Mine icon */
-    int cx = ix + ICON_SIZE / 2, cy = iy + ICON_SIZE / 2;
-    /* Mine body */
-    fb_fill_rect(cx - 5, cy - 5, 10, 10, 0x00202020);
-    /* Spikes */
-    fb_fill_rect(cx - 8, cy - 1, 16, 2, 0x00202020);
-    fb_fill_rect(cx - 1, cy - 8, 2, 16, 0x00202020);
-    /* Diagonal spikes */
-    for (int d = -6; d <= -4; d++) {
-        fb_put_pixel(cx + d, cy + d, 0x00202020);
-        fb_put_pixel(cx - d - 1, cy + d, 0x00202020);
+    fb_color_t bg = pressed ? 0x00282848 :
+                    hover  ? 0x00383860 : 0x002E2E50;
+    fill_rounded_rect(ix, iy, ICON_SIZE, ICON_SIZE, 10, bg);
+
+    if (hover) {
+        fill_rounded_rect(ix - 2, iy + ICON_SIZE - 4, ICON_SIZE + 4, 8, 4,
+                          0x004A6CF7);
     }
-    for (int d = 4; d <= 6; d++) {
-        fb_put_pixel(cx + d, cy + d, 0x00202020);
-        fb_put_pixel(cx - d - 1, cy + d, 0x00202020);
+
+    /* Mine icon - modern */
+    int cx = ix + ICON_SIZE / 2, cy = iy + ICON_SIZE / 2;
+    fb_fill_rect(cx - 6, cy - 6, 12, 12, COLOR_TEXT_DIM);
+    fb_fill_rect(cx - 9, cy - 1, 18, 2, COLOR_TEXT_DIM);
+    fb_fill_rect(cx - 1, cy - 9, 2, 18, COLOR_TEXT_DIM);
+    /* Diagonal spikes */
+    for (int d = -7; d <= -5; d++) {
+        fb_put_pixel(cx + d, cy + d, COLOR_TEXT_DIM);
+        fb_put_pixel(cx - d - 1, cy + d, COLOR_TEXT_DIM);
+    }
+    for (int d = 5; d <= 7; d++) {
+        fb_put_pixel(cx + d, cy + d, COLOR_TEXT_DIM);
+        fb_put_pixel(cx - d - 1, cy + d, COLOR_TEXT_DIM);
     }
     /* Highlight */
-    fb_fill_rect(cx - 2, cy - 3, 2, 2, 0x00D0D0D0);
+    fb_fill_rect(cx - 3, cy - 4, 2, 2, COLOR_TEXT_BRIGHT);
 }
 
 typedef void (*icon_draw_fn)(int, int, int, int);
@@ -846,17 +961,18 @@ static void draw_desktop_icon(int idx, int hover, int pressed)
 
     icon_drawers[idx](ix, iy, hover, pressed);
 
-    /* Label below icon, centered */
+    /* Label below icon, centered with drop shadow */
     const char *name = app_names[idx];
     int len = 0;
     while (name[len]) len++;
     int label_x = ix + (ICON_SIZE - len * 8) / 2;
     if (label_x < 2) label_x = 2;
-    int label_y = iy + ICON_SIZE + 4;
+    int label_y = iy + ICON_SIZE + 6;
 
-    /* Shadow text then bright text */
-    fb_draw_string(label_x + 1, label_y + 1, name, 0x00040810, COLOR_BG_TOP);
-    fb_draw_string(label_x, label_y, name, hover ? COLOR_TEXT_BRIGHT : COLOR_TEXT, COLOR_BG_TOP);
+    /* Drop shadow */
+    fb_draw_string(label_x + 1, label_y + 1, name, 0x00060610, COLOR_BG_TL);
+    /* Text */
+    fb_draw_string(label_x, label_y, name, hover ? COLOR_TEXT_BRIGHT : COLOR_TEXT, COLOR_BG_TL);
 }
 
 static void draw_all_desktop_icons(int hover_icon)
@@ -901,74 +1017,158 @@ static void draw_mouse_cursor(int cx, int cy)
     }
 }
 
-/* Forward declaration - defined in start menu section */
+/* Forward declaration */
 static void draw_fox_face(int x, int y, int size);
 
 /* ================================================================
- *  TASKBAR - Three zones: Start | Window list | System tray
+ *  DOCK TASKBAR - Centered, floating, macOS/Windows 11 style
  * ================================================================ */
 
-#define START_BTN_W  44
-
-static void taskbar_win_rect(int slot, int *bx, int *bw)
+/* Dock geometry helpers */
+static int dock_y(void)
 {
-    int start_x = START_BTN_W + 12;
-    *bw = 110;
-    *bx = start_x + slot * (*bw + 4);
+    return (int)fb_get_height() - TASKBAR_HEIGHT - DOCK_FLOAT_GAP;
+}
+
+static int dock_total_width(void)
+{
+    /* Start button + window buttons + system tray */
+    int start_w = 40;
+    int win_w = num_wins * 44;
+    int tray_w = 80;
+    int spacing = 12;
+    return start_w + spacing + win_w + spacing + tray_w + 16;
+}
+
+static int dock_x(void)
+{
+    int total_w = dock_total_width();
+    int sw = (int)fb_get_width();
+    int dx = (sw - total_w) / 2;
+    if (dx < 10) dx = 10;
+    return dx;
+}
+
+/* Position of start button within dock */
+static void dock_start_rect(int *sx, int *sy, int *sw, int *sh)
+{
+    int dx = dock_x();
+    int dy = dock_y();
+    *sx = dx + 8;
+    *sy = dy + 8;
+    *sw = 36;
+    *sh = TASKBAR_HEIGHT - 16;
+}
+
+/* Position of a window button within dock */
+static void dock_win_rect(int slot, int *bx, int *by, int *bw, int *bh)
+{
+    int dx = dock_x();
+    int dy = dock_y();
+    int start_w = 40;
+    int spacing = 12;
+    *bx = dx + 8 + start_w + spacing + slot * 44;
+    *by = dy + 8;
+    *bw = 40;
+    *bh = TASKBAR_HEIGHT - 16;
+}
+
+/* Position of system tray within dock */
+static void dock_tray_rect(int *tx, int *ty, int *tw, int *th)
+{
+    int dx = dock_x();
+    int dy = dock_y();
+    int start_w = 40;
+    int win_w = num_wins * 44;
+    int spacing = 12;
+    *tx = dx + 8 + start_w + spacing + win_w + spacing;
+    *ty = dy + 8;
+    *tw = 80;
+    *th = TASKBAR_HEIGHT - 16;
 }
 
 static void draw_taskbar(void)
 {
     uint32_t sw = fb_get_width();
-    int tb_y = (int)fb_get_height() - TASKBAR_HEIGHT;
+    int dy = dock_y();
+    int dx = dock_x();
+    int total_w = dock_total_width();
 
-    /* Taskbar background */
-    fb_fill_rect(0, tb_y, sw, TASKBAR_HEIGHT, FB_COLOR_TASKBAR);
-    /* Top accent line */
-    fb_draw_line(0, tb_y, (int)sw, tb_y, COLOR_TASKBAR_LINE);
-    /* Subtle shadow at top */
-    fb_draw_line(0, tb_y + 1, (int)sw, tb_y + 1, 0x00040810);
+    /* Dock background - frosted dark glass with rounded corners */
+    fill_rounded_rect(dx, dy, total_w, TASKBAR_HEIGHT, DOCK_CORNER_R, COLOR_DOCK_BG);
 
-    /* === LEFT: Start button === */
+    /* Subtle top border glow */
     {
-        int btn_x = 4, btn_y = tb_y + 5;
-        int btn_w = START_BTN_W, btn_h = TASKBAR_HEIGHT - 10;
-        fb_color_t btn_bg = start_menu_open ? COLOR_PRIMARY_DARK : COLOR_PRIMARY;
-        fill_rounded_rect(btn_x, btn_y, btn_w, btn_h, 4, btn_bg);
-        /* Fox face icon */
-        draw_fox_face(btn_x + (btn_w - 20) / 2, btn_y + (btn_h - 20) / 2, 20);
+        int line_x1 = dx + DOCK_CORNER_R;
+        int line_x2 = dx + total_w - DOCK_CORNER_R;
+        fb_draw_line(line_x1, dy, line_x2, dy, COLOR_DOCK_BORDER);
+        /* Second glow line - slightly more visible */
+        fb_draw_line(line_x1, dy + 1, line_x2, dy + 1, 0x00202040);
     }
 
-    /* === MIDDLE: Window list === */
+    /* Border around dock */
+    draw_rounded_rect(dx, dy, total_w, TASKBAR_HEIGHT, DOCK_CORNER_R, COLOR_DOCK_BORDER);
+
+    /* === LEFT: Start button (rounded circle with fox logo) === */
+    {
+        int sx, sy, sw2, sh2;
+        dock_start_rect(&sx, &sy, &sw2, &sh2);
+        fb_color_t btn_bg = start_menu_open ? COLOR_ACCENT : COLOR_SURFACE;
+        fill_rounded_rect(sx, sy, sw2, sh2, sw2 / 2, btn_bg);
+
+        /* Glow on hover */
+        if (start_menu_open) {
+            fill_rounded_rect(sx - 2, sy - 2, sw2 + 4, sh2 + 4, sw2 / 2 + 2, 0x003838C0);
+        }
+
+        /* Fox face icon */
+        draw_fox_face(sx + (sw2 - 20) / 2, sy + (sh2 - 20) / 2, 20);
+    }
+
+    /* === CENTER: Running apps as icon buttons === */
     for (int i = 0; i < num_wins; i++) {
-        int bx, bw;
-        taskbar_win_rect(i, &bx, &bw);
-        int by = tb_y + 5;
-        int bh = TASKBAR_HEIGHT - 10;
+        int bx, by, bw, bh;
+        dock_win_rect(i, &bx, &by, &bw, &bh);
         int is_focused = (i == focus_win) && !wins[i].minimized;
         int is_minimized = wins[i].minimized;
 
         fb_color_t bg;
-        if (is_focused) bg = COLOR_PRIMARY;
+        if (is_focused) bg = COLOR_SURFACE_LIGHT;
         else if (is_minimized) bg = COLOR_SURFACE_DIM;
         else bg = COLOR_SURFACE;
 
-        fill_rounded_rect(bx, by, bw, bh, 3, bg);
+        fill_rounded_rect(bx, by, bw, bh, 6, bg);
 
-        fb_color_t txt = is_focused ? COLOR_TEXT_BRIGHT : COLOR_TEXT_DIM;
-        fb_draw_string(bx + 6, by + (bh - 14) / 2, app_names[wins[i].app], txt, bg);
+        /* Mini icon - simplified colored square */
+        fb_color_t icon_c;
+        switch (wins[i].app) {
+        case 0: icon_c = COLOR_TERM_FG; break;
+        case 1: icon_c = COLOR_ACCENT; break;
+        case 2: icon_c = COLOR_SUCCESS; break;
+        case 3: icon_c = COLOR_TEXT_DIM; break;
+        case 4: icon_c = COLOR_ACCENT_START; break;
+        case 5: icon_c = COLOR_WARNING; break;
+        case 6: icon_c = COLOR_TEXT_DIM; break;
+        case 7: icon_c = COLOR_DANGER; break;
+        default: icon_c = COLOR_TEXT_DIM; break;
+        }
+        fill_rounded_rect(bx + 8, by + 6, 24, 24, 4, icon_c);
+        /* Letter on icon */
+        char letter[2] = { app_names[wins[i].app][0], '\0' };
+        fb_draw_string(bx + 14, by + 10, letter, COLOR_TEXT_BRIGHT, icon_c);
 
-        /* Active indicator */
-        if (is_focused)
-            fb_fill_rect(bx + 4, by + bh - 3, bw - 8, 2, COLOR_ACCENT);
-        else if (!is_minimized)
-            fb_fill_rect(bx + 4, by + bh - 3, bw - 8, 2, COLOR_TASKBAR_LINE);
+        /* Active indicator dot below */
+        if (is_focused) {
+            fb_fill_rect(bx + bw / 2 - 3, by + bh - 4, 6, 3, COLOR_ACCENT);
+        } else if (!is_minimized) {
+            fb_fill_rect(bx + bw / 2 - 2, by + bh - 4, 4, 2, COLOR_DOCK_BORDER);
+        }
     }
 
     /* === RIGHT: System tray === */
     {
-        int tray_right = (int)sw - 8;
-        int tray_y = tb_y + 8;
+        int tx, ty, tw2, th2;
+        dock_tray_rect(&tx, &ty, &tw2, &th2);
 
         /* Time */
         uint64_t ms = timer_get_ms();
@@ -991,35 +1191,33 @@ static void draw_taskbar(void)
             else while (n > 0) { tmp[t++] = '0' + (n % 10); n /= 10; }
             for (int j = t - 1; j >= 0; j--) time_buf[pos++] = tmp[j]; }
         time_buf[pos] = '\0';
-        int time_w = pos * 8;
-        fb_draw_string(tray_right - time_w, tray_y + 4, time_buf, COLOR_TEXT, FB_COLOR_TASKBAR);
+        fb_draw_string(tx + 8, ty + 8, time_buf, COLOR_TEXT, COLOR_DOCK_BG);
 
-        /* Separator before tray */
-        fb_draw_line(tray_right - time_w - 12, tb_y + 6, tray_right - time_w - 12, tb_y + TASKBAR_HEIGHT - 6, COLOR_TASKBAR_LINE);
-
-        /* Simple system indicators (dots) */
-        int dot_x = tray_right - time_w - 24;
-        fb_fill_rect(dot_x, tray_y + 8, 6, 6, COLOR_SUCCESS);      /* CPU ok */
-        fb_fill_rect(dot_x + 10, tray_y + 8, 6, 6, COLOR_WARNING); /* Memory */
+        /* Status dots */
+        int dot_x = tx + tw2 - 20;
+        fb_fill_rect(dot_x, ty + 10, 6, 6, COLOR_SUCCESS);
+        fb_fill_rect(dot_x + 10, ty + 10, 6, 6, COLOR_WARNING);
     }
 }
 
 /* ================================================================
- *  START MENU - Enhanced with sections, mini icons, power options
+ *  START MENU - Modern centered panel (Windows 11 / macOS style)
  * ================================================================ */
 
-#define START_MENU_W          260
-#define START_MENU_ITEM_H     26
-#define START_MENU_HEADER_H   38
-#define START_MENU_SECTION_H  20
-#define START_MENU_SEP_H      6
-#define START_MENU_POWER_H    30
-#define START_MENU_USER_H     32
-#define START_MENU_BOTTOM_PAD 4
+#define START_MENU_W          340
+#define START_MENU_ITEM_H     32
+#define START_MENU_HEADER_H   50
+#define START_MENU_SEARCH_H   36
+#define START_MENU_SECTION_H  24
+#define START_MENU_SEP_H      8
+#define START_MENU_POWER_H    36
+#define START_MENU_USER_H     40
+#define START_MENU_BOTTOM_PAD 8
+#define START_MENU_GRID_COLS  4
+#define START_MENU_GRID_ITEM  68
 
 /* Menu item indices:
- * 0-5: Applications (Terminal..Minesweeper)
- * 6-7: Places (Home, Trash)
+ * 0-7: Applications
  * 8:   Shutdown
  * 9:   Restart
  */
@@ -1029,154 +1227,699 @@ static void draw_taskbar(void)
 static int start_menu_height(void)
 {
     return START_MENU_HEADER_H
-         + START_MENU_SECTION_H + 6 * START_MENU_ITEM_H
-         + START_MENU_SEP_H
-         + START_MENU_SECTION_H + 2 * START_MENU_ITEM_H
+         + START_MENU_SEARCH_H + 6
+         + START_MENU_SECTION_H
+         + ((NUM_APPS + START_MENU_GRID_COLS - 1) / START_MENU_GRID_COLS) * START_MENU_GRID_ITEM
          + START_MENU_SEP_H
          + START_MENU_POWER_H
          + START_MENU_USER_H
          + START_MENU_BOTTOM_PAD;
 }
 
+static int start_menu_x(void)
+{
+    return ((int)fb_get_width() - START_MENU_W) / 2;
+}
+
 static int start_menu_top(void)
 {
-    int tb_y = (int)fb_get_height() - TASKBAR_HEIGHT;
-    return tb_y - start_menu_height();
+    int mh = start_menu_height();
+    int sh = (int)fb_get_height();
+    int tb = dock_y();
+    /* Position centered, but not overlapping dock */
+    int top = (sh - mh - TASKBAR_HEIGHT - DOCK_FLOAT_GAP) / 2;
+    if (top < 10) top = 10;
+    return top;
 }
 
-/* Y-offset helpers from menu top */
-static int sm_app_y(int i)
+/* Grid position for app in start menu */
+static void sm_grid_pos(int idx, int *gx, int *gy)
 {
-    return START_MENU_HEADER_H + START_MENU_SECTION_H + i * START_MENU_ITEM_H;
+    int mx = start_menu_x();
+    int my = start_menu_top();
+    int col = idx % START_MENU_GRID_COLS;
+    int row = idx / START_MENU_GRID_COLS;
+    int grid_start_x = mx + (START_MENU_W - START_MENU_GRID_COLS * START_MENU_GRID_ITEM) / 2;
+    int grid_start_y = my + START_MENU_HEADER_H + START_MENU_SEARCH_H + 6 + START_MENU_SECTION_H;
+    *gx = grid_start_x + col * START_MENU_GRID_ITEM;
+    *gy = grid_start_y + row * START_MENU_GRID_ITEM;
 }
 
-static int sm_place_y(int i)
+static void draw_start_menu(void)
 {
-    return START_MENU_HEADER_H + START_MENU_SECTION_H + 6 * START_MENU_ITEM_H
-         + START_MENU_SEP_H + START_MENU_SECTION_H + i * START_MENU_ITEM_H;
-}
+    int mx = start_menu_x();
+    int my = start_menu_top();
+    int mh = start_menu_height();
 
-static int sm_power_y(void)
-{
-    return START_MENU_HEADER_H + START_MENU_SECTION_H + 6 * START_MENU_ITEM_H
-         + START_MENU_SEP_H + START_MENU_SECTION_H + 2 * START_MENU_ITEM_H
-         + START_MENU_SEP_H;
-}
+    /* Multi-layer shadow */
+    fill_rounded_rect(mx + 6, my + 6, START_MENU_W, mh, 14, COLOR_SHADOW3);
+    fill_rounded_rect(mx + 4, my + 4, START_MENU_W, mh, 13, COLOR_SHADOW2);
+    fill_rounded_rect(mx + 2, my + 2, START_MENU_W, mh, 12, COLOR_SHADOW1);
 
-static int sm_user_y(void)
-{
-    return sm_power_y() + START_MENU_POWER_H;
-}
+    /* Background - frosted glass */
+    fill_rounded_rect(mx, my, START_MENU_W, mh, 12, COLOR_GLASS);
+    draw_rounded_rect(mx, my, START_MENU_W, mh, 12, COLOR_DOCK_BORDER);
 
-/* --- Mini icon drawing for start menu items --- */
+    /* ---- Header ---- */
+    {
+        fill_rounded_rect_top(mx + 1, my + 1, START_MENU_W - 2, START_MENU_HEADER_H, 11, COLOR_SURFACE);
+        /* Gradient accent line at bottom of header */
+        fb_draw_line(mx + 20, my + START_MENU_HEADER_H - 1,
+                     mx + START_MENU_W - 20, my + START_MENU_HEADER_H - 1, COLOR_ACCENT);
 
-static void draw_mini_icon_terminal(int x, int y, int hovered)
-{
-    fb_color_t bg = hovered ? COLOR_ACCENT : COLOR_PRIMARY;
-    fill_rounded_rect(x, y, 18, 18, 3, bg);
-    fb_fill_rect(x + 3, y + 3, 12, 9, 0x00081018);
-    fb_draw_string(x + 4, y + 3, ">_", 0x0040D060, 0x00081018);
-    fb_fill_rect(x + 2, y + 13, 14, 3, 0x00404050);
-}
-
-static void draw_mini_icon_folder(int x, int y, int hovered)
-{
-    fb_color_t bg = hovered ? 0x006088A0 : 0x00507090;
-    fill_rounded_rect(x, y, 18, 18, 3, bg);
-    fb_fill_rect(x + 3, y + 6, 5, 2, 0x0080B0D0);
-    fb_fill_rect(x + 3, y + 8, 12, 6, 0x0080B0D0);
-    fb_draw_rect(x + 3, y + 5, 12, 9, 0x00A0D0F0);
-}
-
-static void draw_mini_icon_sysmon(int x, int y, int hovered)
-{
-    fb_color_t bg = hovered ? COLOR_ACCENT : COLOR_PRIMARY;
-    fill_rounded_rect(x, y, 18, 18, 3, bg);
-    fb_fill_rect(x + 3, y + 11, 3, 4, 0x0030A0D0);
-    fb_fill_rect(x + 7, y + 7, 3, 8, 0x0020C080);
-    fb_fill_rect(x + 11, y + 9, 3, 6, 0x00D0A020);
-    fb_draw_line(x + 2, y + 15, x + 15, y + 15, 0x0080A0B0);
-}
-
-static void draw_mini_icon_settings(int x, int y, int hovered)
-{
-    fb_color_t bg = hovered ? COLOR_ACCENT : COLOR_PRIMARY;
-    fill_rounded_rect(x, y, 18, 18, 3, bg);
-    int cx = x + 9, cy = y + 9;
-    fb_fill_rect(cx - 3, cy - 3, 6, 6, 0x00B0C0D0);
-    fb_fill_rect(cx - 1, cy - 7, 2, 4, 0x00B0C0D0);
-    fb_fill_rect(cx - 1, cy + 3, 2, 4, 0x00B0C0D0);
-    fb_fill_rect(cx - 7, cy - 1, 4, 2, 0x00B0C0D0);
-    fb_fill_rect(cx + 3, cy - 1, 4, 2, 0x00B0C0D0);
-    fb_fill_rect(cx - 5, cy - 5, 2, 2, 0x00B0C0D0);
-    fb_fill_rect(cx + 3, cy - 5, 2, 2, 0x00B0C0D0);
-    fb_fill_rect(cx - 5, cy + 3, 2, 2, 0x00B0C0D0);
-    fb_fill_rect(cx + 3, cy + 3, 2, 2, 0x00B0C0D0);
-    fb_fill_rect(cx - 2, cy - 2, 4, 4, bg);
-}
-
-static void draw_mini_icon_about(int x, int y, int hovered)
-{
-    fb_color_t bg = hovered ? COLOR_ACCENT : COLOR_PRIMARY;
-    fill_rounded_rect(x, y, 18, 18, 3, bg);
-    int cx = x + 9, cy = y + 9;
-    for (int dy = -6; dy <= 6; dy++)
-        for (int dx = -6; dx <= 6; dx++)
-            if (dx * dx + dy * dy <= 36 && dx * dx + dy * dy > 16)
-                fb_put_pixel(cx + dx, cy + dy, 0x0060B0E0);
-    fb_fill_rect(cx - 1, cy - 4, 2, 2, 0x0060B0E0);
-    fb_fill_rect(cx - 1, cy - 1, 2, 5, 0x0060B0E0);
-}
-
-static void draw_mini_icon_home(int x, int y, int hovered)
-{
-    fb_color_t bg = hovered ? COLOR_ACCENT : COLOR_PRIMARY;
-    fill_rounded_rect(x, y, 18, 18, 3, bg);
-    int bx = x + 3, by = y + 5;
-    for (int i = 0; i < 4; i++) {
-        int hw = i + 1;
-        fb_fill_rect(bx + 6 - i, by + i, hw * 2, 1, 0x00D0A060);
+        draw_fox_face(mx + 14, my + 10, 28);
+        fb_draw_string(mx + 50, my + 10, "SpiritFoxOS", COLOR_TEXT_BRIGHT, COLOR_SURFACE);
+        fb_draw_string(mx + 50, my + 26, "v0.5.0", COLOR_TEXT_DIM, COLOR_SURFACE);
     }
-    fb_fill_rect(bx + 3, by + 4, 8, 7, 0x0080A0C0);
-    fb_fill_rect(bx + 5, by + 7, 4, 4, 0x00507050);
+
+    /* ---- Search bar ---- */
+    {
+        int sb_x = mx + 16;
+        int sb_y = my + START_MENU_HEADER_H + 6;
+        int sb_w = START_MENU_W - 32;
+        fill_rounded_rect(sb_x, sb_y, sb_w, START_MENU_SEARCH_H, 6, COLOR_SURFACE_DIM);
+        draw_rounded_rect(sb_x, sb_y, sb_w, START_MENU_SEARCH_H, 6, COLOR_DOCK_BORDER);
+        fb_draw_string(sb_x + 10, sb_y + 10, "Search...", COLOR_TEXT_DIM, COLOR_SURFACE_DIM);
+    }
+
+    /* ---- Pinned section label ---- */
+    {
+        int sec_y = my + START_MENU_HEADER_H + START_MENU_SEARCH_H + 6;
+        fb_draw_string(mx + 20, sec_y + 4, "PINNED", COLOR_TEXT_DIM, COLOR_GLASS);
+    }
+
+    /* ---- Pinned apps grid ---- */
+    for (int i = 0; i < NUM_APPS; i++) {
+        int gx, gy;
+        sm_grid_pos(i, &gx, &gy);
+        int hovered = (start_menu_hover == i);
+
+        if (hovered)
+            fill_rounded_rect(gx + 2, gy + 2, START_MENU_GRID_ITEM - 4, START_MENU_GRID_ITEM - 4,
+                              6, COLOR_SURFACE_LIGHT);
+
+        /* Draw a mini icon for each app */
+        fb_color_t icon_c;
+        switch (i) {
+        case 0: icon_c = COLOR_TERM_FG; break;
+        case 1: icon_c = COLOR_ACCENT; break;
+        case 2: icon_c = COLOR_SUCCESS; break;
+        case 3: icon_c = COLOR_TEXT_DIM; break;
+        case 4: icon_c = COLOR_ACCENT_START; break;
+        case 5: icon_c = COLOR_WARNING; break;
+        case 6: icon_c = 0x00606080; break;
+        case 7: icon_c = COLOR_DANGER; break;
+        default: icon_c = COLOR_TEXT_DIM; break;
+        }
+
+        int icx = gx + (START_MENU_GRID_ITEM - 28) / 2;
+        int icy = gy + 6;
+        fill_rounded_rect(icx, icy, 28, 28, 6, icon_c);
+
+        /* Letter */
+        char letter[2] = { app_names[i][0], '\0' };
+        fb_color_t letter_c = (i == 0) ? COLOR_TERM_BG : COLOR_TEXT_BRIGHT;
+        fb_draw_string(icx + 9, icy + 6, letter, letter_c, icon_c);
+
+        /* Label below icon */
+        int label_y = icy + 32;
+        fb_color_t txt = hovered ? COLOR_TEXT_BRIGHT : COLOR_TEXT;
+        fb_color_t bg = hovered ? COLOR_SURFACE_LIGHT : COLOR_GLASS;
+        fb_draw_string(gx + 4, label_y, app_names[i], txt, bg);
+    }
+
+    /* ---- Separator ---- */
+    {
+        int sep_y = my + START_MENU_HEADER_H + START_MENU_SEARCH_H + 6
+                  + START_MENU_SECTION_H
+                  + ((NUM_APPS + START_MENU_GRID_COLS - 1) / START_MENU_GRID_COLS) * START_MENU_GRID_ITEM
+                  + START_MENU_SEP_H / 2;
+        fb_draw_line(mx + 20, sep_y, mx + START_MENU_W - 20, sep_y, COLOR_DOCK_BORDER);
+    }
+
+    /* ---- Power row ---- */
+    {
+        int pw_y = my + START_MENU_HEADER_H + START_MENU_SEARCH_H + 6
+                 + START_MENU_SECTION_H
+                 + ((NUM_APPS + START_MENU_GRID_COLS - 1) / START_MENU_GRID_COLS) * START_MENU_GRID_ITEM
+                 + START_MENU_SEP_H;
+        int half_w = (START_MENU_W - 40) / 2;
+
+        /* Shutdown button */
+        {
+            int hovered = (start_menu_hover == SM_ITEM_SHUTDOWN);
+            fb_color_t bg = hovered ? COLOR_DANGER : COLOR_SURFACE_DIM;
+            fill_rounded_rect(mx + 12, pw_y + 2, half_w, START_MENU_POWER_H - 4, 6, bg);
+            /* Power icon - circle with gap */
+            int icx = mx + 12 + 18, icy = pw_y + START_MENU_POWER_H / 2;
+            for (int dy = -7; dy <= 7; dy++)
+                for (int dx = -7; dx <= 7; dx++)
+                    if (dx * dx + dy * dy <= 49 && dx * dx + dy * dy > 36)
+                        fb_put_pixel(icx + dx, icy + dy, hovered ? COLOR_TEXT_BRIGHT : COLOR_DANGER);
+            fb_fill_rect(icx - 1, icy - 9, 2, 5, hovered ? COLOR_TEXT_BRIGHT : COLOR_DANGER);
+            fb_draw_string(mx + 12 + 32, pw_y + 10, "Shutdown",
+                           hovered ? COLOR_TEXT_BRIGHT : COLOR_DANGER, bg);
+        }
+
+        /* Restart button */
+        {
+            int rx = mx + 12 + half_w + 16;
+            int hovered = (start_menu_hover == SM_ITEM_RESTART);
+            fb_color_t bg = hovered ? COLOR_WARNING : COLOR_SURFACE_DIM;
+            fill_rounded_rect(rx, pw_y + 2, half_w, START_MENU_POWER_H - 4, 6, bg);
+            int icx = rx + 18, icy = pw_y + START_MENU_POWER_H / 2;
+            for (int dy = -7; dy <= 7; dy++)
+                for (int dx = -7; dx <= 7; dx++)
+                    if (dx * dx + dy * dy <= 49 && dx * dx + dy * dy > 36)
+                        fb_put_pixel(icx + dx, icy + dy, hovered ? COLOR_TEXT_BRIGHT : COLOR_WARNING);
+            fb_fill_rect(icx + 3, icy - 7, 4, 3, hovered ? COLOR_TEXT_BRIGHT : COLOR_WARNING);
+            fb_draw_string(rx + 32, pw_y + 10, "Restart",
+                           hovered ? COLOR_TEXT_BRIGHT : COLOR_WARNING, bg);
+        }
+    }
+
+    /* ---- User bar ---- */
+    {
+        int uy = my + mh - START_MENU_USER_H - START_MENU_BOTTOM_PAD;
+        fb_fill_rect(mx + 1, uy, START_MENU_W - 2, START_MENU_USER_H, COLOR_SURFACE_DIM);
+        /* Rounded bottom corners */
+        for (int i = 0; i < 12; i++) {
+            int dx2 = 12 - i;
+            fb_fill_rect(mx + 1, uy + START_MENU_USER_H - 1 - i, dx2, 1, COLOR_GLASS);
+            fb_fill_rect(mx + START_MENU_W - 1 - dx2, uy + START_MENU_USER_H - 1 - i, dx2, 1, COLOR_GLASS);
+        }
+
+        /* Avatar circle */
+        int ax = mx + 28, ay = uy + START_MENU_USER_H / 2;
+        for (int dy2 = -12; dy2 <= 12; dy2++)
+            for (int dx2 = -12; dx2 <= 12; dx2++)
+                if (dx2 * dx2 + dy2 * dy2 <= 144)
+                    fb_put_pixel(ax + dx2, ay + dy2, COLOR_ACCENT);
+        /* Face in avatar */
+        fb_fill_rect(ax - 4, ay - 4, 3, 3, COLOR_TEXT_BRIGHT);
+        fb_fill_rect(ax + 1, ay - 4, 3, 3, COLOR_TEXT_BRIGHT);
+        fb_fill_rect(ax - 3, ay + 2, 6, 2, COLOR_TERM_FG);
+
+        fb_draw_string(mx + 48, uy + 10, "user", COLOR_TEXT, COLOR_SURFACE_DIM);
+        fb_draw_string(mx + 48, uy + 24, "Administrator", COLOR_TEXT_DIM, COLOR_SURFACE_DIM);
+    }
 }
 
-static void draw_mini_icon_trash(int x, int y, int hovered)
+static int point_in_start_menu(int px, int py)
 {
-    fb_color_t bg = hovered ? COLOR_ACCENT : COLOR_PRIMARY;
-    fill_rounded_rect(x, y, 18, 18, 3, bg);
-    int bx = x + 4, by = y + 4;
-    fb_fill_rect(bx, by, 10, 2, 0x00909898);
-    fb_fill_rect(bx + 3, by - 2, 4, 2, 0x00909898);
-    fb_fill_rect(bx + 1, by + 2, 8, 9, 0x00707878);
-    fb_draw_rect(bx + 1, by + 2, 8, 9, 0x00A0A8A8);
+    if (!start_menu_open) return 0;
+    int mx = start_menu_x();
+    int my = start_menu_top();
+    int mh = start_menu_height();
+    return (px >= mx && px < mx + START_MENU_W && py >= my && py < my + mh);
 }
 
-static void draw_mini_icon_minesweeper(int x, int y, int hovered)
+static int start_menu_item_at(int px, int py)
 {
-    fb_color_t bg = hovered ? COLOR_ACCENT : COLOR_PRIMARY;
-    fill_rounded_rect(x, y, 18, 18, 3, bg);
-    int cx = x + 9, cy = y + 9;
-    fb_fill_rect(cx - 3, cy - 3, 6, 6, 0x00202020);
-    fb_fill_rect(cx - 5, cy - 1, 10, 2, 0x00202020);
-    fb_fill_rect(cx - 1, cy - 5, 2, 10, 0x00202020);
-    fb_fill_rect(cx - 1, cy - 2, 1, 1, 0x00D0D0D0);
+    if (!start_menu_open) return -1;
+
+    /* Pinned apps grid */
+    for (int i = 0; i < NUM_APPS; i++) {
+        int gx, gy;
+        sm_grid_pos(i, &gx, &gy);
+        if (px >= gx && px < gx + START_MENU_GRID_ITEM &&
+            py >= gy && py < gy + START_MENU_GRID_ITEM)
+            return i;
+    }
+
+    /* Power row */
+    int mh = start_menu_height();
+    int mx = start_menu_x();
+    int my = start_menu_top();
+    int pw_y = my + START_MENU_HEADER_H + START_MENU_SEARCH_H + 6
+             + START_MENU_SECTION_H
+             + ((NUM_APPS + START_MENU_GRID_COLS - 1) / START_MENU_GRID_COLS) * START_MENU_GRID_ITEM
+             + START_MENU_SEP_H;
+    int half_w = (START_MENU_W - 40) / 2;
+    if (py >= pw_y && py < pw_y + START_MENU_POWER_H) {
+        if (px >= mx + 12 && px < mx + 12 + half_w)
+            return SM_ITEM_SHUTDOWN;
+        if (px >= mx + 12 + half_w + 16 && px < mx + START_MENU_W - 12)
+            return SM_ITEM_RESTART;
+    }
+
+    return -1;
 }
 
-typedef void (*mini_icon_draw_fn)(int, int, int);
+/* ================================================================
+ *  DESKTOP CONTEXT MENU (Right-click) - Modern frosted glass
+ * ================================================================ */
 
-static const mini_icon_draw_fn mini_icon_drawers[NUM_APPS] = {
-    draw_mini_icon_terminal,
-    draw_mini_icon_folder,
-    draw_mini_icon_sysmon,
-    draw_mini_icon_settings,
-    draw_mini_icon_about,
-    draw_mini_icon_home,
-    draw_mini_icon_trash,
-    draw_mini_icon_minesweeper
+#define CTX_MENU_W  200
+#define CTX_MENU_ITEM_H 32
+
+static const char *ctx_menu_items[] = {
+    "Open Terminal",
+    "Open File Manager",
+    "System Monitor",
+    "Settings",
+    "---",
+    "About SpiritFoxOS",
+    "Shutdown"
 };
+#define CTX_MENU_COUNT 7
 
-/* --- Draw a small fox face for the header --- */
+static void draw_ctx_menu(void)
+{
+    if (!ctx_menu_open) return;
+    int mx = ctx_menu_x, my = ctx_menu_y;
+    int menu_h = CTX_MENU_COUNT * CTX_MENU_ITEM_H + 12;
+
+    if (mx + CTX_MENU_W > (int)fb_get_width()) mx = (int)fb_get_width() - CTX_MENU_W;
+    if (my + menu_h > dock_y()) my = dock_y() - menu_h;
+
+    /* Shadow */
+    fill_rounded_rect(mx + 4, my + 4, CTX_MENU_W, menu_h, 10, COLOR_SHADOW2);
+
+    /* Background - frosted glass */
+    fill_rounded_rect(mx, my, CTX_MENU_W, menu_h, 10, COLOR_GLASS);
+    draw_rounded_rect(mx, my, CTX_MENU_W, menu_h, 10, COLOR_DOCK_BORDER);
+
+    int iy = my + 6;
+    for (int i = 0; i < CTX_MENU_COUNT; i++) {
+        if (strcmp(ctx_menu_items[i], "---") == 0) {
+            /* Separator with opacity */
+            fb_draw_line(mx + 16, iy + CTX_MENU_ITEM_H / 2,
+                         mx + CTX_MENU_W - 16, iy + CTX_MENU_ITEM_H / 2,
+                         COLOR_DOCK_BORDER);
+            iy += CTX_MENU_ITEM_H;
+            continue;
+        }
+        int hovered = (ctx_menu_hover == i);
+        if (hovered)
+            fill_rounded_rect(mx + 4, iy, CTX_MENU_W - 8, CTX_MENU_ITEM_H, 4, COLOR_SURFACE_LIGHT);
+
+        fb_color_t txt = hovered ? COLOR_TEXT_BRIGHT : COLOR_TEXT;
+        fb_color_t bg = hovered ? COLOR_SURFACE_LIGHT : COLOR_GLASS;
+        if (i == CTX_MENU_COUNT - 1 && !hovered) txt = COLOR_DANGER;
+        fb_draw_string(mx + 16, iy + 8, ctx_menu_items[i], txt, bg);
+        iy += CTX_MENU_ITEM_H;
+    }
+}
+
+static int point_in_ctx_menu(int px, int py)
+{
+    if (!ctx_menu_open) return 0;
+    int menu_h = CTX_MENU_COUNT * CTX_MENU_ITEM_H + 12;
+    int mx = ctx_menu_x, my = ctx_menu_y;
+    if (mx + CTX_MENU_W > (int)fb_get_width()) mx = (int)fb_get_width() - CTX_MENU_W;
+    if (my + menu_h > dock_y()) my = dock_y() - menu_h;
+    return (px >= mx && px < mx + CTX_MENU_W && py >= my && py < my + menu_h);
+}
+
+static int ctx_menu_item_at(int px, int py)
+{
+    if (!ctx_menu_open) return -1;
+    int mx = ctx_menu_x, my = ctx_menu_y;
+    int menu_h = CTX_MENU_COUNT * CTX_MENU_ITEM_H + 12;
+    if (mx + CTX_MENU_W > (int)fb_get_width()) mx = (int)fb_get_width() - CTX_MENU_W;
+    if (my + menu_h > dock_y()) my = dock_y() - menu_h;
+
+    int iy = my + 6;
+    for (int i = 0; i < CTX_MENU_COUNT; i++) {
+        if (px >= mx && px < mx + CTX_MENU_W && py >= iy && py < iy + CTX_MENU_ITEM_H)
+            return i;
+        iy += CTX_MENU_ITEM_H;
+    }
+    return -1;
+}
+
+/* ================================================================
+ *  WINDOW FRAME - Modern minimalist with macOS-style dots
+ * ================================================================ */
+
+/* Control button positions for a window */
+static void win_control_positions(int wx, int wy, int ww __attribute__((unused)),
+                                  int *close_x, int *min_x, int *max_x, int *btn_y)
+{
+    *btn_y = wy + 10;
+    *close_x = wx + 12;
+    *min_x = wx + 32;
+    *max_x = wx + 52;
+}
+
+static void draw_window_frame(int x, int y, int w, int h, const char *title,
+                              int active, int maximized)
+{
+    /* Multi-layer shadow */
+    if (!maximized) {
+        draw_window_shadow(x, y, w, h);
+    }
+
+    /* Window body */
+    fill_rounded_rect_top(x, y + TITLE_BAR_HEIGHT, w, h - TITLE_BAR_HEIGHT, 0, COLOR_WIN_BODY);
+
+    /* Title bar - semi-transparent dark */
+    fill_rounded_rect_top(x, y, w, TITLE_BAR_HEIGHT, WIN_CORNER_R, COLOR_WIN_TITLE);
+
+    /* Clear top corners to create rounded shape */
+    clear_top_corners_rounded(x, y, w, TITLE_BAR_HEIGHT, WIN_CORNER_R, COLOR_BG_TL);
+
+    /* Redraw rounded top corners with proper color */
+    for (int i = 0; i < WIN_CORNER_R; i++) {
+        int dx = WIN_CORNER_R - i;
+        fb_fill_rect(x + dx, y + i, 1, 1, COLOR_WIN_TITLE);
+        fb_fill_rect(x + w - 1 - dx, y + i, 1, 1, COLOR_WIN_TITLE);
+    }
+
+    /* Title text - centered */
+    {
+        int len = 0;
+        while (title[len]) len++;
+        int title_x = x + (w - len * 8) / 2;
+        fb_draw_string(title_x, y + 10, title, active ? COLOR_TEXT_BRIGHT : COLOR_TEXT_DIM, COLOR_WIN_TITLE);
+    }
+
+    /* Control buttons - macOS style colored dots */
+    int close_x, min_x, max_x, btn_y;
+    win_control_positions(x, y, w, &close_x, &min_x, &max_x, &btn_y);
+
+    /* Close - red dot */
+    {
+        int cx2 = close_x + 5, cy2 = btn_y + 5;
+        for (int dy2 = -5; dy2 <= 5; dy2++)
+            for (int dx2 = -5; dx2 <= 5; dx2++)
+                if (dx2 * dx2 + dy2 * dy2 <= 25)
+                    fb_put_pixel(cx2 + dx2, cy2 + dy2, COLOR_DANGER);
+    }
+
+    /* Minimize - yellow dot */
+    {
+        int cx2 = min_x + 5, cy2 = btn_y + 5;
+        for (int dy2 = -5; dy2 <= 5; dy2++)
+            for (int dx2 = -5; dx2 <= 5; dx2++)
+                if (dx2 * dx2 + dy2 * dy2 <= 25)
+                    fb_put_pixel(cx2 + dx2, cy2 + dy2, COLOR_WARNING);
+    }
+
+    /* Maximize - green dot */
+    {
+        int cx2 = max_x + 5, cy2 = btn_y + 5;
+        for (int dy2 = -5; dy2 <= 5; dy2++)
+            for (int dx2 = -5; dx2 <= 5; dx2++)
+                if (dx2 * dx2 + dy2 * dy2 <= 25)
+                    fb_put_pixel(cx2 + dx2, cy2 + dy2, COLOR_SUCCESS);
+    }
+
+    /* Subtle border - only if active */
+    if (active) {
+        draw_rounded_rect(x, y, w, h, WIN_CORNER_R, COLOR_DOCK_BORDER);
+    }
+
+    /* Resize handle - subtle, only at bottom-right */
+    if (!maximized) {
+        int rx = x + w - 4, ry = y + h - 4;
+        fb_put_pixel(rx, ry, COLOR_DOCK_BORDER);
+        fb_put_pixel(rx - 3, ry, COLOR_DOCK_BORDER);
+        fb_put_pixel(rx, ry - 3, COLOR_DOCK_BORDER);
+        fb_put_pixel(rx - 6, ry, COLOR_DOCK_BORDER);
+        fb_put_pixel(rx, ry - 6, COLOR_DOCK_BORDER);
+        fb_put_pixel(rx - 3, ry - 3, COLOR_DOCK_BORDER);
+    }
+}
+
+/* ================================================================
+ *  APPLICATION WINDOW DRAWING
+ * ================================================================ */
+
+static void draw_terminal_window(WinSlot *ws)
+{
+    draw_window_frame(ws->x, ws->y, ws->w, ws->h, "Terminal",
+                      ws == &wins[focus_win], ws->maximized);
+
+    /* Terminal background - dark */
+    int tx = ws->x + 2;
+    int ty_body = ws->y + TITLE_BAR_HEIGHT;
+    int tw = ws->w - 4;
+    int th = ws->h - TITLE_BAR_HEIGHT - 2;
+    fb_fill_rect(tx, ty_body, tw, th, COLOR_TERM_BG);
+
+    int tx2 = ws->x + 12, ty2 = ty_body + 8;
+    int term_rows = (th - 40) / 16;
+    if (term_rows > TERM_BUF_LINES) term_rows = TERM_BUF_LINES;
+    int start_line = term_cursor_line - term_rows + 1;
+    if (start_line < 0) start_line = 0;
+    for (int i = 0; i < term_rows; i++) {
+        int li = start_line + i;
+        if (li >= 0 && li < TERM_BUF_LINES)
+            fb_draw_string(tx2, ty2 + i * 16, term_buf[li], COLOR_TERM_FG, COLOR_TERM_BG);
+    }
+
+    /* Modern prompt */
+    int input_y = ty2 + term_rows * 16;
+    fb_draw_string(tx2, input_y, "user@spiritfox:~$ ", COLOR_TERM_PROMPT, COLOR_TERM_BG);
+    int prompt_w = 18 * 8;
+    fb_draw_string(tx2 + prompt_w, input_y, term_input, COLOR_TEXT_BRIGHT, COLOR_TERM_BG);
+
+    /* Blinking block cursor */
+    if ((timer_get_ms() / 500) % 2 == 0) {
+        int cursor_x = tx2 + prompt_w + term_input_len * 8;
+        fb_fill_rect(cursor_x, input_y, 8, 16, COLOR_TERM_FG);
+    }
+}
+
+static void draw_sysmon_window(WinSlot *ws)
+{
+    draw_window_frame(ws->x, ws->y, ws->w, ws->h, "System Monitor",
+                      ws == &wins[focus_win], ws->maximized);
+
+    int tx = ws->x + 16, ty = ws->y + TITLE_BAR_HEIGHT + 12;
+    int content_w = ws->w - 32;
+
+    /* Header */
+    fb_draw_string(tx, ty, "System Monitor", COLOR_TEXT_BRIGHT, COLOR_WIN_BODY);
+    ty += 28;
+
+    /* Card: Display Info */
+    {
+        fill_rounded_rect(tx, ty, content_w, 52, 6, COLOR_SURFACE);
+        fb_draw_string(tx + 12, ty + 6, "Display", COLOR_ACCENT, COLOR_SURFACE);
+        char buf[32]; int pos = 0; uint32_t w2 = fb_get_width(), h2 = fb_get_height();
+        int n = (int)w2; char tmp[12]; int t = 0;
+        if (n == 0) buf[pos++] = '0';
+        else { while (n > 0) { tmp[t++] = '0' + (n % 10); n /= 10; }
+            for (int j = t - 1; j >= 0; j--) buf[pos++] = tmp[j]; }
+        buf[pos++] = 'x'; n = (int)h2; t = 0;
+        if (n == 0) buf[pos++] = '0';
+        else { while (n > 0) { tmp[t++] = '0' + (n % 10); n /= 10; }
+            for (int j = t - 1; j >= 0; j--) buf[pos++] = tmp[j]; }
+        buf[pos++] = 'x'; buf[pos++] = '3'; buf[pos++] = '2'; buf[pos] = '\0';
+        fb_draw_string(tx + 12, ty + 24, buf, COLOR_TEXT, COLOR_SURFACE);
+        fb_draw_string(tx + 100, ty + 24, "32bpp", COLOR_TEXT_DIM, COLOR_SURFACE);
+        ty += 60;
+    }
+
+    /* Card: Uptime */
+    {
+        fill_rounded_rect(tx, ty, content_w, 52, 6, COLOR_SURFACE);
+        fb_draw_string(tx + 12, ty + 6, "Uptime", COLOR_ACCENT, COLOR_SURFACE);
+        char buf[32]; int pos = 0; int n = (int)(timer_get_ms() / 1000);
+        char tmp[12]; int t = 0;
+        if (n == 0) buf[pos++] = '0';
+        else { while (n > 0) { tmp[t++] = '0' + (n % 10); n /= 10; }
+            for (int j = t - 1; j >= 0; j--) buf[pos++] = tmp[j]; }
+        buf[pos++] = 's'; buf[pos] = '\0';
+        fb_draw_string(tx + 12, ty + 24, buf, COLOR_TEXT, COLOR_SURFACE);
+        ty += 60;
+    }
+
+    /* Card: CPU Usage */
+    {
+        fill_rounded_rect(tx, ty, content_w, 52, 6, COLOR_SURFACE);
+        fb_draw_string(tx + 12, ty + 6, "CPU Usage", COLOR_ACCENT, COLOR_SURFACE);
+        /* Progress bar */
+        int bar_x = tx + 12, bar_y2 = ty + 26, bar_w = content_w - 24;
+        fill_rounded_rect(bar_x, bar_y2, bar_w, 14, 4, COLOR_SURFACE_DIM);
+        int usage = (int)((timer_get_ms() / 100) % 80);
+        int fill_w = bar_w * usage / 100;
+        if (fill_w > 4) {
+            fb_color_t bar_c = usage > 60 ? COLOR_WARNING : COLOR_SUCCESS;
+            fill_rounded_rect(bar_x, bar_y2, fill_w, 14, 4, bar_c);
+        }
+        ty += 60;
+    }
+
+    /* Card: Memory */
+    {
+        fill_rounded_rect(tx, ty, content_w, 52, 6, COLOR_SURFACE);
+        fb_draw_string(tx + 12, ty + 6, "Memory", COLOR_ACCENT, COLOR_SURFACE);
+        int bar_x = tx + 12, bar_y2 = ty + 26, bar_w = content_w - 24;
+        fill_rounded_rect(bar_x, bar_y2, bar_w, 14, 4, COLOR_SURFACE_DIM);
+        int mem_pct = 40;
+        int fill_w = bar_w * mem_pct / 100;
+        if (fill_w > 4) {
+            fill_rounded_rect(bar_x, bar_y2, fill_w, 14, 4, COLOR_ACCENT);
+        }
+        ty += 60;
+    }
+
+    /* Card: Windows */
+    {
+        fill_rounded_rect(tx, ty, content_w, 40, 6, COLOR_SURFACE);
+        fb_draw_string(tx + 12, ty + 6, "Windows: ", COLOR_TEXT_DIM, COLOR_SURFACE);
+        char buf[8]; buf[0] = '0' + num_wins; buf[1] = '\0';
+        fb_draw_string(tx + 80, ty + 6, buf, COLOR_TEXT, COLOR_SURFACE);
+        fb_draw_string(tx + 12, ty + 22, "GUI: Modern WM", COLOR_TEXT_DIM, COLOR_SURFACE);
+    }
+}
+
+static void draw_about_window(WinSlot *ws)
+{
+    draw_window_frame(ws->x, ws->y, ws->w, ws->h, "About SpiritFoxOS",
+                      ws == &wins[focus_win], ws->maximized);
+
+    int cx = ws->x + ws->w / 2;
+    int ty = ws->y + TITLE_BAR_HEIGHT + 20;
+
+    /* Large fox logo */
+    draw_fox_face(cx - 30, ty, 60);
+    ty += 72;
+
+    /* Gradient text effect for title */
+    fb_draw_string(cx - 11 * 8 / 2, ty, "SpiritFoxOS", COLOR_ACCENT, COLOR_WIN_BODY);
+    ty += 22;
+    fb_draw_string(cx - 8 * 8 / 2, ty, "v0.5.0", COLOR_TEXT_DIM, COLOR_WIN_BODY);
+    ty += 24;
+
+    /* Separator */
+    fb_draw_line(ws->x + 30, ty, ws->x + ws->w - 30, ty, COLOR_DOCK_BORDER);
+    ty += 16;
+
+    fb_draw_string(cx - 18 * 8 / 2, ty, "Modern Window Manager", COLOR_TEXT, COLOR_WIN_BODY);
+    ty += 20;
+    fb_draw_string(cx - 20 * 8 / 2, ty, "Mouse-Supported GUI", COLOR_TERM_PROMPT, COLOR_WIN_BODY);
+    ty += 20;
+    fb_draw_string(cx - 19 * 8 / 2, ty, "Double-buffered FB", COLOR_TEXT_DIM, COLOR_WIN_BODY);
+    ty += 28;
+    fb_draw_string(cx - 25 * 8 / 2, ty, "Right-click desktop for menu", COLOR_ACCENT, COLOR_WIN_BODY);
+}
+
+static void draw_filemanager_window(WinSlot *ws)
+{
+    draw_window_frame(ws->x, ws->y, ws->w, ws->h, "File Manager",
+                      ws == &wins[focus_win], ws->maximized);
+
+    /* Sidebar */
+    int sidebar_w = 120;
+    fill_rounded_rect(ws->x + 2, ws->y + TITLE_BAR_HEIGHT, sidebar_w,
+                      ws->h - TITLE_BAR_HEIGHT - 2, 0, COLOR_SURFACE);
+
+    int sx = ws->x + 10, sy = ws->y + TITLE_BAR_HEIGHT + 10;
+    fb_draw_string(sx, sy, "Places", COLOR_ACCENT, COLOR_SURFACE); sy += 22;
+    fb_draw_string(sx, sy, "Home", COLOR_TEXT, COLOR_SURFACE); sy += 18;
+    fb_draw_string(sx, sy, "Desktop", COLOR_TEXT, COLOR_SURFACE); sy += 18;
+    fb_draw_string(sx, sy, "Documents", COLOR_TEXT, COLOR_SURFACE); sy += 18;
+    fb_draw_string(sx, sy, "Downloads", COLOR_TEXT, COLOR_SURFACE); sy += 18;
+
+    /* Content area */
+    int tx = ws->x + sidebar_w + 12;
+    int ty = ws->y + TITLE_BAR_HEIGHT + 10;
+    fb_draw_string(tx, ty, "Path: /", COLOR_TEXT_BRIGHT, COLOR_WIN_BODY); ty += 24;
+
+    const char *entries[] = {
+        "  bin/", "  dev/", "  etc/", "  home/",
+        "  mnt/", "  opt/", "  proc/", "  root/",
+        "  sbin/", "  sys/", "  tmp/", "  usr/", "  var/"
+    };
+    for (int i = 0; i < 13; i++) {
+        fb_draw_string(tx, ty, entries[i], COLOR_TERM_PROMPT, COLOR_WIN_BODY);
+        ty += 18;
+    }
+}
+
+static void draw_settings_window(WinSlot *ws)
+{
+    draw_window_frame(ws->x, ws->y, ws->w, ws->h, "Settings",
+                      ws == &wins[focus_win], ws->maximized);
+
+    int tx = ws->x + 20, ty = ws->y + TITLE_BAR_HEIGHT + 14;
+    int content_w = ws->w - 40;
+
+    /* Display section */
+    fb_draw_string(tx, ty, "Display", COLOR_TEXT_BRIGHT, COLOR_WIN_BODY); ty += 24;
+    /* Card */
+    fill_rounded_rect(tx, ty, content_w, 56, 6, COLOR_SURFACE);
+    fb_draw_string(tx + 12, ty + 8, "Resolution: VBE default", COLOR_TEXT, COLOR_SURFACE);
+    fb_draw_string(tx + 12, ty + 28, "Color depth: 32-bit XRGB8888", COLOR_TEXT_DIM, COLOR_SURFACE);
+    ty += 68;
+
+    /* Keyboard section */
+    fb_draw_string(tx, ty, "Keyboard", COLOR_TEXT_BRIGHT, COLOR_WIN_BODY); ty += 24;
+    fill_rounded_rect(tx, ty, content_w, 36, 6, COLOR_SURFACE);
+    fb_draw_string(tx + 12, ty + 8, "Layout: US (Scancode Set 1)", COLOR_TEXT, COLOR_SURFACE);
+    ty += 48;
+
+    /* Mouse section */
+    fb_draw_string(tx, ty, "Mouse", COLOR_TEXT_BRIGHT, COLOR_WIN_BODY); ty += 24;
+    fill_rounded_rect(tx, ty, content_w, 36, 6, COLOR_SURFACE);
+    fb_draw_string(tx + 12, ty + 8, "PS/2 compatible, 3 buttons", COLOR_TEXT, COLOR_SURFACE);
+    ty += 48;
+
+    /* Shortcuts section */
+    fb_draw_string(tx, ty, "Shortcuts", COLOR_TEXT_BRIGHT, COLOR_WIN_BODY); ty += 24;
+    fill_rounded_rect(tx, ty, content_w, 52, 6, COLOR_SURFACE);
+    fb_draw_string(tx + 12, ty + 8, "Alt+Tab: Switch window", COLOR_TEXT, COLOR_SURFACE);
+    fb_draw_string(tx + 12, ty + 28, "Esc: Exit GUI", COLOR_TEXT_DIM, COLOR_SURFACE);
+}
+
+static void draw_home_window(WinSlot *ws)
+{
+    draw_window_frame(ws->x, ws->y, ws->w, ws->h, "Home",
+                      ws == &wins[focus_win], ws->maximized);
+
+    int tx = ws->x + 14, ty = ws->y + TITLE_BAR_HEIGHT + 10;
+    fb_draw_string(tx, ty, "/home/user", COLOR_TEXT_BRIGHT, COLOR_WIN_BODY); ty += 24;
+
+    /* Folder items as small cards */
+    const char *items[] = { "Documents/", "Downloads/", "Pictures/", "Music/", "Desktop/" };
+    for (int i = 0; i < 5; i++) {
+        fill_rounded_rect(tx, ty, ws->w - 28, 24, 4, COLOR_SURFACE);
+        /* Folder icon */
+        fill_rounded_rect(tx + 6, ty + 5, 14, 10, 2, COLOR_ACCENT);
+        fb_draw_string(tx + 26, ty + 4, items[i], COLOR_TERM_PROMPT, COLOR_SURFACE);
+        ty += 30;
+    }
+}
+
+static void draw_trash_window(WinSlot *ws)
+{
+    draw_window_frame(ws->x, ws->y, ws->w, ws->h, "Trash",
+                      ws == &wins[focus_win], ws->maximized);
+
+    int cx = ws->x + ws->w / 2;
+    int ty = ws->y + TITLE_BAR_HEIGHT + 30;
+
+    /* Empty state icon */
+    fill_rounded_rect(cx - 16, ty, 32, 32, 6, COLOR_SURFACE_DIM);
+    fb_draw_string(cx - 4, ty + 8, "X", COLOR_TEXT_DIM, COLOR_SURFACE_DIM);
+    ty += 44;
+
+    fb_draw_string(cx - 6 * 8 / 2, ty, "Trash is empty", COLOR_TEXT_DIM, COLOR_WIN_BODY);
+}
+
+static void draw_app_window(WinSlot *ws)
+{
+    switch (ws->app) {
+    case 0: draw_terminal_window(ws); break;
+    case 1: draw_filemanager_window(ws); break;
+    case 2: draw_sysmon_window(ws); break;
+    case 3: draw_settings_window(ws); break;
+    case 4: draw_about_window(ws); break;
+    case 5: draw_home_window(ws); break;
+    case 6: draw_trash_window(ws); break;
+    case 7: draw_minesweeper_window(ws); break;
+    }
+}
+
+/* ================================================================
+ *  FOX FACE LOGO
+ * ================================================================ */
+
 static void draw_fox_face(int x, int y, int size)
 {
     fb_color_t fur = 0x00E09040;
@@ -1199,14 +1942,13 @@ static void draw_fox_face(int x, int y, int size)
     int face_y = y + ear_h - 2;
     int face_h = size - ear_h + 2;
     fb_fill_rect(x + size / 6, face_y, size * 2 / 3, face_h, fur);
-    /* Cheeks - slightly lighter */
+    /* Cheeks */
     fb_fill_rect(x + size / 6 + 1, face_y + face_h / 2, 3, face_h / 2, 0x00F0A050);
     fb_fill_rect(x + size - size / 6 - 4, face_y + face_h / 2, 3, face_h / 2, 0x00F0A050);
     /* Eyes */
     int eye_y = face_y + face_h / 4;
     fb_fill_rect(x + size / 3 - 1, eye_y, 3, 3, 0x00202020);
     fb_fill_rect(x + 2 * size / 3 - 1, eye_y, 3, 3, 0x00202020);
-    /* Eye highlights */
     fb_put_pixel(x + size / 3, eye_y, 0x00FFFFFF);
     fb_put_pixel(x + 2 * size / 3, eye_y, 0x00FFFFFF);
     /* Nose */
@@ -1217,510 +1959,6 @@ static void draw_fox_face(int x, int y, int size)
     fb_put_pixel(x + size / 2 + 1, eye_y + 8, 0x00302020);
 }
 
-/* --- Main start menu drawing --- */
-static void draw_start_menu(void)
-{
-    int tb_y = (int)fb_get_height() - TASKBAR_HEIGHT;
-    int menu_h = start_menu_height();
-    int mx = 4;
-    int my = tb_y - menu_h;
-
-    /* Shadow */
-    fb_fill_rect(mx + 5, my + 5, START_MENU_W, menu_h, 0x00040810);
-
-    /* Background with rounded corners */
-    fill_rounded_rect(mx, my, START_MENU_W, menu_h, 8, 0x00142038);
-    draw_rounded_rect(mx, my, START_MENU_W, menu_h, 8, COLOR_TASKBAR_LINE);
-
-    /* Left accent strip */
-    {
-        int strip_x = mx + 1;
-        int strip_y = my + START_MENU_HEADER_H + 1;
-        int strip_h = menu_h - START_MENU_HEADER_H - 2;
-        fb_fill_rect(strip_x, strip_y, 3, strip_h, COLOR_ACCENT);
-    }
-
-    /* ---- Header ---- */
-    {
-        fill_rounded_rect(mx + 1, my + 1, START_MENU_W - 2, START_MENU_HEADER_H, 7, COLOR_PRIMARY);
-        fb_fill_rect(mx + 1, my + START_MENU_HEADER_H - 3, START_MENU_W - 2, 2, COLOR_PRIMARY_DARK);
-
-        draw_fox_face(mx + 10, my + 5, 26);
-
-        fb_draw_string(mx + 42, my + 7, "SpiritFoxOS", COLOR_TEXT_BRIGHT, COLOR_PRIMARY);
-        fb_draw_string(mx + 42, my + 21, "v0.5.0", COLOR_TEXT_DIM, COLOR_PRIMARY);
-    }
-
-    /* ---- APPLICATIONS section ---- */
-    {
-        int sec_y = my + START_MENU_HEADER_H;
-        fb_draw_string(mx + 14, sec_y + 4, "APPLICATIONS", COLOR_TEXT_DIM, 0x00142038);
-
-        for (int i = 0; i < 6; i++) {
-            int item_y = my + sm_app_y(i);
-            int hovered = (start_menu_hover == i);
-
-            if (hovered)
-                fill_rounded_rect(mx + 6, item_y + 1, START_MENU_W - 12, START_MENU_ITEM_H - 2, 4, COLOR_PRIMARY_LIGHT);
-
-            mini_icon_drawers[i](mx + 14, item_y + 4, hovered);
-
-            fb_color_t txt = hovered ? COLOR_TEXT_BRIGHT : COLOR_TEXT;
-            fb_color_t bg = hovered ? COLOR_PRIMARY_LIGHT : 0x00142038;
-            fb_draw_string(mx + 38, item_y + 6, app_names[i], txt, bg);
-        }
-    }
-
-    /* ---- Separator ---- */
-    {
-        int sep_y = my + sm_place_y(0) - START_MENU_SEP_H + 1;
-        fb_draw_line(mx + 14, sep_y + 2, mx + START_MENU_W - 14, sep_y + 2, COLOR_TASKBAR_LINE);
-    }
-
-    /* ---- PLACES section ---- */
-    {
-        int sec_y = my + sm_place_y(0) - START_MENU_SECTION_H;
-        fb_draw_string(mx + 14, sec_y + 4, "PLACES", COLOR_TEXT_DIM, 0x00142038);
-
-        for (int i = 0; i < 2; i++) {
-            int item_y = my + sm_place_y(i);
-            int hovered = (start_menu_hover == 6 + i);
-
-            if (hovered)
-                fill_rounded_rect(mx + 6, item_y + 1, START_MENU_W - 12, START_MENU_ITEM_H - 2, 4, COLOR_PRIMARY_LIGHT);
-
-            mini_icon_drawers[6 + i](mx + 14, item_y + 4, hovered);
-
-            fb_color_t txt = hovered ? COLOR_TEXT_BRIGHT : COLOR_TEXT;
-            fb_color_t bg = hovered ? COLOR_PRIMARY_LIGHT : 0x00142038;
-            fb_draw_string(mx + 38, item_y + 6, app_names[6 + i], txt, bg);
-        }
-    }
-
-    /* ---- Separator ---- */
-    {
-        int sep_y = my + sm_power_y() - START_MENU_SEP_H + 1;
-        fb_draw_line(mx + 14, sep_y + 2, mx + START_MENU_W - 14, sep_y + 2, COLOR_TASKBAR_LINE);
-    }
-
-    /* ---- Power row ---- */
-    {
-        int pw_y = my + sm_power_y();
-        int half_w = (START_MENU_W - 24) / 2;
-
-        /* Shutdown button */
-        {
-            int hovered = (start_menu_hover == SM_ITEM_SHUTDOWN);
-            fb_color_t bg = hovered ? COLOR_DANGER : COLOR_SURFACE_DIM;
-            fill_rounded_rect(mx + 8, pw_y + 2, half_w, START_MENU_POWER_H - 4, 4, bg);
-            /* Power icon */
-            int icx = mx + 8 + 16, icy = pw_y + START_MENU_POWER_H / 2;
-            for (int dy = -5; dy <= 5; dy++)
-                for (int dx = -5; dx <= 5; dx++)
-                    if (dx * dx + dy * dy <= 25 && dx * dx + dy * dy > 16)
-                        fb_put_pixel(icx + dx, icy + dy, hovered ? COLOR_TEXT_BRIGHT : COLOR_DANGER);
-            fb_fill_rect(icx - 1, icy - 7, 2, 4, hovered ? COLOR_TEXT_BRIGHT : COLOR_DANGER);
-            fb_draw_string(mx + 8 + 30, pw_y + 8, "Shutdown",
-                           hovered ? COLOR_TEXT_BRIGHT : COLOR_DANGER, bg);
-        }
-
-        /* Restart button */
-        {
-            int rx = mx + 8 + half_w + 8;
-            int hovered = (start_menu_hover == SM_ITEM_RESTART);
-            fb_color_t bg = hovered ? COLOR_WARNING : COLOR_SURFACE_DIM;
-            fill_rounded_rect(rx, pw_y + 2, half_w, START_MENU_POWER_H - 4, 4, bg);
-            /* Restart icon - circular arrow */
-            int icx = rx + 16, icy = pw_y + START_MENU_POWER_H / 2;
-            for (int dy = -5; dy <= 5; dy++)
-                for (int dx = -5; dx <= 5; dx++)
-                    if (dx * dx + dy * dy <= 25 && dx * dx + dy * dy > 16)
-                        fb_put_pixel(icx + dx, icy + dy, hovered ? COLOR_TEXT_BRIGHT : COLOR_WARNING);
-            /* Arrow tip */
-            fb_fill_rect(icx + 2, icy - 6, 4, 3, hovered ? COLOR_TEXT_BRIGHT : COLOR_WARNING);
-            fb_fill_rect(icx + 4, icy - 7, 2, 3, hovered ? COLOR_TEXT_BRIGHT : COLOR_WARNING);
-            fb_draw_string(rx + 30, pw_y + 8, "Restart",
-                           hovered ? COLOR_TEXT_BRIGHT : COLOR_WARNING, bg);
-        }
-    }
-
-    /* ---- User bar ---- */
-    {
-        int uy = my + sm_user_y();
-        fb_fill_rect(mx + 1, uy, START_MENU_W - 2, START_MENU_USER_H, 0x00101828);
-        /* Avatar circle */
-        int ax = mx + 20, ay = uy + START_MENU_USER_H / 2;
-        for (int dy = -9; dy <= 9; dy++)
-            for (int dx = -9; dx <= 9; dx++)
-                if (dx * dx + dy * dy <= 81)
-                    fb_put_pixel(ax + dx, ay + dy, COLOR_PRIMARY);
-        /* Face in avatar */
-        fb_fill_rect(ax - 3, ay - 3, 2, 2, COLOR_TEXT_BRIGHT);
-        fb_fill_rect(ax + 1, ay - 3, 2, 2, COLOR_TEXT_BRIGHT);
-        fb_fill_rect(ax - 2, ay + 1, 4, 2, COLOR_ACCENT);
-        /* Username */
-        fb_draw_string(mx + 36, uy + 10, "user", COLOR_TEXT, 0x00101828);
-        /* Separator dot */
-        fb_draw_string(mx + 36, uy + 20, "Administrator", COLOR_TEXT_DIM, 0x00101828);
-    }
-}
-
-static int point_in_start_menu(int px, int py)
-{
-    if (!start_menu_open) return 0;
-    int tb_y = (int)fb_get_height() - TASKBAR_HEIGHT;
-    int menu_h = start_menu_height();
-    return (px >= 4 && px < 4 + START_MENU_W && py >= tb_y - menu_h && py < tb_y);
-}
-
-static int start_menu_item_at(int px, int py)
-{
-    if (!start_menu_open) return -1;
-    int menu_x = 4;
-    int menu_top_y = start_menu_top();
-
-    /* App items (0-5) */
-    for (int i = 0; i < 6; i++) {
-        int item_y = menu_top_y + sm_app_y(i);
-        if (px >= menu_x && px < menu_x + START_MENU_W &&
-            py >= item_y && py < item_y + START_MENU_ITEM_H)
-            return i;
-    }
-
-    /* Place items (6-7) */
-    for (int i = 0; i < 2; i++) {
-        int item_y = menu_top_y + sm_place_y(i);
-        if (px >= menu_x && px < menu_x + START_MENU_W &&
-            py >= item_y && py < item_y + START_MENU_ITEM_H)
-            return 6 + i;
-    }
-
-    /* Power row */
-    int pw_y = menu_top_y + sm_power_y();
-    int half_w = (START_MENU_W - 24) / 2;
-    if (py >= pw_y && py < pw_y + START_MENU_POWER_H) {
-        if (px >= menu_x + 8 && px < menu_x + 8 + half_w)
-            return SM_ITEM_SHUTDOWN;
-        if (px >= menu_x + 8 + half_w + 8 && px < menu_x + START_MENU_W - 8)
-            return SM_ITEM_RESTART;
-    }
-
-    return -1;
-}
-
-/* ================================================================
- *  DESKTOP CONTEXT MENU (Right-click)
- * ================================================================ */
-
-#define CTX_MENU_W  180
-#define CTX_MENU_ITEM_H 26
-
-static const char *ctx_menu_items[] = {
-    "Open Terminal",
-    "Open File Manager",
-    "System Monitor",
-    "Settings",
-    "---",            /* separator */
-    "About SpiritFoxOS",
-    "Shutdown"
-};
-#define CTX_MENU_COUNT 7
-
-static void draw_ctx_menu(void)
-{
-    if (!ctx_menu_open) return;
-    int mx = ctx_menu_x, my = ctx_menu_y;
-    int menu_h = CTX_MENU_COUNT * CTX_MENU_ITEM_H + 8;
-
-    /* Keep on screen */
-    if (mx + CTX_MENU_W > (int)fb_get_width()) mx = (int)fb_get_width() - CTX_MENU_W;
-    if (my + menu_h > (int)fb_get_height() - TASKBAR_HEIGHT) my = (int)fb_get_height() - TASKBAR_HEIGHT - menu_h;
-
-    /* Shadow + Background */
-    fb_fill_rect(mx + 3, my + 3, CTX_MENU_W, menu_h, 0x00040810);
-    fb_fill_rect(mx, my, CTX_MENU_W, menu_h, 0x00142038);
-    draw_rounded_rect(mx, my, CTX_MENU_W, menu_h, 4, COLOR_TASKBAR_LINE);
-
-    int iy = my + 4;
-    for (int i = 0; i < CTX_MENU_COUNT; i++) {
-        if (strcmp(ctx_menu_items[i], "---") == 0) {
-            /* Separator */
-            fb_draw_line(mx + 10, iy + CTX_MENU_ITEM_H / 2, mx + CTX_MENU_W - 10, iy + CTX_MENU_ITEM_H / 2, COLOR_TASKBAR_LINE);
-            iy += CTX_MENU_ITEM_H;
-            continue;
-        }
-        int hovered = (ctx_menu_hover == i);
-        if (hovered)
-            fb_fill_rect(mx + 3, iy, CTX_MENU_W - 6, CTX_MENU_ITEM_H, COLOR_PRIMARY_LIGHT);
-
-        fb_color_t txt = hovered ? COLOR_TEXT_BRIGHT : COLOR_TEXT;
-        fb_color_t bg = hovered ? COLOR_PRIMARY_LIGHT : 0x00142038;
-        /* Red for shutdown */
-        if (i == CTX_MENU_COUNT - 1 && !hovered) txt = COLOR_DANGER;
-        fb_draw_string(mx + 12, iy + 5, ctx_menu_items[i], txt, bg);
-        iy += CTX_MENU_ITEM_H;
-    }
-}
-
-static int point_in_ctx_menu(int px, int py)
-{
-    if (!ctx_menu_open) return 0;
-    int menu_h = CTX_MENU_COUNT * CTX_MENU_ITEM_H + 8;
-    int mx = ctx_menu_x, my = ctx_menu_y;
-    if (mx + CTX_MENU_W > (int)fb_get_width()) mx = (int)fb_get_width() - CTX_MENU_W;
-    if (my + menu_h > (int)fb_get_height() - TASKBAR_HEIGHT) my = (int)fb_get_height() - TASKBAR_HEIGHT - menu_h;
-    return (px >= mx && px < mx + CTX_MENU_W && py >= my && py < my + menu_h);
-}
-
-static int ctx_menu_item_at(int px, int py)
-{
-    if (!ctx_menu_open) return -1;
-    int mx = ctx_menu_x, my = ctx_menu_y;
-    int menu_h = CTX_MENU_COUNT * CTX_MENU_ITEM_H + 8;
-    if (mx + CTX_MENU_W > (int)fb_get_width()) mx = (int)fb_get_width() - CTX_MENU_W;
-    if (my + menu_h > (int)fb_get_height() - TASKBAR_HEIGHT) my = (int)fb_get_height() - TASKBAR_HEIGHT - menu_h;
-
-    int iy = my + 4;
-    for (int i = 0; i < CTX_MENU_COUNT; i++) {
-        if (px >= mx && px < mx + CTX_MENU_W && py >= iy && py < iy + CTX_MENU_ITEM_H)
-            return i;
-        iy += CTX_MENU_ITEM_H;
-    }
-    return -1;
-}
-
-/* ================================================================
- *  WINDOW FRAME
- * ================================================================ */
-
-static void draw_window_frame(int x, int y, int w, int h, const char *title,
-                              int active, int maximized)
-{
-    fb_color_t border = active ? COLOR_ACCENT : COLOR_TASKBAR_LINE;
-    fb_color_t title_bg = active ? COLOR_PRIMARY : COLOR_SURFACE;
-
-    /* Shadow */
-    fb_fill_rect(x + WIN_SHADOW_OFFSET, y + WIN_SHADOW_OFFSET, w, h, WIN_SHADOW_COLOR);
-
-    /* Body */
-    fb_fill_rect(x, y + TITLE_BAR_HEIGHT, w, h - TITLE_BAR_HEIGHT, WIN_BODY_COLOR);
-
-    /* Title bar */
-    fb_fill_rect(x, y, w, TITLE_BAR_HEIGHT, title_bg);
-
-    /* Rounded corners */
-    int cr = 5;
-    for (int i = 0; i < cr; i++) {
-        int dx = cr - i;
-        /* Clear corners with bg color (approximate) */
-        fb_fill_rect(x, y + i, dx, 1, COLOR_BG_TOP);
-        fb_fill_rect(x + w - dx, y + i, dx, 1, COLOR_BG_TOP);
-        fb_fill_rect(x, y + h - 1 - i, dx, 1, COLOR_BG_TOP);
-        fb_fill_rect(x + w - dx, y + h - 1 - i, dx, 1, COLOR_BG_TOP);
-    }
-
-    /* Title text */
-    fb_draw_string(x + 12, y + 8, title, COLOR_TEXT_BRIGHT, title_bg);
-
-    /* Control buttons */
-    int btn_size = 22;
-    int btn_y = y + 4;
-    int btn_right = x + w - 8;
-    int min_x = btn_right - btn_size * 3 - 6 * 2;
-    int max_x = btn_right - btn_size * 2 - 6;
-    int close_x = btn_right - btn_size;
-
-    /* Minimize */
-    fill_rounded_rect(min_x, btn_y, btn_size, btn_size, 3, COLOR_SURFACE);
-    fb_draw_line(min_x + 5, btn_y + btn_size - 6, min_x + btn_size - 5, btn_y + btn_size - 6, COLOR_TEXT);
-
-    /* Maximize / Restore */
-    fill_rounded_rect(max_x, btn_y, btn_size, btn_size, 3, COLOR_SURFACE);
-    if (maximized) {
-        /* Restore icon: two overlapping rectangles */
-        fb_draw_rect(max_x + 5, btn_y + 4, 9, 9, COLOR_TEXT);
-        fb_draw_rect(max_x + 8, btn_y + 7, 9, 9, COLOR_TEXT);
-        fb_fill_rect(max_x + 9, btn_y + 8, 7, 7, COLOR_SURFACE);
-    } else {
-        fb_draw_rect(max_x + 5, btn_y + 4, 12, 12, COLOR_TEXT);
-    }
-
-    /* Close */
-    fill_rounded_rect(close_x, btn_y, btn_size, btn_size, 3, COLOR_DANGER);
-    fb_draw_string(close_x + 5, btn_y + 3, "X", COLOR_TEXT_BRIGHT, COLOR_DANGER);
-
-    /* Border */
-    fb_draw_rect(x, y, w, h, border);
-
-    /* Resize handle (bottom-right corner) - 3 diagonal lines */
-    if (!maximized) {
-        int rx = x + w - 3, ry = y + h - 3;
-        fb_put_pixel(rx, ry, border);
-        fb_put_pixel(rx - 4, ry, border); fb_put_pixel(rx, ry - 4, border);
-        fb_put_pixel(rx - 8, ry, border); fb_put_pixel(rx, ry - 8, border);
-        fb_put_pixel(rx - 4, ry - 4, border);
-    }
-}
-
-/* ================================================================
- *  APPLICATION WINDOW DRAWING
- * ================================================================ */
-
-static void draw_terminal_window(WinSlot *ws)
-{
-    draw_window_frame(ws->x, ws->y, ws->w, ws->h, "Terminal",
-                      ws == &wins[focus_win], ws->maximized);
-    int tx = ws->x + 10, ty = ws->y + TITLE_BAR_HEIGHT + 6;
-    int term_rows = (ws->h - TITLE_BAR_HEIGHT - 40) / 16;
-    if (term_rows > TERM_BUF_LINES) term_rows = TERM_BUF_LINES;
-    int start_line = term_cursor_line - term_rows + 1;
-    if (start_line < 0) start_line = 0;
-    for (int i = 0; i < term_rows; i++) {
-        int li = start_line + i;
-        if (li >= 0 && li < TERM_BUF_LINES)
-            fb_draw_string(tx, ty + i * 16, term_buf[li], COLOR_SUCCESS, WIN_BODY_COLOR);
-    }
-    int input_y = ty + term_rows * 16;
-    fb_draw_string(tx, input_y, "> ", 0x0040A0C0, WIN_BODY_COLOR);
-    fb_draw_string(tx + 16, input_y, term_input, COLOR_TEXT_BRIGHT, WIN_BODY_COLOR);
-    if ((timer_get_ms() / 500) % 2 == 0) {
-        int cursor_x = tx + 16 + term_input_len * 8;
-        fb_fill_rect(cursor_x, input_y, 8, 16, COLOR_TEXT_BRIGHT);
-    }
-}
-
-static void draw_sysmon_window(WinSlot *ws)
-{
-    draw_window_frame(ws->x, ws->y, ws->w, ws->h, "System Monitor",
-                      ws == &wins[focus_win], ws->maximized);
-    int tx = ws->x + 14, ty = ws->y + TITLE_BAR_HEIGHT + 10;
-    fb_draw_string(tx, ty, "SpiritFoxOS System Monitor", COLOR_TEXT_BRIGHT, WIN_BODY_COLOR); ty += 28;
-
-    fb_draw_string(tx, ty, "Resolution:", COLOR_TEXT_DIM, WIN_BODY_COLOR);
-    { char buf[32]; int pos = 0; uint32_t w = fb_get_width(), h = fb_get_height();
-        int n = (int)w; char tmp[12]; int t = 0;
-        if (n == 0) buf[pos++] = '0';
-        else { while (n > 0) { tmp[t++] = '0' + (n % 10); n /= 10; }
-            for (int j = t - 1; j >= 0; j--) buf[pos++] = tmp[j]; }
-        buf[pos++] = 'x'; n = (int)h; t = 0;
-        if (n == 0) buf[pos++] = '0';
-        else { while (n > 0) { tmp[t++] = '0' + (n % 10); n /= 10; }
-            for (int j = t - 1; j >= 0; j--) buf[pos++] = tmp[j]; }
-        buf[pos++] = 'x'; buf[pos++] = '3'; buf[pos++] = '2'; buf[pos] = '\0';
-        fb_draw_string(tx + 120, ty, buf, COLOR_TEXT, WIN_BODY_COLOR); }
-    ty += 20;
-
-    fb_draw_string(tx, ty, "Uptime:", COLOR_TEXT_DIM, WIN_BODY_COLOR);
-    { char buf[32]; int pos = 0; int n = (int)(timer_get_ms() / 1000);
-        char tmp[12]; int t = 0;
-        if (n == 0) buf[pos++] = '0';
-        else { while (n > 0) { tmp[t++] = '0' + (n % 10); n /= 10; }
-            for (int j = t - 1; j >= 0; j--) buf[pos++] = tmp[j]; }
-        buf[pos++] = 's'; buf[pos] = '\0';
-        fb_draw_string(tx + 120, ty, buf, COLOR_TEXT, WIN_BODY_COLOR); }
-    ty += 20;
-
-    fb_draw_string(tx, ty, "GUI Mode:", COLOR_TEXT_DIM, WIN_BODY_COLOR);
-    fb_draw_string(tx + 120, ty, "Multi-Window", COLOR_SUCCESS, WIN_BODY_COLOR); ty += 20;
-
-    fb_draw_string(tx, ty, "Windows:", COLOR_TEXT_DIM, WIN_BODY_COLOR);
-    { char buf[8]; buf[0] = '0' + num_wins; buf[1] = '\0';
-        fb_draw_string(tx + 120, ty, buf, COLOR_TEXT, WIN_BODY_COLOR); } ty += 30;
-
-    fb_draw_string(tx, ty, "CPU Usage:", COLOR_TEXT_DIM, WIN_BODY_COLOR);
-    int bar_x = tx + 120, bar_w = 160;
-    fb_fill_rect(bar_x, ty + 2, bar_w, 12, COLOR_SURFACE_DIM);
-    { int usage = (int)((timer_get_ms() / 100) % 80);
-        fb_fill_rect(bar_x, ty + 2, bar_w * usage / 100, 12,
-                     usage > 60 ? COLOR_WARNING : COLOR_SUCCESS); } ty += 20;
-
-    fb_draw_string(tx, ty, "Memory:", COLOR_TEXT_DIM, WIN_BODY_COLOR);
-    fb_fill_rect(bar_x, ty + 2, bar_w, 12, COLOR_SURFACE_DIM);
-    fb_fill_rect(bar_x, ty + 2, bar_w * 40 / 100, 12, COLOR_PRIMARY);
-}
-
-static void draw_about_window(WinSlot *ws)
-{
-    draw_window_frame(ws->x, ws->y, ws->w, ws->h, "About SpiritFoxOS",
-                      ws == &wins[focus_win], ws->maximized);
-    int tx = ws->x + 20, ty = ws->y + TITLE_BAR_HEIGHT + 14;
-    fb_draw_string(tx, ty, "SpiritFoxOS v0.5.0", COLOR_TEXT_BRIGHT, WIN_BODY_COLOR); ty += 24;
-    fb_draw_string(tx, ty, "Multi-Window Manager", COLOR_TEXT_DIM, WIN_BODY_COLOR); ty += 20;
-    fb_draw_string(tx, ty, "Mouse-Supported GUI", 0x0040A0C0, WIN_BODY_COLOR); ty += 20;
-    fb_draw_string(tx, ty, "Double-buffered FB", COLOR_TEXT_DIM, WIN_BODY_COLOR); ty += 30;
-    fb_draw_string(tx, ty, "Right-click desktop for menu", COLOR_ACCENT, WIN_BODY_COLOR);
-}
-
-static void draw_filemanager_window(WinSlot *ws)
-{
-    draw_window_frame(ws->x, ws->y, ws->w, ws->h, "File Manager",
-                      ws == &wins[focus_win], ws->maximized);
-    int tx = ws->x + 14, ty = ws->y + TITLE_BAR_HEIGHT + 8;
-    fb_draw_string(tx, ty, "Path: /", COLOR_TEXT_BRIGHT, WIN_BODY_COLOR); ty += 22;
-    const char *entries[] = {
-        "  bin/", "  dev/", "  etc/", "  home/",
-        "  mnt/", "  opt/", "  proc/", "  root/",
-        "  sbin/", "  sys/", "  tmp/", "  usr/", "  var/"
-    };
-    for (int i = 0; i < 13; i++) {
-        fb_draw_string(tx, ty, entries[i], 0x0040A0C0, WIN_BODY_COLOR);
-        ty += 16;
-    }
-}
-
-static void draw_settings_window(WinSlot *ws)
-{
-    draw_window_frame(ws->x, ws->y, ws->w, ws->h, "Settings",
-                      ws == &wins[focus_win], ws->maximized);
-    int tx = ws->x + 18, ty = ws->y + TITLE_BAR_HEIGHT + 14;
-    fb_draw_string(tx, ty, "Display", COLOR_TEXT_BRIGHT, WIN_BODY_COLOR); ty += 22;
-    fb_draw_string(tx + 16, ty, "Resolution: VBE default", COLOR_TEXT_DIM, WIN_BODY_COLOR); ty += 18;
-    fb_draw_string(tx + 16, ty, "Color depth: 32-bit XRGB8888", COLOR_TEXT_DIM, WIN_BODY_COLOR); ty += 28;
-    fb_draw_string(tx, ty, "Keyboard", COLOR_TEXT_BRIGHT, WIN_BODY_COLOR); ty += 22;
-    fb_draw_string(tx + 16, ty, "Layout: US (Scancode Set 1)", COLOR_TEXT_DIM, WIN_BODY_COLOR); ty += 28;
-    fb_draw_string(tx, ty, "Mouse", COLOR_TEXT_BRIGHT, WIN_BODY_COLOR); ty += 22;
-    fb_draw_string(tx + 16, ty, "PS/2 compatible, 3 buttons", COLOR_TEXT_DIM, WIN_BODY_COLOR); ty += 28;
-    fb_draw_string(tx, ty, "Shortcuts", COLOR_TEXT_BRIGHT, WIN_BODY_COLOR); ty += 22;
-    fb_draw_string(tx + 16, ty, "Alt+Tab: Switch window", COLOR_TEXT_DIM, WIN_BODY_COLOR); ty += 18;
-    fb_draw_string(tx + 16, ty, "Esc: Exit GUI", COLOR_TEXT_DIM, WIN_BODY_COLOR);
-}
-
-/* Home and Trash show simplified content */
-static void draw_home_window(WinSlot *ws)
-{
-    draw_window_frame(ws->x, ws->y, ws->w, ws->h, "Home",
-                      ws == &wins[focus_win], ws->maximized);
-    int tx = ws->x + 14, ty = ws->y + TITLE_BAR_HEIGHT + 8;
-    fb_draw_string(tx, ty, "/home/user", COLOR_TEXT_BRIGHT, WIN_BODY_COLOR); ty += 22;
-    const char *items[] = { "  Documents/", "  Downloads/", "  Pictures/", "  Music/", "  Desktop/" };
-    for (int i = 0; i < 5; i++) {
-        fb_draw_string(tx, ty, items[i], 0x0040A0C0, WIN_BODY_COLOR);
-        ty += 18;
-    }
-}
-
-static void draw_trash_window(WinSlot *ws)
-{
-    draw_window_frame(ws->x, ws->y, ws->w, ws->h, "Trash",
-                      ws == &wins[focus_win], ws->maximized);
-    int tx = ws->x + 14, ty = ws->y + TITLE_BAR_HEIGHT + 8;
-    fb_draw_string(tx, ty, "Trash is empty", COLOR_TEXT_DIM, WIN_BODY_COLOR);
-}
-
-static void draw_app_window(WinSlot *ws)
-{
-    switch (ws->app) {
-    case 0: draw_terminal_window(ws); break;
-    case 1: draw_filemanager_window(ws); break;
-    case 2: draw_sysmon_window(ws); break;
-    case 3: draw_settings_window(ws); break;
-    case 4: draw_about_window(ws); break;
-    case 5: draw_home_window(ws); break;
-    case 6: draw_trash_window(ws); break;
-    case 7: draw_minesweeper_window(ws); break;
-    }
-}
-
 /* ================================================================
  *  WINDOW MANAGEMENT
  * ================================================================ */
@@ -1729,22 +1967,22 @@ static void compute_app_size(int app, int *w, int *h)
 {
     uint32_t sw = fb_get_width(), sh = fb_get_height();
     switch (app) {
-    case 0: *w = sw > 700 ? 680 : (int)sw - 40;
-            *h = sh > 500 ? 440 : (int)sh - 100; break;
-    case 1: *w = sw > 500 ? 480 : (int)sw - 40;
-            *h = sh > 400 ? 360 : (int)sh - 100; break;
-    case 2: *w = sw > 500 ? 480 : (int)sw - 40;
-            *h = sh > 400 ? 360 : (int)sh - 100; break;
-    case 3: *w = sw > 400 ? 380 : (int)sw - 40;
-            *h = 340; break;
-    case 4: *w = sw > 400 ? 380 : (int)sw - 40;
-            *h = 260; break;
-    case 5: *w = sw > 400 ? 380 : (int)sw - 40;
-            *h = 260; break;
-    case 6: *w = sw > 400 ? 380 : (int)sw - 40;
-            *h = 200; break;
-    case 7: *w = MS_COLS * MS_CELL_SIZE + 32;
-            *h = MS_ROWS * MS_CELL_SIZE + TITLE_BAR_HEIGHT + 56; break;
+    case 0: *w = sw > 720 ? 700 : (int)sw - 40;
+            *h = sh > 520 ? 480 : (int)sh - 100; break;
+    case 1: *w = sw > 520 ? 500 : (int)sw - 40;
+            *h = sh > 420 ? 380 : (int)sh - 100; break;
+    case 2: *w = sw > 520 ? 500 : (int)sw - 40;
+            *h = sh > 520 ? 480 : (int)sh - 100; break;
+    case 3: *w = sw > 420 ? 400 : (int)sw - 40;
+            *h = 360; break;
+    case 4: *w = sw > 420 ? 400 : (int)sw - 40;
+            *h = 300; break;
+    case 5: *w = sw > 420 ? 400 : (int)sw - 40;
+            *h = 300; break;
+    case 6: *w = sw > 320 ? 300 : (int)sw - 40;
+            *h = 220; break;
+    case 7: *w = MS_COLS * MS_CELL_SIZE + 40;
+            *h = MS_ROWS * MS_CELL_SIZE + TITLE_BAR_HEIGHT + 64; break;
     default: *w = (int)sw - 40;
              *h = (int)sh - TASKBAR_HEIGHT - 60; break;
     }
@@ -1758,11 +1996,11 @@ static int open_window(int app)
     ws->minimized = 0;
     ws->maximized = 0;
     compute_app_size(app, &ws->w, &ws->h);
-    int offset = num_wins * 28;
+    int offset = num_wins * 32;
     ws->x = ((int)fb_get_width() - ws->w) / 2 + offset;
-    ws->y = ((int)fb_get_height() - TASKBAR_HEIGHT - ws->h) / 2 + offset;
+    ws->y = ((int)fb_get_height() - TASKBAR_HEIGHT - DOCK_FLOAT_GAP - ws->h) / 2 + offset;
     if (ws->x + ws->w > (int)fb_get_width()) ws->x = 0;
-    if (ws->y + ws->h > (int)fb_get_height() - TASKBAR_HEIGHT) ws->y = 0;
+    if (ws->y + ws->h > dock_y()) ws->y = 0;
     focus_win = num_wins;
     num_wins++;
     return focus_win;
@@ -1781,29 +2019,67 @@ static void close_window(int slot)
     else if (resize_win > slot) resize_win--;
 }
 
-/* Check which resize edge the cursor is on for a window */
 static int get_resize_edge(WinSlot *ws, int mx, int my)
 {
     if (ws->maximized) return 0;
     int edge = 0;
     int margin = 8;
-    /* Right edge */
     if (mx >= ws->x + ws->w - margin && mx < ws->x + ws->w + 4 &&
         my >= ws->y && my < ws->y + ws->h)
         edge |= 1;
-    /* Bottom edge */
     if (my >= ws->y + ws->h - margin && my < ws->y + ws->h + 4 &&
         mx >= ws->x && mx < ws->x + ws->w)
         edge |= 2;
-    /* Left edge */
     if (mx >= ws->x - 4 && mx < ws->x + margin &&
         my >= ws->y && my < ws->y + ws->h)
         edge |= 4;
-    /* Top edge */
     if (my >= ws->y - 4 && my < ws->y + margin &&
         mx >= ws->x && mx < ws->x + ws->w)
         edge |= 8;
     return edge;
+}
+
+/* ================================================================
+ *  SPLASH SCREEN
+ * ================================================================ */
+
+static void show_splash(void)
+{
+    uint32_t sw = fb_get_width(), sh = fb_get_height();
+
+    /* Dark gradient background */
+    for (int y = 0; y < (int)sh; y++) {
+        int t = y * 256 / (int)sh;
+        int r = 0x0A + ((0x1A - 0x0A) * t >> 8);
+        int g = 0x0A + ((0x10 - 0x0A) * t >> 8);
+        int b = 0x1A + ((0x40 - 0x1A) * t >> 8);
+        fb_color_t c = (r << 16) | (g << 8) | b;
+        fb_fill_rect(0, y, sw, 1, c);
+    }
+
+    /* Logo */
+    int logo_x = ((int)sw - LOGO_WIDTH) / 2;
+    int logo_y = ((int)sh - LOGO_HEIGHT) / 2 - 30;
+    for (int y = 0; y < LOGO_HEIGHT; y++)
+        for (int x = 0; x < LOGO_WIDTH; x++) {
+            fb_color_t pixel = logo_pixels[y * LOGO_WIDTH + x];
+            if (pixel != 0x000000)
+                fb_put_pixel(logo_x + x, logo_y + y, pixel);
+        }
+
+    /* Title text */
+    fb_draw_string(((int)sw - 11 * 8) / 2, logo_y + LOGO_HEIGHT + 20,
+                   "SpiritFoxOS", COLOR_TEXT_DIM, COLOR_BG_TL);
+
+    /* Loading dots animation */
+    for (int i = 0; i < 3; i++) {
+        int dot_x = ((int)sw) / 2 - 20 + i * 16;
+        int dot_y = logo_y + LOGO_HEIGHT + 44;
+        fill_rounded_rect(dot_x, dot_y, 8, 8, 4, COLOR_ACCENT);
+    }
+
+    fb_swap_buffer();
+    timer_sleep_ms(3000);
 }
 
 /* ================================================================
@@ -1824,26 +2100,11 @@ void window_enter(void)
 
     mouse_init();
 
-    /* Show splash logo */
-    {
-        uint32_t sw = fb_get_width(), sh = fb_get_height();
-        fb_clear(COLOR_BG_TOP);
-        int logo_x = ((int)sw - LOGO_WIDTH) / 2;
-        int logo_y = ((int)sh - LOGO_HEIGHT) / 2 - 20;
-        for (int y = 0; y < LOGO_HEIGHT; y++)
-            for (int x = 0; x < LOGO_WIDTH; x++) {
-                fb_color_t pixel = logo_pixels[y * LOGO_WIDTH + x];
-                if (pixel != 0x000000)
-                    fb_put_pixel(logo_x + x, logo_y + y, pixel);
-            }
-        fb_draw_string(((int)sw - 11 * 8) / 2, logo_y + LOGO_HEIGHT + 16,
-                       "SpiritFoxOS", COLOR_TEXT_DIM, COLOR_BG_TOP);
-        fb_swap_buffer();
-        timer_sleep_ms(3000);
-    }
+    /* Show splash */
+    show_splash();
 
     term_clear();
-    term_print("SpiritFoxOS Terminal v0.3\n");
+    term_print("SpiritFoxOS Terminal v0.5\n");
     term_print("Type 'help' for commands.\n\n");
     term_input[0] = '\0';
     term_input_len = 0;
@@ -1854,6 +2115,7 @@ void window_enter(void)
     start_menu_open = 0;
     ctx_menu_open = 0;
     icon_pressed = -1;
+    anim_tick = 0;
 
     { uint8_t btn;
       mouse_get_state(&mouse_x, &mouse_y, &btn);
@@ -1862,6 +2124,8 @@ void window_enter(void)
 
     /* ======== MAIN LOOP ======== */
     while (window_running) {
+        anim_tick++;
+
         /* ---- Keyboard ---- */
         while (keyboard_has_char()) {
             char c = keyboard_get_char();
@@ -1904,7 +2168,24 @@ void window_enter(void)
         int right_click = (mouse_buttons & MOUSE_BTN_RIGHT) &&
                           !(mouse_prev_buttons & MOUSE_BTN_RIGHT);
 
-        int tb_y = (int)fb_get_height() - TASKBAR_HEIGHT;
+        /* Double-click detection */
+        if (left_click) {
+            uint64_t now = timer_get_ms();
+            if (now - last_click_time < 400 &&
+                mouse_x >= last_click_x - 4 && mouse_x <= last_click_x + 4 &&
+                mouse_y >= last_click_y - 4 && mouse_y <= last_click_y + 4) {
+                double_click = 1;
+            } else {
+                double_click = 0;
+            }
+            last_click_time = now;
+            last_click_x = mouse_x;
+            last_click_y = mouse_y;
+        } else {
+            double_click = 0;
+        }
+
+        int tb_y = dock_y();
 
         /* ---- Icon press tracking ---- */
         if (!left_down) icon_pressed = -1;
@@ -1921,24 +2202,26 @@ void window_enter(void)
         else
             ctx_menu_hover = -1;
 
-        /* ---- Taskbar click ---- */
+        /* ---- Taskbar / Dock click ---- */
         if (left_click && mouse_y >= tb_y) {
             /* Start button */
-            if (mouse_x >= 4 && mouse_x < 4 + START_BTN_W &&
-                mouse_y >= tb_y + 5 && mouse_y < tb_y + TASKBAR_HEIGHT - 5) {
+            int sx, sy, sw2, sh2;
+            dock_start_rect(&sx, &sy, &sw2, &sh2);
+            if (mouse_x >= sx && mouse_x < sx + sw2 &&
+                mouse_y >= sy && mouse_y < sy + sh2) {
                 start_menu_open = !start_menu_open;
                 if (!start_menu_open) start_menu_hover = -1;
                 ctx_menu_open = 0;
             } else {
                 if (start_menu_open) { start_menu_open = 0; start_menu_hover = -1; }
                 ctx_menu_open = 0;
-                /* Window buttons */
+                /* Window buttons in dock */
                 int clicked_slot = -1;
                 for (int i = 0; i < num_wins; i++) {
-                    int bx, bw;
-                    taskbar_win_rect(i, &bx, &bw);
+                    int bx, by, bw, bh;
+                    dock_win_rect(i, &bx, &by, &bw, &bh);
                     if (mouse_x >= bx && mouse_x < bx + bw &&
-                        mouse_y >= tb_y + 5 && mouse_y < tb_y + TASKBAR_HEIGHT - 5) {
+                        mouse_y >= by && mouse_y < by + bh) {
                         clicked_slot = i;
                         break;
                     }
@@ -1959,21 +2242,19 @@ void window_enter(void)
         if (left_click && start_menu_open && mouse_y < tb_y) {
             int item = start_menu_item_at(mouse_x, mouse_y);
             if (item >= 0 && item < NUM_APPS) {
-                /* App items 0-(NUM_APPS-1) */
-                if (item == 7) ms_init();  /* Reset minesweeper on open */
+                if (item == 7) ms_init();
                 open_window(item);
                 start_menu_open = 0; start_menu_hover = -1;
             } else if (item == SM_ITEM_SHUTDOWN) {
                 window_running = 0;
             } else if (item == SM_ITEM_RESTART) {
-                /* Restart GUI - close all windows, reset state */
                 num_wins = 0;
                 focus_win = -1;
                 start_menu_open = 0;
                 start_menu_hover = -1;
                 ctx_menu_open = 0;
                 term_clear();
-                term_print("SpiritFoxOS Terminal v0.3\n");
+                term_print("SpiritFoxOS Terminal v0.5\n");
                 term_print("Type 'help' for commands.\n\n");
                 term_input[0] = '\0';
                 term_input_len = 0;
@@ -1993,7 +2274,7 @@ void window_enter(void)
                     int grid_w = MS_COLS * MS_CELL_SIZE;
                     int grid_h = MS_ROWS * MS_CELL_SIZE;
                     int mgx = mws->x + (mws->w - grid_w) / 2;
-                    int mgy = mws->y + TITLE_BAR_HEIGHT + 28;
+                    int mgy = mws->y + TITLE_BAR_HEIGHT + 32;
                     if (mouse_x >= mgx && mouse_x < mgx + grid_w &&
                         mouse_y >= mgy && mouse_y < mgy + grid_h) {
                         int mc = (mouse_x - mgx) / MS_CELL_SIZE;
@@ -2010,7 +2291,6 @@ void window_enter(void)
 
         /* ---- Desktop right-click ---- */
         if (right_click && mouse_y < tb_y && !point_in_start_menu(mouse_x, mouse_y)) {
-            /* Check not on a window */
             int on_win = 0;
             for (int i = num_wins - 1; i >= 0; i--) {
                 if (!wins[i].minimized &&
@@ -2034,12 +2314,12 @@ void window_enter(void)
             int item = ctx_menu_item_at(mouse_x, mouse_y);
             if (item >= 0) {
                 switch (item) {
-                case 0: open_window(0); break;  /* Terminal */
-                case 1: open_window(1); break;  /* File Manager */
-                case 2: open_window(2); break;  /* SysMon */
-                case 3: open_window(3); break;  /* Settings */
-                case 5: open_window(4); break;  /* About */
-                case 6: window_running = 0; break;  /* Shutdown */
+                case 0: open_window(0); break;
+                case 1: open_window(1); break;
+                case 2: open_window(2); break;
+                case 3: open_window(3); break;
+                case 5: open_window(4); break;
+                case 6: window_running = 0; break;
                 }
                 ctx_menu_open = 0; ctx_menu_hover = -1;
             } else if (!point_in_ctx_menu(mouse_x, mouse_y)) {
@@ -2109,18 +2389,23 @@ void window_enter(void)
             /* Window button / drag / resize for focused window */
             if (clicked >= 0 && clicked == focus_win) {
                 WinSlot *ws = &wins[focus_win];
-                int btn_size = 22;
-                int btn_y_pos = ws->y + 4;
-                int btn_right = ws->x + ws->w - 8;
-                int min_btn = btn_right - btn_size * 3 - 6 * 2;
-                int max_btn = btn_right - btn_size * 2 - 6;
-                int close_btn = btn_right - btn_size;
+                int close_x2, min_x2, max_x2, btn_y2;
+                win_control_positions(ws->x, ws->y, ws->w, &close_x2, &min_x2, &max_x2, &btn_y2);
 
-                /* Title bar buttons */
-                if (mouse_y >= btn_y_pos && mouse_y < btn_y_pos + btn_size) {
-                    if (mouse_x >= close_btn && mouse_x < close_btn + btn_size) {
+                /* macOS-style dot buttons - check if click is in the button area */
+                if (mouse_y >= ws->y + 4 && mouse_y < ws->y + TITLE_BAR_HEIGHT - 4 &&
+                    mouse_x >= ws->x + 8 && mouse_x < ws->x + 68) {
+                    /* Close button */
+                    if (mouse_x >= close_x2 && mouse_x < close_x2 + 12) {
                         close_window(focus_win); clicked = -1;
-                    } else if (mouse_x >= max_btn && mouse_x < max_btn + btn_size) {
+                    }
+                    /* Minimize button */
+                    else if (mouse_x >= min_x2 && mouse_x < min_x2 + 12) {
+                        ws->minimized = 1;
+                        dragging = 0; drag_win = -1;
+                    }
+                    /* Maximize button */
+                    else if (mouse_x >= max_x2 && mouse_x < max_x2 + 12) {
                         if (ws->maximized) {
                             ws->x = ws->saved_x; ws->y = ws->saved_y;
                             ws->w = ws->saved_w; ws->h = ws->saved_h;
@@ -2130,12 +2415,9 @@ void window_enter(void)
                             ws->saved_w = ws->w; ws->saved_h = ws->h;
                             ws->x = 0; ws->y = 0;
                             ws->w = (int)fb_get_width();
-                            ws->h = (int)fb_get_height() - TASKBAR_HEIGHT;
+                            ws->h = dock_y();
                             ws->maximized = 1;
                         }
-                        dragging = 0; drag_win = -1;
-                    } else if (mouse_x >= min_btn && mouse_x < min_btn + btn_size) {
-                        ws->minimized = 1;
                         dragging = 0; drag_win = -1;
                     }
                 }
@@ -2147,7 +2429,7 @@ void window_enter(void)
                     int grid_w = MS_COLS * MS_CELL_SIZE;
                     int grid_h = MS_ROWS * MS_CELL_SIZE;
                     int mgx = mws->x + (mws->w - grid_w) / 2;
-                    int mgy = mws->y + TITLE_BAR_HEIGHT + 28;
+                    int mgy = mws->y + TITLE_BAR_HEIGHT + 32;
                     if (mouse_x >= mgx && mouse_x < mgx + grid_w &&
                         mouse_y >= mgy && mouse_y < mgy + grid_h) {
                         int mc = (mouse_x - mgx) / MS_CELL_SIZE;
@@ -2162,14 +2444,32 @@ void window_enter(void)
                     }
                 }
 
-                /* Start dragging if on title bar (not buttons) */
+                /* Start dragging if on title bar (not on dot buttons) */
                 if (clicked >= 0 && focus_win >= 0 && !wins[focus_win].minimized &&
-                    !wins[focus_win].maximized &&
                     mouse_y >= ws->y && mouse_y < ws->y + TITLE_BAR_HEIGHT &&
-                    !(mouse_x >= min_btn && mouse_y < btn_y_pos + btn_size)) {
-                    dragging = 1; drag_win = focus_win;
-                    drag_off_x = mouse_x - ws->x;
-                    drag_off_y = mouse_y - ws->y;
+                    !(mouse_x >= ws->x + 8 && mouse_x < ws->x + 68 &&
+                      mouse_y >= ws->y + 4 && mouse_y < ws->y + TITLE_BAR_HEIGHT - 4)) {
+
+                    /* Double-click on title bar toggles maximize */
+                    if (double_click) {
+                        if (ws->maximized) {
+                            ws->x = ws->saved_x; ws->y = ws->saved_y;
+                            ws->w = ws->saved_w; ws->h = ws->saved_h;
+                            ws->maximized = 0;
+                        } else {
+                            ws->saved_x = ws->x; ws->saved_y = ws->y;
+                            ws->saved_w = ws->w; ws->saved_h = ws->h;
+                            ws->x = 0; ws->y = 0;
+                            ws->w = (int)fb_get_width();
+                            ws->h = (int)fb_get_height() - TASKBAR_HEIGHT - DOCK_FLOAT_GAP;
+                            ws->maximized = 1;
+                        }
+                        dragging = 0; drag_win = -1;
+                    } else if (!wins[focus_win].maximized) {
+                        dragging = 1; drag_win = focus_win;
+                        drag_off_x = mouse_x - ws->x;
+                        drag_off_y = mouse_y - ws->y;
+                    }
                 }
 
                 /* Start resizing if on edge */
@@ -2192,12 +2492,12 @@ void window_enter(void)
                 WinSlot *ws = &wins[drag_win];
                 ws->x = mouse_x - drag_off_x;
                 ws->y = mouse_y - drag_off_y;
-                int sw = (int)fb_get_width();
-                int sh = (int)fb_get_height();
+                int sw2 = (int)fb_get_width();
+                int sh2 = (int)fb_get_height();
                 if (ws->x < 0) ws->x = 0;
                 if (ws->y < 0) ws->y = 0;
-                if (ws->x + 60 > sw) ws->x = sw - 60;
-                if (ws->y + 30 > sh - TASKBAR_HEIGHT) ws->y = sh - TASKBAR_HEIGHT - 30;
+                if (ws->x + 60 > sw2) ws->x = sw2 - 60;
+                if (ws->y + 30 > dock_y()) ws->y = dock_y() - 30;
             } else {
                 dragging = 0; drag_win = -1;
             }
@@ -2207,24 +2507,24 @@ void window_enter(void)
         if (resizing && resize_win >= 0) {
             if (left_down && !wins[resize_win].minimized) {
                 WinSlot *ws = &wins[resize_win];
-                int dx = mouse_x - resize_start_x;
-                int dy = mouse_y - resize_start_y;
+                int dx2 = mouse_x - resize_start_x;
+                int dy2 = mouse_y - resize_start_y;
 
-                if (resize_edge & 1) { /* right */
-                    int nw = resize_orig_w + dx;
+                if (resize_edge & 1) {
+                    int nw = resize_orig_w + dx2;
                     if (nw >= 160) ws->w = nw;
                 }
-                if (resize_edge & 2) { /* bottom */
-                    int nh = resize_orig_h + dy;
+                if (resize_edge & 2) {
+                    int nh = resize_orig_h + dy2;
                     if (nh >= 100) ws->h = nh;
                 }
-                if (resize_edge & 4) { /* left */
-                    int nw = resize_orig_w - dx;
-                    if (nw >= 160) { ws->w = nw; ws->x = resize_orig_x + dx; }
+                if (resize_edge & 4) {
+                    int nw = resize_orig_w - dx2;
+                    if (nw >= 160) { ws->w = nw; ws->x = resize_orig_x + dx2; }
                 }
-                if (resize_edge & 8) { /* top */
-                    int nh = resize_orig_h - dy;
-                    if (nh >= 100) { ws->h = nh; ws->y = resize_orig_y + dy; }
+                if (resize_edge & 8) {
+                    int nh = resize_orig_h - dy2;
+                    if (nh >= 100) { ws->h = nh; ws->y = resize_orig_y + dy2; }
                 }
             } else {
                 resizing = 0; resize_win = -1;
