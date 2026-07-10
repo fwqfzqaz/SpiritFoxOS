@@ -1,6 +1,9 @@
 #include "acpi.h"
 #include "hal.h"
 #include "string.h"
+#include "boot.h"
+
+extern BootInfo *g_boot_info;
 
 static acpi_rsdp_t *rsdp = NULL;
 static acpi_sdt_header_t *rsdt = NULL;
@@ -64,7 +67,29 @@ static acpi_rsdp_t *acpi_find_rsdp(void)
 
 void acpi_init(void)
 {
-    rsdp = acpi_find_rsdp();
+    /* Try RSDP from boot info first (UEFI provides it directly) */
+    if (g_boot_info && g_boot_info->acpi_rsdp != 0) {
+        uintptr_t rsdp_addr = (uintptr_t)g_boot_info->acpi_rsdp;
+        hal_ensure_mapped(rsdp_addr, sizeof(acpi_rsdp_t));
+        acpi_rsdp_t *candidate = (acpi_rsdp_t *)rsdp_addr;
+        if (memcmp(candidate->signature, "RSD PTR ", 8) == 0) {
+            if (candidate->revision >= 2) {
+                if (acpi_checksum(candidate, candidate->length)) {
+                    rsdp = candidate;
+                }
+            } else {
+                if (acpi_checksum(candidate, 20)) {
+                    rsdp = candidate;
+                }
+            }
+        }
+    }
+
+    /* Fall back to traditional scanning if RSDP not found via boot info */
+    if (!rsdp) {
+        rsdp = acpi_find_rsdp();
+    }
+    
     if (!rsdp)
         return;
 

@@ -253,6 +253,9 @@ void hal_map_2mb(uintptr_t virt, uintptr_t phys, uint64_t flags);
 /* Map a 4KB page at virtual address to physical address */
 void hal_map_4kb(uintptr_t virt, uintptr_t phys, uint64_t flags);
 
+/* Map a 1GB page at virtual address to physical address */
+void hal_map_1gb(uintptr_t virt, uintptr_t phys, uint64_t flags);
+
 /* Ensure a virtual address range is mapped (identity mapping) */
 void hal_ensure_mapped(uintptr_t phys, size_t size);
 

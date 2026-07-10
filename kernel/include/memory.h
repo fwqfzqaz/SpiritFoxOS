@@ -11,6 +11,8 @@ void memory_init(BootInfo* info, uintptr_t kernel_end);
 void* alloc_page(void);
 void* alloc_pages(size_t count);
 void free_page(void* addr);
+void* alloc_huge_page(void);
+void free_huge_page(void* addr);
 uint64_t pmm_total_pages(void);
 uint64_t pmm_used_pages(void);
 

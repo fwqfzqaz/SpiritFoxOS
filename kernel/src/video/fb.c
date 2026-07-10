@@ -201,6 +201,14 @@ void fb_init(BootInfo *info)
         return;
     }
 
+    /* If already initialized with the same resolution, just clear and return.
+     * This prevents leaking the back buffer on re-entry (e.g., entering
+     * graphical mode a second time from the shell). */
+    if (fb_initialized && fb_width == 1024 && fb_height == 768 && fb_back) {
+        memset(fb_back, 0, fb_size);
+        return;
+    }
+
     /* Set VBE graphics mode via Bochs DISPI interface */
     vbe_set_mode(1024, 768, 32);
 

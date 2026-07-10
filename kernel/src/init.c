@@ -31,6 +31,8 @@
 #include "sandbox.h"
 #include "procfs.h"
 #include "net.h"
+#include "smp.h"
+#include "slab.h"
 #include "rtl8139.h"
 #include "serial.h"
 #include "autorun.h"
@@ -91,6 +93,9 @@ void init_hardware(void)
     serial_puts("[SpiritFoxOS] apic_init...\n");
     apic_init();
     printf("[APIC] Initialized\n");
+
+    serial_puts("[SpiritFoxOS] smp_init...\n");
+    smp_init();
 
     serial_puts("[SpiritFoxOS] timer_init...\n");
     timer_init();
@@ -196,6 +201,10 @@ void init_services(void)
 {
     serial_puts("[SpiritFoxOS] kmalloc_init...\n");
     kmalloc_init();
+
+    serial_puts("[SpiritFoxOS] slab_init...\n");
+    slab_init();
+    printf("[SLAB] Slab allocator initialized\n");
 
     serial_puts("[SpiritFoxOS] process_init...\n");
     process_init();

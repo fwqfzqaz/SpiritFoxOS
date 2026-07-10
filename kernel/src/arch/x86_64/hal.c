@@ -72,3 +72,26 @@ void hal_ensure_mapped_mmio(uintptr_t phys, size_t size)
         hal_map_2mb(addr, addr, PTE_PRESENT | PTE_WRITABLE | PTE_PCD | PTE_PWT);
     }
 }
+
+/* Map a 1GB page at virtual address to physical address using PDPT entry */
+void hal_map_1gb(uintptr_t virt, uintptr_t phys, uint64_t flags)
+{
+    uint64_t *pml4 = (uint64_t *)(hal_read_cr3() & PTE_ADDR_MASK);
+
+    uint64_t pml4_idx = (virt >> 39) & 0x1FF;
+    uint64_t pdpt_idx = (virt >> 30) & 0x1FF;
+
+    /* Walk PML4 -> PDPT */
+    if (!(pml4[pml4_idx] & PTE_PRESENT)) {
+        void *new_page = alloc_page();
+        if (!new_page) return;
+        memset(new_page, 0, PAGE_SIZE);
+        pml4[pml4_idx] = (uintptr_t)new_page | PTE_PRESENT | PTE_WRITABLE;
+    }
+    uint64_t *pdpt = (uint64_t *)(pml4[pml4_idx] & PTE_ADDR_MASK);
+
+    /* Map 1GB page directly in PDPT (PTE_HUGE at PDPT level = 1GB page) */
+    pdpt[pdpt_idx] = phys | flags | PTE_HUGE | PTE_PRESENT;
+
+    hal_flush_tlb_page(virt);
+}

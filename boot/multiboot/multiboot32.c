@@ -103,7 +103,7 @@ static uint64_t p2_table[512] __attribute__((aligned(4096)));
 /* ========== BootInfo for 64-bit kernel ========== */
 struct BootInfo64 {
     uint32_t magic;
-    uint32_t padding;
+    uint32_t boot_type;         /* BOOT_TYPE_LEGACY = 0 */
     uint64_t framebuffer_base;
     uint64_t framebuffer_size;
     uint32_t width;
@@ -114,6 +114,9 @@ struct BootInfo64 {
     uint64_t memory_map_size;
     uint64_t memory_map_descriptor_size;
     uint64_t memory_map_entry_count;
+    uint64_t acpi_rsdp;         /* 0 for now, kernel scans */
+    uint64_t efi_runtime_services; /* 0 for legacy boot */
+    uint64_t total_memory;
 };
 
 #define BOOTINFO_ADDR 0x9000
@@ -301,7 +304,7 @@ void _start_c(uint32_t magic, struct mb2_info *mbi)
     /* ---- Prepare BootInfo ---- */
     struct BootInfo64 *bi = (struct BootInfo64 *)BOOTINFO_ADDR;
     bi->magic = 0x5F1F0F05;
-    bi->padding = 0;
+    bi->boot_type = 0;
 
     if (fb_found && fb_bpp >= 24) {
         /* Use framebuffer info from GRUB multiboot2 tags if available */
@@ -336,6 +339,9 @@ void _start_c(uint32_t magic, struct mb2_info *mbi)
     bi->memory_map_size = 0;
     bi->memory_map_descriptor_size = 0;
     bi->memory_map_entry_count = 0;
+    bi->acpi_rsdp = 0;               /* Kernel scans EBDA/0xE0000 */
+    bi->efi_runtime_services = 0;     /* Not available for legacy boot */
+    bi->total_memory = 0;             /* Not computed by 32-bit loader */
 
     /* ---- Enable long mode ---- */
     serial_puts("[LOADER] Calling enable_long_mode...\n");
