@@ -7,7 +7,9 @@ extern BootInfo *g_boot_info;
 
 static acpi_rsdp_t *rsdp = NULL;
 static acpi_sdt_header_t *rsdt = NULL;
+static acpi_sdt_header_t *xsdt = NULL;
 static uint32_t rsdt_entry_count = 0;
+static int use_xsdt = 0;
 
 /* MADT parsed results */
 static uintptr_t lapic_addr = 0;
@@ -89,22 +91,37 @@ void acpi_init(void)
     if (!rsdp) {
         rsdp = acpi_find_rsdp();
     }
-    
+
     if (!rsdp)
         return;
 
-    /* Map and validate RSDT */
-    hal_ensure_mapped(rsdp->rsdt_address, sizeof(acpi_sdt_header_t));
-    rsdt = (acpi_sdt_header_t *)(uintptr_t)rsdp->rsdt_address;
+    /* Prefer XSDT for ACPI 2.0+ (UEFI provides revision >= 2) */
+    if (rsdp->revision >= 2 && rsdp->xsdt_address != 0) {
+        hal_ensure_mapped(rsdp->xsdt_address, sizeof(acpi_sdt_header_t));
+        xsdt = (acpi_sdt_header_t *)(uintptr_t)rsdp->xsdt_address;
 
-    hal_ensure_mapped(rsdp->rsdt_address, rsdt->length);
-    if (!acpi_checksum(rsdt, rsdt->length)) {
-        rsdt = NULL;
-        return;
+        hal_ensure_mapped(rsdp->xsdt_address, xsdt->length);
+        if (memcmp(xsdt->signature, "XSDT", 4) == 0 && acpi_checksum(xsdt, xsdt->length)) {
+            use_xsdt = 1;
+            rsdt_entry_count = (xsdt->length - sizeof(acpi_sdt_header_t)) / sizeof(uint64_t);
+        } else {
+            xsdt = NULL;
+        }
     }
 
-    /* Number of 32-bit entries in RSDT (after the header) */
-    rsdt_entry_count = (rsdt->length - sizeof(acpi_sdt_header_t)) / sizeof(uint32_t);
+    /* Fall back to RSDT */
+    if (!use_xsdt) {
+        hal_ensure_mapped(rsdp->rsdt_address, sizeof(acpi_sdt_header_t));
+        rsdt = (acpi_sdt_header_t *)(uintptr_t)rsdp->rsdt_address;
+
+        hal_ensure_mapped(rsdp->rsdt_address, rsdt->length);
+        if (!acpi_checksum(rsdt, rsdt->length)) {
+            rsdt = NULL;
+            return;
+        }
+
+        rsdt_entry_count = (rsdt->length - sizeof(acpi_sdt_header_t)) / sizeof(uint32_t);
+    }
 
     /* Parse MADT */
     void *madt_ptr = acpi_find_table("APIC");
@@ -144,17 +161,35 @@ acpi_rsdp_t *acpi_get_rsdp(void)
 
 void *acpi_find_table(const char *signature)
 {
-    if (!rsdt || rsdt_entry_count == 0)
+    if (rsdt_entry_count == 0)
         return NULL;
 
-    for (uint32_t i = 0; i < rsdt_entry_count; i++) {
-        uint32_t entry_addr = ((uint32_t *)((uintptr_t)rsdt + sizeof(acpi_sdt_header_t)))[i];
-        hal_ensure_mapped(entry_addr, sizeof(acpi_sdt_header_t));
-        acpi_sdt_header_t *hdr = (acpi_sdt_header_t *)(uintptr_t)entry_addr;
-        if (memcmp(hdr->signature, signature, 4) == 0) {
-            hal_ensure_mapped(entry_addr, hdr->length);
-            if (acpi_checksum(hdr, hdr->length))
-                return (void *)hdr;
+    if (use_xsdt) {
+        /* XSDT: 64-bit entries */
+        uint64_t *entries = (uint64_t *)((uintptr_t)xsdt + sizeof(acpi_sdt_header_t));
+        for (uint32_t i = 0; i < rsdt_entry_count; i++) {
+            uintptr_t entry_addr = (uintptr_t)entries[i];
+            if (entry_addr == 0) continue;
+            hal_ensure_mapped(entry_addr, sizeof(acpi_sdt_header_t));
+            acpi_sdt_header_t *hdr = (acpi_sdt_header_t *)entry_addr;
+            if (memcmp(hdr->signature, signature, 4) == 0) {
+                hal_ensure_mapped(entry_addr, hdr->length);
+                if (acpi_checksum(hdr, hdr->length))
+                    return (void *)hdr;
+            }
+        }
+    } else {
+        /* RSDT: 32-bit entries */
+        if (!rsdt) return NULL;
+        for (uint32_t i = 0; i < rsdt_entry_count; i++) {
+            uint32_t entry_addr = ((uint32_t *)((uintptr_t)rsdt + sizeof(acpi_sdt_header_t)))[i];
+            hal_ensure_mapped(entry_addr, sizeof(acpi_sdt_header_t));
+            acpi_sdt_header_t *hdr = (acpi_sdt_header_t *)(uintptr_t)entry_addr;
+            if (memcmp(hdr->signature, signature, 4) == 0) {
+                hal_ensure_mapped(entry_addr, hdr->length);
+                if (acpi_checksum(hdr, hdr->length))
+                    return (void *)hdr;
+            }
         }
     }
     return NULL;

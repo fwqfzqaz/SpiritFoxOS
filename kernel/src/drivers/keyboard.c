@@ -164,6 +164,12 @@ void keyboard_init(void)
 char keyboard_get_char(void)
 {
     while (buffer_empty()) {
+        /* Poll PS/2 controller: if keyboard has data but IRQ didn't fire,
+         * read it manually. This handles cases where the IOAPIC/LAPIC
+         * fails to deliver the interrupt (e.g., stale IRQ line after UEFI). */
+        if (hal_inb(0x64) & 0x01) {
+            keyboard_handler();
+        }
         __asm__ volatile ("hlt");
     }
     return buffer_get();

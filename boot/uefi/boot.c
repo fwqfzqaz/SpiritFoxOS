@@ -129,6 +129,7 @@ static EFI_STATUS load_kernel_elf(
     UINTN i;
 
     /* Get loaded image protocol for device handle */
+    print(st, L"  HandleProtocol(loaded_image)...\r\n");
     status = st->BootServices->HandleProtocol(
         image_handle, &li_guid, (void **)&loaded_image);
     if (EFI_ERROR(status)) {
@@ -137,8 +138,15 @@ static EFI_STATUS load_kernel_elf(
         print(st, L"\r\n");
         return status;
     }
+    print(st, L"  loaded_image at: 0x");
+    print_hex(st, (uint64_t)(uintptr_t)loaded_image);
+    print(st, L"\r\n");
+    print(st, L"  DeviceHandle: 0x");
+    print_hex(st, (uint64_t)(uintptr_t)loaded_image->DeviceHandle);
+    print(st, L"\r\n");
 
     /* Get file system protocol */
+    print(st, L"  HandleProtocol(filesystem)...\r\n");
     status = st->BootServices->HandleProtocol(
         loaded_image->DeviceHandle, &fs_guid, (void **)&fs);
     if (EFI_ERROR(status)) {
@@ -147,8 +155,12 @@ static EFI_STATUS load_kernel_elf(
         print(st, L"\r\n");
         return status;
     }
+    print(st, L"  fs at: 0x");
+    print_hex(st, (uint64_t)(uintptr_t)fs);
+    print(st, L"\r\n");
 
     /* Open root volume */
+    print(st, L"  OpenVolume...\r\n");
     status = fs->OpenVolume(fs, &root);
     if (EFI_ERROR(status)) {
         print(st, L"Failed to open volume: ");
@@ -158,15 +170,19 @@ static EFI_STATUS load_kernel_elf(
     }
 
     /* Open kernel file */
+    print(st, L"  Opening kernel file...\r\n");
     status = root->FileOpen(root, &kernel_file, KERNEL_PATH,
                         EFI_FILE_MODE_READ, 0);
     if (EFI_ERROR(status)) {
         print(st, L"Failed to open kernel: ");
         print_status(st, status);
+        print(st, L" path=");
+        print(st, KERNEL_PATH);
         print(st, L"\r\n");
         root->FileClose(root);
         return status;
     }
+    print(st, L"  Kernel file opened OK\r\n");
 
     /* Get file info */
     file_info_size = 0;
@@ -289,12 +305,12 @@ static uint64_t find_acpi_rsdp(EFI_SYSTEM_TABLE *st)
 
     /* Prefer ACPI 2.0 */
     for (i = 0; i < st->NumberOfTableEntries; i++) {
-        if (compare_guid(&st->ConfigurationTable[i].VendorGuid, &acpi_20_guid))
+        if (!compare_guid(&st->ConfigurationTable[i].VendorGuid, &acpi_20_guid))
             return (uint64_t)(uintptr_t)st->ConfigurationTable[i].VendorTable;
     }
     /* Fall back to ACPI 1.0 */
     for (i = 0; i < st->NumberOfTableEntries; i++) {
-        if (compare_guid(&st->ConfigurationTable[i].VendorGuid, &acpi_10_guid))
+        if (!compare_guid(&st->ConfigurationTable[i].VendorGuid, &acpi_10_guid))
             return (uint64_t)(uintptr_t)st->ConfigurationTable[i].VendorTable;
     }
     return 0;
@@ -302,37 +318,60 @@ static uint64_t find_acpi_rsdp(EFI_SYSTEM_TABLE *st)
 
 /* ---- Build Boot Info ---- */
 
+/* Kernel's MemoryMapEntry layout (differs from UEFI EFI_MEMORY_DESCRIPTOR) */
+typedef struct {
+    uint64_t physical_start;
+    uint64_t virtual_start;
+    uint64_t number_of_pages;
+    uint64_t attribute;
+    uint32_t type;
+    uint32_t reserved;
+} KernelMemoryMapEntry;
+
+static void convert_memory_map(
+    EFI_MEMORY_DESCRIPTOR *src, UINTN num_entries, UINTN desc_size,
+    KernelMemoryMapEntry *dst)
+{
+    UINTN i;
+    for (i = 0; i < num_entries; i++) {
+        EFI_MEMORY_DESCRIPTOR *d = (EFI_MEMORY_DESCRIPTOR *)(
+            (uint8_t *)src + i * desc_size);
+        dst[i].physical_start  = d->PhysicalStart;
+        dst[i].virtual_start   = d->VirtualStart;
+        dst[i].number_of_pages = d->NumberOfPages;
+        dst[i].attribute       = d->Attribute;
+        dst[i].type            = d->Type;
+        dst[i].reserved        = 0;
+    }
+}
+
 static void build_boot_info(
     EFI_SYSTEM_TABLE *st,
-    EFI_GRAPHICS_OUTPUT_PROTOCOL *gop,
-    EFI_MEMORY_DESCRIPTOR *map, UINTN map_size, UINTN desc_size,
+    uint64_t fb_base, uint64_t fb_size,
+    uint32_t fb_width, uint32_t fb_height,
+    uint32_t fb_bpp,
+    KernelMemoryMapEntry *converted_map, UINTN num_entries,
+    UINTN desc_size, EFI_MEMORY_DESCRIPTOR *raw_map,
     BootInfo *info)
 {
+    UINTN i;
+
     info->magic = BOOT_INFO_MAGIC;
     info->boot_type = BOOT_TYPE_UEFI;
 
-    /* Framebuffer from GOP */
-    if (gop != NULL) {
-        info->framebuffer_base = gop->Mode->FrameBufferBase;
-        info->framebuffer_size = gop->Mode->FrameBufferSize;
-        info->width = gop->Mode->Info->HorizontalResolution;
-        info->height = gop->Mode->Info->VerticalResolution;
-        info->pitch = gop->Mode->Info->PixelsPerScanLine * 4;
-        info->bpp = 32;
-    } else {
-        info->framebuffer_base = 0;
-        info->framebuffer_size = 0;
-        info->width = 0;
-        info->height = 0;
-        info->pitch = 0;
-        info->bpp = 0;
-    }
+    /* Framebuffer info (saved before ExitBootServices) */
+    info->framebuffer_base = fb_base;
+    info->framebuffer_size = fb_size;
+    info->width = fb_width;
+    info->height = fb_height;
+    info->pitch = fb_width * 4;  /* Calculate from width and bpp */
+    info->bpp = fb_bpp;
 
-    /* Memory map */
-    info->memory_map = (uint64_t)(uintptr_t)map;
-    info->memory_map_size = map_size;
-    info->memory_map_descriptor_size = desc_size;
-    info->memory_map_entry_count = map_size / desc_size;
+    /* Memory map (already converted) */
+    info->memory_map = (uint64_t)(uintptr_t)converted_map;
+    info->memory_map_size = num_entries * sizeof(KernelMemoryMapEntry);
+    info->memory_map_descriptor_size = sizeof(KernelMemoryMapEntry);
+    info->memory_map_entry_count = num_entries;
 
     /* ACPI RSDP */
     info->acpi_rsdp = find_acpi_rsdp(st);
@@ -343,11 +382,9 @@ static void build_boot_info(
     /* Total usable memory */
     {
         uint64_t total = 0;
-        UINTN n = map_size / desc_size;
-        UINTN i;
-        for (i = 0; i < n; i++) {
+        for (i = 0; i < num_entries; i++) {
             EFI_MEMORY_DESCRIPTOR *d = (EFI_MEMORY_DESCRIPTOR *)(
-                (uint8_t *)map + i * desc_size);
+                (uint8_t *)raw_map + i * desc_size);
             if (d->Type == EfiConventionalMemory)
                 total += d->NumberOfPages * 4096;
         }
@@ -366,25 +403,80 @@ EFI_STATUS __attribute__((ms_abi)) efi_main(
     UINTN map_size = 0, map_key = 0, desc_size = 0;
     UINT32 desc_ver = 0;
     void *kernel_entry = NULL;
-    BootInfo boot_info;
+    /* Allocate BootInfo in a safe, dedicated memory location (not on stack).
+     * Use AllocatePool to get a dedicated page for BootInfo so it won't
+     * be affected by stack changes or PE relocations. */
+    BootInfo *boot_info_ptr;
+    {
+        void *bi_mem;
+        status = system_table->BootServices->AllocatePool(
+            EfiLoaderData, sizeof(BootInfo), &bi_mem);
+        if (EFI_ERROR(status)) {
+            print(system_table, L"Failed to allocate BootInfo!\r\n");
+            while (1) __asm__ volatile("pause");
+        }
+        boot_info_ptr = (BootInfo *)bi_mem;
+    }
     kernel_entry_t kernel;
+    KernelMemoryMapEntry *converted_map = NULL;
+    UINTN num_entries;
+    UINTN max_entries = 256;  /* Pre-allocate for worst case */
+    UINTN converted_buf_size;
 
     print(system_table, L"SpiritFoxOS UEFI Bootloader\r\n");
     print(system_table, L"========================\r\n");
 
-    /* Step 1: GOP */
+    /* Debug: print system table info */
+    print(system_table, L"SystemTable at: 0x");
+    print_hex(system_table, (uint64_t)(uintptr_t)system_table);
+    print(system_table, L"\r\n");
+    print(system_table, L"BootServices at: 0x");
+    print_hex(system_table, (uint64_t)(uintptr_t)system_table->BootServices);
+    print(system_table, L"\r\n");
+    print(system_table, L"ImageHandle: 0x");
+    print_hex(system_table, (uint64_t)(uintptr_t)image_handle);
+    print(system_table, L"\r\n");
+
+    /* Step 0: Pre-allocate buffer for converted memory map */
+    converted_buf_size = max_entries * sizeof(KernelMemoryMapEntry);
+    status = system_table->BootServices->AllocatePool(
+        EfiLoaderData, converted_buf_size, (void **)&converted_map);
+    if (EFI_ERROR(status)) {
+        print(system_table, L"Failed to allocate memory map buffer!\r\n");
+        while (1) __asm__ volatile("pause");
+    }
+
+    /* Step 1: GOP - Save framebuffer info BEFORE ExitBootServices.
+     * After ExitBootServices, GOP protocol memory may be freed by UEFI,
+     * making gop->Mode->Info pointers invalid. */
+    uint64_t saved_fb_base = 0;
+    uint64_t saved_fb_size = 0;
+    uint32_t saved_width = 0;
+    uint32_t saved_height = 0;
+    uint32_t saved_pitch = 0;
+    uint32_t saved_bpp = 0;
+
     print(system_table, L"Setting up GOP...\r\n");
     status = setup_gop(system_table, &gop);
     if (EFI_ERROR(status)) {
-        print(system_table, L"GOP not available, no framebuffer\r\n");
+        print(system_table, L"GOP not available: ");
+        print_status(system_table, status);
+        print(system_table, L"\r\n");
         gop = NULL;
     } else {
+        saved_fb_base = gop->Mode->FrameBufferBase;
+        saved_fb_size = gop->Mode->FrameBufferSize;
+        saved_width  = gop->Mode->Info->HorizontalResolution;
+        saved_height = gop->Mode->Info->VerticalResolution;
+        saved_pitch  = gop->Mode->Info->PixelsPerScanLine * 4;
+        saved_bpp    = 32;
+
         print(system_table, L"GOP: ");
-        print_decimal(system_table, gop->Mode->Info->HorizontalResolution);
+        print_decimal(system_table, saved_width);
         print(system_table, L"x");
-        print_decimal(system_table, gop->Mode->Info->VerticalResolution);
+        print_decimal(system_table, saved_height);
         print(system_table, L" FB=0x");
-        print_hex(system_table, gop->Mode->FrameBufferBase);
+        print_hex(system_table, saved_fb_base);
         print(system_table, L"\r\n");
     }
 
@@ -407,43 +499,24 @@ EFI_STATUS __attribute__((ms_abi)) efi_main(
         print(system_table, L"Memory map failed!\r\n");
         return status;
     }
+    num_entries = map_size / desc_size;
     print(system_table, L"Map entries: ");
-    print_decimal(system_table, (uint32_t)(map_size / desc_size));
+    print_decimal(system_table, (uint32_t)num_entries);
     print(system_table, L"\r\n");
 
-    /* Step 4: Build boot info */
-    build_boot_info(system_table, gop, memory_map, map_size,
-                    desc_size, &boot_info);
-
-    /* Step 5: Exit boot services (may need retry) */
+    /* Step 4: Exit boot services (may need retry) */
     print(system_table, L"Exiting boot services...\r\n");
     status = system_table->BootServices->ExitBootServices(
         image_handle, map_key);
     if (EFI_ERROR(status)) {
-        /* Stale map key - retry with fresh map */
+        /* Stale map key - retry with fresh map.
+         * Do NOT allocate memory between get_memory_map and ExitBootServices! */
         system_table->BootServices->FreePool(memory_map);
         status = get_memory_map(system_table, &memory_map, &map_size,
                                 &map_key, &desc_size, &desc_ver);
         if (EFI_ERROR(status))
             while (1) __asm__ volatile("pause");
-
-        /* Rebuild relevant fields */
-        boot_info.memory_map = (uint64_t)(uintptr_t)memory_map;
-        boot_info.memory_map_size = map_size;
-        boot_info.memory_map_descriptor_size = desc_size;
-        boot_info.memory_map_entry_count = map_size / desc_size;
-        {
-            uint64_t total = 0;
-            UINTN n = map_size / desc_size;
-            UINTN i;
-            for (i = 0; i < n; i++) {
-                EFI_MEMORY_DESCRIPTOR *d = (EFI_MEMORY_DESCRIPTOR *)(
-                    (uint8_t *)memory_map + i * desc_size);
-                if (d->Type == EfiConventionalMemory)
-                    total += d->NumberOfPages * 4096;
-            }
-            boot_info.total_memory = total;
-        }
+        num_entries = map_size / desc_size;
 
         status = system_table->BootServices->ExitBootServices(
             image_handle, map_key);
@@ -451,9 +524,20 @@ EFI_STATUS __attribute__((ms_abi)) efi_main(
             while (1) __asm__ volatile("pause");
     }
 
+    /* Step 5: Convert memory map and build boot info (AFTER ExitBootServices) */
+    if (num_entries > max_entries)
+        num_entries = max_entries;
+    convert_memory_map(memory_map, num_entries, desc_size, converted_map);
+    build_boot_info(system_table,
+                    saved_fb_base, saved_fb_size,
+                    saved_width, saved_height,
+                    saved_bpp,
+                    converted_map, num_entries,
+                    desc_size, memory_map, boot_info_ptr);
+
     /* Step 6: Jump to kernel */
     kernel = (kernel_entry_t)kernel_entry;
-    kernel(&boot_info);
+    kernel(boot_info_ptr);
 
     while (1) __asm__ volatile("pause");
     return EFI_SUCCESS;

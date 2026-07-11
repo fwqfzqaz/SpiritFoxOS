@@ -1,19 +1,22 @@
 #!/usr/bin/env python3
-"""Generate PE .reloc section from ELF relocations for UEFI bootloader.
+"""Generate and patch PE .reloc section for UEFI bootloader.
 
-objcopy does not properly convert ELF relocations to PE .reloc entries.
+objcopy does not properly set up the PE Data Directory for base relocations.
 This script:
   1. Reads the ELF to find data sections with absolute pointers
   2. Generates PE .reloc section with IMAGE_REL_BASED_DIR64 entries
-  3. Patches the PE binary in-place (or adds .reloc if missing)
+  3. Adds or patches .reloc section in the PE binary
+  4. Updates Data Directory entry for Base Relocations
+  5. Fixes PE optional header fields (Stack/Heap sizes, etc.)
 
 Usage: gen_reloc.py <bootloader.elf> <BOOTX64.EFI>
 """
 
 import sys
 import struct
+import os
 
-# ── ELF constants ─────────────────────────────────────────────────────────────
+# ELF constants
 ELFMAG = b'\x7fELF'
 ELFCLASS64 = 2
 ELFDATA2LSB = 1
@@ -27,9 +30,10 @@ R_X86_64_JUMP_SLOT = 7
 R_X86_64_RELATIVE  = 8
 RELOC_TYPES = {R_X86_64_64, R_X86_64_GLOB_DAT, R_X86_64_JUMP_SLOT, R_X86_64_RELATIVE}
 
-# ── PE constants ──────────────────────────────────────────────────────────────
+# PE constants
 IMAGE_REL_BASED_DIR64 = 10
 PE32_PLUS_MAGIC = 0x020B
+EFI_APPLICATION = 10
 
 
 def _read_elf_header(f):
@@ -77,7 +81,6 @@ def collect_relocation_offsets(elf_path):
     with open(elf_path, 'rb') as f:
         hdr = _read_elf_header(f)
 
-        # Read all section headers
         sections = []
         for i in range(hdr['e_shnum']):
             sections.append(_read_section_header(f, hdr['e_shoff'] + i * hdr['e_shentsize']))
@@ -101,7 +104,7 @@ def collect_relocation_offsets(elf_path):
                 if r_type in RELOC_TYPES:
                     offsets.add(r_offset)
 
-        # 2. Scan .data/.sdata for absolute pointers within image VMA range
+        # 2. Scan .data/.sdata for absolute pointers
         vma_min = 0xFFFFFFFFFFFFFFFF
         vma_max = 0
         for sec in sections:
@@ -134,6 +137,7 @@ def collect_relocation_offsets(elf_path):
 def gen_pe_reloc(offsets):
     """Generate PE .reloc section data from sorted RVA offsets."""
     if not offsets:
+        # Empty .reloc: just a single block header with 0 pages
         return struct.pack('<II', 0, 8)
 
     pages = {}
@@ -159,84 +163,172 @@ def gen_pe_reloc(offsets):
 
 
 def patch_pe(pe_path, reloc_data):
-    """Patch the PE binary: fix subsystem, entry point, and .reloc section."""
+    """Patch the PE binary: fix header fields, add/patch .reloc, update Data Directory."""
     with open(pe_path, 'r+b') as f:
-        # DOS header
-        f.seek(0x3C)
-        pe_offset = struct.unpack('<I', f.read(4))[0]
+        pe_data = bytearray(f.read())
 
-        # PE signature
-        f.seek(pe_offset)
-        sig = f.read(4)
-        if sig != b'PE\0\0':
-            print("Error: Not a valid PE file", file=sys.stderr)
-            return False
+    # DOS header -> PE offset
+    pe_offset = struct.unpack_from('<I', pe_data, 0x3C)[0]
 
-        # COFF header
-        machine, num_sections = struct.unpack('<HH', f.read(4))
-        f.read(12)
-        opt_header_size, _ = struct.unpack('<HH', f.read(4))
+    # PE signature check
+    if pe_data[pe_offset:pe_offset+4] != b'PE\0\0':
+        print("Error: Not a valid PE file", file=sys.stderr)
+        return False
 
-        # Optional header
-        opt_start = f.tell()
-        magic = struct.unpack('<H', f.read(2))[0]
+    # COFF header
+    coff_offset = pe_offset + 4
+    machine, num_sections = struct.unpack_from('<HH', pe_data, coff_offset)
+    opt_header_size = struct.unpack_from('<H', pe_data, coff_offset + 16)[0]
 
-        is_pe32plus = (magic == PE32_PLUS_MAGIC)
+    # Fix COFF Characteristics: clear IMAGE_FILE_RELOCS_STRIPPED (0x0001)
+    characteristics = struct.unpack_from('<H', pe_data, coff_offset + 18)[0]
+    if characteristics & 0x0001:
+        characteristics &= ~0x0001
+        struct.pack_into('<H', pe_data, coff_offset + 18, characteristics)
+        print(f"Cleared RELOCS_STRIPPED flag in COFF header")
 
-        if is_pe32plus:
-            # Fix Subsystem: offset 92 from OptionalHeader start = EFI_APPLICATION (10)
-            f.seek(opt_start + 92)
-            subsystem = struct.unpack('<H', f.read(2))[0]
-            if subsystem != 10:
-                f.seek(opt_start + 92)
-                f.write(struct.pack('<H', 10))
-                print(f"Fixed Subsystem: {subsystem} -> 10 (EFI_APPLICATION)")
+    # Optional header
+    opt_offset = coff_offset + 20
+    magic = struct.unpack_from('<H', pe_data, opt_offset)[0]
+    is_pe32plus = (magic == PE32_PLUS_MAGIC)
 
-            # Fix DllCharacteristics: offset 96 - ensure no incompatible flags
-            # For UEFI, we want IMAGE_DLLCHARACTERISTICS_NX_COMPAT (0x100) on modern firmware
-            # but keep it 0 for maximum compatibility
-            f.seek(opt_start + 96)
-            f.write(struct.pack('<H', 0))
-        else:
-            # PE32: Subsystem at offset 68
-            f.seek(opt_start + 68)
-            subsystem = struct.unpack('<H', f.read(2))[0]
-            if subsystem != 10:
-                f.seek(opt_start + 68)
-                f.write(struct.pack('<H', 10))
-                print(f"Fixed Subsystem: {subsystem} -> 10 (EFI_APPLICATION)")
+    if not is_pe32plus:
+        print("Error: Not a PE32+ file", file=sys.stderr)
+        return False
 
-        # Find .reloc section and patch it
-        section_start = opt_start + opt_header_size
-        found_reloc = False
+    # --- Fix Optional Header fields (PE32+ layout) ---
 
-        for i in range(num_sections):
-            sec_offset = section_start + i * 40
-            f.seek(sec_offset)
-            name = f.read(8).rstrip(b'\0').decode('ascii', errors='replace')
-            vsize, vaddr, raw_size, raw_ptr = struct.unpack('<IIII', f.read(16))
+    # Subsystem at opt_offset + 68
+    subsystem = struct.unpack_from('<H', pe_data, opt_offset + 68)[0]
+    if subsystem != EFI_APPLICATION:
+        struct.pack_into('<H', pe_data, opt_offset + 68, EFI_APPLICATION)
+        print(f"Fixed Subsystem: {subsystem} -> {EFI_APPLICATION} (EFI_APPLICATION)")
 
-            if name == '.reloc':
-                found_reloc = True
-                padded = reloc_data
-                if len(padded) > raw_size:
-                    print(f"Warning: reloc data ({len(padded)}) > section size ({raw_size}), truncating",
-                          file=sys.stderr)
-                    padded = padded[:raw_size]
-                elif len(padded) < raw_size:
-                    padded = padded + b'\0' * (raw_size - len(padded))
+    # DllCharacteristics at opt_offset + 70
+    struct.pack_into('<H', pe_data, opt_offset + 70, 0)
 
-                f.seek(raw_ptr)
-                f.write(padded)
-                f.seek(sec_offset + 8)
-                f.write(struct.pack('<I', len(reloc_data)))
-                print(f"Patched .reloc: {len(reloc_data)} bytes at file offset 0x{raw_ptr:x}")
-                return True
+    # SizeOfStackReserve at opt_offset + 72 (8 bytes)
+    struct.pack_into('<Q', pe_data, opt_offset + 72, 0x100000)   # 1 MB
 
-        if not found_reloc:
-            print("No .reloc section in PE (OK for fully PIC code)")
+    # SizeOfStackCommit at opt_offset + 80 (8 bytes)
+    struct.pack_into('<Q', pe_data, opt_offset + 80, 0x10000)    # 64 KB
 
-        return True
+    # SizeOfHeapReserve at opt_offset + 88 (8 bytes)
+    struct.pack_into('<Q', pe_data, opt_offset + 88, 0x100000)   # 1 MB
+
+    # SizeOfHeapCommit at opt_offset + 96 (8 bytes)
+    struct.pack_into('<Q', pe_data, opt_offset + 96, 0x1000)     # 4 KB
+
+    # --- Find or add .reloc section ---
+    section_start = opt_offset + opt_header_size
+
+    found_reloc = False
+    reloc_section_idx = -1
+
+    for i in range(num_sections):
+        sec_offset = section_start + i * 40
+        name = pe_data[sec_offset:sec_offset+8].rstrip(b'\0').decode('ascii', errors='replace')
+        if name == '.reloc':
+            found_reloc = True
+            reloc_section_idx = i
+            break
+
+    if found_reloc:
+        # Patch existing .reloc section
+        sec_offset = section_start + reloc_section_idx * 40
+        vsize, vaddr, raw_size, raw_ptr = struct.unpack_from('<IIII', pe_data, sec_offset + 8)
+
+        padded = reloc_data
+        if len(padded) > raw_size:
+            print(f"Warning: reloc data ({len(padded)}) > section size ({raw_size}), truncating",
+                  file=sys.stderr)
+            padded = padded[:raw_size]
+        elif len(padded) < raw_size:
+            padded = padded + b'\0' * (raw_size - len(padded))
+
+        pe_data[raw_ptr:raw_ptr + len(padded)] = padded
+        # Update virtual size
+        struct.pack_into('<I', pe_data, sec_offset + 8, len(reloc_data))
+
+        reloc_rva = vaddr
+        reloc_size = len(reloc_data)
+        print(f"Patched .reloc: {len(reloc_data)} bytes at RVA 0x{vaddr:x}")
+    else:
+        # Need to add .reloc section
+        print("No .reloc section found, adding one...")
+
+        # Calculate new section position
+        last_sec_offset = section_start + (num_sections - 1) * 40
+        last_vsize = struct.unpack_from('<I', pe_data, last_sec_offset + 8)[0]
+        last_vaddr = struct.unpack_from('<I', pe_data, last_sec_offset + 12)[0]
+        last_raw_size = struct.unpack_from('<I', pe_data, last_sec_offset + 16)[0]
+        last_raw_ptr = struct.unpack_from('<I', pe_data, last_sec_offset + 20)[0]
+
+        new_vaddr = (last_vaddr + last_vsize + 0xFFF) & ~0xFFF
+        new_raw_ptr = (last_raw_ptr + last_raw_size + 0x1FF) & ~0x1FF
+        new_vsize = len(reloc_data)
+        new_raw_size = (len(reloc_data) + 0x1FF) & ~0x1FF
+
+        # Pad PE data to accommodate new section
+        needed_size = new_raw_ptr + new_raw_size
+        if len(pe_data) < needed_size:
+            pe_data.extend(b'\0' * (needed_size - len(pe_data)))
+
+        # Write new section header (exactly 40 bytes)
+        new_sec_offset = section_start + num_sections * 40
+        sec_header = b'.reloc\0\0'                                    # Name (8 bytes)
+        sec_header += struct.pack('<I', new_vsize)                    # VirtualSize
+        sec_header += struct.pack('<I', new_vaddr)                    # VirtualAddress
+        sec_header += struct.pack('<I', new_raw_size)                 # SizeOfRawData
+        sec_header += struct.pack('<I', new_raw_ptr)                  # PointerToRawData
+        sec_header += struct.pack('<I', 0)                            # PointerToRelocations
+        sec_header += struct.pack('<I', 0)                            # PointerToLinenumbers
+        sec_header += struct.pack('<H', 0)                            # NumberOfRelocations
+        sec_header += struct.pack('<H', 0)                            # NumberOfLinenums
+        sec_header += struct.pack('<I', 0x42000040)                   # Characteristics
+
+        pe_data[new_sec_offset:new_sec_offset + 40] = sec_header
+
+        # Write .reloc data
+        reloc_padded = reloc_data + b'\0' * (new_raw_size - len(reloc_data))
+        pe_data[new_raw_ptr:new_raw_ptr + len(reloc_padded)] = reloc_padded
+
+        # Update COFF header: NumberOfSections
+        struct.pack_into('<H', pe_data, coff_offset + 2, num_sections + 1)
+
+        # Update SizeOfImage in Optional Header (offset 56 for PE32+)
+        new_image_size = new_vaddr + ((new_vsize + 0xFFF) & ~0xFFF)
+        struct.pack_into('<I', pe_data, opt_offset + 56, new_image_size)
+
+        reloc_rva = new_vaddr
+        reloc_size = new_vsize
+        print(f"Added .reloc: {len(reloc_data)} bytes at RVA 0x{new_vaddr:x}")
+
+    # --- Update Data Directory entry for Base Relocations ---
+    # In PE32+, Data Directory starts at opt_offset + 112 + 8*8 = opt_offset + 176
+    # Actually: DataDir starts at opt_offset + 112 for PE32+
+    # Entry 5 (Base Relocation) = DataDir + 5*8
+    # PE32+ Optional Header layout:
+    #   0-1: Magic (2)
+    #   ... many fields ...
+    #   112: Data Directory start (NumberOfRvaAndSizes is at offset 108)
+    num_data_dir = struct.unpack_from('<I', pe_data, opt_offset + 108)[0]
+    datadir_offset = opt_offset + 112
+
+    if num_data_dir >= 6:
+        # Entry 5: Base Relocation Directory
+        entry_offset = datadir_offset + 5 * 8
+        old_rva, old_size = struct.unpack_from('<II', pe_data, entry_offset)
+        struct.pack_into('<II', pe_data, entry_offset, reloc_rva, reloc_size)
+        print(f"Data Directory[5] (Base Reloc): RVA=0x{reloc_rva:x} Size={reloc_size}")
+    else:
+        print(f"Warning: Data Directory only has {num_data_dir} entries, need >= 6", file=sys.stderr)
+
+    # Write back
+    with open(pe_path, 'wb') as f:
+        f.write(pe_data)
+
+    return True
 
 
 def main():

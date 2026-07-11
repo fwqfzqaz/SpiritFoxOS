@@ -78,6 +78,17 @@ void init_core(BootInfo *boot_info)
         memory_init(boot_info, kernel_end);
     }
 
+    /* UEFI sets CR0.WP (Write Protect) which prevents kernel writes
+     * to read-only pages. We need to clear it so hal_ensure_mapped
+     * can modify UEFI's page tables. */
+    if (boot_info->boot_type == BOOT_TYPE_UEFI) {
+        uint64_t cr0;
+        __asm__ volatile("mov %%cr0, %0" : "=r"(cr0));
+        cr0 &= ~(1ULL << 16);  /* Clear WP bit */
+        __asm__ volatile("mov %0, %%cr0" :: "r"(cr0));
+        serial_puts("[SpiritFoxOS] Cleared CR0.WP for UEFI boot\n");
+    }
+
     serial_puts("[SpiritFoxOS] vga_init...\n");
     vga_init(boot_info);
 

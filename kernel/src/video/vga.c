@@ -75,14 +75,21 @@ static void scroll(void)
 
 void vga_init(BootInfo* info)
 {
-    (void)info;
-
     text_attr = VGA_WHITE_ON_BLACK;
     cursor_x = 0;
     cursor_y = 0;
 
     vga_clear();
     serial_init();
+
+    /* Initialize framebuffer driver. For UEFI boot, this uses the
+     * GOP-provided framebuffer; for BIOS boot, it uses VBE DISPI. */
+    fb_init(info);
+
+    /* If framebuffer is initialized, set up the fb text terminal */
+    if (fb_term_is_active() == 0) {
+        fb_term_init();
+    }
 }
 
 void vga_putchar(char c)

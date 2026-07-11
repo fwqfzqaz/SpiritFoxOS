@@ -204,39 +204,52 @@ void fb_init(BootInfo *info)
     /* If already initialized with the same resolution, just clear and return.
      * This prevents leaking the back buffer on re-entry (e.g., entering
      * graphical mode a second time from the shell). */
-    if (fb_initialized && fb_width == 1024 && fb_height == 768 && fb_back) {
+    if (fb_initialized && fb_width == info->width && fb_height == info->height && fb_back) {
         memset(fb_back, 0, fb_size);
         return;
     }
 
-    /* Set VBE graphics mode via Bochs DISPI interface */
-    vbe_set_mode(1024, 768, 32);
+    uintptr_t lfb_addr;
+    uint32_t width, height, pitch, bpp;
 
-    fb_width  = 1024;
-    fb_height = 768;
-    fb_pitch  = 1024 * 4;  /* 4096 bytes per scanline */
-    fb_bpp    = 32;
-    fb_size   = (size_t)fb_pitch * fb_height;
+    if (info->boot_type == BOOT_TYPE_UEFI && info->framebuffer_base != 0) {
+        /* UEFI boot: GOP already set up the graphics mode and framebuffer.
+         * Use the GOP-provided parameters directly instead of VBE DISPI. */
+        width  = info->width;
+        height = info->height;
+        pitch  = info->pitch;
+        bpp    = info->bpp;
+        lfb_addr = (uintptr_t)info->framebuffer_base;
+    } else {
+        /* Legacy BIOS boot: set VBE graphics mode via Bochs DISPI interface */
+        vbe_set_mode(1024, 768, 32);
 
-    /* Find the VGA device via PCI and read its BAR0 for the framebuffer address.
-     * QEMU's std-vga may map the LFB at different addresses depending on
-     * configuration (e.g., 0xFD000000 instead of the Bochs default 0xE0000000). */
-    uintptr_t lfb_addr = VBE_LFB_PHYS_ADDR; /* fallback default */
-    int num_pci = pci_get_device_count();
-    for (int i = 0; i < num_pci; i++) {
-        const pci_device_t *dev = pci_get_device(i);
-        if (dev->class_code == PCI_CLASS_DISPLAY && dev->vendor_id == 0x1234) {
-            /* QEMU std-vga: vendor 1234, device 1111
-             * BAR0 is the prefetchable framebuffer memory region */
-            uint32_t bar0 = dev->bars[0];
-            if (bar0 & 0x01) {
-                /* I/O space BAR - skip */
-                continue;
+        width  = 1024;
+        height = 768;
+        pitch  = 1024 * 4;  /* 4096 bytes per scanline */
+        bpp    = 32;
+
+        /* Find the VGA device via PCI and read its BAR0 for the framebuffer address.
+         * QEMU's std-vga may map the LFB at different addresses depending on
+         * configuration (e.g., 0xFD000000 instead of the Bochs default 0xE0000000). */
+        lfb_addr = VBE_LFB_PHYS_ADDR; /* fallback default */
+        int num_pci = pci_get_device_count();
+        for (int i = 0; i < num_pci; i++) {
+            const pci_device_t *dev = pci_get_device(i);
+            if (dev->class_code == PCI_CLASS_DISPLAY && dev->vendor_id == 0x1234) {
+                uint32_t bar0 = dev->bars[0];
+                if (bar0 & 0x01) continue;
+                lfb_addr = (uintptr_t)(bar0 & 0xFFFFFFF0);
+                break;
             }
-            lfb_addr = (uintptr_t)(bar0 & 0xFFFFFFF0);
-            break;
         }
     }
+
+    fb_width  = width;
+    fb_height = height;
+    fb_pitch  = pitch;
+    fb_bpp    = bpp;
+    fb_size   = (size_t)fb_pitch * fb_height;
 
     /* Ensure the framebuffer LFB memory is identity-mapped with
      * cache disabled (MMIO region - must use PCD/PWT flags). */
@@ -244,24 +257,41 @@ void fb_init(BootInfo *info)
 
     fb_front = (uint32_t *)(uintptr_t)lfb_addr;
 
-    /* Allocate back buffer using contiguous physical pages. */
-    size_t bb_pages = (fb_size + 4095) / 4096;
-
-    uintptr_t bb_phys = (uintptr_t)alloc_pages(bb_pages);
-
-    if (bb_phys && bb_phys < 0x100000000ULL) {
-        fb_back = (uint32_t *)bb_phys;
-
-        /* Map the back buffer pages (identity mapping) */
-        hal_ensure_mapped(bb_phys, fb_size);
-
-        /* Clear back buffer */
-        memset(fb_back, 0, fb_size);
-    } else {
+    /* Allocate back buffer using contiguous physical pages.
+     * For UEFI boot with framebuffer at high addresses, skip back buffer
+     * to avoid potential issues with large contiguous allocation and
+     * write directly to the front buffer. */
+    if (info->boot_type == BOOT_TYPE_UEFI) {
+        /* UEFI: write directly to front buffer (no double buffering)
+         * to avoid allocating 3MB of contiguous memory which may
+         * fail or fragment the early physical memory. */
         fb_back = NULL;
+    } else {
+        size_t bb_pages = (fb_size + 4095) / 4096;
+        uintptr_t bb_phys = (uintptr_t)alloc_pages(bb_pages);
+
+        if (bb_phys && bb_phys < 0x100000000ULL) {
+            fb_back = (uint32_t *)bb_phys;
+            hal_ensure_mapped(bb_phys, fb_size);
+            memset(fb_back, 0, fb_size);
+        } else {
+            fb_back = NULL;
+        }
     }
 
     fb_initialized = 1;
+
+    /* Debug: print framebuffer info */
+    fb_debug("[fb_init] ");
+    fb_debug("base="); fb_debug_hex(lfb_addr);
+    fb_debug(" size="); fb_debug_hex(fb_size);
+    fb_debug(" w="); fb_debug_hex(width);
+    fb_debug(" h="); fb_debug_hex(height);
+    fb_debug(" pitch="); fb_debug_hex(pitch);
+    fb_debug(" bpp="); fb_debug_hex(bpp);
+    fb_debug(" back="); fb_debug_hex((uintptr_t)fb_back);
+    fb_debug(" front="); fb_debug_hex((uintptr_t)fb_front);
+    fb_debug("\n");
 }
 
 uint32_t fb_get_width(void)   { return fb_width; }
@@ -447,27 +477,36 @@ int fb_term_is_active(void)
 
 static void fb_term_scroll(void)
 {
-    if (!fb_back) return;
     /* Copy each row up by one character height */
     size_t row_bytes = fb_pitch * FB_TERM_CHAR_H;
     int stride = fb_pitch / 4;
     int scroll_offset = FB_TERM_CHAR_H * stride;
-
-    /* Scroll back buffer */
-    memmove(fb_back, fb_back + scroll_offset, row_bytes * (fb_term_rows - 1));
-    /* Clear the last row in back buffer */
-    uint32_t *last_row = fb_back + (fb_term_rows - 1) * FB_TERM_CHAR_H * stride;
     uint32_t bg32 = fb_term_bg;
-    for (size_t i = 0; i < row_bytes / 4; i++) {
-        last_row[i] = bg32;
-    }
 
-    /* Scroll front buffer in-place too, avoiding a full 3MB memcpy */
-    memmove(fb_front, fb_front + scroll_offset, row_bytes * (fb_term_rows - 1));
-    /* Clear the last row in front buffer */
-    uint32_t *last_row_front = fb_front + (fb_term_rows - 1) * FB_TERM_CHAR_H * stride;
-    for (size_t i = 0; i < row_bytes / 4; i++) {
-        last_row_front[i] = bg32;
+    if (fb_back) {
+        /* Double buffering: scroll back buffer, then copy to front buffer */
+        memmove(fb_back, fb_back + scroll_offset, row_bytes * (fb_term_rows - 1));
+        /* Clear the last row in back buffer */
+        uint32_t *last_row = fb_back + (fb_term_rows - 1) * FB_TERM_CHAR_H * stride;
+        for (size_t i = 0; i < row_bytes / 4; i++) {
+            last_row[i] = bg32;
+        }
+
+        /* Scroll front buffer in-place too, avoiding a full 3MB memcpy */
+        memmove(fb_front, fb_front + scroll_offset, row_bytes * (fb_term_rows - 1));
+        /* Clear the last row in front buffer */
+        uint32_t *last_row_front = fb_front + (fb_term_rows - 1) * FB_TERM_CHAR_H * stride;
+        for (size_t i = 0; i < row_bytes / 4; i++) {
+            last_row_front[i] = bg32;
+        }
+    } else {
+        /* No back buffer (UEFI direct rendering): scroll front buffer in-place */
+        memmove(fb_front, fb_front + scroll_offset, row_bytes * (fb_term_rows - 1));
+        /* Clear the last row in front buffer */
+        uint32_t *last_row_front = fb_front + (fb_term_rows - 1) * FB_TERM_CHAR_H * stride;
+        for (size_t i = 0; i < row_bytes / 4; i++) {
+            last_row_front[i] = bg32;
+        }
     }
 }
 

@@ -216,15 +216,113 @@ void apic_init(void)
     hal_outb(0x21, 0xFF);  /* Mask all master PIC IRQs */
     hal_outb(0xA1, 0xFF);  /* Mask all slave PIC IRQs */
 
-    /* Step 11: Route essential IRQs through IOAPIC */
+    /* Step 11: Route essential IRQs through IOAPIC.
+     * NOTE: We route keyboard IRQ with MASK bit set first,
+     * then unmask it after the PS/2 keyboard controller is
+     * fully reinitialized. This prevents stale IRQ1 edges
+     * from UEFI firmware from being latched by IOAPIC. */
     apic_enable_irq(0, APIC_VECTOR_TIMER);      /* PIT Timer -> GSI 2 -> vector 32 */
-    apic_enable_irq(1, APIC_VECTOR_KEYBOARD);   /* Keyboard -> GSI 1 -> vector 33 */
+    /* Keyboard: set up routing but keep MASKED for now */
+    {
+        uint32_t gsi = irq_to_gsi(1);
+        uint16_t override_flags = 0;
+        uint32_t tmp_gsi;
+        acpi_get_irq_override(1, &tmp_gsi, &override_flags);
+        uint64_t entry = (uint64_t)APIC_VECTOR_KEYBOARD;
+        entry |= IOAPIC_DELMOD_FIXED;
+        entry |= IOAPIC_DESTMOD_PHYS;
+        if (override_flags & 0x02) entry |= IOAPIC_POLARITY_LOW;
+        if (override_flags & 0x01) entry |= IOAPIC_TRIGGER_LEVEL;
+        entry |= ((uint64_t)apic_get_lapic_id() << 56);
+        entry |= IOAPIC_MASK;  /* Keep masked until PS/2 init is done */
+        ioapic_set_redirection(gsi - ioapic_gsi_base, entry);
+    }
     apic_enable_irq(4, APIC_VECTOR_COM1);       /* COM1 -> vector 36 */
-    apic_enable_irq(12, APIC_VECTOR_MOUSE);  /* PS/2 mouse -> vector 44 */
-
-    /* Also enable ATA IRQs for future disk driver */
+    apic_enable_irq(12, APIC_VECTOR_MOUSE);     /* PS/2 mouse -> vector 44 */
     apic_enable_irq(14, APIC_VECTOR_ATA_PRI);   /* Primary ATA -> vector 46 */
     apic_enable_irq(15, APIC_VECTOR_ATA_SEC);   /* Secondary ATA -> vector 47 */
+
+    /* Reinitialize PS/2 keyboard controller for interrupt mode.
+     * UEFI may have left the keyboard in a state where:
+     * - The PS/2 controller has pending output data
+     * - The keyboard scanning is disabled
+     * We must flush all pending data and enable scanning BEFORE
+     * unmasking the keyboard IRQ in IOAPIC.
+     */
+    {
+        int timeout;
+
+        /* Step A: Flush ALL pending data from PS/2 controller */
+        for (timeout = 0; timeout < 100; timeout++) {
+            if (hal_inb(0x64) & 0x01) {
+                hal_inb(0x60); /* discard */
+                hal_io_wait();
+            } else {
+                break;
+            }
+        }
+
+        /* Step B: Ensure keyboard IRQ is enabled in PS/2 CCR */
+        timeout = 10000;
+        while (timeout-- > 0 && (hal_inb(0x64) & 0x02))
+            hal_io_wait();
+        hal_outb(0x64, 0x20);
+        timeout = 10000;
+        while (timeout-- > 0 && (hal_inb(0x64) & 0x01) == 0)
+            hal_io_wait();
+        uint8_t cmd_byte = hal_inb(0x60);
+
+        cmd_byte |= 0x01;  /* Enable keyboard interrupt (IRQ1) */
+        cmd_byte |= 0x40;  /* Translate scan code set 2 to set 1 */
+        cmd_byte &= ~0x10; /* Disable keyboard lock */
+
+        timeout = 10000;
+        while (timeout-- > 0 && (hal_inb(0x64) & 0x02))
+            hal_io_wait();
+        hal_outb(0x64, 0x60);
+        timeout = 10000;
+        while (timeout-- > 0 && (hal_inb(0x64) & 0x02))
+            hal_io_wait();
+        hal_outb(0x60, cmd_byte);
+
+        /* Step C: Enable keyboard scanning (0xF4).
+         * ACK (0xFA) is consumed by polling, not by interrupt,
+         * since IOAPIC keyboard entry is still MASKED. */
+        timeout = 10000;
+        while (timeout-- > 0 && (hal_inb(0x64) & 0x02))
+            hal_io_wait();
+        hal_outb(0x60, 0xF4);
+
+        timeout = 10000;
+        while (timeout-- > 0) {
+            if (hal_inb(0x64) & 0x01) {
+                hal_inb(0x60); /* consume ACK */
+                break;
+            }
+            hal_io_wait();
+        }
+
+        /* Step D: Flush any remaining data (e.g., second ACK byte) */
+        hal_io_wait();
+        for (timeout = 0; timeout < 100; timeout++) {
+            if (hal_inb(0x64) & 0x01) {
+                hal_inb(0x60);
+                hal_io_wait();
+            } else {
+                break;
+            }
+        }
+
+        /* Step E: Now unmask keyboard IRQ in IOAPIC.
+         * At this point the PS/2 controller is clean and
+         * IRQ1 line is de-asserted, so no stale edges. */
+        {
+            uint32_t gsi = irq_to_gsi(1);
+            uint64_t entry = ioapic_get_redirection(gsi - ioapic_gsi_base);
+            entry &= ~IOAPIC_MASK;
+            ioapic_set_redirection(gsi - ioapic_gsi_base, entry);
+        }
+    }
 
     printf("[APIC] Initialized: PIC disabled, IOAPIC routing active\n");
 }

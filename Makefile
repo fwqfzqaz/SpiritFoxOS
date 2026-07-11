@@ -313,9 +313,12 @@ run-uefi: uefi-image build/ovmf_vars.fd
 	    -drive if=pflash,format=raw,file=build/ovmf_vars.fd \
 	    -drive if=ide,format=raw,file=$(IMAGE_FILE) \
 	    -m 2G \
+	    -vga std \
 	    -serial stdio \
-	    -netdev user,id=net0,hostfwd=tcp::25565-:25565 \
-	    -device rtl8139,netdev=net0
+	    -netdev user,id=net0,hostfwd=tcp::25566-:25565 \
+	    -device rtl8139,netdev=net0 \
+	    -no-reboot -no-shutdown \
+	    -boot c
 
 build/ovmf_vars.fd:
 	@cp $(OVMF_VARS) $@ 2>/dev/null || dd if=/dev/zero of=$@ bs=1 count=0 seek=262143 2>/dev/null

@@ -52,17 +52,19 @@ typedef uint64_t UINT64;
 typedef uint32_t UINT32;
 typedef uint8_t UINT8;
 
+#define EFIERR(a)                 (0x8000000000000000ULL | (a))
+
 #define EFI_SUCCESS               0
-#define EFI_LOAD_ERROR            ((EFI_STATUS)(1))
-#define EFI_INVALID_PARAMETER     ((EFI_STATUS)(2))
-#define EFI_UNSUPPORTED           ((EFI_STATUS)(3))
-#define EFI_BAD_BUFFER_SIZE       ((EFI_STATUS)(4))
-#define EFI_BUFFER_TOO_SMALL      ((EFI_STATUS)(5))
-#define EFI_NOT_READY             ((EFI_STATUS)(6))
-#define EFI_DEVICE_ERROR          ((EFI_STATUS)(7))
-#define EFI_WRITE_PROTECTED       ((EFI_STATUS)(8))
-#define EFI_OUT_OF_RESOURCES      ((EFI_STATUS)(9))
-#define EFI_NOT_FOUND             ((EFI_STATUS)(14))
+#define EFI_LOAD_ERROR            ((EFI_STATUS)EFIERR(1))
+#define EFI_INVALID_PARAMETER     ((EFI_STATUS)EFIERR(2))
+#define EFI_UNSUPPORTED           ((EFI_STATUS)EFIERR(3))
+#define EFI_BAD_BUFFER_SIZE       ((EFI_STATUS)EFIERR(4))
+#define EFI_BUFFER_TOO_SMALL      ((EFI_STATUS)EFIERR(5))
+#define EFI_NOT_READY             ((EFI_STATUS)EFIERR(6))
+#define EFI_DEVICE_ERROR          ((EFI_STATUS)EFIERR(7))
+#define EFI_WRITE_PROTECTED       ((EFI_STATUS)EFIERR(8))
+#define EFI_OUT_OF_RESOURCES      ((EFI_STATUS)EFIERR(9))
+#define EFI_NOT_FOUND             ((EFI_STATUS)EFIERR(14))
 
 #define EFI_ERROR(status)         (((EFI_STATUS)(status)) != EFI_SUCCESS)
 
@@ -253,54 +255,67 @@ typedef struct {
     void *RestoreTPL;               /* 0x020 */
 
     /* Memory functions */
-    EFI_ALLOCATE_PAGES   AllocatePages;   /* 0x028 */
-    EFI_FREE_PAGES       FreePages;       /* 0x030 */
-    EFI_ALLOCATE_POOL    AllocatePool;    /* 0x038 */
-    EFI_FREE_POOL        FreePool;        /* 0x040 */
+    EFI_ALLOCATE_PAGES   AllocatePages;      /* 0x028 */
+    EFI_FREE_PAGES       FreePages;          /* 0x030 */
+    EFI_GET_MEMORY_MAP   GetMemoryMap;       /* 0x038 */
+    EFI_ALLOCATE_POOL    AllocatePool;       /* 0x040 */
+    EFI_FREE_POOL        FreePool;           /* 0x048 */
 
-    EFI_COPY_MEM         CopyMem;         /* 0x048 */
-    EFI_SET_MEM          SetMem;          /* 0x050 */
-
-    EFI_GET_MEMORY_MAP   GetMemoryMap;    /* 0x058 */
+    /* Event & timer functions */
+    void *CreateEvent;                         /* 0x050 */
+    void *SetTimer;                            /* 0x058 */
+    void *WaitForEvent;                        /* 0x060 */
+    void *SignalEvent;                         /* 0x068 */
+    void *CloseEvent;                          /* 0x070 */
+    void *CheckEvent;                          /* 0x078 */
 
     /* Protocol handler functions */
-    EFI_HANDLE_PROTOCOL  HandleProtocol;  /* 0x060 */
-    void *Reserved1;                      /* 0x068 */
-    void *RegisterProtocolNotify;         /* 0x070 */
-    void *LocateHandle;                   /* 0x078 */
-    void *LocateDevicePath;               /* 0x080 */
-    void *InstallConfigurationTable;      /* 0x088 */
+    void *InstallProtocolInterface;            /* 0x080 */
+    void *ReinstallProtocolInterface;          /* 0x088 */
+    void *UninstallProtocolInterface;          /* 0x090 */
+    EFI_HANDLE_PROTOCOL  HandleProtocol;       /* 0x098 */
+    void *PCHandleProtocol;                    /* 0x0A0 */
+    void *RegisterProtocolNotify;              /* 0x0A8 */
+    void *LocateHandle;                        /* 0x0B0 */
+    void *LocateDevicePath;                    /* 0x0B8 */
+    void *InstallConfigurationTable;           /* 0x0C0 */
 
     /* Image functions */
-    void *LoadImage;                      /* 0x090 */
-    void *StartImage;                     /* 0x098 */
-    void *Exit;                           /* 0x0A0 */
-    void *UnloadImage;                    /* 0x0A8 */
+    void *LoadImage;                           /* 0x0C8 */
+    void *StartImage;                          /* 0x0D0 */
+    void *Exit;                                /* 0x0D8 */
+    void *UnloadImage;                         /* 0x0E0 */
 
-    EFI_EXIT_BOOT_SERVICES ExitBootServices; /* 0x0B0 */
+    EFI_EXIT_BOOT_SERVICES ExitBootServices;   /* 0x0E8 */
 
     /* Misc functions */
-    void *GetNextMonotonicCount;          /* 0x0B8 */
-    void *Stall;                          /* 0x0C0 */
-    void *SetWatchdogTimer;               /* 0x0C8 */
+    void *GetNextMonotonicCount;               /* 0x0F0 */
+    void *Stall;                               /* 0x0F8 */
+    void *SetWatchdogTimer;                    /* 0x100 */
 
     /* Driver support functions */
-    void *ConnectController;              /* 0x0D0 */
-    void *DisconnectController;           /* 0x0D8 */
+    void *ConnectController;                   /* 0x108 */
+    void *DisconnectController;                /* 0x110 */
 
     /* Protocol open/close functions */
-    void *OpenProtocol;                   /* 0x0E0 */
-    void *CloseProtocol;                  /* 0x0E8 */
-    void *OpenProtocolInformation;        /* 0x0F0 */
+    void *OpenProtocol;                        /* 0x118 */
+    void *CloseProtocol;                       /* 0x120 */
+    void *OpenProtocolInformation;             /* 0x128 */
 
-    void *ProtocolsPerHandle;             /* 0x0F8 */
-    void *LocateHandleBuffer;             /* 0x100 */
+    void *ProtocolsPerHandle;                  /* 0x130 */
+    void *LocateHandleBuffer;                  /* 0x138 */
 
-    EFI_LOCATE_PROTOCOL  LocateProtocol;  /* 0x108 */
+    EFI_LOCATE_PROTOCOL  LocateProtocol;       /* 0x140 */
 
-    void *InstallMultipleProtocolInterfaces;    /* 0x110 */
-    void *UninstallMultipleProtocolInterfaces;  /* 0x118 */
-    void *CalculateCrc32;                       /* 0x120 */
+    void *InstallMultipleProtocolInterfaces;   /* 0x148 */
+    void *UninstallMultipleProtocolInterfaces; /* 0x150 */
+
+    void *CalculateCrc32;                      /* 0x158 */
+
+    EFI_COPY_MEM         CopyMem;              /* 0x160 */
+    EFI_SET_MEM          SetMem;               /* 0x168 */
+
+    void *CreateEventEx;                       /* 0x170 */
 } EFI_BOOT_SERVICES;
 
 /* Runtime Services - we just need the pointer */
