@@ -1,9 +1,9 @@
 /*
- * net.c - TCP/IP network stack for SpiritFoxOS
+ * net.c - SpiritFoxOS TCP/IP 网络协议栈
  *
- * Implements a basic TCP/IP stack with loopback interface,
- * TCP state machine (3-way handshake, data transfer, FIN close),
- * UDP send/receive, and socket buffer management.
+ * 实现基本的 TCP/IP 协议栈，包含回环接口、
+ * TCP 状态机（三次握手、数据传输、FIN 关闭）、
+ * UDP 收发和套接字缓冲区管理。
  */
 
 #include "net.h"
@@ -16,7 +16,7 @@
 #include "rtl8139.h"
 
 /* ========================================================================
- * Error codes (match syscall.c definitions)
+ * 错误码（与 syscall.c 定义匹配）
  * ======================================================================== */
 #define EINVAL      22
 #define ENOMEM      12
@@ -32,7 +32,7 @@
 #define EPIPE       32
 
 /* ========================================================================
- * Byte-order helpers (x86_64 is little-endian, network is big-endian)
+ * 字节序辅助函数（x86_64 为小端序，网络为大端序）
  * ======================================================================== */
 static inline uint16_t htons(uint16_t v) {
     return ((v & 0xFF) << 8) | ((v >> 8) & 0xFF);
@@ -49,35 +49,35 @@ static inline uint32_t ntohl(uint32_t v) {
 }
 
 /* ========================================================================
- * Global state
+ * 全局状态
  * ======================================================================== */
 static net_socket_t sockets[NET_MAX_SOCKETS];
 static int socket_used[NET_MAX_SOCKETS];
 static port_t next_ephemeral_port = 49152;
-static ipv4_addr_t loopback_ip = INADDR_LOOPBACK; /* 127.0.0.1 host order */
-static uint32_t tcp_initial_seq = 0x12345678;     /* Starting ISN */
+static ipv4_addr_t loopback_ip = INADDR_LOOPBACK; /* 127.0.0.1 主机字节序 */
+static uint32_t tcp_initial_seq = 0x12345678;     /* 起始 ISN */
 
-/* Network configuration (IP addresses in network byte order) */
+/* 网络配置（IP 地址为网络字节序） */
 uint32_t net_local_ip    = 0x0A00020F;   /* 10.0.2.15 (QEMU user-mode default) */
 uint32_t net_gateway_ip  = 0x0A000202;   /* 10.0.2.2 */
 uint32_t net_netmask     = 0xFFFFFF00;   /* 255.255.255.0 */
 uint8_t  net_local_mac[6] = {0};
 int      net_hw_initialized = 0;
 
-/* ARP cache */
+/* ARP 缓存 */
 typedef struct {
-    uint32_t ip;        /* Network byte order */
+    uint32_t ip;        /* 网络字节序 */
     uint8_t  mac[6];
-    uint64_t expire;    /* Expiry timestamp in ms */
+    uint64_t expire;    /* 过期时间戳（毫秒） */
 } arp_entry_t;
 
 static arp_entry_t arp_cache[16];
 
 /* ========================================================================
- * Internal helpers
+ * 内部辅助函数
  * ======================================================================== */
 
-/* Simple pseudo-random using timer */
+/* 基于定时器的简单伪随机数 */
 static uint32_t net_random(void)
 {
     uint64_t t = timer_get_ms();
@@ -85,7 +85,7 @@ static uint32_t net_random(void)
     return (uint32_t)t;
 }
 
-/* Compute IP header checksum */
+/* 计算 IP 头校验和 */
 static uint16_t compute_ip_checksum(const ipv4_header_t *hdr)
 {
     const uint16_t *ptr = (const uint16_t *)hdr;
@@ -102,14 +102,14 @@ static uint16_t compute_ip_checksum(const ipv4_header_t *hdr)
     return (uint16_t)(~sum);
 }
 
-/* Compute TCP checksum with pseudo-header */
+/* 计算带伪首部的 TCP 校验和 */
 static uint16_t compute_tcp_checksum(ipv4_addr_t src_ip, ipv4_addr_t dst_ip,
                                       const void *tcp_seg, uint16_t tcp_len)
 {
     const uint16_t *ptr = (const uint16_t *)tcp_seg;
     uint32_t sum = 0;
 
-    /* Pseudo-header */
+    /* 伪首部 */
     uint16_t src_hi = (uint16_t)(src_ip >> 16);
     uint16_t src_lo = (uint16_t)(src_ip & 0xFFFF);
     uint16_t dst_hi = (uint16_t)(dst_ip >> 16);
@@ -122,12 +122,12 @@ static uint16_t compute_tcp_checksum(ipv4_addr_t src_ip, ipv4_addr_t dst_ip,
     sum += htons((uint16_t)IP_PROTO_TCP);
     sum += htons(tcp_len);
 
-    /* TCP header + data */
+    /* TCP 头 + 数据 */
     for (int i = 0; i < tcp_len / 2; i++) {
         sum += ptr[i];
     }
 
-    /* Handle odd byte */
+    /* 处理奇数字节 */
     if (tcp_len & 1) {
         const uint8_t *byte_ptr = (const uint8_t *)tcp_seg;
         sum += (uint16_t)byte_ptr[tcp_len - 1] << 8;
@@ -139,7 +139,7 @@ static uint16_t compute_tcp_checksum(ipv4_addr_t src_ip, ipv4_addr_t dst_ip,
     return (uint16_t)(~sum);
 }
 
-/* Compute UDP checksum with pseudo-header */
+/* 计算带伪首部的 UDP 校验和 */
 static uint16_t compute_udp_checksum(ipv4_addr_t src_ip, ipv4_addr_t dst_ip,
                                       const void *udp_seg, uint16_t udp_len)
 {
@@ -173,7 +173,7 @@ static uint16_t compute_udp_checksum(ipv4_addr_t src_ip, ipv4_addr_t dst_ip,
     return (uint16_t)(~sum);
 }
 
-/* Find a socket by local port and local IP */
+/* 根据本地端口和本地 IP 查找套接字 */
 static net_socket_t *find_socket_by_port(port_t local_port_ho, ipv4_addr_t local_ip_ho)
 {
     for (int i = 0; i < NET_MAX_SOCKETS; i++) {
@@ -181,7 +181,7 @@ static net_socket_t *find_socket_by_port(port_t local_port_ho, ipv4_addr_t local
             continue;
         net_socket_t *s = &sockets[i];
         if (s->local_port == local_port_ho) {
-            /* Match if IP is INADDR_ANY (0) or exact match */
+            /* IP 为 INADDR_ANY (0) 或完全匹配时命中 */
             if (s->local_ip == 0 || s->local_ip == local_ip_ho)
                 return s;
         }
@@ -189,7 +189,7 @@ static net_socket_t *find_socket_by_port(port_t local_port_ho, ipv4_addr_t local
     return NULL;
 }
 
-/* Find a listening socket by port */
+/* 根据端口查找监听套接字 */
 static net_socket_t *find_listening_socket(port_t local_port_ho)
 {
     for (int i = 0; i < NET_MAX_SOCKETS; i++) {
@@ -204,7 +204,7 @@ static net_socket_t *find_listening_socket(port_t local_port_ho)
     return NULL;
 }
 
-/* Find a TCP socket by 4-tuple */
+/* 根据四元组查找 TCP 套接字 */
 static net_socket_t *find_tcp_socket(ipv4_addr_t local_ip, port_t local_port,
                                       ipv4_addr_t remote_ip, port_t remote_port)
 {
@@ -224,7 +224,7 @@ static net_socket_t *find_tcp_socket(ipv4_addr_t local_ip, port_t local_port,
     return NULL;
 }
 
-/* Find a UDP socket by local port */
+/* 根据本地端口查找 UDP 套接字 */
 static net_socket_t *find_udp_socket(port_t local_port_ho, ipv4_addr_t local_ip_ho)
 {
     for (int i = 0; i < NET_MAX_SOCKETS; i++) {
@@ -240,7 +240,7 @@ static net_socket_t *find_udp_socket(port_t local_port_ho, ipv4_addr_t local_ip_
     return NULL;
 }
 
-/* Get socket by fd */
+/* 根据文件描述符获取套接字 */
 static net_socket_t *get_socket(int fd)
 {
     if (fd < 0 || fd >= NET_MAX_SOCKETS)
@@ -250,7 +250,7 @@ static net_socket_t *get_socket(int fd)
     return &sockets[fd];
 }
 
-/* Allocate a free socket slot */
+/* 分配空闲套接字槽位 */
 static int alloc_socket_slot(void)
 {
     for (int i = 0; i < NET_MAX_SOCKETS; i++) {
@@ -262,7 +262,7 @@ static int alloc_socket_slot(void)
     return -1;
 }
 
-/* Free a socket slot and its resources */
+/* 释放套接字槽位及其资源 */
 static void free_socket_slot(int fd)
 {
     if (fd < 0 || fd >= NET_MAX_SOCKETS)
@@ -279,12 +279,12 @@ static void free_socket_slot(int fd)
         s->tx_buf = NULL;
     }
 
-    /* Remove from parent's pending list if we're a child */
+    /* 如果是子套接字，从父套接字的待处理列表中移除 */
     if (s->listen_parent) {
         net_socket_t *parent = s->listen_parent;
         for (int i = 0; i < parent->pending_count; i++) {
             if (parent->pending_conns[i] == s) {
-                /* Shift remaining entries */
+                /* 移动剩余条目 */
                 for (int j = i; j < parent->pending_count - 1; j++)
                     parent->pending_conns[j] = parent->pending_conns[j + 1];
                 parent->pending_count--;
@@ -298,7 +298,7 @@ static void free_socket_slot(int fd)
     socket_used[fd] = 0;
 }
 
-/* Write data into a socket's circular RX buffer */
+/* 将数据写入套接字的环形接收缓冲区 */
 static int rx_buffer_write(net_socket_t *s, const void *data, size_t len)
 {
     if (!s->rx_buf || len == 0)
@@ -317,7 +317,7 @@ static int rx_buffer_write(net_socket_t *s, const void *data, size_t len)
     return (int)to_write;
 }
 
-/* Read data from a socket's circular RX buffer */
+/* 从套接字的环形接收缓冲区读取数据 */
 static int rx_buffer_read(net_socket_t *s, void *data, size_t len)
 {
     if (!s->rx_buf || s->rx_count == 0)
@@ -336,10 +336,10 @@ static int rx_buffer_read(net_socket_t *s, void *data, size_t len)
 }
 
 /* ========================================================================
- * Packet construction and transmission
+ * 数据包构造与传输
  * ======================================================================== */
 
-/* Build and send a TCP segment over loopback */
+/* 构造并通过回环发送 TCP 报文段 */
 static void tcp_send_packet(net_socket_t *s, uint8_t tcp_flags,
                             const void *data, size_t data_len)
 {
@@ -347,16 +347,16 @@ static void tcp_send_packet(net_socket_t *s, uint8_t tcp_flags,
     ipv4_header_t *ip = (ipv4_header_t *)packet;
     tcp_header_t *tcp = (tcp_header_t *)(packet + sizeof(ipv4_header_t));
 
-    /* IPs in network byte order for the wire */
+    /* IP 地址转为网络字节序用于线路传输 */
     ipv4_addr_t src_ip_n = htonl(s->local_ip ? s->local_ip : loopback_ip);
     ipv4_addr_t dst_ip_n = htonl(s->remote_ip);
 
-    /* IP header */
-    ip->version_ihl   = 0x45;      /* IPv4, IHL=5 (20 bytes) */
+    /* IP 头部 */
+    ip->version_ihl   = 0x45;      /* IPv4, IHL=5（20 字节） */
     ip->dscp_ecn      = 0;
     ip->total_length  = htons(sizeof(ipv4_header_t) + sizeof(tcp_header_t) + data_len);
     ip->identification = htons((uint16_t)(net_random() & 0xFFFF));
-    ip->flags_fragment = htons(0x4000); /* Don't fragment */
+    ip->flags_fragment = htons(0x4000); /* 禁止分片 */
     ip->ttl           = 64;
     ip->protocol      = IP_PROTO_TCP;
     ip->header_checksum = 0;
@@ -364,7 +364,7 @@ static void tcp_send_packet(net_socket_t *s, uint8_t tcp_flags,
     ip->dst_ip        = dst_ip_n;
     ip->header_checksum = compute_ip_checksum(ip);
 
-    /* TCP header */
+    /* TCP 头部 */
     memset(tcp, 0, sizeof(tcp_header_t));
     tcp->src_port = htons(s->local_port);
     tcp->dst_port = htons(s->remote_port);
@@ -375,12 +375,12 @@ static void tcp_send_packet(net_socket_t *s, uint8_t tcp_flags,
     tcp->window_size = htons(NET_TCP_WINDOW);
     tcp->urgent_ptr  = 0;
 
-    /* Copy payload */
+    /* 复制载荷 */
     if (data && data_len > 0) {
         memcpy((uint8_t *)(tcp + 1), data, data_len);
     }
 
-    /* Compute TCP checksum */
+    /* 计算 TCP 校验和 */
     tcp->checksum = 0;
     uint16_t tcp_total_len = sizeof(tcp_header_t) + data_len;
     tcp->checksum = compute_tcp_checksum(ntohl(src_ip_n), ntohl(dst_ip_n),
@@ -388,18 +388,18 @@ static void tcp_send_packet(net_socket_t *s, uint8_t tcp_flags,
 
     size_t total_len = sizeof(ipv4_header_t) + sizeof(tcp_header_t) + data_len;
 
-    /* Advance seq for SYN or FIN (they each consume 1 seq number) */
+    /* SYN 或 FIN 各占用一个序列号，推进序列号 */
     if (tcp_flags & TCP_FLAG_SYN)
         s->seq_num++;
     if (tcp_flags & TCP_FLAG_FIN)
         s->seq_num++;
     s->seq_num += data_len;
 
-    /* Send via Ethernet (handles loopback for 127.x.x.x) */
+    /* 通过以太网发送（对 127.x.x.x 处理回环） */
     net_send_eth(packet, total_len, dst_ip_n);
 }
 
-/* Send a UDP datagram over loopback */
+/* 通过回环发送 UDP 数据报 */
 static void udp_send_packet(ipv4_addr_t src_ip_ho, port_t src_port_ho,
                              ipv4_addr_t dst_ip_ho, port_t dst_port_ho,
                              const void *data, size_t data_len)
@@ -411,7 +411,7 @@ static void udp_send_packet(ipv4_addr_t src_ip_ho, port_t src_port_ho,
     ipv4_addr_t src_ip_n = htonl(src_ip_ho ? src_ip_ho : loopback_ip);
     ipv4_addr_t dst_ip_n = htonl(dst_ip_ho);
 
-    /* IP header */
+    /* IP 头部 */
     ip->version_ihl   = 0x45;
     ip->dscp_ecn      = 0;
     ip->total_length  = htons(sizeof(ipv4_header_t) + sizeof(udp_header_t) + data_len);
@@ -424,18 +424,18 @@ static void udp_send_packet(ipv4_addr_t src_ip_ho, port_t src_port_ho,
     ip->dst_ip        = dst_ip_n;
     ip->header_checksum = compute_ip_checksum(ip);
 
-    /* UDP header */
+    /* UDP 头部 */
     udp->src_port = htons(src_port_ho);
     udp->dst_port = htons(dst_port_ho);
     udp->length   = htons(sizeof(udp_header_t) + data_len);
     udp->checksum = 0;
 
-    /* Copy payload */
+    /* 复制载荷 */
     if (data && data_len > 0) {
         memcpy((uint8_t *)(udp + 1), data, data_len);
     }
 
-    /* Compute UDP checksum */
+    /* 计算 UDP 校验和 */
     uint16_t udp_total_len = sizeof(udp_header_t) + data_len;
     udp->checksum = compute_udp_checksum(ntohl(src_ip_n), ntohl(dst_ip_n),
                                           udp, udp_total_len);
@@ -445,10 +445,10 @@ static void udp_send_packet(ipv4_addr_t src_ip_ho, port_t src_port_ho,
 }
 
 /* ========================================================================
- * TCP state machine processing
+ * TCP 状态机处理
  * ======================================================================== */
 
-/* Process an incoming TCP segment */
+/* 处理传入的 TCP 报文段 */
 static void process_tcp_packet(const ipv4_header_t *ip, const void *tcp_data, size_t ip_payload_len)
 {
     if (ip_payload_len < sizeof(tcp_header_t))
@@ -464,21 +464,21 @@ static void process_tcp_packet(const ipv4_header_t *ip, const void *tcp_data, si
     uint32_t ack = ntohl(tcp->ack_num);
     uint8_t flags = tcp->flags;
 
-    /* Data offset in 32-bit words */
+    /* 数据偏移量（以 32 位字为单位） */
     uint8_t data_offset = (tcp->data_offset_flags >> 4) * 4;
     size_t header_len = data_offset;
     const void *payload = (const uint8_t *)tcp + header_len;
     size_t payload_len = ip_payload_len - header_len;
 
-    /* Try to find an established/connection socket by 4-tuple */
+    /* 尝试根据四元组查找已建立/已连接的套接字 */
     net_socket_t *s = find_tcp_socket(dst_ip_ho, dst_port_ho, src_ip_ho, src_port_ho);
 
     if (!s) {
-        /* Check for a listening socket */
+        /* 查找监听套接字 */
         s = find_listening_socket(dst_port_ho);
         if (!s) {
-            /* No listener - send RST */
-            /* Build a minimal RST response */
+            /* 无监听者 - 发送 RST */
+            /* 构造最小 RST 响应 */
             net_socket_t rst_sock;
             memset(&rst_sock, 0, sizeof(rst_sock));
             rst_sock.local_ip  = dst_ip_ho;
@@ -491,10 +491,10 @@ static void process_tcp_packet(const ipv4_header_t *ip, const void *tcp_data, si
             return;
         }
 
-        /* SYN to a listening socket - create child socket */
+        /* SYN 到达监听套接字 - 创建子套接字 */
         if (flags & TCP_FLAG_SYN) {
             if (s->pending_count >= NET_TCP_BACKLOG) {
-                /* Backlog full, silently drop */
+                /* 待处理队列已满，静默丢弃 */
                 return;
             }
 
@@ -535,27 +535,27 @@ static void process_tcp_packet(const ipv4_header_t *ip, const void *tcp_data, si
                 return;
             }
 
-            /* Add to parent's pending list */
+            /* 添加到父套接字的待处理列表 */
             s->pending_conns[s->pending_count++] = child;
 
-            /* Send SYN-ACK */
+            /* 发送 SYN-ACK */
             tcp_send_packet(child, TCP_FLAG_SYN | TCP_FLAG_ACK, NULL, 0);
 
             return;
         }
 
-        /* Non-SYN to a listening socket with no matching child - drop */
+        /* 非 SYN 到达监听套接字且无匹配子套接字 - 丢弃 */
         return;
     }
 
-    /* We have a matching socket - process by state */
+    /* 找到匹配套接字 - 按状态处理 */
     switch (s->state) {
     case TCP_SYN_SENT:
-        /* We sent SYN, expecting SYN-ACK */
+        /* 已发送 SYN，期待 SYN-ACK */
         if ((flags & TCP_FLAG_SYN) && (flags & TCP_FLAG_ACK)) {
             s->ack_num = seq + 1;
             s->remote_seq = seq + 1;
-            /* Send ACK to complete handshake */
+            /* 发送 ACK 完成三次握手 */
             tcp_send_packet(s, TCP_FLAG_ACK, NULL, 0);
             s->state = TCP_ESTABLISHED;
         } else if (flags & TCP_FLAG_RST) {
@@ -564,36 +564,36 @@ static void process_tcp_packet(const ipv4_header_t *ip, const void *tcp_data, si
         break;
 
     case TCP_SYN_RECEIVED:
-        /* We sent SYN-ACK, expecting ACK */
+        /* 已发送 SYN-ACK，期待 ACK */
         if (flags & TCP_FLAG_ACK) {
             s->state = TCP_ESTABLISHED;
-            /* Any data with the ACK can be processed below */
+            /* ACK 中携带的数据可在下方处理 */
         } else if (flags & TCP_FLAG_RST) {
-            /* Clean up this child socket */
+            /* 清理此子套接字 */
             s->state = TCP_CLOSED;
         }
         break;
 
     case TCP_ESTABLISHED:
-        /* Process incoming data */
+        /* 处理传入数据 */
         if (flags & TCP_FLAG_RST) {
             s->state = TCP_CLOSED;
             break;
         }
 
         if (payload_len > 0) {
-            /* Write to RX buffer */
+            /* 写入接收缓冲区 */
             rx_buffer_write(s, payload, payload_len);
 
-            /* Update ACK number */
+            /* 更新确认号 */
             s->ack_num = seq + payload_len;
             s->remote_seq = seq + payload_len;
 
-            /* Send ACK */
+            /* 发送 ACK */
             tcp_send_packet(s, TCP_FLAG_ACK, NULL, 0);
         }
 
-        /* Handle FIN */
+        /* 处理 FIN */
         if (flags & TCP_FLAG_FIN) {
             s->ack_num = seq + 1;
             s->remote_seq = seq + 1;
@@ -604,9 +604,9 @@ static void process_tcp_packet(const ipv4_header_t *ip, const void *tcp_data, si
 
     case TCP_FIN_WAIT_1:
         if (flags & TCP_FLAG_ACK) {
-            /* Our FIN was acknowledged */
+            /* 我们的 FIN 已被确认 */
             if (flags & TCP_FLAG_FIN) {
-                /* Simultaneous close - both sent FIN */
+                /* 同时关闭 - 双方都发送了 FIN */
                 s->ack_num = seq + 1;
                 tcp_send_packet(s, TCP_FLAG_ACK, NULL, 0);
                 s->state = TCP_TIME_WAIT;
@@ -614,7 +614,7 @@ static void process_tcp_packet(const ipv4_header_t *ip, const void *tcp_data, si
                 s->state = TCP_FIN_WAIT_2;
             }
         } else if (flags & TCP_FLAG_FIN) {
-            /* Simultaneous close */
+            /* 同时关闭 */
             s->ack_num = seq + 1;
             tcp_send_packet(s, TCP_FLAG_ACK, NULL, 0);
             s->state = TCP_CLOSING;
@@ -622,13 +622,13 @@ static void process_tcp_packet(const ipv4_header_t *ip, const void *tcp_data, si
         break;
 
     case TCP_FIN_WAIT_2:
-        /* Waiting for remote FIN */
+        /* 等待远端 FIN */
         if (flags & TCP_FLAG_FIN) {
             s->ack_num = seq + 1;
             tcp_send_packet(s, TCP_FLAG_ACK, NULL, 0);
             s->state = TCP_TIME_WAIT;
         }
-        /* Can still receive data in FIN_WAIT_2 */
+        /* FIN_WAIT_2 状态下仍可接收数据 */
         if (payload_len > 0) {
             rx_buffer_write(s, payload, payload_len);
             s->ack_num = seq + payload_len;
@@ -644,9 +644,9 @@ static void process_tcp_packet(const ipv4_header_t *ip, const void *tcp_data, si
         break;
 
     case TCP_CLOSE_WAIT:
-        /* Application should call close/shutdown */
+        /* 应用应调用 close/shutdown */
         if (flags & TCP_FLAG_FIN) {
-            /* Duplicate FIN, re-ACK */
+            /* 重复 FIN，重新确认 */
             tcp_send_packet(s, TCP_FLAG_ACK, NULL, 0);
         }
         break;
@@ -658,11 +658,11 @@ static void process_tcp_packet(const ipv4_header_t *ip, const void *tcp_data, si
         break;
 
     case TCP_TIME_WAIT:
-        /* Re-ACK any retransmitted FINs */
+        /* 对重传的 FIN 重新确认 */
         if (flags & TCP_FLAG_FIN) {
             tcp_send_packet(s, TCP_FLAG_ACK, NULL, 0);
         }
-        /* For simplicity, immediately transition to CLOSED */
+        /* 简化处理，立即转为 CLOSED 状态 */
         s->state = TCP_CLOSED;
         break;
 
@@ -671,7 +671,7 @@ static void process_tcp_packet(const ipv4_header_t *ip, const void *tcp_data, si
     }
 }
 
-/* Process an incoming UDP datagram */
+/* 处理传入的 UDP 数据报 */
 static void process_udp_packet(const ipv4_header_t *ip, const void *udp_data, size_t ip_payload_len)
 {
     if (ip_payload_len < sizeof(udp_header_t))
@@ -688,14 +688,14 @@ static void process_udp_packet(const ipv4_header_t *ip, const void *udp_data, si
     size_t payload_len = udp_len - sizeof(udp_header_t);
     const void *payload = (const uint8_t *)udp + sizeof(udp_header_t);
 
-    /* Find the target UDP socket */
+    /* 查找目标 UDP 套接字 */
     net_socket_t *s = find_udp_socket(dst_port_ho, dst_ip_ho);
     if (!s)
-        return; /* Silently drop */
+        return; /* 静默丢弃 */
 
-    /* Write a simple header + payload into RX buffer so recvfrom can
-     * extract the source address. Format:
-     *   [4 bytes src_ip][2 bytes src_port][payload]  */
+    /* 将简单的头部 + 载荷写入接收缓冲区，以便 recvfrom
+     * 提取源地址。格式：
+     *   [4 字节 src_ip][2 字节 src_port][载荷]  */
     uint8_t meta[6];
     memcpy(meta, &src_ip_ho, 4);
     memcpy(meta + 4, &src_port_ho, 2);
@@ -715,7 +715,7 @@ void net_arp_init(void)
     memset(arp_cache, 0, sizeof(arp_cache));
 }
 
-/* Compute ICMP-style checksum over arbitrary data (used for ICMP and ARP) */
+/* 计算任意数据的 ICMP 风格校验和（用于 ICMP 和 ARP） */
 static uint16_t compute_checksum(const void *data, size_t len)
 {
     const uint16_t *ptr = (const uint16_t *)data;
@@ -738,15 +738,15 @@ static void arp_cache_insert(uint32_t ip, const uint8_t mac[6])
 {
     uint64_t now = timer_get_ms();
 
-    /* Update existing entry or find empty slot */
+    /* 更新已有条目或查找空槽 */
     for (int i = 0; i < 16; i++) {
         if (arp_cache[i].ip == ip) {
             memcpy(arp_cache[i].mac, mac, 6);
-            arp_cache[i].expire = now + 60000; /* 60 seconds */
+            arp_cache[i].expire = now + 60000; /* 60 秒 */
             return;
         }
     }
-    /* Find empty or expired slot */
+    /* 查找空槽或已过期槽 */
     for (int i = 0; i < 16; i++) {
         if (arp_cache[i].ip == 0 || arp_cache[i].expire <= now) {
             arp_cache[i].ip = ip;
@@ -755,7 +755,7 @@ static void arp_cache_insert(uint32_t ip, const uint8_t mac[6])
             return;
         }
     }
-    /* Overwrite oldest (first expired or first entry) */
+    /* 覆盖最旧的（最先过期或第一个条目） */
     arp_cache[0].ip = ip;
     memcpy(arp_cache[0].mac, mac, 6);
     arp_cache[0].expire = now + 60000;
@@ -773,33 +773,33 @@ static int arp_cache_lookup(uint32_t ip, uint8_t *mac_out)
     return -1;
 }
 
-/* Send an ARP request for the given IP */
+/* 为给定 IP 发送 ARP 请求 */
 static void arp_send_request(uint32_t target_ip)
 {
     uint8_t frame[14 + sizeof(arp_packet_t)];
     eth_header_t *eth = (eth_header_t *)frame;
     arp_packet_t *arp = (arp_packet_t *)(frame + 14);
 
-    /* Ethernet header: broadcast destination */
+    /* 以太网头部：广播目标 */
     memset(eth->dst_mac, 0xFF, 6);
     memcpy(eth->src_mac, net_local_mac, 6);
     eth->ethertype = htons(0x0806);
 
-    /* ARP payload */
-    arp->htype = htons(1);          /* Ethernet */
+    /* ARP 载荷 */
+    arp->htype = htons(1);          /* 以太网 */
     arp->ptype = htons(0x0800);     /* IPv4 */
     arp->hlen  = 6;
     arp->plen  = 4;
-    arp->oper  = htons(1);          /* Request */
+    arp->oper  = htons(1);          /* 请求 */
     memcpy(arp->sha, net_local_mac, 6);
-    arp->spa   = net_local_ip;      /* Already in network byte order */
+    arp->spa   = net_local_ip;      /* 已为网络字节序 */
     memset(arp->tha, 0x00, 6);
     arp->tpa   = target_ip;
 
     rtl8139_send(frame, sizeof(frame));
 }
 
-/* Send an ARP reply */
+/* 发送 ARP 应答 */
 static void arp_send_reply(uint32_t target_ip, const uint8_t target_mac[6])
 {
     uint8_t frame[14 + sizeof(arp_packet_t)];
@@ -814,7 +814,7 @@ static void arp_send_reply(uint32_t target_ip, const uint8_t target_mac[6])
     arp->ptype = htons(0x0800);
     arp->hlen  = 6;
     arp->plen  = 4;
-    arp->oper  = htons(2);          /* Reply */
+    arp->oper  = htons(2);          /* 应答 */
     memcpy(arp->sha, net_local_mac, 6);
     arp->spa   = net_local_ip;
     memcpy(arp->tha, target_mac, 6);
@@ -830,7 +830,7 @@ void net_arp_rx(const void *data, size_t len)
 
     const arp_packet_t *arp = (const arp_packet_t *)data;
 
-    /* Only handle Ethernet + IPv4 ARP */
+    /* 仅处理以太网 + IPv4 ARP */
     if (ntohs(arp->htype) != 1 || ntohs(arp->ptype) != 0x0800)
         return;
     if (arp->hlen != 6 || arp->plen != 4)
@@ -838,7 +838,7 @@ void net_arp_rx(const void *data, size_t len)
 
     uint16_t oper = ntohs(arp->oper);
 
-    /* If this is a reply, cache the sender's MAC */
+    /* 如果是应答，缓存发送方的 MAC */
     if (oper == 2) {
         if (arp->tpa == net_local_ip) {
             arp_cache_insert(arp->spa, arp->sha);
@@ -846,10 +846,10 @@ void net_arp_rx(const void *data, size_t len)
         return;
     }
 
-    /* If this is a request for our IP, send a reply */
+    /* 如果是针对本机 IP 的请求，发送应答 */
     if (oper == 1) {
         if (arp->tpa == net_local_ip) {
-            /* Also cache the sender's info */
+            /* 同时缓存发送方信息 */
             arp_cache_insert(arp->spa, arp->sha);
             arp_send_reply(arp->spa, arp->sha);
         }
@@ -858,26 +858,26 @@ void net_arp_rx(const void *data, size_t len)
 
 int net_arp_resolve(uint32_t ip, uint8_t *mac_out)
 {
-    /* Check cache first */
+    /* 先检查缓存 */
     if (arp_cache_lookup(ip, mac_out) == 0)
         return 0;
 
-    /* Not in cache - send ARP request and poll with timeout */
+    /* 不在缓存中 - 发送 ARP 请求并轮询等待 */
     arp_send_request(ip);
 
-    uint64_t deadline = timer_get_ms() + 1000; /* 1 second timeout */
+    uint64_t deadline = timer_get_ms() + 1000; /* 1 秒超时 */
     while (timer_get_ms() < deadline) {
-        /* Brief busy-wait; allow IRQ to process the reply */
+        /* 短暂忙等待；允许中断处理应答 */
         hal_io_wait();
         if (arp_cache_lookup(ip, mac_out) == 0)
             return 0;
     }
 
-    return -1; /* Not resolved */
+    return -1; /* 未解析 */
 }
 
 /* ========================================================================
- * Ethernet send (wraps IP packet with Ethernet header, handles ARP)
+ * 以太网发送（为 IP 包封装以太网头部，处理 ARP）
  * ======================================================================== */
 
 void net_send_eth(const void *ip_packet, size_t ip_len, uint32_t dst_ip)
@@ -885,7 +885,7 @@ void net_send_eth(const void *ip_packet, size_t ip_len, uint32_t dst_ip)
     if (!ip_packet || ip_len == 0)
         return;
 
-    /* Check if destination is loopback (127.x.x.x) */
+    /* 检查目标是否为回环地址（127.x.x.x） */
     uint8_t first_byte = (ntohl(dst_ip) >> 24) & 0xFF;
     if (first_byte == 127) {
         net_loopback_tx(ip_packet, ip_len);
@@ -893,12 +893,12 @@ void net_send_eth(const void *ip_packet, size_t ip_len, uint32_t dst_ip)
     }
 
     if (!net_hw_initialized) {
-        /* No hardware - fall back to loopback */
+        /* 无硬件 - 回退到回环 */
         net_loopback_tx(ip_packet, ip_len);
         return;
     }
 
-    /* Determine next-hop: if on same subnet, target is dst_ip; else gateway */
+    /* 确定下一跳：若在同一子网则目标为 dst_ip，否则为网关 */
     uint32_t next_hop_ip;
     if ((dst_ip & net_netmask) == (net_local_ip & net_netmask)) {
         next_hop_ip = dst_ip;
@@ -906,13 +906,13 @@ void net_send_eth(const void *ip_packet, size_t ip_len, uint32_t dst_ip)
         next_hop_ip = net_gateway_ip;
     }
 
-    /* Resolve destination MAC via ARP */
+    /* 通过 ARP 解析目标 MAC */
     uint8_t dst_mac[6];
     if (net_arp_resolve(next_hop_ip, dst_mac) != 0) {
-        return; /* Could not resolve MAC address */
+        return; /* 无法解析 MAC 地址 */
     }
 
-    /* Construct Ethernet frame */
+    /* 构造以太网帧 */
     size_t frame_len = sizeof(eth_header_t) + ip_len;
     uint8_t *frame = (uint8_t *)kmalloc(frame_len);
     if (!frame)
@@ -931,7 +931,7 @@ void net_send_eth(const void *ip_packet, size_t ip_len, uint32_t dst_ip)
 }
 
 /* ========================================================================
- * ICMP protocol
+ * ICMP 协议
  * ======================================================================== */
 
 void net_icmp_rx(const void *data, size_t len, uint32_t src_ip)
@@ -941,9 +941,9 @@ void net_icmp_rx(const void *data, size_t len, uint32_t src_ip)
 
     const icmp_header_t *icmp = (const icmp_header_t *)data;
 
-    /* Handle Echo Request (ping) */
+    /* 处理回显请求（ping） */
     if (icmp->type == 8 && icmp->code == 0) {
-        /* Build Echo Reply */
+        /* 构造回显应答 */
         size_t reply_len = len;
         uint8_t *reply = (uint8_t *)kmalloc(reply_len);
         if (!reply)
@@ -952,12 +952,12 @@ void net_icmp_rx(const void *data, size_t len, uint32_t src_ip)
         memcpy(reply, data, reply_len);
 
         icmp_header_t *reply_icmp = (icmp_header_t *)reply;
-        reply_icmp->type = 0;    /* Echo Reply */
+        reply_icmp->type = 0;    /* 回显应答 */
         reply_icmp->code = 0;
         reply_icmp->checksum = 0;
         reply_icmp->checksum = compute_checksum(reply, reply_len);
 
-        /* Build the IP + ICMP packet for sending */
+        /* 构造 IP + ICMP 包用于发送 */
         size_t total_len = sizeof(ipv4_header_t) + reply_len;
         uint8_t *packet = (uint8_t *)kmalloc(total_len);
         if (!packet) {
@@ -987,7 +987,7 @@ void net_icmp_rx(const void *data, size_t len, uint32_t src_ip)
 }
 
 /* ========================================================================
- * Public API - Initialization
+ * 公共 API - 初始化
  * ======================================================================== */
 
 void net_init(void)
@@ -997,13 +997,13 @@ void net_init(void)
     next_ephemeral_port = 49152;
     tcp_initial_seq = net_random();
 
-    /* Initialize ARP cache */
+    /* 初始化 ARP 缓存 */
     net_arp_init();
 
-    /* Initialize RTL8139 NIC */
+    /* 初始化 RTL8139 网卡 */
     rtl8139_init();
 
-    /* Get MAC address from NIC */
+    /* 从网卡获取 MAC 地址 */
     if (rtl8139_get_mac(net_local_mac) == 0) {
         net_hw_initialized = 1;
         printf("[NET] TCP/IP stack initialized (IP: 10.0.2.15, MAC: %02x:%02x:%02x:%02x:%02x:%02x)\n",
@@ -1015,7 +1015,7 @@ void net_init(void)
 }
 
 /* ========================================================================
- * Public API - Socket operations
+ * 公共 API - 套接字操作
  * ======================================================================== */
 
 int net_socket(int domain, int type, int protocol)
@@ -1029,7 +1029,7 @@ int net_socket(int domain, int type, int protocol)
     if (protocol != 0 && protocol != IP_PROTO_TCP && protocol != IP_PROTO_UDP)
         return -EPROTONOSUPPORT;
 
-    /* Validate protocol matches type */
+    /* 验证协议与类型匹配 */
     if (type == SOCK_STREAM && protocol != 0 && protocol != IP_PROTO_TCP)
         return -EPROTONOSUPPORT;
     if (type == SOCK_DGRAM && protocol != 0 && protocol != IP_PROTO_UDP)

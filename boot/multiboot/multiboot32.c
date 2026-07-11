@@ -1,20 +1,20 @@
 /*
- * multiboot32.c - 32-bit multiboot2 loader for SpiritFoxOS
- * GRUB loads this as ELF32 multiboot2 kernel.
- * It sets up long mode and jumps to the 64-bit kernel loaded as a module.
+ * multiboot32.c - SpiritFoxOS 的 32 位 multiboot2 加载器
+ * GRUB 将此作为 ELF32 multiboot2 内核加载。
+ * 它设置长模式并跳转到作为模块加载的 64 位内核。
  *
- * Multiboot2 provides proper VBE framebuffer support via tags.
+ * Multiboot2 通过标签提供正确的 VBE 帧缓冲支持。
  */
 
 #include <stdint.h>
 
-/* ========== Multiboot2 header ========== */
+/* ========== Multiboot2 头部 ========== */
 #define MB2_MAGIC       0xE85250D6
-#define MB2_ARCHITECTURE_I386  0  /* 0 = i386 (includes x86_64) */
+#define MB2_ARCHITECTURE_I386  0  /* 0 = i386（包括 x86_64） */
 #define MB2_HEADER_TAG_FRAMEBUFFER  5
 #define MB2_HEADER_TAG_END          0
 
-/* Multiboot2 header tags */
+/* Multiboot2 头部标签 */
 struct mb2_header_tag {
     uint16_t type;
     uint16_t flags;
@@ -22,17 +22,17 @@ struct mb2_header_tag {
 };
 
 struct mb2_header_tag_fb {
-    uint16_t type;      /* 5 = framebuffer */
+    uint16_t type;      /* 5 = 帧缓冲 */
     uint16_t flags;
     uint32_t size;
-    uint32_t width;     /* requested width */
-    uint32_t height;    /* requested height */
-    uint32_t depth;     /* requested bpp */
+    uint32_t width;     /* 请求的宽度 */
+    uint32_t height;    /* 请求的高度 */
+    uint32_t depth;     /* 请求的每像素位数 */
 };
 
-/* Multiboot2 header - must be 8-byte aligned.
- * Framebuffer is requested via GRUB gfxpayload instead of header tag
- * (GRUB 2.06 doesn't support the framebuffer header tag). */
+/* Multiboot2 头部 - 必须 8 字节对齐。
+ * 帧缓冲通过 GRUB gfxpayload 请求，而非头部标签
+ * （GRUB 2.06 不支持帧缓冲头部标签）。 */
 __attribute__((section(".multiboot")))
 static const struct {
     uint32_t magic;
@@ -52,13 +52,13 @@ static const struct {
     },
 };
 
-/* ========== Multiboot2 info (tag-based) ========== */
+/* ========== Multiboot2 信息（基于标签） ========== */
 #define MB2_BOOTLOADER_MAGIC 0x36D76289
 
 struct mb2_info {
     uint32_t total_size;
-    uint32_t reserved;  /* always 0 */
-    /* followed by tags */
+    uint32_t reserved;  /* 始终为 0 */
+    /* 后面是标签 */
 };
 
 struct mb2_tag {
@@ -80,7 +80,7 @@ struct mb2_tag_module {
     uint32_t size;
     uint32_t mod_start;
     uint32_t mod_end;
-    char string[1];   /* null-terminated */
+    char string[1];   /* 以空字符结尾 */
 };
 
 struct mb2_tag_framebuffer {
@@ -92,15 +92,15 @@ struct mb2_tag_framebuffer {
     uint32_t framebuffer_height;
     uint8_t  framebuffer_bpp;
     uint8_t  framebuffer_type;
-    /* color_info follows */
+    /* 后面是 color_info */
 };
 
-/* ========== Page tables ========== */
+/* ========== 页表 ========== */
 static uint64_t p4_table[512] __attribute__((aligned(4096)));
 static uint64_t p3_table[512] __attribute__((aligned(4096)));
 static uint64_t p2_table[512] __attribute__((aligned(4096)));
 
-/* ========== BootInfo for 64-bit kernel ========== */
+/* ========== 64 位内核的 BootInfo ========== */
 struct BootInfo64 {
     uint32_t magic;
     uint32_t boot_type;         /* BOOT_TYPE_LEGACY = 0 */
@@ -114,18 +114,18 @@ struct BootInfo64 {
     uint64_t memory_map_size;
     uint64_t memory_map_descriptor_size;
     uint64_t memory_map_entry_count;
-    uint64_t acpi_rsdp;         /* 0 for now, kernel scans */
-    uint64_t efi_runtime_services; /* 0 for legacy boot */
+    uint64_t acpi_rsdp;         /* 暂为 0，由内核扫描 */
+    uint64_t efi_runtime_services; /* 传统引导下为 0 */
     uint64_t total_memory;
 };
 
 #define BOOTINFO_ADDR 0x9000
 
-/* ========== Bochs VBE LFB address ========== */
-/* QEMU std VGA framebuffer base address - used by the kernel's fb.c */
+/* ========== Bochs VBE LFB 地址 ========== */
+/* QEMU 标准 VGA 帧缓冲基地址 - 由内核的 fb.c 使用 */
 #define VBE_LFB_PHYS_ADDR  0xE0000000
 
-/* ========== Serial debug ========== */
+/* ========== 串口调试 ========== */
 #define COM1 0x3F8
 
 static inline void serial_outb(uint16_t port, uint8_t val)
@@ -179,13 +179,13 @@ static void serial_put_hex64(uint64_t val)
     }
 }
 
-/* ========== Helper: align up to 8 bytes ========== */
+/* ========== 辅助函数：向上对齐到 8 字节 ========== */
 static uint32_t align8(uint32_t v)
 {
     return (v + 7) & ~7u;
 }
 
-/* ========== Entry point ========== */
+/* ========== 入口点 ========== */
 extern void enable_long_mode(uint32_t p4_table_addr) __attribute__((noreturn));
 
 void _start_c(uint32_t magic, struct mb2_info *mbi)
@@ -209,14 +209,14 @@ void _start_c(uint32_t magic, struct mb2_info *mbi)
     }
     serial_puts("\n");
 
-    /* ---- Parse multiboot2 tags ---- */
+    /* ---- 解析 multiboot2 标签 ---- */
     uint32_t kernel_start = 0, kernel_size = 0;
     uint64_t fb_addr = 0;
     uint32_t fb_width = 0, fb_height = 0, fb_pitch = 0, fb_bpp = 0;
     int fb_found = 0;
 
     if (mbi) {
-        uint32_t offset = 8; /* skip total_size and reserved */
+        uint32_t offset = 8; /* 跳过 total_size 和 reserved */
         uint32_t end = mbi->total_size;
 
         while (offset < end) {
@@ -263,7 +263,7 @@ void _start_c(uint32_t magic, struct mb2_info *mbi)
                 break;
             }
 
-            /* Advance to next tag (8-byte aligned) */
+            /* 前进到下一个标签（8 字节对齐） */
             offset = align8(offset + tag->size);
         }
     }
@@ -272,7 +272,7 @@ void _start_c(uint32_t magic, struct mb2_info *mbi)
         serial_puts("[LOADER] No module found!\n");
     }
 
-    /* ---- Copy kernel module to 0x100000 ---- */
+    /* ---- 将内核模块复制到 0x100000 ---- */
     if (kernel_start && kernel_size) {
         uint8_t *src = (uint8_t *)kernel_start;
         uint8_t *dst = (uint8_t *)0x100000;
@@ -281,7 +281,7 @@ void _start_c(uint32_t magic, struct mb2_info *mbi)
         }
     }
 
-    /* ---- Set up identity-mapped page tables (PAE) ---- */
+    /* ---- 设置恒等映射页表 (PAE) ---- */
     for (int i = 0; i < 512; i++) {
         p4_table[i] = 0;
         p3_table[i] = 0;
@@ -297,17 +297,17 @@ void _start_c(uint32_t magic, struct mb2_info *mbi)
 
     serial_puts("[LOADER] Page tables set up\n");
 
-    /* VBE mode setting is deferred to the kernel's fb_init().
-     * Setting it here would switch VGA to graphics mode, making
-     * the text-mode console (0xB8000) invisible at boot. */
+    /* VBE 模式设置推迟到内核的 fb_init() 中执行。
+     * 在此处设置会使 VGA 切换到图形模式，导致
+     * 文本模式控制台 (0xB8000) 在启动时不可见。 */
 
-    /* ---- Prepare BootInfo ---- */
+    /* ---- 准备 BootInfo ---- */
     struct BootInfo64 *bi = (struct BootInfo64 *)BOOTINFO_ADDR;
     bi->magic = 0x5F1F0F05;
     bi->boot_type = 0;
 
     if (fb_found && fb_bpp >= 24) {
-        /* Use framebuffer info from GRUB multiboot2 tags if available */
+        /* 如果可用，使用来自 GRUB multiboot2 标签的帧缓冲信息 */
         bi->framebuffer_base = fb_addr;
         bi->width  = fb_width;
         bi->height = fb_height;
@@ -325,12 +325,12 @@ void _start_c(uint32_t magic, struct mb2_info *mbi)
         serial_put_hex(bi->bpp);
         serial_puts("\n");
     } else {
-        /* Use Bochs VBE LFB at 0xE0000000 - set by vbe_set_mode() above */
+        /* 使用 0xE0000000 处的 Bochs VBE LFB - 由上面的 vbe_set_mode() 设置 */
         serial_puts("[LOADER] Using Bochs VBE LFB at 0xE0000000\n");
         bi->framebuffer_base = VBE_LFB_PHYS_ADDR;
         bi->width  = 1024;
         bi->height = 768;
-        bi->pitch  = 1024 * 4;  /* 4096 bytes per line (1024 pixels * 4 bytes) */
+        bi->pitch  = 1024 * 4;  /* 每行 4096 字节（1024 像素 * 4 字节） */
         bi->bpp    = 32;
         bi->framebuffer_size = (uint64_t)bi->pitch * bi->height;
     }
@@ -339,11 +339,11 @@ void _start_c(uint32_t magic, struct mb2_info *mbi)
     bi->memory_map_size = 0;
     bi->memory_map_descriptor_size = 0;
     bi->memory_map_entry_count = 0;
-    bi->acpi_rsdp = 0;               /* Kernel scans EBDA/0xE0000 */
-    bi->efi_runtime_services = 0;     /* Not available for legacy boot */
-    bi->total_memory = 0;             /* Not computed by 32-bit loader */
+    bi->acpi_rsdp = 0;               /* 内核扫描 EBDA/0xE0000 */
+    bi->efi_runtime_services = 0;     /* 传统引导不可用 */
+    bi->total_memory = 0;             /* 32 位加载器未计算 */
 
-    /* ---- Enable long mode ---- */
+    /* ---- 启用长模式 ---- */
     serial_puts("[LOADER] Calling enable_long_mode...\n");
     __asm__ volatile (
         "movw $0x3FD, %%dx\n\t"

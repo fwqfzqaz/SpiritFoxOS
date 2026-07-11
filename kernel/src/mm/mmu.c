@@ -22,7 +22,7 @@ uint64_t *mmu_walk_page(uint64_t pml4_phys, uint64_t virt, int create)
         }
         tbl = (uint64_t *)(tbl[idx] & PTE_ADDR_MASK);
     }
-    return &tbl[indices[3]];  // Return pointer to the PTE
+    return &tbl[indices[3]];  // 返回指向PTE的指针
 }
 
 int mmu_map_page(uint64_t pml4_phys, uint64_t virt, uint64_t phys, uint64_t flags)

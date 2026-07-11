@@ -4,10 +4,10 @@
 #include "fb.h"
 #include "string.h"
 
-/* Terminal state */
+/* 终端状态 */
 static uint32_t term_flags = TERM_LFLAG_ECHO | TERM_LFLAG_ICANON | TERM_LFLAG_ISIG;
 
-/* Wrapper functions: dispatch to fb terminal or VGA depending on mode */
+/* 包装函数：根据模式分派到帧缓冲终端或VGA */
 static void term_putchar(char c)
 {
     if (fb_term_is_active())
@@ -40,22 +40,22 @@ static void term_backspace(void)
         vga_backspace();
 }
 
-/* Input line buffer */
+/* 输入行缓冲区 */
 static char term_input_buf[TERM_INPUT_BUF_SIZE];
 static int   term_input_len = 0;
 
-/* Cursor position within input buffer (0 to term_input_len) */
+/* 输入缓冲区中的光标位置（0到term_input_len） */
 static int term_cursor_pos = 0;
 
-/* Completed line buffer (for canonical mode) */
+/* 已完成行缓冲区（用于规范模式） */
 static char term_line_buf[TERM_INPUT_BUF_SIZE];
 static int   term_line_len = 0;
 static int   term_line_ready = 0;
 
-/* Output function */
+/* 输出函数 */
 static void (*term_output_func)(char) = term_putchar;
 
-/* Key callback for special keys (Tab, Up, Down) */
+/* 特殊按键回调（Tab、上、下） */
 static term_key_cb_t term_key_cb = NULL;
 
 void terminal_init(void)
@@ -85,20 +85,20 @@ int terminal_get_input_len(void)
 
 void terminal_set_input(const char *buf, int len)
 {
-    /* Erase current input from screen */
+    /* 从屏幕擦除当前输入 */
     if (term_flags & TERM_LFLAG_ECHO) {
-        /* Move cursor to end of input first */
+        /* 先将光标移到输入末尾 */
         while (term_cursor_pos < term_input_len) {
             term_putchar(term_input_buf[term_cursor_pos]);
             term_cursor_pos++;
         }
-        /* Now erase all characters by backspacing */
+        /* 然后通过退格擦除所有字符 */
         for (int i = 0; i < term_input_len; i++) {
             term_backspace();
         }
     }
 
-    /* Copy new input */
+    /* 复制新输入 */
     if (len >= TERM_INPUT_BUF_SIZE)
         len = TERM_INPUT_BUF_SIZE - 1;
     if (len > 0) {
@@ -108,7 +108,7 @@ void terminal_set_input(const char *buf, int len)
     term_input_len = len;
     term_cursor_pos = len;
 
-    /* Echo the new input */
+    /* 回显新输入 */
     if (term_flags & TERM_LFLAG_ECHO) {
         for (int i = 0; i < len; i++) {
             term_putchar(term_input_buf[i]);
@@ -116,27 +116,26 @@ void terminal_set_input(const char *buf, int len)
     }
 }
 
-/* Redraw the portion of the input line from 'from' to the end,
- * then move the VGA cursor back to the term_cursor_pos position.
- * This is used after inserting/deleting characters in the middle. */
+/* 重绘输入行中从 'from' 到末尾的部分，
+ * 然后将VGA光标移回term_cursor_pos位置。
+ * 用于在中间插入/删除字符后。 */
 static void term_redraw_from(int from)
 {
     if (!(term_flags & TERM_LFLAG_ECHO))
         return;
 
-    /* Print characters from 'from' to end of input */
+    /* 打印从 'from' 到输入末尾的字符 */
     for (int i = from; i < term_input_len; i++) {
         term_putchar(term_input_buf[i]);
     }
 
-    /* Overwrite the stale tail with spaces (if input shrank) -
-     * we print one extra space to clear the character that was
-     * at the old end position. */
+    /* 用空格覆盖过期的尾部（如果输入缩短了） -
+     * 多打印一个空格来清除旧末尾位置的字符。 */
     term_putchar(' ');
 
-    /* Now move cursor back to term_cursor_pos.
-     * Current VGA position is at (from + remaining + 1).
-     * We need to go back (term_input_len - term_cursor_pos + 1) characters. */
+    /* 现在将光标移回term_cursor_pos。
+     * 当前VGA位置在 (from + remaining + 1)。
+     * 需要回退 (term_input_len - term_cursor_pos + 1) 个字符。 */
     int back = term_input_len - term_cursor_pos + 1;
     int cx, cy;
     term_get_cursor(&cx, &cy);
@@ -151,13 +150,13 @@ static void term_redraw_from(int from)
     term_set_cursor(cx, cy);
 }
 
-/* Process an incoming character through the line discipline */
+/* 通过行规程处理输入字符 */
 void terminal_input(char c)
 {
-    /* Cast to unsigned for correct comparison with extended key codes (>= 0x80) */
+    /* 转为无符号类型以正确比较扩展按键码（>= 0x80） */
     unsigned char uc = (unsigned char)c;
 
-    /* Signal generation */
+    /* 信号生成 */
     if (term_flags & TERM_LFLAG_ISIG) {
         if (c == TERM_CHAR_INTR) {
             if (term_flags & TERM_LFLAG_ECHO) {
@@ -182,9 +181,9 @@ void terminal_input(char c)
         }
     }
 
-    /* Canonical (line-buffered) mode processing */
+    /* 规范（行缓冲）模式处理 */
     if (term_flags & TERM_LFLAG_ICANON) {
-        /* Handle special keys passed to shell callback first */
+        /* 优先处理传递给shell回调的特殊按键 */
         if (uc == TERM_CHAR_UP || uc == TERM_CHAR_DOWN || uc == TERM_CHAR_TAB) {
             if (term_key_cb) {
                 term_key_cb(c);
@@ -192,7 +191,7 @@ void terminal_input(char c)
             return;
         }
 
-        /* Left arrow: move cursor left */
+        /* 左箭头：光标左移 */
         if (uc == TERM_CHAR_LEFT) {
             if (term_cursor_pos > 0) {
                 term_cursor_pos--;
@@ -209,7 +208,7 @@ void terminal_input(char c)
             return;
         }
 
-        /* Right arrow: move cursor right */
+        /* 右箭头：光标右移 */
         if (uc == TERM_CHAR_RIGHT) {
             if (term_cursor_pos < term_input_len) {
                 term_cursor_pos++;
@@ -227,14 +226,14 @@ void terminal_input(char c)
             return;
         }
 
-        /* Home: move cursor to beginning */
+        /* Home键：光标移到开头 */
         if (uc == TERM_CHAR_HOME) {
             if (term_cursor_pos > 0) {
                 term_cursor_pos = 0;
                 if (term_flags & TERM_LFLAG_ECHO) {
                     int cx, cy;
                     term_get_cursor(&cx, &cy);
-                    /* Move back by term_input_len characters */
+                    /* 向后移动term_input_len个字符 */
                     for (int i = 0; i < term_input_len; i++) {
                         if (cx > 0) {
                             cx--;
@@ -249,13 +248,13 @@ void terminal_input(char c)
             return;
         }
 
-        /* End: move cursor to end of input */
+        /* End键：光标移到输入末尾 */
         if (uc == TERM_CHAR_END) {
             if (term_cursor_pos < term_input_len) {
                 if (term_flags & TERM_LFLAG_ECHO) {
                     int cx, cy;
                     term_get_cursor(&cx, &cy);
-                    /* Move forward by (term_input_len - term_cursor_pos) characters */
+                    /* 向前移动 (term_input_len - term_cursor_pos) 个字符 */
                     int fwd = term_input_len - term_cursor_pos;
                     for (int i = 0; i < fwd; i++) {
                         cx++;
@@ -271,10 +270,10 @@ void terminal_input(char c)
             return;
         }
 
-        /* Delete: remove character at cursor */
+        /* Delete键：删除光标处字符 */
         if (uc == TERM_CHAR_DELETE) {
             if (term_cursor_pos < term_input_len) {
-                /* Shift characters left */
+                /* 字符左移 */
                 for (int i = term_cursor_pos; i < term_input_len - 1; i++) {
                     term_input_buf[i] = term_input_buf[i + 1];
                 }
@@ -286,11 +285,11 @@ void terminal_input(char c)
         }
 
         if (c == '\n' || c == '\r') {
-            /* Enter: submit the current line */
+            /* 回车键：提交当前行 */
             if (term_flags & TERM_LFLAG_ECHO) {
                 term_putchar('\n');
             }
-            /* Copy input to line buffer */
+            /* 将输入复制到行缓冲区 */
             if (term_input_len > 0) {
                 memcpy(term_line_buf, term_input_buf, term_input_len);
             }
@@ -319,9 +318,9 @@ void terminal_input(char c)
         }
 
         if (c == TERM_CHAR_ERASE || c == '\b') {
-            /* Backspace: erase character before cursor */
+            /* 退格键：擦除光标前的字符 */
             if (term_cursor_pos > 0) {
-                /* Shift characters left */
+                /* 字符左移 */
                 for (int i = term_cursor_pos - 1; i < term_input_len - 1; i++) {
                     term_input_buf[i] = term_input_buf[i + 1];
                 }
@@ -330,7 +329,7 @@ void terminal_input(char c)
                 term_input_buf[term_input_len] = '\0';
 
                 if (term_flags & TERM_LFLAG_ECHO) {
-                    /* Move cursor back one */
+                    /* 光标后退一位 */
                     int cx, cy;
                     term_get_cursor(&cx, &cy);
                     if (cx > 0) {
@@ -340,7 +339,7 @@ void terminal_input(char c)
                         cx = 79;
                     }
                     term_set_cursor(cx, cy);
-                    /* Redraw from new cursor pos to end, plus clear trailing char */
+                    /* 从新光标位置重绘到末尾，并清除末尾字符 */
                     term_redraw_from(term_cursor_pos);
                 }
             }
@@ -348,14 +347,14 @@ void terminal_input(char c)
         }
 
         if (c == TERM_CHAR_KILL) {
-            /* Ctrl+U: kill entire line */
+            /* Ctrl+U：删除整行 */
             if (term_flags & TERM_LFLAG_ECHO) {
-                /* Move cursor to end first */
+                /* 先将光标移到末尾 */
                 while (term_cursor_pos < term_input_len) {
                     term_putchar(term_input_buf[term_cursor_pos]);
                     term_cursor_pos++;
                 }
-                /* Erase all characters on screen */
+                /* 擦除屏幕上所有字符 */
                 for (int i = 0; i < term_input_len; i++) {
                     term_backspace();
                 }
@@ -366,10 +365,10 @@ void terminal_input(char c)
         }
 
         if (c == TERM_CHAR_WERASE) {
-            /* Ctrl+W: erase last word */
-            /* Skip trailing spaces (before cursor) */
+            /* Ctrl+W：删除上一个单词 */
+            /* 跳过末尾空格（光标前） */
             while (term_cursor_pos > 0 && term_input_buf[term_cursor_pos - 1] == ' ') {
-                /* Shift characters left at cursor pos */
+                /* 在光标位置左移字符 */
                 for (int i = term_cursor_pos - 1; i < term_input_len - 1; i++) {
                     term_input_buf[i] = term_input_buf[i + 1];
                 }
@@ -377,7 +376,7 @@ void terminal_input(char c)
                 term_cursor_pos--;
                 if (term_flags & TERM_LFLAG_ECHO) term_backspace();
             }
-            /* Erase word characters */
+            /* 删除单词字符 */
             while (term_cursor_pos > 0 && term_input_buf[term_cursor_pos - 1] != ' ') {
                 for (int i = term_cursor_pos - 1; i < term_input_len - 1; i++) {
                     term_input_buf[i] = term_input_buf[i + 1];
@@ -386,16 +385,16 @@ void terminal_input(char c)
                 term_cursor_pos--;
                 if (term_flags & TERM_LFLAG_ECHO) term_backspace();
             }
-            /* Redraw to fix display after mid-line deletion */
+            /* 重绘以修复行中删除后的显示 */
             if (term_flags & TERM_LFLAG_ECHO) {
                 term_redraw_from(term_cursor_pos);
             }
             return;
         }
 
-        /* Regular character: insert at cursor position */
+        /* 普通字符：在光标位置插入 */
         if (term_input_len < TERM_INPUT_BUF_SIZE - 1) {
-            /* Shift characters right to make room */
+            /* 字符右移以腾出空间 */
             for (int i = term_input_len; i > term_cursor_pos; i--) {
                 term_input_buf[i] = term_input_buf[i - 1];
             }
@@ -405,14 +404,14 @@ void terminal_input(char c)
             term_cursor_pos++;
 
             if (term_flags & TERM_LFLAG_ECHO) {
-                /* Redraw from inserted position */
+                /* 从插入位置重绘 */
                 term_redraw_from(term_cursor_pos - 1);
             }
         }
         return;
     }
 
-    /* Raw mode: pass character directly to line buffer */
+    /* 原始模式：直接将字符传入行缓冲区 */
     if (term_line_len < TERM_INPUT_BUF_SIZE - 1) {
         term_line_buf[term_line_len++] = c;
     }
@@ -422,13 +421,13 @@ void terminal_input(char c)
 
 int terminal_readline(char *buf, int maxlen)
 {
-    /* Wait for a complete line */
+    /* 等待完整行 */
     while (!term_line_ready) {
         char c = keyboard_get_char();
         terminal_input(c);
     }
 
-    /* Copy line to caller's buffer */
+    /* 将行复制到调用者的缓冲区 */
     int len = term_line_len < maxlen - 1 ? term_line_len : maxlen - 1;
     if (len > 0) {
         memcpy(buf, term_line_buf, len);

@@ -6,7 +6,7 @@
 
 static volatile uint64_t timer_ticks = 0;
 
-/* Called from IRQ handler when timer interrupt fires (vector 32) */
+/* 定时器中断触发时由 IRQ 处理程序调用（向量 32） */
 void timer_handler(void)
 {
     timer_ticks++;
@@ -15,14 +15,14 @@ void timer_handler(void)
 
 void timer_init(void)
 {
-    /* Configure 8254 PIT: channel 0, lobyte/hibyte, rate generator (mode 2) */
+    /* 配置 8254 PIT：通道 0，低字节/高字节，速率发生器（模式 2） */
     hal_outb(PIT_COMMAND, 0x36);
 
-    /* Set divisor for TIMER_HZ frequency */
+    /* 设置 TIMER_HZ 频率的除数 */
     uint16_t divisor = PIT_DIVISOR;
-    hal_outb(PIT_CHANNEL_0, divisor & 0xFF);        /* Low byte */
+    hal_outb(PIT_CHANNEL_0, divisor & 0xFF);        /* 低字节 */
     hal_io_wait();
-    hal_outb(PIT_CHANNEL_0, (divisor >> 8) & 0xFF); /* High byte */
+    hal_outb(PIT_CHANNEL_0, (divisor >> 8) & 0xFF); /* 高字节 */
 
     printf("[TIMER] PIT initialized at %d Hz (divisor: %d)\n", TIMER_HZ, divisor);
 }
@@ -34,7 +34,7 @@ uint64_t timer_get_ticks(void)
 
 uint64_t timer_get_ms(void)
 {
-    return timer_ticks;  /* 1 tick = 1 ms at TIMER_HZ=1000 */
+    return timer_ticks;  /* 在 TIMER_HZ=1000 时，1 滴答 = 1 毫秒 */
 }
 
 void timer_sleep_ms(uint64_t ms)

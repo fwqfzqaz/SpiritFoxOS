@@ -12,7 +12,7 @@
 #include "serial.h"
 #include "kmalloc.h"
 
-/* clock ids */
+/* 时钟 ID */
 #define CLOCK_REALTIME           0
 #define CLOCK_MONOTONIC          1
 #define CLOCK_PROCESS_CPUTIME_ID 2
@@ -23,13 +23,13 @@ typedef struct {
     int64_t tv_nsec;
 } linux_timespec_t;
 
-/* timeval structure */
+/* timeval 结构体 */
 typedef struct {
     int64_t tv_sec;
     int64_t tv_usec;
 } linux_timeval_t;
 
-/* Linux-compatible utsname structure */
+/* Linux 兼容的 utsname 结构体 */
 typedef struct {
     char sysname[65];
     char nodename[65];
@@ -48,7 +48,7 @@ int64_t sys_uname(trap_frame_t *frame)
     if (!buf)
         return -EFAULT;
 
-    /* Fill in Linux-compatible utsname */
+    /* 填充 Linux 兼容的 utsname */
     const char *sysname = "Linux";
     const char *nodename = "SpiritFoxOS";
     const char *release = "6.1.0-sfk";
@@ -146,7 +146,7 @@ int64_t sys_sched_yield(trap_frame_t *frame)
 int64_t sys_poll(trap_frame_t *frame)
 {
     (void)frame;
-    /* Stub: no poll support yet */
+    /* 桩函数：暂不支持 poll */
     return 0;
 }
 
@@ -160,7 +160,7 @@ int64_t sys_getrandom(trap_frame_t *frame)
     if (!buf || count == 0)
         return -EINVAL;
 
-    /* Simple pseudo-random implementation using TSC and timer */
+    /* 使用 TSC 和定时器的简单伪随机实现 */
     uint64_t seed = timer_get_ms();
     uint8_t *p = (uint8_t *)buf;
     for (size_t i = 0; i < count; i++) {
@@ -223,13 +223,13 @@ int64_t sys_sysinfo(trap_frame_t *frame)
 }
 
 /* ========================================================================
- * epoll syscalls
+ * epoll 系统调用
  * ======================================================================== */
 
-/* epoll_event structure (Linux-compatible) */
+/* epoll_event 结构体（Linux 兼容） */
 typedef struct {
-    uint32_t events;   /* Epoll events (EPOLLIN, EPOLLOUT, etc.) */
-    uint64_t data;     /* User data variable */
+    uint32_t events;   /* Epoll events (nts (EP, LLIN, EP,Oetc.)OUT, etc.) */
+    uint64_t data;     /* 用户数据变量 */
 } epoll_event_t;
 
 #define EPOLL_CTL_ADD 1
@@ -253,13 +253,13 @@ typedef struct {
 
 #define EPOLL_MAX_FDS 256
 
-/* Kernel epoll instance */
+/* 内核 epoll 实例 */
 typedef struct {
     int      max_fds;
     int      n_entries;
     struct {
         int          fd;
-        uint32_t     events;   /* Monitored events */
+        uint32_t     events;   /* 监控的事件 */
         uint64_t     data;     /* User data */
     } entries[EPOLL_MAX_FDS];
 } epoll_instance_t;
@@ -277,7 +277,7 @@ int64_t sys_epoll_create(trap_frame_t *frame)
     ep->max_fds = EPOLL_MAX_FDS;
     ep->n_entries = 0;
 
-    /* Allocate an fd to hold the epoll instance pointer */
+    /* 分配一个 fd 来持有 epoll 实例指针 */
     int fd = vfs_alloc_fd();
     if (fd < 0) {
         kfree(ep);
@@ -293,7 +293,7 @@ int64_t sys_epoll_create(trap_frame_t *frame)
     memset(file, 0, sizeof(vfs_file_t));
     file->refcount = 1;
     file->flags = VFS_O_RDONLY;
-    /* Store epoll instance pointer in fs_data of a dummy inode */
+    /* 在虚拟 inode 的 fs_data 中存储 epoll 实例指针 */
     vfs_inode_t *inode = (vfs_inode_t *)kmalloc(sizeof(vfs_inode_t));
     if (!inode) {
         kfree(file);
@@ -369,7 +369,7 @@ int64_t sys_epoll_ctl(trap_frame_t *frame)
     case EPOLL_CTL_DEL: {
         for (int i = 0; i < ep->n_entries; i++) {
             if (ep->entries[i].fd == fd) {
-                /* Shift remaining entries down */
+                /* 将剩余条目前移 */
                 for (int j = i; j < ep->n_entries - 1; j++)
                     ep->entries[j] = ep->entries[j + 1];
                 ep->n_entries--;
@@ -401,30 +401,30 @@ int64_t sys_epoll_wait(trap_frame_t *frame)
     int n_ready = 0;
 
     for (;;) {
-        /* Poll each watched fd */
+        /* 轮询每个被监视的 fd */
         for (int i = 0; i < ep->n_entries && n_ready < maxevents; i++) {
             uint32_t revents = 0;
             int fd = ep->entries[i].fd;
 
-            /* Try a zero-byte read to check for readability */
+            /* Try a zero-byte read to check for readabilityte read to check for readability */
             vfs_file_t **fd_table = process_get_fd_table();
             if (fd_table && fd >= 0 && fd < PROC_MAX_FD && fd_table[fd]) {
                 vfs_file_t *f = fd_table[fd];
-                /* Check if pipe has data */
+                /* 检查管道是否有数据 */
                 if (f->pipe && f->pipe->count > 0) {
                     revents |= EPOLLIN;
                 }
-                /* If write side of pipe is closed, report EPOLLIN + EPOLLHUP */
+                /* 如果管道写端关闭，报告 EPOLLIN + EPOLLHUP */
                 if (f->pipe && f->pipe->write_closed) {
                     revents |= EPOLLIN | EPOLLHUP;
                 }
-                /* Read-end closed -> EPOLLOUT | EPOLLERR for write end */
+                /* 读端关闭 -> 写端报告 EPOLLOUT | EPOLLERR */
                 if (f->pipe && f->pipe->read_closed) {
                     revents |= EPOLLOUT | EPOLLERR;
                 }
             }
 
-            /* Always report EPOLLERR and EPOLLHUP if monitored */
+            /* 始终报告被监视的 EPOLLERR 和 EPOLLHUP */
             if (ep->entries[i].events & EPOLLERR)
                 revents |= EPOLLERR;
             if (ep->entries[i].events & EPOLLHUP)
@@ -443,9 +443,9 @@ int64_t sys_epoll_wait(trap_frame_t *frame)
         if (n_ready > 0)
             return n_ready;
 
-        /* Check timeout */
+        /* 检查超时 */
         if (timeout == 0)
-            return 0;  /* Non-blocking, no events */
+            return 0;  /* 非阻塞，无事件 */
 
         if (timeout > 0) {
             uint64_t elapsed = timer_get_ms() - start_ms;
@@ -459,7 +459,7 @@ int64_t sys_epoll_wait(trap_frame_t *frame)
 }
 
 /* ========================================================================
- * eventfd syscalls
+ * eventfd 系统调用
  * ======================================================================== */
 
 /* Kernel eventfd instance */
@@ -544,7 +544,7 @@ int64_t sys_eventfd2(trap_frame_t *frame)
  * signalfd syscalls
  * ======================================================================== */
 
-/* Kernel signalfd instance */
+/* 内核 signalfd 实例 */
 typedef struct {
     uint64_t sigmask;
     int      flags;
@@ -594,7 +594,7 @@ int64_t sys_signalfd(trap_frame_t *frame)
     sfd->sigmask = mask ? *mask : 0;
     sfd->flags = 0;
 
-    /* If fd == -1, create new fd */
+    /* 如果 fd == -1，创建新 fd */
     if (fd == -1) {
         int new_fd = signalfd_alloc_fd(sfd);
         if (new_fd < 0) {
@@ -604,7 +604,7 @@ int64_t sys_signalfd(trap_frame_t *frame)
         return new_fd;
     }
 
-    /* Otherwise, reuse existing fd - just store the mask */
+    /* 否则，复用已有 fd - 仅存储掩码 */
     return fd;
 }
 
@@ -637,17 +637,17 @@ int64_t sys_signalfd4(trap_frame_t *frame)
 }
 
 /* ========================================================================
- * timerfd syscalls
+ * timerfd 系统调用
  * ======================================================================== */
 
-/* Kernel timerfd instance */
+/* 内核 timerfd 实例 */
 typedef struct {
     int        clockid;
     int        flags;
-    uint64_t   initial_ms;    /* Initial expiration in ms */
-    uint64_t   interval_ms;   /* Interval in ms */
-    uint64_t   next_expiry;   /* Next expiry time (absolute ms) */
-    int        armed;         /* Is the timer armed? */
+    uint64_t   initial_ms;    /* 初始过期时间（毫秒） */
+    uint64_t   interval_ms;   /* 间隔（毫秒） */
+    uint64_t   next_expiry;   /* 下次过期时间（绝对毫秒） */
+    int        armed;         /* 定时器是否已启用？ */
 } timerfd_instance_t;
 
 int64_t sys_timerfd_create(trap_frame_t *frame)
@@ -704,7 +704,7 @@ int64_t sys_timerfd_settime(trap_frame_t *frame)
 
     (void)fd; (void)flags;
 
-    /* Return old timer value if requested */
+    /* 如果请求，返回旧的定时器值 */
     if (old_value) {
         old_value->tv_sec = 0;
         old_value->tv_nsec = 0;
@@ -713,10 +713,10 @@ int64_t sys_timerfd_settime(trap_frame_t *frame)
     if (!new_value)
         return -EFAULT;
 
-    /* We can't easily access the timerfd instance from just the fd here,
-     * so just accept the parameters and return success.
-     * A full implementation would look up the vfs_file by fd,
-     * then access inode->fs_data to get the timerfd_instance_t. */
+    /* 仅通过 fd 不容易访问 timerfd 实例，
+     * 因此只接受参数并返回成功。
+     * 完整实现应通过 fd 查找 vfs_file，
+     * 然后通过 inode->fs_data 获取 timerfd_instance_t。 */
     return 0;
 }
 
@@ -727,7 +727,7 @@ int64_t sys_timerfd_gettime(trap_frame_t *frame)
 }
 
 /* ========================================================================
- * inotify syscalls
+ * inotify 系统调用
  * ======================================================================== */
 
 int64_t sys_inotify_init(trap_frame_t *frame)
@@ -755,7 +755,7 @@ int64_t sys_inotify_rm_watch(trap_frame_t *frame)
 }
 
 /* ========================================================================
- * dl_iterate_phdr - needed by glibc/JVM
+ * dl_iterate_phdr - glibc/JVM 需要
  * ======================================================================== */
 
 int64_t sys_dl_iterate_phdr(trap_frame_t *frame)
@@ -765,13 +765,13 @@ int64_t sys_dl_iterate_phdr(trap_frame_t *frame)
 }
 
 /* ========================================================================
- * getauxval - needed by JVM for AT_HWCAP etc.
+ * getauxval - JVM 用于 AT_HWCAP 等
  * ======================================================================== */
 
 int64_t sys_getauxval(trap_frame_t *frame)
 {
     uint64_t type = frame->rdi;
-    /* Return reasonable values for common auxiliary vector entries */
+    /* 返回常见辅助向量项的合理值 */
     switch (type) {
     case 0: return 0;  /* AT_NULL */
     case 1: return 0;  /* AT_IGNORE */
@@ -799,7 +799,7 @@ int64_t sys_getauxval(trap_frame_t *frame)
 }
 
 /* ========================================================================
- * membarrier
+ * membarrier 内存屏障
  * ======================================================================== */
 
 int64_t sys_membarrier(trap_frame_t *frame)
@@ -809,7 +809,7 @@ int64_t sys_membarrier(trap_frame_t *frame)
 }
 
 /* ========================================================================
- * rseq
+ * rseq 可重启序列
  * ======================================================================== */
 
 int64_t sys_rseq(trap_frame_t *frame)
@@ -819,7 +819,7 @@ int64_t sys_rseq(trap_frame_t *frame)
 }
 
 /* ========================================================================
- * Resource limits
+ * 资源限制
  * ======================================================================== */
 
 int64_t sys_getrlimit(trap_frame_t *frame)
@@ -835,7 +835,7 @@ int64_t sys_setrlimit(trap_frame_t *frame)
 }
 
 /* ========================================================================
- * SFK-specific syscalls (600+)
+ * SFK 特有系统调用（600+）
  * ======================================================================== */
 
 int64_t sys_sfk_check_perm(trap_frame_t *frame)
@@ -868,7 +868,7 @@ int64_t sys_sfk_get_pkg_info(trap_frame_t *frame)
 }
 
 /* ========================================================================
- * Registry syscalls (700+)
+ * 注册表系统调用（700+）
  * ======================================================================== */
 
 int64_t sys_reg_read(trap_frame_t *frame)

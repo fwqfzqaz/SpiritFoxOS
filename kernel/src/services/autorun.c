@@ -1,13 +1,13 @@
 /*
- * SpiritFoxOS Autorun Module
+ * SpiritFoxOS 自动运行模块
  *
- * Reads and executes commands from a configuration file at boot time.
- * Default file: /etc/autorun.cfg
+ * 在启动时读取并执行配置文件中的命令。
+ * 默认文件：/etc/autorun.cfg
  *
- * File format:
- *   - One command per line
- *   - Lines starting with '#' are comments
- *   - Empty lines are skipped
+ * 文件格式：
+ *   - 每行一条命令
+ *   - 以 '#' 开头的行是注释
+ *   - 空行将被跳过
  */
 
 #include "autorun.h"
@@ -49,20 +49,20 @@ int autorun_execute(const char *path)
             if (buf[i] == '\n') {
                 line[line_pos] = '\0';
 
-                /* Strip trailing CR (Windows line endings) */
+                /* 去除行尾回车符（Windows 换行符） */
                 if (line_pos > 0 && line[line_pos - 1] == '\r')
                     line[--line_pos] = '\0';
 
-                /* Skip leading whitespace */
+                /* 跳过前导空白 */
                 char *cmd = line;
                 while (*cmd == ' ' || *cmd == '\t')
                     cmd++;
 
-                /* Skip empty lines and comments */
+                /* 跳过空行和注释 */
                 if (*cmd != '\0' && *cmd != '#') {
                     printf("[autorun] > %s\n", cmd);
 
-                    /* Parse and execute via shell */
+                    /* 通过 shell 解析并执行 */
                     char *argv[AUTORUN_MAX_ARGS];
                     int argc = 0;
                     char *token = strtok(cmd, " \t");
@@ -85,7 +85,7 @@ int autorun_execute(const char *path)
         }
     }
 
-    /* Handle last line without trailing newline */
+    /* 处理没有尾部换行符的最后一行 */
     if (line_pos > 0) {
         line[line_pos] = '\0';
         if (line_pos > 0 && line[line_pos - 1] == '\r')
@@ -128,14 +128,14 @@ int autorun_create_default(const char *path)
     if (!path)
         path = AUTORUN_DEFAULT_PATH;
 
-    /* Check if file already exists */
+    /* 检查文件是否已存在 */
     int fd = vfs_open(path, VFS_O_RDONLY, 0);
     if (fd >= 0) {
         vfs_close(fd);
-        return 0; /* File already exists, don't overwrite */
+        return 0; /* 文件已存在，不覆盖 */
     }
 
-    /* Create a default autorun.cfg */
+    /* 创建默认的 autorun.cfg */
     fd = vfs_open(path, VFS_O_CREAT | VFS_O_WRONLY,
                   VFS_S_IRUSR | VFS_S_IWUSR);
     if (fd < 0)

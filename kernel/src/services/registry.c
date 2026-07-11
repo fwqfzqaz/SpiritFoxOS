@@ -1,10 +1,10 @@
 /*
- * SpiritFoxOS System Registry
+ * SpiritFoxOS 系统注册表
  *
- * Tree-structured key-value store with three root keys:
- *   HKEY_SYSTEM   - System global config, software installation records
- *   HKEY_FILEASSOC - File associations
- *   HKEY_USER     - User preferences
+ * 树形结构的键值存储，包含三个根键：
+ *   HKEY_SYSTEM   - 系统全局配置、软件安装记录
+ *   HKEY_FILEASSOC - 文件关联
+ *   HKEY_USER     - 用户偏好
  */
 
 #include "registry.h"
@@ -15,13 +15,13 @@
 #include "memory.h"
 
 /* ========================================================================
- * Internal state
+ * 内部状态
  * ======================================================================== */
 
 static reg_key_t *reg_roots[3];     /* HKEY_SYSTEM, HKEY_FILEASSOC, HKEY_USER */
 static int        reg_initialized = 0;
 
-/* Simple key cache for fast lookup */
+/* 用于快速查找的简单键缓存 */
 #define REG_CACHE_SIZE 64
 typedef struct {
     char      path[256];
@@ -31,14 +31,14 @@ typedef struct {
 static reg_cache_entry_t reg_cache[REG_CACHE_SIZE];
 static uint32_t reg_cache_count = 0;
 
-/* Transaction state */
+/* 事务状态 */
 static uint64_t reg_next_tx_id = 1;
 
 /* ========================================================================
- * Internal helpers
+ * 内部辅助函数
  * ======================================================================== */
 
-/* Create a new key node */
+/* 创建新的键节点 */
 static reg_key_t *create_key(const char *name, reg_key_t *parent)
 {
     reg_key_t *key = (reg_key_t *)kcalloc(1, sizeof(reg_key_t));
@@ -55,7 +55,7 @@ static reg_key_t *create_key(const char *name, reg_key_t *parent)
     key->values = NULL;
     key->values_capacity = 0;
 
-    /* Link into parent's child list */
+    /* 链入父键的子键列表 */
     if (parent) {
         key->next = parent->child;
         parent->child = key;
@@ -65,7 +65,7 @@ static reg_key_t *create_key(const char *name, reg_key_t *parent)
     return key;
 }
 
-/* Find a child key by name in parent's child list */
+/* 在父键的子键列表中按名称查找子键 */
 static reg_key_t *find_child(reg_key_t *parent, const char *name)
 {
     if (!parent || !name) return NULL;
@@ -77,9 +77,9 @@ static reg_key_t *find_child(reg_key_t *parent, const char *name)
     return NULL;
 }
 
-/* Parse the first component of a path separated by '/'.
- * Returns pointer to the rest of the path (after the '/'), or NULL if done.
- * Writes the component into `out`. */
+/* 解析以 '/' 分隔的路径的第一个组件。
+ * 返回指向剩余路径的指针（'/' 之后），如果完成则返回 NULL。
+ * 将组件写入 `out`。 */
 static const char *path_next_component(const char *path, char *out, int out_size)
 {
     if (!path || *path == '\0') return NULL;
@@ -90,11 +90,11 @@ static const char *path_next_component(const char *path, char *out, int out_size
     }
     out[i] = '\0';
 
-    if (*path == '/') path++;  /* skip the slash */
+    if (*path == '/') path++;  /* 跳过斜杠 */
     return (*path != '\0') ? path : NULL;
 }
 
-/* Find a root key by name (HKEY_SYSTEM, HKEY_FILEASSOC, HKEY_USER) */
+/* 按名称查找根键（HKEY_SYSTEM, HKEY_FILEASSOC, HKEY_USER） */
 static reg_key_t *find_root(const char *name)
 {
     for (int i = 0; i < 3; i++) {
@@ -104,7 +104,7 @@ static reg_key_t *find_root(const char *name)
     return NULL;
 }
 
-/* Walk a full path and return the key. If create_if_missing, create intermediates. */
+/* 遍历完整路径并返回键。如果 create_if_missing 为真，则创建中间键。 */
 static reg_key_t *walk_path(const char *path, int create_if_missing)
 {
     if (!path || *path == '\0') return NULL;
@@ -112,7 +112,7 @@ static reg_key_t *walk_path(const char *path, int create_if_missing)
     char comp[REG_MAX_KEY_NAME];
     const char *p = path;
 
-    /* First component must be a root key */
+    /* 第一个组件必须是根键 */
     const char *next = path_next_component(p, comp, sizeof(comp));
     if (!next && comp[0] == '\0') return NULL;
 
@@ -141,7 +141,7 @@ static void key_build_path(reg_key_t *key, char *buf, int buf_size)
 {
     if (!key || !buf || buf_size <= 0) return;
 
-    /* Collect names from root to this key */
+    /* 从根到此键收集名称 */
     char *stack[REG_MAX_PATH_DEPTH];
     int depth = 0;
 
@@ -175,7 +175,7 @@ static reg_key_t *cache_lookup(const char *path)
     return NULL;
 }
 
-/* Cache insert */
+/* 缓存插入 */
 static void cache_insert(const char *path, reg_key_t *key)
 {
     if (reg_cache_count >= REG_CACHE_SIZE) return;
@@ -201,7 +201,7 @@ static void cache_invalidate_prefix(const char *prefix)
     reg_cache_count = write;
 }
 
-/* Invalidate entire cache */
+/* 使整个缓存失效 */
 static void cache_invalidate_all(void)
 {
     reg_cache_count = 0;
@@ -226,19 +226,19 @@ static void unlink_from_parent(reg_key_t *key)
     key->next = NULL;
 }
 
-/* Recursively free a key and all its subkeys and values */
+/* 递归释放键及其所有子键和值 */
 static void free_key_recursive(reg_key_t *key)
 {
     if (!key) return;
 
-    /* Free all children first */
+    /* 先释放所有子键 */
     while (key->child) {
         reg_key_t *child = key->child;
         key->child = child->next;
         free_key_recursive(child);
     }
 
-    /* Free values array */
+    /* 释放值数组 */
     if (key->values) {
         kfree(key->values);
         key->values = NULL;
@@ -247,7 +247,7 @@ static void free_key_recursive(reg_key_t *key)
     kfree(key);
 }
 
-/* Find a value by name in a key */
+/* 在键中按名称查找值 */
 static reg_value_t *find_value(reg_key_t *key, const char *name)
 {
     if (!key || !name) return NULL;
@@ -258,16 +258,16 @@ static reg_value_t *find_value(reg_key_t *key, const char *name)
     return NULL;
 }
 
-/* Add or get a value slot in a key */
+/* 在键中添加或获取值槽位 */
 static reg_value_t *alloc_value(reg_key_t *key, const char *name)
 {
     if (!key || !name) return NULL;
 
-    /* Check if value already exists */
+    /* 检查值是否已存在 */
     reg_value_t *val = find_value(key, name);
     if (val) return val;
 
-    /* Need to add a new value */
+    /* 需要添加新值新
     if (key->nvalues >= key->values_capacity) {
         uint32_t new_cap = key->values_capacity == 0 ? 4 : key->values_capacity * 2;
         if (new_cap > REG_MAX_VALUES) new_cap = REG_MAX_VALUES;
@@ -296,7 +296,7 @@ static int remove_value(reg_key_t *key, const char *name)
 
     for (uint32_t i = 0; i < key->nvalues; i++) {
         if (strcmp(key->values[i].name, name) == 0) {
-            /* Shift remaining values down */
+            /* Shift remaining values downremaining values down */
             for (uint32_t j = i; j < key->nvalues - 1; j++) {
                 key->values[j] = key->values[j + 1];
             }
@@ -307,7 +307,7 @@ static int remove_value(reg_key_t *key, const char *name)
     return -1;
 }
 
-/* Convert a byte to hex characters */
+/* 将字节转换为十六进制字符 */
 static void byte_to_hex(uint8_t b, char *out)
 {
     static const char hex[] = "0123456789ABCDEF";
@@ -315,19 +315,19 @@ static void byte_to_hex(uint8_t b, char *out)
     out[1] = hex[b & 0x0F];
 }
 
-/* Convert hex character pair to byte. Returns -1 on error. */
+/* 将十六进制字符对转换为字节。出错返回 -1。 */
 static int hex_to_byte(const char *s, uint8_t *out)
 {
     static const char hex[] = "0123456789ABCDEFabcdef";
     uint8_t hi, lo;
 
-    /* High nibble */
+    /* 高四位 */
     char *p = strchr(hex, s[0]);
     if (!p) return -1;
     hi = (uint8_t)(p - hex);
     if (hi >= 16) hi -= 6; /* handle lowercase */
 
-    /* Low nibble */
+    /* 低四位 */
     p = strchr(hex, s[1]);
     if (!p) return -1;
     lo = (uint8_t)(p - hex);
@@ -345,11 +345,11 @@ static void dump_key(reg_key_t *key, int indent)
 {
     if (!key) return;
 
-    /* Print indentation + key name */
+    /* 打印缩进 + 键名 */
     for (int i = 0; i < indent; i++) printf("  ");
     printf("[%s] (%u values, %u subkeys)\n", key->name, key->nvalues, key->nsubkeys);
 
-    /* Print values */
+    /* 打印值 */
     for (uint32_t v = 0; v < key->nvalues; v++) {
         for (int i = 0; i < indent + 1; i++) printf("  ");
         reg_value_t *val = &key->values[v];
@@ -362,7 +362,7 @@ static void dump_key(reg_key_t *key, int indent)
         printf("\n");
     }
 
-    /* Recurse into children */
+    /* 递归进入子键 */
     reg_key_t *child = key->child;
     while (child) {
         dump_key(child, indent + 1);
@@ -371,11 +371,11 @@ static void dump_key(reg_key_t *key, int indent)
 }
 
 /* ========================================================================
- * Save/load helpers
+ * 保存/加载辅助函数
  * ======================================================================== */
 
-/* Simple string formatting for registry persistence.
- * Only supports %s, %u, %d, %x - enough for our needs. */
+/* 用于注册表持久化的简单字符串格式化。
+ * 仅支持 %s、%u、%d、%x - 足以满足需求。 */
 static int reg_sprintf(char *buf, const char *fmt, ...)
 {
     __builtin_va_list ap;
@@ -430,12 +430,12 @@ static void save_key_recursive(reg_key_t *key, const char *parent_path, int fd)
         cur_path[sizeof(cur_path) - 1] = '\0';
     }
 
-    /* Write KEY line */
+    /* 写入 KEY 行 */
     char line[512];
     int n = reg_sprintf(line, "KEY %s\n", cur_path);
     vfs_write(fd, line, n);
 
-    /* Write VALUE lines */
+    /* 写入 VALUE 行 */
     for (uint32_t v = 0; v < key->nvalues; v++) {
         reg_value_t *val = &key->values[v];
         n = reg_sprintf(line, "VALUE %s %s %u ", val->name, cur_path, val->type);
@@ -449,7 +449,7 @@ static void save_key_recursive(reg_key_t *key, const char *parent_path, int fd)
         vfs_write(fd, line, n);
     }
 
-    /* Recurse into children */
+    /* 递归进入子键 */
     reg_key_t *child = key->child;
     while (child) {
         save_key_recursive(child, cur_path, fd);
@@ -468,19 +468,19 @@ void registry_init(void)
     memset(reg_cache, 0, sizeof(reg_cache));
     reg_cache_count = 0;
 
-    /* Create root keys (no parent - they are the roots) */
+    /* 创建根键（无父键 - 它们是根） */
     reg_roots[0] = create_key(REG_ROOT_SYSTEM, NULL);
     reg_roots[1] = create_key(REG_ROOT_FILEASSOC, NULL);
     reg_roots[2] = create_key(REG_ROOT_USER, NULL);
 
-    /* Create default subkey structure for HKEY_SYSTEM */
+    /* 为 HKEY_SYSTEM 创建默认子键结构 */
     create_key("Software", reg_roots[0]);
     create_key("Services", reg_roots[0]);
     create_key("Config", reg_roots[0]);
 
-    /* HKEY_FILEASSOC is flat - extensions become subkeys, no defaults */
+    /* HKEY_FILEASSOC 是扁平的 - 扩展名成为子键，无默认值 */
 
-    /* Create default subkey structure for HKEY_USER */
+    /* 为 HKEY_USER 创建默认子键结构 */
     create_key("Preferences", reg_roots[2]);
 
     reg_initialized = 1;
@@ -503,7 +503,7 @@ reg_key_t *registry_open_key(const char *path, int create_if_missing)
 
 void registry_close_key(reg_key_t *key)
 {
-    /* No-op for now - no reference counting */
+    /* 目前无操作 - 无引用计数 */
     (void)key;
 }
 
@@ -514,7 +514,7 @@ int registry_delete_key(const char *path)
     reg_key_t *key = walk_path(path, 0);
     if (!key) return -1;
 
-    /* Cannot delete root keys */
+    /* 不能删除根键 */
     if (!key->parent) return -1;
 
     /* Invalidate cache entries with this prefix */
@@ -529,7 +529,7 @@ int registry_delete_key(const char *path)
     cache_invalidate_prefix(prefix);
     cache_invalidate_prefix(path);
 
-    /* Unlink from parent */
+    /* 从父键解除链接 */
     unlink_from_parent(key);
 
     /* Recursively free */
@@ -642,7 +642,7 @@ int registry_list_values(const char *key_path, char names[][REG_MAX_VALUE_NAME],
 }
 
 /* ========================================================================
- * Transaction support (simplified)
+ * 事务支持（简化版）
  * ======================================================================== */
 
 uint64_t registry_transaction_begin(void)
@@ -652,14 +652,14 @@ uint64_t registry_transaction_begin(void)
 
 int registry_transaction_commit(uint64_t tx_id)
 {
-    /* All writes are immediate - no-op */
+    /* 所有写入都是立即生效的 - 无操作 */
     (void)tx_id;
     return 0;
 }
 
 int registry_transaction_abort(uint64_t tx_id)
 {
-    /* No-op since all writes are immediate */
+    /* 无操作，因为所有写入都是立即生效的 */
     (void)tx_id;
     return 0;
 }
@@ -691,7 +691,7 @@ int registry_load(const char *path)
     int fd = vfs_open(path, VFS_O_RDONLY, 0);
     if (fd < 0) return -1;
 
-    /* Read entire file into a buffer */
+    /* 读取整个文件到缓冲区 */
     char *buf = (char *)kmalloc(65536);
     if (!buf) {
         vfs_close(fd);
@@ -712,7 +712,7 @@ int registry_load(const char *path)
     /* First, free all existing keys */
     for (int i = 0; i < 3; i++) {
         if (reg_roots[i]) {
-            /* Free children */
+            /* Free children children children children children children children children children children children children children children children children */
             while (reg_roots[i]->child) {
                 reg_key_t *child = reg_roots[i]->child;
                 reg_roots[i]->child = child->next;
@@ -731,10 +731,10 @@ int registry_load(const char *path)
 
     cache_invalidate_all();
 
-    /* Parse the file line by line */
+    /* 逐行解析文件
     char *line = buf;
     while (line && *line) {
-        /* Find end of line */
+        /* Find end of line end of line end of line end of line end of line end of line end of line end of line end of line end of line end of line end of line end of line end of line end of line end of line */
         char *eol = line;
         while (*eol && *eol != '\n') eol++;
         int line_len = (int)(eol - line);
@@ -742,9 +742,9 @@ int registry_load(const char *path)
         *eol = '\0';
 
         if (strncmp(line, "KEY ", 4) == 0) {
-            /* KEY <path> - ensure the key exists */
+            /* KEY <path> - 确保键存在 */
             char *key_path = line + 4;
-            /* Trim trailing whitespace */
+            /*空去除尾部空白
             char *end = key_path + strlen(key_path) - 1;
             while (end > key_path && (*end == ' ' || *end == '\r')) *end-- = '\0';
 
@@ -756,21 +756,21 @@ int registry_load(const char *path)
             char kpath[256];
             uint32_t vtype;
 
-            /* Parse value name */
+            /*解解析值名称
             int i = 0;
             while (*p && *p != ' ' && i < REG_MAX_VALUE_NAME - 1)
                 vname[i++] = *p++;
             vname[i] = '\0';
             if (*p == ' ') p++;
 
-            /* Parse key path */
+            /*解解析键路径
             i = 0;
             while (*p && *p != ' ' && i < 255)
                 kpath[i++] = *p++;
             kpath[i] = '\0';
             if (*p == ' ') p++;
 
-            /* Parse type */
+            /* 解析类型 */
             vtype = 0;
             while (*p && *p != ' ') {
                 vtype = vtype * 10 + (*p - '0');
@@ -778,13 +778,13 @@ int registry_load(const char *path)
             }
             if (*p == ' ') p++;
 
-            /* Open the key */
+            /* 打开键 */
             reg_key_t *key = walk_path(kpath, 1);
             if (key) {
                 reg_value_t *val = alloc_value(key, vname);
                 if (val) {
                     val->type = vtype;
-                    /* Parse hex data */
+                    /* 解析十六进制数据 */
                     int dpos = 0;
                     while (*p && *p != '\r' && *p != '\n' && dpos < (int)REG_MAX_VALUE_DATA) {
                         if (p[0] && p[1]) {
@@ -803,7 +803,7 @@ int registry_load(const char *path)
             }
         }
 
-        /* Move to next line */
+        /* 移动到下一行 */
         *eol = saved;
         line = (*eol) ? eol + 1 : NULL;
     }
@@ -813,7 +813,7 @@ int registry_load(const char *path)
 }
 
 /* ========================================================================
- * Software record helpers
+ * 软件记录辅助函数
  * ======================================================================== */
 
 int registry_register_software(const reg_software_record_t *record)
@@ -823,7 +823,7 @@ int registry_register_software(const reg_software_record_t *record)
     char key_path[256];
     reg_sprintf(key_path, "%s/Software/%s", REG_ROOT_SYSTEM, record->pkg_id);
 
-    /* Create the key */
+    /* 创建键 */
     reg_key_t *key = registry_open_key(key_path, 1);
     if (!key) return -1;
 
@@ -880,7 +880,7 @@ int registry_get_software(const char *pkg_id, reg_software_record_t *record)
     uint32_t type;
     uint32_t dsize;
 
-    /* Read string fields */
+    /* 读取字符串字段 */
     dsize = sizeof(record->name);
     registry_read_value(key_path, "name", &type, record->name, &dsize);
 
@@ -1003,7 +1003,7 @@ int registry_get_fileassoc(const char *extension, reg_fileassoc_t *assoc)
 }
 
 /* ========================================================================
- * Service record helpers
+ * 服务记录辅助函数
  * ======================================================================== */
 
 int registry_register_service(const reg_service_t *service)
@@ -1108,7 +1108,7 @@ int registry_update_service_status(const char *name, uint32_t status, uint32_t p
 }
 
 /* ========================================================================
- * Debug dump
+ * 调试转储
  * ======================================================================== */
 
 void registry_dump(void)

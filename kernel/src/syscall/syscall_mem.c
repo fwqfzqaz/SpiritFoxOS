@@ -6,21 +6,21 @@
 #include "errno.h"
 #include "mmu.h"
 
-/* mmap flags */
+/* mmap 标志 */
 #define MAP_SHARED    0x01
 #define MAP_PRIVATE   0x02
 #define MAP_FIXED     0x10
 #define MAP_ANONYMOUS 0x20
 #define MAP_FAILED_VAL ((uint64_t)-1)
 
-/* mmap protection flags */
+/* mmap protectioneflags ction flags */
 #define PROT_NONE     0x0
 #define PROT_READ     0x1
 #define PROT_WRITE    0x2
 #define PROT_EXEC     0x4
 
 /* ========================================================================
- * Memory syscalls
+ * 内存系统调用
  * ======================================================================== */
 
 int64_t sys_mmap(trap_frame_t *frame)
@@ -60,7 +60,7 @@ int64_t sys_mmap(trap_frame_t *frame)
     if (prot & PROT_WRITE)
         pte_flags |= PTE_WRITABLE;
 
-    /* For MAP_ANONYMOUS or file-backed, allocate zero-filled pages */
+    /* 对于 MAP_ANONYMOUS 或文件映射，分配零填充页面 */
     if ((flags & MAP_ANONYMOUS) || fd >= 0) {
         for (size_t off = 0; off < map_len; off += PAGE_SIZE) {
             void *phys_page = alloc_page();
@@ -91,17 +91,17 @@ int64_t sys_brk(trap_frame_t *frame)
         return (int64_t)proc->brk;
     }
 
-    /* Only grow brk, never shrink (simple implementation) */
+    /* 只增长 brk，不收缩（简单实现） */
     if (addr <= proc->brk) {
         return (int64_t)proc->brk;
     }
 
-    /* Allocate physical pages for the new brk range */
+    /* Allocate physical pages for the newocaterangel pages for the new brk range */
     uint64_t old_page = (proc->brk + PAGE_SIZE - 1) & ~(uint64_t)(PAGE_SIZE - 1);
     uint64_t new_page = (addr + PAGE_SIZE - 1) & ~(uint64_t)(PAGE_SIZE - 1);
 
     for (uint64_t vaddr = old_page; vaddr < new_page; vaddr += PAGE_SIZE) {
-        /* Check if already mapped */
+        /* 检查是否已映射 */
         if (mmu_virt_to_phys(proc->pml4, vaddr) != 0)
             continue;
 
@@ -132,22 +132,22 @@ int64_t sys_mprotect(trap_frame_t *frame)
     if (length == 0)
         return -EINVAL;
 
-    /* addr must be page-aligned */
+    /* addr 必须页对/
     if (addr & (PAGE_SIZE - 1))
         return -EINVAL;
 
     size_t len = (length + PAGE_SIZE - 1) & ~(size_t)(PAGE_SIZE - 1);
 
-    /* Build new PTE flags */
+    /* 构建新的 PTE 标志 */
     uint64_t new_flags = PTE_USER | PTE_PRESENT;
     if (prot & PROT_WRITE)
         new_flags |= PTE_WRITABLE;
-    /* Note: PROT_EXEC is not enforced at PTE level on x86-64 with NX bit
-     * disabled. If NX support is added, PROT_EXEC should clear the NX bit. */
+    /* 注意：在未启用 NX 位的 x86-64 上，PROT_EXEC 不会在 PTE 层级强制执行。
+     * 如果添加 NX 支持，PROT_EXEC 应清除 NX 位。 */
     if (prot == PROT_NONE)
-        new_flags = 0;  /* Remove all access */
+        new_flags = 0;  /* 移除所有访问权限 */
 
-    /* Walk through each page and update PTE flags */
+    /* 遍历每个页面并更新 PTE 标志 */
     for (size_t off = 0; off < len; off += PAGE_SIZE) {
         uint64_t virt = addr + off;
         uint64_t *pte = mmu_walk_page(proc->pml4, virt, 0);
@@ -155,8 +155,7 @@ int64_t sys_mprotect(trap_frame_t *frame)
             uint64_t phys = *pte & ~(uint64_t)(PAGE_SIZE - 1) & ~(uint64_t)0xFFFULL;
             *pte = phys | new_flags;
         }
-        /* If page is not mapped, silently skip (Linux allows mprotect on
-         * unmapped regions in some cases) */
+        /* 如果页面未映射，静默跳过（Linux 在某些情况下允许对未映射区域调用 mprotect） */
     }
 
     /* Flush TLB for the affected range */
@@ -179,21 +178,21 @@ int64_t sys_munmap(trap_frame_t *frame)
     if (length == 0)
         return -EINVAL;
 
-    /* addr must be page-aligned */
+    /* addr 必须页对/
     if (addr & (PAGE_SIZE - 1))
         return -EINVAL;
 
     size_t len = (length + PAGE_SIZE - 1) & ~(size_t)(PAGE_SIZE - 1);
 
-    /* Walk through each page, free physical pages and clear PTEs */
+    /* 遍历每个页面，释放物理页面并清除 PTE */
     for (size_t off = 0; off < len; off += PAGE_SIZE) {
         uint64_t virt = addr + off;
         uint64_t *pte = mmu_walk_page(proc->pml4, virt, 0);
         if (pte && (*pte & PTE_PRESENT)) {
-            /* Free the physical page */
+            /* 释放物理页面 */
             uint64_t phys = *pte & ~(uint64_t)(PAGE_SIZE - 1) & ~(uint64_t)0xFFFULL;
             free_page((void *)(uintptr_t)phys);
-            /* Clear the PTE */
+            /* 清除 PTE */
             *pte = 0;
         }
     }
@@ -209,7 +208,7 @@ int64_t sys_munmap(trap_frame_t *frame)
 int64_t sys_madvise(trap_frame_t *frame)
 {
     (void)frame;
-    return 0;  /* Ignore madvise hints */
+    return 0;  /* 忽略 madvise 提示 */
 }
 
 int64_t sys_mlock(trap_frame_t *frame)

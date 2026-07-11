@@ -1,9 +1,9 @@
 /*
- * SpiritFoxOS User-Mode Process Support
+ * SpiritFoxOS 用户态进程支持
  *
- * User-mode transitions, exec, and FD table helpers.
- * Extracted from process.c for modularity.
- * Refactored to use mmu_virt_to_phys() and serial module.
+ * 用户态转换、exec 和 FD 表辅助函数。
+ * 从 process.c 中提取以实现模块化。
+ * 重构为使用 mmu_virt_to_phys() 和串口模块。
  */
 
 #include "process.h"
@@ -21,25 +21,24 @@
 extern process_t *current;
 
 /* ========================================================================
- * Constants
+ * 常量
  * ======================================================================== */
 
 #define KERNEL_STACK_PAGES 2
 #define DEFAULT_TIMESLICE  20
 
-/* GDT selectors (must match gdt.h) */
+/* GDT 选择器（必须与 gdt.h 匹配） */
 #define USER_CS     0x18
 #define USER_DS     0x20
 
-/* RFLAGS with interrupt flag set */
+/* 带中断标志的 RFLAGS */
 #define RFLAGS_IF   0x0202
 
 /* ========================================================================
- * write_user_mem() – write bytes to user virtual address via mmu
+ * write_user_mem() – 通过 mmu 向用户虚拟地址写入字节
  *
- * The kernel uses identity mapping, so physical page addresses are also
- * valid virtual addresses.  We use mmu_virt_to_phys() to find the
- * physical page, then write through the identity mapping.
+ * 内核使用恒等映射，因此物理页地址也是有效的虚拟地址。
+ * 我们使用 mmu_virt_to_phys() 查找物理页，然后通过恒等映射写入。
  * ======================================================================== */
 
 int write_user_mem(process_t *proc, uint64_t vaddr,
@@ -64,16 +63,16 @@ int write_user_mem(process_t *proc, uint64_t vaddr,
 }
 
 /* ========================================================================
- * process_exec() – replace the current process image with a new program
+ * process_exec() – 用新程序替换当前进程映像
  *
- * 1. Copy path to kernel buffer (user address space will be replaced)
- * 2. Load ELF via elf_load_from_vfs() (creates new PML4, maps segments/stack)
- * 3. Switch to new address space (CR3)
- * 4. Reset signals, set up user stack with argc/argv/envp
- * 5. Build trap frame and iretq to user mode
+ * 1. 将路径复制到内核缓冲区（用户地址空间将被替换）
+ * 2. 通过 elf_load_from_vfs() 加载 ELF（创建新 PML4，映射段/栈）
+ * 3. 切换到新地址空间（CR3）
+ * 4. 重置信号，设置带 argc/argv/envp 的用户栈
+ * 5. 构建 trap frame 并 iretq 到用户态
  *
- * On failure the old address space is restored so the process can continue.
- * On success this function never returns – it jumps to user mode.
+ * 失败时恢复旧地址空间，以便进程可以继续运行。
+ * 成功时此函数不返回 – 它跳转到用户态。
  * ======================================================================== */
 
 int process_exec(const char *path, const char *const argv[],
@@ -82,7 +81,7 @@ int process_exec(const char *path, const char *const argv[],
     if (!current || !path)
         return -1;
 
-    /* ---- 1. Copy path to kernel buffer ---- */
+    /* ---- 1. 将路径复制到内核缓冲区 ---- */
     char kpath[VFS_MAX_PATH];
     {
         size_t i;
@@ -101,7 +100,7 @@ int process_exec(const char *path, const char *const argv[],
     /* Track whether the binary has a PT_INTERP (dynamic linker) */
     int has_interp = 0;
 
-    /* ---- 3. Load ELF (creates new PML4, loads segments, maps stack) ---- */
+    /* ---- 3. 加载 ELF（创建新 PML4，加载段，映射栈） ---- */
     {
         int fd = vfs_open(kpath, VFS_O_RDONLY, 0);
         if (fd < 0) {
@@ -189,7 +188,7 @@ int process_exec(const char *path, const char *const argv[],
             load_ret = elf_load_with_base(current, buf, (size_t)file_size,
                                           pie_base);
         } else {
-            /* Regular ET_EXEC – load at original virtual addresses */
+            /* 常规 ET_EXEC – 加载到原始虚拟地址 */
             load_ret = elf_load_with_base(current, buf, (size_t)file_size, 0);
         }
 
@@ -203,7 +202,7 @@ int process_exec(const char *path, const char *const argv[],
             return -1;
         }
 
-        /* Try to load the dynamic linker (interpreter) if PT_INTERP exists */
+        /* 如果存在 PT_INTERP，尝试加载动态链接器（解释器） */
         if (has_interp && interp_path[0]) {
             int interp_fd = vfs_open(interp_path, VFS_O_RDONLY, 0);
             if (interp_fd >= 0) {
@@ -247,7 +246,7 @@ int process_exec(const char *path, const char *const argv[],
                     vfs_close(interp_fd);
                 }
             }
-            /* If the interpreter file doesn't exist, proceed without it */
+            /* 如果解释器文件不存在，不使用它继续 */
         }
 
         kfree(buf);
@@ -275,8 +274,8 @@ int process_exec(const char *path, const char *const argv[],
     uint64_t main_entry = current->entry_point; /* AT_ENTRY */
     uint64_t main_flags = 0;        /* AT_FLAGS */
 
-    /* Re-read the ELF to get phdr/program header info for auxv.
-     * We need to know where the PT_LOAD segments were mapped to compute AT_PHDR. */
+    /* 重新读取 ELF 以获取 phdr/程序头信息用于 auxv。
+     * 我们需要知道 PT_LOAD 段被映射到哪里以计算 AT_PHDR。 */
     {
         int fd2 = vfs_open(kpath, VFS_O_RDONLY, 0);
         if (fd2 >= 0) {
@@ -290,13 +289,13 @@ int process_exec(const char *path, const char *const argv[],
                         main_phnum = eh->e_phnum;
                         main_phent = eh->e_phentsize;
 
-                        /* Find the base address where the first PT_LOAD was mapped */
+                        /* 查找第一个 PT_LOAD 被映射的基址 */
                         if (eh->e_type == ET_DYN)
-                            main_base = 0; /* PIE base - we'll find it from PT_PHDR */
+                            main_base = 0; /* PIE 基址 - 我们将从 PT_PHDR 找到 */
                         else
-                            main_base = 0; /* ET_EXEC uses original addresses */
+                            main_base = 0; /* ET_EXEC 使用原始地址 */
 
-                        /* Find PT_PHDR to get the program header table address */
+                        /* 查找 PT_PHDR 以获取程序头表地址 */
                         const Elf64_Phdr *ph = (const Elf64_Phdr *)
                             ((const uint8_t *)ebuf + eh->e_phoff);
                         for (uint16_t i = 0; i < eh->e_phnum; i++) {
@@ -310,13 +309,13 @@ int process_exec(const char *path, const char *const argv[],
                                 break;
                             }
                         }
-                        /* If no PT_PHDR, compute from first PT_LOAD */
+                        /* 如果没有 PT_PHDR，从第一个 PT_LOAD 计算 */
                         if (main_phdr_addr == 0) {
                             for (uint16_t i = 0; i < eh->e_phnum; i++) {
                                 if (ph[i].p_type == PT_LOAD) {
                                     uint64_t load_base = (eh->e_type == ET_DYN)
                                         ? 0x400000ULL : 0;
-                                    /* phdr table is typically in the first LOAD segment */
+                                    /* phdr 表通常在第一个 LOAD 段中 */
                                     main_phdr_addr = load_base + eh->e_phoff;
                                     break;
                                 }
@@ -330,11 +329,11 @@ int process_exec(const char *path, const char *const argv[],
         }
     }
 
-    /* If interpreter was loaded, set AT_BASE to its load address */
+    /* 如果已加载解释器，设置 AT_BASE 为其加载地址 */
     if (has_interp)
         main_base = 0x7FF000000000ULL;
 
-    /* Count argv and copy strings to kernel space */
+    /* 计算 argv 数量并将字符串复制到内核空间 */
     int    argc_val = 0;
     char   kargv_buf[PROC_MAX_ARGS][VFS_MAX_PATH];
     size_t kargv_len[PROC_MAX_ARGS];
@@ -346,7 +345,7 @@ int process_exec(const char *path, const char *const argv[],
                 len++;
             memcpy(kargv_buf[argc_val], argv[argc_val], len);
             kargv_buf[argc_val][len] = '\0';
-            kargv_len[argc_val] = len + 1;   /* include NUL */
+            kargv_len[argc_val] = len + 1;   /* 包含 NUL */
             argc_val++;
         }
     }
@@ -385,7 +384,7 @@ int process_exec(const char *path, const char *const argv[],
         write_user_mem(current, sp, kenvp_buf[j], kenvp_len[j]);
     }
 
-    /* Align sp to 16 bytes (ABI requirement) */
+    /* 将 sp 对齐到 16 字节（ABI 要求） */
     sp &= ~0xFULL;
 
     /* Auxiliary vector (AT_NULL terminated, pairs of type+value) */
@@ -412,26 +411,26 @@ int process_exec(const char *path, const char *const argv[],
     int nauxv = sizeof(auxv) / (2 * sizeof(uint64_t));
     for (int i = nauxv - 1; i >= 0; i--) {
         sp -= 8;
-        write_user_mem(current, sp, &auxv[i * 2 + 1], 8); /* value */
+        write_user_mem(current, sp, &auxv[i * 2 + 1], 8); /* 值 */
         sp -= 8;
-        write_user_mem(current, sp, &auxv[i * 2], 8);     /* type */
+        write_user_mem(current, sp, &auxv[i * 2], 8);     /* 类型 */
     }
 
-    /* envp NULL terminator */
+    /* envp NULL 终止符 */
     sp -= 8;
     write_user_mem(current, sp, (uint64_t[]){0}, 8);
 
-    /* envp pointers (reverse order) */
+    /* envp 指针（逆序） */
     for (int j = envc_val - 1; j >= 0; j--) {
         sp -= 8;
         write_user_mem(current, sp, &kenvp_str_addr[j], 8);
     }
 
-    /* argv NULL terminator */
+    /* argv NULL 终止符 */
     sp -= 8;
     write_user_mem(current, sp, (uint64_t[]){0}, 8);
 
-    /* argv pointers (reverse order) */
+    /* argv 指针（逆序） */
     for (int j = argc_val - 1; j >= 0; j--) {
         sp -= 8;
         write_user_mem(current, sp, &kargv_str_addr[j], 8);
@@ -451,7 +450,7 @@ int process_exec(const char *path, const char *const argv[],
                     (KERNEL_STACK_PAGES * PAGE_SIZE);
     }
 
-    /* ---- 8. Jump to user mode – does not return ---- */
+    /* ---- 8. 跳转到用户态 – 不返回 ---- */
     process_enter_user(current->trap_frame);
 
     __builtin_unreachable();
@@ -469,10 +468,9 @@ void process_setup_frame(process_t *proc, uint64_t entry, uint64_t stack,
         return;
     }
 
-    /* Allocate trap_frame separately from the kernel stack.
-     * Previously this was placed at the top of the kernel stack,
-     * but subsequent function calls in user_proc_launcher would
-     * overwrite it since the stack grows downward into the same area. */
+    /* 将 trap_frame 与内核栈分开分配。
+     * 之前它被放在内核栈的顶部，但 user_proc_launcher 中
+     * 后续的函数调用会覆盖它，因为栈向下增长到同一区域。 */
     trap_frame_t *frame = kmalloc(sizeof(trap_frame_t));
     if (!frame) {
         printf("[setup_frame] ERROR: failed to allocate trap_frame\n");
@@ -484,12 +482,12 @@ void process_setup_frame(process_t *proc, uint64_t entry, uint64_t stack,
 
     memset(frame, 0, sizeof(trap_frame_t));
 
-    /* User mode register state */
+    /* 用户态寄存器状态 */
     frame->rip    = entry;
-    frame->cs     = USER_CS | 0x03;    /* 0x1B – user code with RPL 3 */
+    frame->cs     = USER_CS | 0x03;    /* 0x1B – 用户代码段，RPL 3 */
     frame->rflags = RFLAGS_IF;
     frame->rsp    = stack;
-    frame->ss     = USER_DS | 0x03;    /* 0x23 – user data with RPL 3 */
+    frame->ss     = USER_DS | 0x03;    /* 0x23 – 用户数据段，RPL 3 */
     frame->rdi    = arg;
 
     proc->trap_frame  = frame;
@@ -502,7 +500,7 @@ void process_setup_frame(process_t *proc, uint64_t entry, uint64_t stack,
 }
 
 /* ========================================================================
- * process_enter_user() – jump to user mode via iretq
+ * process_enter_user() – 通过 iretq 跳转到用户态
  * ======================================================================== */
 
 void process_enter_user(trap_frame_t *frame)
@@ -510,13 +508,13 @@ void process_enter_user(trap_frame_t *frame)
     if (!frame)
         return;
 
-    /* Set TSS rsp0 so we can return to kernel mode on interrupts */
+    /* 设置 TSS rsp0 以便中断时可以返回内核态 */
     if (current && current->kernel_stack) {
         tss.rsp0 = (uint64_t)current->kernel_stack +
                     (KERNEL_STACK_PAGES * PAGE_SIZE);
     }
 
-    /* Debug: dump entry point bytes BEFORE CR3 switch */
+    /* 调试：在 CR3 切换前转储入口点字节 */
     {
         uint64_t entry = frame->rip;
         uint64_t phys = mmu_virt_to_phys(current->pml4, entry);
@@ -546,7 +544,7 @@ void process_enter_user(trap_frame_t *frame)
     serial_put_hex(frame->ss);
     serial_puts("\n");
 
-    /* Debug: Read GS MSRs BEFORE CR3 switch */
+    /* 调试：在 CR3 切换前读取 GS MSR */
     printf("[enter_user] PRE-CR3: KERNEL_GS_BASE=%llx GS_BASE=%llx\n",
            (unsigned long long)hal_read_msr(MSR_IA32_KERNEL_GS_BASE),
            (unsigned long long)hal_read_msr(MSR_IA32_GS_BASE));
@@ -610,17 +608,17 @@ void process_enter_user(trap_frame_t *frame)
 
     __asm__ volatile (
         "cli\n\t"
-        /* Load frame pointer into r8 (callee-saved, won't be clobbered) */
+        /* 将帧指针加载到 r8（被调用者保存，不会被覆盖） */
         "mov %[frame], %%r8\n\t"
 
-        /* Set data segments to user mode (USER_DS | RPL 3 = 0x23) */
+        /* 将数据段设置为用户态（USER_DS | RPL 3 = 0x23） */
         "mov $0x23, %%ax\n\t"
         "mov %%ax, %%ds\n\t"
         "mov %%ax, %%es\n\t"
         "mov %%ax, %%fs\n\t"
         "mov %%ax, %%gs\n\t"
 
-        /* Push iretq frame: ss, rsp, rflags, cs, rip */
+        /* 压入 iretq 帧：ss, rsp, rflags, cs, rip */
         "mov 168(%%r8), %%rax\n\t"    /* frame->ss */
         "pushq %%rax\n\t"
         "mov 160(%%r8), %%rax\n\t"    /* frame->rsp */
@@ -632,7 +630,7 @@ void process_enter_user(trap_frame_t *frame)
         "mov 136(%%r8), %%rax\n\t"    /* frame->rip */
         "pushq %%rax\n\t"
 
-        /* Restore general-purpose registers from trap_frame */
+        /* 从 trap_frame 恢复通用寄存器 */
         "mov 0(%%r8), %%r15\n\t"
         "mov 8(%%r8), %%r14\n\t"
         "mov 16(%%r8), %%r13\n\t"
@@ -640,14 +638,14 @@ void process_enter_user(trap_frame_t *frame)
         "mov 32(%%r8), %%r11\n\t"
         "mov 40(%%r8), %%r10\n\t"
         "mov 48(%%r8), %%r9\n\t"
-        /* skip r8 – we're still using it */
+        /* 跳过 r8 – 我们仍在使用它 */
         "mov 64(%%r8), %%rdi\n\t"
         "mov 72(%%r8), %%rsi\n\t"
         "mov 80(%%r8), %%rdx\n\t"
         "mov 88(%%r8), %%rcx\n\t"
         "mov 96(%%r8), %%rbx\n\t"
         "mov 104(%%r8), %%rbp\n\t"
-        /* Now load rax and r8 */
+        /* 现在加载 rax 和 r8 */
         "mov 112(%%r8), %%rax\n\t"
         "mov 56(%%r8), %%r8\n\t"
 
@@ -661,7 +659,7 @@ void process_enter_user(trap_frame_t *frame)
 }
 
 /* ========================================================================
- * FD table helpers
+ * FD 表辅助函数
  * ======================================================================== */
 
 vfs_file_t **process_get_fd_table(void)

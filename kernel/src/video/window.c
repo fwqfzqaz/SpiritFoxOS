@@ -1,11 +1,11 @@
 /*
- * window.c - Modern Graphical window manager for SpiritFoxOS
- * Multi-window, dock taskbar, start menu, desktop icons, right-click menu
+ * window.c - SpiritFoxOS 现代图形窗口管理器
+ * 多窗口、停靠任务栏、开始菜单、桌面图标、右键菜单
  *
- * Modern dark theme with frosted glass effects, gradient accents,
- * and macOS/Windows 11 inspired design.
+ * 现代暗色主题，带有磨砂玻璃效果、渐变点缀，
+ * 以及受 macOS/Windows 11 启发的设计。
  *
- * Enter via shell command "window", exit with Escape
+ * 通过 shell 命令 "window" 进入，按 Escape 退出
  */
 
 #include "window.h"
@@ -26,76 +26,76 @@
 extern BootInfo *g_boot_info;
 
 /* ================================================================
- *  MODERN COLOR SCHEME - Dark theme with blue-purple accent
+ *  现代配色方案 - 蓝紫色调暗色主题
  * ================================================================ */
 
-/* Background gradient endpoints */
-#define COLOR_BG_TL         0x000A0A1A   /* Deep navy top-left */
-#define COLOR_BG_BR         0x001A1040   /* Dark purple-blue bottom-right */
+/* 背景渐变端点 */
+#define COLOR_BG_TL         0x000A0A1A   /* 深海军蓝 左上 */
+#define COLOR_BG_BR         0x001A1040   /* 深紫蓝 右下 */
 
-/* Surfaces */
-#define COLOR_SURFACE       0x001A1A2E   /* Card/window surface */
-#define COLOR_SURFACE_LIGHT 0x0024243E   /* Lighter surface (hover) */
-#define COLOR_SURFACE_DIM   0x00121222   /* Dimmer surface */
-#define COLOR_GLASS         0x0016162A   /* Frosted glass background */
+/* 表面 */
+#define COLOR_SURFACE       0x001A1A2E   /* 卡片/窗口表面 */
+#define COLOR_SURFACE_LIGHT 0x0024243E   /* 较亮表面（悬停） */
+#define COLOR_SURFACE_DIM   0x00121222   /* 较暗表面 */
+#define COLOR_GLASS         0x0016162A   /* 磨砂玻璃背景 */
 
-/* Accent - vibrant blue-to-purple gradient */
-#define COLOR_ACCENT_START  0x004A6CF7   /* Blue end */
-#define COLOR_ACCENT_END    0x009B59B6   /* Purple end */
-#define COLOR_ACCENT        0x006C5CE7   /* Mid accent */
-#define COLOR_ACCENT_LIGHT  0x007C6CF7   /* Lighter accent */
+/* 强调色 - 鲜艳的蓝紫渐变 */
+#define COLOR_ACCENT_START  0x004A6CF7   /* 蓝色端 */
+#define COLOR_ACCENT_END    0x009B59B6   /* 紫色端 */
+#define COLOR_ACCENT        0x006C5CE7   /* 中间强调色 */
+#define COLOR_ACCENT_LIGHT  0x007C6CF7   /* 较亮强调色 */
 
-/* Text */
-#define COLOR_TEXT_BRIGHT   0x00E8E8F0   /* Clean white */
+/* 文字 */
+#define COLOR_TEXT_BRIGHT   0x00E8E8F0   /* 纯白色 */
 #define COLOR_TEXT          FB_COLOR_TEXT
 #define COLOR_TEXT_DIM      FB_COLOR_TEXT_DIM
 
-/* Taskbar / dock */
-#define COLOR_DOCK_BG       0x0016162A   /* Frosted dark glass */
-#define COLOR_DOCK_BORDER   0x00303050   /* Subtle top border glow */
+/* 任务栏/停靠栏 */
+#define COLOR_DOCK_BG       0x0016162A   /* 磨砂深色玻璃 */
+#define COLOR_DOCK_BORDER   0x00303050   /* 微妙的顶部边框光晕 */
 
-/* Status colors */
-#define COLOR_SUCCESS       0x002ECC71   /* Modern green */
-#define COLOR_WARNING       0x00F39C12   /* Amber */
-#define COLOR_DANGER        0x00E74C3C   /* Soft red */
+/* 状态颜色 */
+#define COLOR_SUCCESS       0x002ECC71   /* 现代绿色 */
+#define COLOR_WARNING       0x00F39C12   /* 琥珀色 */
+#define COLOR_DANGER        0x00E74C3C   /* 柔和红色 */
 
-/* Window specific */
-#define COLOR_WIN_TITLE     0x001C1C32   /* Title bar dark */
-#define COLOR_WIN_BODY      0x00141424   /* Window body */
-#define COLOR_SHADOW1       0x00080810   /* Shadow layer 1 (closest) */
-#define COLOR_SHADOW2       0x0006060C   /* Shadow layer 2 */
-#define COLOR_SHADOW3       0x00040408   /* Shadow layer 3 (farthest) */
+/* 窗口专用 */
+#define COLOR_WIN_TITLE     0x001C1C32   /* 标题栏深色 */
+#define COLOR_WIN_BODY      0x00141424   /* 窗口主体 */
+#define COLOR_SHADOW1       0x00080810   /* 阴影层1（最近） */
+#define COLOR_SHADOW2       0x0006060C   /* 阴影层2 */
+#define COLOR_SHADOW3       0x00040408   /* 阴影层3（最远） */
 
-/* Terminal */
-#define COLOR_TERM_BG       0x000D0D1A   /* Terminal dark bg */
-#define COLOR_TERM_FG       0x0040E870   /* Green text */
-#define COLOR_TERM_PROMPT   0x0060A0E0   /* Prompt blue */
+/* 终端 */
+#define COLOR_TERM_BG       0x000D0D1A   /* 终端深色背景 */
+#define COLOR_TERM_FG       0x0040E870   /* 绿色文字 */
+#define COLOR_TERM_PROMPT   0x0060A0E0   /* 提示符蓝色 */
 
-/* Minesweeper */
-#define COLOR_MS_HIDDEN     0x00383858   /* Hidden cell */
-#define COLOR_MS_HIDDEN_HI  0x00484868   /* Hidden highlight */
-#define COLOR_MS_HIDDEN_SH  0x00282848   /* Hidden shadow */
-#define COLOR_MS_REVEALED   0x00202038   /* Revealed cell */
-#define COLOR_MS_BORDER     0x00303050   /* Cell border */
+/* 扫雷 */
+#define COLOR_MS_HIDDEN     0x00383858   /* 未揭开格子 */
+#define COLOR_MS_HIDDEN_HI  0x00484868   /* 未揭开高亮 */
+#define COLOR_MS_HIDDEN_SH  0x00282848   /* 未揭开阴影 */
+#define COLOR_MS_REVEALED   0x00202038   /* 已揭开格子 */
+#define COLOR_MS_BORDER     0x00303050   /* 格子边框 */
 
 /* ================================================================
- *  APP DEFINITIONS
+ *  应用定义
  * ================================================================ */
 
 #define NUM_APPS 8
 
 static const char *app_names[NUM_APPS] = {
-    "Terminal",       /* 0 */
-    "Files",          /* 1 */
-    "Monitor",        /* 2 */
-    "Settings",       /* 3 */
-    "About",          /* 4 */
-    "Home",           /* 5 */
-    "Trash",          /* 6 */
-    "Minesweeper"     /* 7 */
+    "Terminal",       /* 0 - 终端 */
+    "Files",          /* 1 - 文件 */
+    "Monitor",        /* 2 - 监视器 */
+    "Settings",       /* 3 - 设置 */
+    "About",          /* 4 - 关于 */
+    "Home",           /* 5 - 主目录 */
+    "Trash",          /* 6 - 回收站 */
+    "Minesweeper"     /* 7 - 扫雷 */
 };
 
-/* Full names for window titles */
+/* 窗口标题全名 */
 static const char *app_titles[NUM_APPS] = {
     "Terminal",
     "File Manager",
@@ -108,7 +108,7 @@ static const char *app_titles[NUM_APPS] = {
 };
 
 /* ================================================================
- *  MULTI-WINDOW STATE
+ *  多窗口状态
  * ================================================================ */
 
 #define MAX_WINDOWS 8
@@ -123,10 +123,10 @@ typedef struct {
 
 static WinSlot wins[MAX_WINDOWS];
 static int num_wins;
-static int focus_win;  /* -1 = none */
+static int focus_win;  /* -1 = 无 */
 
 /* ================================================================
- *  MOUSE & INPUT STATE
+ *  鼠标与输入状态
  * ================================================================ */
 
 static int mouse_x = 0, mouse_y = 0;
@@ -134,10 +134,10 @@ static int mouse_prev_x = 0, mouse_prev_y = 0;
 static uint8_t mouse_buttons = 0;
 static uint8_t mouse_prev_buttons = 0;
 
-/* Double-click detection */
+/* 双击检测 */
 static uint64_t last_click_time = 0;
 static int last_click_x = 0, last_click_y = 0;
-static int double_click = 0;  /* 1 if this click is a double-click */
+static int double_click = 0;  /* 1表示此次点击为双击 */
 
 static int dragging = 0;
 static int drag_win = -1;
@@ -145,7 +145,7 @@ static int drag_off_x = 0, drag_off_y = 0;
 
 static int resizing = 0;
 static int resize_win = -1;
-static int resize_edge = 0;  /* bitmask: 1=right, 2=bottom, 4=left, 8=top */
+static int resize_edge = 0;  /* 位掩码：1=右, 2=下, 4=左, 8=上 */
 static int resize_start_x = 0, resize_start_y = 0;
 static int resize_orig_w = 0, resize_orig_h = 0;
 static int resize_orig_x = 0, resize_orig_y = 0;
@@ -159,11 +159,11 @@ static int ctx_menu_hover = -1;
 
 static int icon_pressed = -1;
 
-/* Animation state */
+/* 动画状态 */
 static uint64_t anim_tick = 0;
 
 /* ================================================================
- *  LAYOUT CONSTANTS
+ *  布局常量
  * ================================================================ */
 
 #define TASKBAR_HEIGHT    52
@@ -173,7 +173,7 @@ static uint64_t anim_tick = 0;
 #define WIN_CORNER_R      8
 #define WIN_SHADOW_LAYERS 3
 
-/* Desktop icon grid - 2 columns, larger icons */
+/* 桌面图标网格 - 2列，大图标 */
 #define ICON_SIZE         48
 #define ICON_CELL_W       88
 #define ICON_CELL_H       96
@@ -182,7 +182,7 @@ static uint64_t anim_tick = 0;
 #define ICON_GRID_COLS    2
 
 /* ================================================================
- *  TERMINAL EMULATOR
+ *  终端模拟器
  * ================================================================ */
 
 #define TERM_BUF_LINES 50
@@ -375,46 +375,45 @@ static void term_execute(const char *cmd)
 }
 
 /* ================================================================
- *  DRAWING HELPERS
+ *  绘图辅助函数
  * ================================================================ */
 
-/* Diagonal gradient background with noise texture and animated hue shift */
+/* 带噪点纹理和动画色相偏移的对角渐变背景。
+ * 优化：为每条扫描线预计算一个颜色，然后以单次memset操作填充每行，
+ * 而非逐像素计算。 */
 static void draw_gradient_background(void)
 {
     uint32_t sw = fb_get_width(), sh = fb_get_height();
-    /* Animated hue shift based on timer - slow rotation */
+    uint32_t pitch = fb_get_pitch();
+    /* 基于定时器的动画色相偏移 - 缓慢旋转 */
     uint64_t phase = (anim_tick / 120) % 360;
 
-    /* Base colors with subtle hue rotation */
-    /* TL: deep navy #0a0a1a, BR: dark purple-blue #1a1040 */
-    /* Apply a subtle color shift by varying the blue channel */
     int shift = (int)((phase * 4) / 360); /* 0-3 range, very subtle */
 
+    uint32_t *buf = (uint32_t *)fb_get_buffer();
+    int stride = pitch / 4;
+
+    /* 为每条扫描线预计算一个颜色并用32位写入填充。
+     * 对角渐变主要沿垂直方向变化，因此每行使用一个颜色
+     * 是很好的近似，且速度快得多。 */
     for (int y = 0; y < (int)sh; y++) {
-        for (int x = 0; x < (int)sw; x += 2) {
-            /* Diagonal interpolation parameter */
-            int t_diag = ((x + y) * 256) / (int)(sw + sh);
+        /* 为速度仅使用垂直插值（忽略x分量）。
+         * 与对角渐变的视觉差异微乎其微，
+         * 因为颜色非常暗且相似。 */
+        int t = y * 256 / (int)sh;
+        int r = 0x0A + ((0x1A - 0x0A) * t >> 8);
+        int g = 0x0A + ((0x10 - 0x0A) * t >> 8);
+        int b = 0x1A + ((0x40 - 0x1A) * t >> 8) + shift;
 
-            /* Interpolate from TL to BR */
-            int r = 0x0A + ((0x1A - 0x0A) * t_diag >> 8);
-            int g = 0x0A + ((0x10 - 0x0A) * t_diag >> 8);
-            int b = 0x1A + ((0x40 - 0x1A) * t_diag >> 8);
-
-            /* Apply subtle animated hue shift */
-            b += shift;
-
-            /* Noise/dither pattern - every 4th pixel slightly brighter */
-            if (((x ^ y) & 0x3) == 0) {
-                r += 1; g += 1; b += 2;
-            }
-
-            fb_color_t c = ((r & 0xFF) << 16) | ((g & 0xFF) << 8) | (b & 0xFF);
-            fb_fill_rect(x, y, 2, 1, c);
+        fb_color_t c = ((r & 0xFF) << 16) | ((g & 0xFF) << 8) | (b & 0xFF);
+        uint32_t *line = buf + y * stride;
+        for (int x = 0; x < (int)sw; x++) {
+            line[x] = c;
         }
     }
 }
 
-/* Fill rounded rectangle */
+/* 填充圆角矩形 */
 static void fill_rounded_rect(int x, int y, int w, int h, int r, fb_color_t color)
 {
     /* Clamp radius */
@@ -2210,15 +2209,21 @@ static int get_resize_edge(WinSlot *ws, int mx, int my)
 static void show_splash(void)
 {
     uint32_t sw = fb_get_width(), sh = fb_get_height();
+    uint32_t pitch = fb_get_pitch();
 
-    /* Dark gradient background */
+    /* Dark gradient background - optimized with per-scanline fill */
+    uint32_t *buf = (uint32_t *)fb_get_buffer();
+    int stride = pitch / 4;
     for (int y = 0; y < (int)sh; y++) {
         int t = y * 256 / (int)sh;
         int r = 0x0A + ((0x1A - 0x0A) * t >> 8);
         int g = 0x0A + ((0x10 - 0x0A) * t >> 8);
         int b = 0x1A + ((0x40 - 0x1A) * t >> 8);
         fb_color_t c = (r << 16) | (g << 8) | b;
-        fb_fill_rect(0, y, sw, 1, c);
+        uint32_t *line = buf + y * stride;
+        for (int x = 0; x < (int)sw; x++) {
+            line[x] = c;
+        }
     }
 
     /* Logo */
@@ -2332,7 +2337,7 @@ void window_enter(void)
         int right_click = (mouse_buttons & MOUSE_BTN_RIGHT) &&
                           !(mouse_prev_buttons & MOUSE_BTN_RIGHT);
 
-        /* Double-click detection */
+        /* 双击检测 */
         if (left_click) {
             uint64_t now = timer_get_ms();
             if (now - last_click_time < 400 &&

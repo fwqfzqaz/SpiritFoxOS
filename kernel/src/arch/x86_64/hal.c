@@ -13,7 +13,7 @@ void hal_map_2mb(uintptr_t virt, uintptr_t phys, uint64_t flags)
 
     int need_tlb_flush = 0;
 
-    /* Walk PML4 -> PDPT */
+    /* 遍历 PML4 -> PDPT */
     if (!(pml4[pml4_idx] & PTE_PRESENT)) {
         void *new_page = alloc_page();
         if (!new_page) return;
@@ -23,7 +23,7 @@ void hal_map_2mb(uintptr_t virt, uintptr_t phys, uint64_t flags)
     }
     uint64_t *pdpt = (uint64_t *)(pml4[pml4_idx] & PTE_ADDR_MASK);
 
-    /* Walk PDPT -> PD */
+    /* 遍历 PDPT -> PD */
     if (!(pdpt[pdpt_idx] & PTE_PRESENT)) {
         void *new_page = alloc_page();
         if (!new_page) return;
@@ -33,7 +33,7 @@ void hal_map_2mb(uintptr_t virt, uintptr_t phys, uint64_t flags)
     }
     uint64_t *pd = (uint64_t *)(pdpt[pdpt_idx] & PTE_ADDR_MASK);
 
-    /* Map 2MB page in PD */
+    /* 在 PD 中映射 2MB 页 */
     pd[pd_idx] = phys | flags | PTE_HUGE;
 
     if (need_tlb_flush) {
@@ -45,7 +45,7 @@ void hal_map_2mb(uintptr_t virt, uintptr_t phys, uint64_t flags)
 
 void hal_map_4kb(uintptr_t virt, uintptr_t phys, uint64_t flags)
 {
-    /* Use unified MMU API for 4KB page mapping */
+    /* 使用统一的 MMU API 进行 4KB 页映射 */
     uint64_t *pte = mmu_walk_page(hal_read_cr3() & PTE_ADDR_MASK, virt, 1);
     if (!pte) return;
 
@@ -73,7 +73,7 @@ void hal_ensure_mapped_mmio(uintptr_t phys, size_t size)
     }
 }
 
-/* Map a 1GB page at virtual address to physical address using PDPT entry */
+/* 使用 PDPT 条目在虚拟地址映射 1GB 页到物理地址 */
 void hal_map_1gb(uintptr_t virt, uintptr_t phys, uint64_t flags)
 {
     uint64_t *pml4 = (uint64_t *)(hal_read_cr3() & PTE_ADDR_MASK);
@@ -81,7 +81,7 @@ void hal_map_1gb(uintptr_t virt, uintptr_t phys, uint64_t flags)
     uint64_t pml4_idx = (virt >> 39) & 0x1FF;
     uint64_t pdpt_idx = (virt >> 30) & 0x1FF;
 
-    /* Walk PML4 -> PDPT */
+    /* 遍历 PML4 -> PDPT */
     if (!(pml4[pml4_idx] & PTE_PRESENT)) {
         void *new_page = alloc_page();
         if (!new_page) return;
@@ -90,7 +90,7 @@ void hal_map_1gb(uintptr_t virt, uintptr_t phys, uint64_t flags)
     }
     uint64_t *pdpt = (uint64_t *)(pml4[pml4_idx] & PTE_ADDR_MASK);
 
-    /* Map 1GB page directly in PDPT (PTE_HUGE at PDPT level = 1GB page) */
+    /* 直接在 PDPT 中映射 1GB 页（PDPT 层级的 PTE_HUGE = 1GB 页） */
     pdpt[pdpt_idx] = phys | flags | PTE_HUGE | PTE_PRESENT;
 
     hal_flush_tlb_page(virt);

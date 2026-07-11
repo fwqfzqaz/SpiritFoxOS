@@ -9,7 +9,7 @@
 #include "mmu.h"
 
 /* ========================================================================
- * arch_prctl sub-functions
+ * arch_prctl 子功能
  * ======================================================================== */
 
 #define ARCH_SET_GS   0x1001
@@ -18,7 +18,7 @@
 #define ARCH_GET_GS   0x1004
 
 /* ========================================================================
- * Process/thread/signal syscalls
+ * 进程/线程/信号系统调用
  * ======================================================================== */
 
 int64_t sys_fork(trap_frame_t *frame)
@@ -37,7 +37,7 @@ int64_t sys_execve(trap_frame_t *frame)
     if (ret < 0)
         return -ENOENT;
 
-    /* process_exec does not return on success */
+    /* process_exec 成功时不返回 */
     __builtin_unreachable();
 }
 
@@ -113,7 +113,7 @@ int64_t sys_setuid(trap_frame_t *frame)
     if (!proc)
         return -ESRCH;
 
-    /* Only root (uid 0) can set uid */
+    /* 仅 root（uid 0）可以设置 uid */
     if (proc->uid != 0 && proc->euid != 0)
         return -EPERM;
 
@@ -129,7 +129,7 @@ int64_t sys_setgid(trap_frame_t *frame)
     if (!proc)
         return -ESRCH;
 
-    /* Only root (uid 0) can set gid */
+    /* 仅 root（uid 0）可以设置 gid */
     if (proc->uid != 0 && proc->euid != 0)
         return -EPERM;
 
@@ -151,7 +151,7 @@ int64_t sys_getgroups(trap_frame_t *frame)
 int64_t sys_setgroups(trap_frame_t *frame)
 {
     (void)frame;
-    /* No supplementary groups - root only, ignore */
+    /* 无补充组 - 仅限 root，忽略 */
     return 0;
 }
 
@@ -196,7 +196,7 @@ int64_t sys_rt_sigaction(trap_frame_t *frame)
         oact->sa_restorer = proc->signal_restorer;
     }
 
-    /* Set new action if provided */
+    /* 如果提供，设置新操作 */
     if (act) {
         proc->signal_handlers[sig - 1] = act->sa_handler;
         proc->signal_flags[sig - 1]    = act->sa_flags;
@@ -220,27 +220,27 @@ int64_t sys_rt_sigprocmask(trap_frame_t *frame)
     if (!proc)
         return -ESRCH;
 
-    /* Return old mask if requested */
+    /* 如果请求，返回旧掩码 */
     if (oldset)
         *oldset = proc->signal_mask;
 
-    /* Set new mask if provided */
+    /* 如果提供，设置新掩码 */
     if (set) {
         switch (how) {
         case 0: /* SIG_BLOCK */
             proc->signal_mask |= *set;
             break;
-        case 1: /* SIG_UNBLOCK */
+        case 1: /* SIG_UNBLOCK 解除阻塞 */
             proc->signal_mask &= ~(*set);
             break;
-        case 2: /* SIG_SETMASK */
+        case 2: /* SIG_SETMASK 设置掩码 */
             proc->signal_mask = *set;
             break;
         default:
             return -EINVAL;
         }
 
-        /* Never allow blocking SIGKILL and SIGSTOP */
+        /* 永远不允许阻塞 SIGKILL 和 SIGSTOP */
         proc->signal_mask &= ~((1ULL << (SIGKILL - 1)) | (1ULL << (SIGSTOP - 1)));
     }
 
@@ -253,12 +253,12 @@ int64_t sys_rt_sigreturn(trap_frame_t *frame)
     if (!proc || !proc->trap_frame)
         return -EINVAL;
 
-    /* The signal handler pushed a trap_frame_t copy on the user stack,
-     * followed by the signal number (8 bytes).  The current user RSP
-     * points after the return address (which was popped by ret).
+    /* 信号处理程序在用户栈上压入了一个 trap_frame_t 副本，
+     * 随后是信号编号（8 字节）。当前用户态 RSP
+     * 指向返回地址之后（返回地址已被 ret 弹出）。
      *
-     * Layout was: [ret_addr][sig_num(8)][trap_frame_t copy]
-     * After handler ret: RSP points to [sig_num(8)][trap_frame_t copy]
+     * 布局为：[ret_addr][sig_num(8)][trap_frame_t 副本]
+     * 处理程序 ret 后：RSP 指向 [sig_num(8)][trap_frame_t 副本]
      */
 
     uint64_t user_sp = frame->rsp;
@@ -266,17 +266,17 @@ int64_t sys_rt_sigreturn(trap_frame_t *frame)
     /* Skip signal number */
     user_sp += 8;
 
-    /* Read the saved trap frame from user stack using mmu_virt_to_phys */
+    /* 使用 mmu_virt_to_phys 从用户栈读取保存的陷阱帧 */
     uint64_t phys = mmu_virt_to_phys(proc->pml4, user_sp);
     if (phys == 0)
         return -EFAULT;
 
     trap_frame_t *saved_tf = (trap_frame_t *)(uintptr_t)phys;
 
-    /* Restore the original trap frame */
+    /* 恢复原始陷阱帧 */
     *frame = *saved_tf;
 
-    /* Adjust RSP past the saved trap frame */
+    /* 调整 RSP 跳过保存的陷阱帧 */
     frame->rsp = user_sp + sizeof(trap_frame_t);
 
     /* Return the original rax value */
@@ -346,7 +346,7 @@ int64_t sys_tgkill(trap_frame_t *frame)
     int tid = (int)frame->rsi;
     int sig = (int)frame->rdx;
     (void)tgid;
-    /* For now, treat like kill */
+    /* 目前视为与 kill 相同 */
     return process_kill(tid, sig);
 }
 
@@ -360,7 +360,7 @@ int64_t sys_tkill(trap_frame_t *frame)
 int64_t sys_sigaltstack(trap_frame_t *frame)
 {
     (void)frame;
-    /* Stub: sigaltstack not fully implemented */
+    /* 桩函数：sigaltstack 尚未完全实现 */
     return 0;
 }
 
@@ -414,7 +414,7 @@ int64_t sys_prctl(trap_frame_t *frame)
 
 int64_t sys_prlimit64(trap_frame_t *frame)
 {
-    /* Stub: resource limits not implemented */
+    /* 桩函数：资源限制未实现 */
     (void)frame;
     return 0;
 }

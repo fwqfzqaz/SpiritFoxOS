@@ -29,7 +29,7 @@ typedef struct {
 static IDTEntry idt[IDT_ENTRIES];
 static IDTPtr   idt_ptr;
 
-/* ISR stub declarations (defined in assembly) */
+/* ISR 存根声明（在汇编中定义） */
 extern void isr0(void);  extern void isr1(void);  extern void isr2(void);
 extern void isr3(void);  extern void isr4(void);  extern void isr5(void);
 extern void isr6(void);  extern void isr7(void);  extern void isr8(void);
@@ -42,7 +42,7 @@ extern void isr24(void); extern void isr25(void); extern void isr26(void);
 extern void isr27(void); extern void isr28(void); extern void isr29(void);
 extern void isr30(void); extern void isr31(void);
 
-/* IRQ stubs (vectors 32-47) */
+/* IRQ 存根（向量 32-47） */
 extern void irq0(void);  extern void irq1(void);  extern void irq2(void);
 extern void irq3(void);  extern void irq4(void);  extern void irq5(void);
 extern void irq6(void);  extern void irq7(void);  extern void irq8(void);
@@ -50,10 +50,10 @@ extern void irq9(void);  extern void irq10(void); extern void irq11(void);
 extern void irq12(void); extern void irq13(void); extern void irq14(void);
 extern void irq15(void);
 
-/* Spurious interrupt stub (vector 255) */
+/* 伪中断存根（向量 255） */
 extern void irq_spurious(void);
 
-/* Syscall entry point (defined in isr_stub.S) */
+/* 系统调用入口点（在 isr_stub.S 中定义） */
 extern void syscall_entry(void);
 
 static const char* exception_messages[] = {
@@ -68,21 +68,21 @@ static const char* exception_messages[] = {
     "Reserved", "Reserved", "Reserved", "Reserved"
 };
 
-/* ISR handler - called from assembly for exceptions (INT 0-31) */
+/* ISR 处理程序 - 从汇编调用，用于异常（INT 0-31） */
 void isr_handler(uint64_t int_num, uint64_t error_code)
 {
-    /* For page faults (vector 14), try COW handling first.
-     * Error code bit 1 (W/R) = 1 means write-caused fault.
-     * Error code bit 0 (P)   = 1 means protection fault (page present but not writable).
-     * This combination is exactly what COW produces. */
+    /* 对于缺页异常（向量 14），先尝试 COW 处理。
+     * 错误码第 1 位 (W/R) = 1 表示写操作引起的缺页。
+     * 错误码第 0 位 (P)   = 1 表示保护错误（页存在但不可写）。
+     * 此组合正是 COW 产生的典型情况。 */
     if (int_num == 14) {
         uint64_t cr2;
         __asm__ volatile ("mov %%cr2, %0" : "=r"(cr2));
 
-        /* Write fault on a present page: (error_code & 0x3) == 0x3 */
+        /* 写操作缺页且页存在：(error_code & 0x3) == 0x3 */
         if ((error_code & 0x3) == 0x3) {
             if (process_cow_page_fault(cr2) == 0) {
-                /* COW handled successfully - retry the faulting instruction */
+                /* COW 处理成功 - 重试引起缺页的指令 */
                 return;
             }
         }
@@ -99,7 +99,7 @@ void isr_handler(uint64_t int_num, uint64_t error_code)
     serial_puts("] Error code: ");
     serial_put_hex(error_code);
 
-    /* For page faults, print CR2 (faulting address) */
+    /* 对于缺页异常，打印 CR2（缺页地址） */
     if (int_num == 14) {
         uint64_t cr2;
         __asm__ volatile ("mov %%cr2, %0" : "=r"(cr2));
@@ -109,7 +109,7 @@ void isr_handler(uint64_t int_num, uint64_t error_code)
 
     serial_puts("\nSystem Halted.\n");
 
-    /* If current process is a user process, kill it instead of halting */
+    /* 如果当前进程是用户进程，则终止它而不是停机 */
     process_t *cur = process_current();
     if (cur && !(cur->flags & PROC_FLAG_KERNEL) && cur->pid > 0) {
         serial_puts("Killing user process PID=");
@@ -117,7 +117,7 @@ void isr_handler(uint64_t int_num, uint64_t error_code)
         serial_puts("\n");
         cur->state = PROC_ZOMBIE;
         cur->exit_code = 128 + (int)int_num;
-        /* Don't halt - let scheduler continue */
+        /* 不停机 - 让调度器继续运行 */
         hal_enable_interrupts();
         for (;;) { __asm__ volatile ("hlt"); }
     }
@@ -127,50 +127,50 @@ void isr_handler(uint64_t int_num, uint64_t error_code)
     }
 }
 
-/* IRQ handler - called from assembly for hardware interrupts */
+/* IRQ 处理程序 - 从汇编调用，用于硬件中断 */
 void irq_handler(uint64_t int_num, uint64_t error_code)
 {
     (void)error_code;
 
     switch (int_num) {
-    case 32:  /* Timer (PIT via IOAPIC or LAPIC timer) */
+    case 32:  /* 定时器（通过 IOAPIC 的 PIT 或 LAPIC 定时器） */
         timer_handler();
         break;
-    case 33:  /* Keyboard (IRQ1 via IOAPIC) */
+    case 33:  /* 键盘（通过 IOAPIC 的 IRQ1） */
         keyboard_handler();
         break;
-    case 44:  /* PS/2 Mouse (IRQ12 via IOAPIC) */
+    case 44:  /* PS/2 鼠标（通过 IOAPIC 的 IRQ12） */
         mouse_handler();
         break;
-    case 43:  /* RTL8139 NIC (IRQ11 via IOAPIC) */
+    case 43:  /* RTL8139 网卡（通过 IOAPIC 的 IRQ11） */
         rtl8139_irq_handler();
         break;
     default:
-        /* Other IRQs - currently no handler */
+        /* 其他 IRQ - 当前无处理程序 */
         break;
     }
 
-    /* Send EOI: use LAPIC if available, otherwise fall back to PIC */
+    /* 发送 EOI：如果可用则使用 LAPIC，否则回退到 PIC */
     apic_eoi();
     if (int_num >= 40) {
-        /* Slave PIC EOI (for legacy compatibility) */
+        /* 从 PIC EOI（用于传统兼容） */
         hal_outb(0xA0, 0x20);
     }
 
-    /* Check if rescheduling is needed after timer tick */
+    /* 检查定时器滴答后是否需要重新调度 */
     if (int_num == 32 && need_reschedule_check()) {
         scheduler_schedule();
     }
 }
 
-/* Spurious interrupt handler */
+/* 伪中断处理程序 */
 void spurious_handler(uint64_t int_num, uint64_t error_code)
 {
     (void)int_num;
     (void)error_code;
-    /* Spurious interrupts must NOT send EOI to IOAPIC,
-     * only to LAPIC if it was a real APIC spurious interrupt */
-    /* For LAPIC spurious, no EOI is needed */
+    /* 伪中断不能向 IOAPIC 发送 EOI，
+     * 仅当是真正的 APIC 伪中断时才向 LAPIC 发送 */
+    /* 对于 LAPIC 伪中断，不需要 EOI */
 }
 
 void idt_set_gate(uint8_t num, uint64_t handler, uint16_t selector, uint8_t type_attr)
@@ -194,7 +194,7 @@ void idt_init(void)
     idt_ptr.limit = sizeof(IDTEntry) * IDT_ENTRIES - 1;
     idt_ptr.base  = (uint64_t)&idt;
 
-    /* Zero out IDT */
+    /* 清零 IDT */
     for (int i = 0; i < IDT_ENTRIES; i++) {
         idt[i].offset_low  = 0;
         idt[i].selector    = 0;
@@ -205,24 +205,24 @@ void idt_init(void)
         idt[i].reserved    = 0;
     }
 
-    /* Remap PIC: master IRQ 0-7 -> INT 32-39, slave IRQ 8-15 -> INT 40-47
-     * This is needed even with APIC to prevent spurious PIC interrupts
-     * from triggering CPU exceptions (INT 8-15). PIC will be masked later
-     * by apic_init(). */
-    hal_outb(0x20, 0x11);  /* ICW1: master, cascade, ICW4 needed */
-    hal_outb(0xA0, 0x11);  /* ICW1: slave, cascade, ICW4 needed */
-    hal_outb(0x21, 0x20);  /* ICW2: master offset 32 */
-    hal_outb(0xA1, 0x28);  /* ICW2: slave offset 40 */
-    hal_outb(0x21, 0x04);  /* ICW3: master cascade */
-    hal_outb(0xA1, 0x02);  /* ICW3: slave cascade */
-    hal_outb(0x21, 0x01);  /* ICW4: 8086 mode */
-    hal_outb(0xA1, 0x01);  /* ICW4: 8086 mode */
+    /* 重映射 PIC：主 IRQ 0-7 -> INT 32-39，从 IRQ 8-15 -> INT 40-47
+     * 即使使用 APIC 也需要这样做，以防止伪 PIC 中断
+     * 触发 CPU 异常（INT 8-15）。PIC 稍后会被
+     * apic_init() 屏蔽。 */
+    hal_outb(0x20, 0x11);  /* ICW1：主片，级联，需要 ICW4 */
+    hal_outb(0xA0, 0x11);  /* ICW1：从片，级联，需要 ICW4 */
+    hal_outb(0x21, 0x20);  /* ICW2：主片偏移 32 */
+    hal_outb(0xA1, 0x28);  /* ICW2：从片偏移 40 */
+    hal_outb(0x21, 0x04);  /* ICW3：主片级联 */
+    hal_outb(0xA1, 0x02);  /* ICW3：从片级联 */
+    hal_outb(0x21, 0x01);  /* ICW4：8086 模式 */
+    hal_outb(0xA1, 0x01);  /* ICW4：8086 模式 */
 
-    /* Mask all PIC IRQs initially - APIC will handle interrupts */
+    /* 初始屏蔽所有 PIC IRQ - APIC 将处理中断 */
     hal_outb(0x21, 0xFF);
     hal_outb(0xA1, 0xFF);
 
-    /* Set up exception handlers (ISR 0-31) */
+    /* 设置异常处理程序（ISR 0-31） */
     idt_set_gate(0,  (uint64_t)isr0,  0x08, IDT_TYPE_TRAP);
     idt_set_gate(1,  (uint64_t)isr1,  0x08, IDT_TYPE_TRAP);
     idt_set_gate(2,  (uint64_t)isr2,  0x08, IDT_TYPE_TRAP);
@@ -256,7 +256,7 @@ void idt_init(void)
     idt_set_gate(30, (uint64_t)isr30, 0x08, IDT_TYPE_TRAP);
     idt_set_gate(31, (uint64_t)isr31, 0x08, IDT_TYPE_TRAP);
 
-    /* Set up IRQ handlers (vectors 32-47) */
+    /* 设置 IRQ 处理程序（向量 32-47） */
     idt_set_gate(32, (uint64_t)irq0,  0x08, IDT_TYPE_INTERRUPT);
     idt_set_gate(33, (uint64_t)irq1,  0x08, IDT_TYPE_INTERRUPT);
     idt_set_gate(34, (uint64_t)irq2,  0x08, IDT_TYPE_INTERRUPT);
@@ -274,26 +274,26 @@ void idt_init(void)
     idt_set_gate(46, (uint64_t)irq14, 0x08, IDT_TYPE_INTERRUPT);
     idt_set_gate(47, (uint64_t)irq15, 0x08, IDT_TYPE_INTERRUPT);
 
-    /* Spurious interrupt handler (vector 255) */
+    /* 伪中断处理程序（向量 255） */
     idt_set_gate(255, (uint64_t)irq_spurious, 0x08, IDT_TYPE_INTERRUPT);
 
-    /* Load IDT - but do NOT enable interrupts yet (sti).
-     * Interrupts will be enabled after APIC is initialized. */
+    /* 加载 IDT - 但还不要启用中断（sti）。
+     * 中断将在 APIC 初始化后启用。 */
     idt_flush((uint64_t)&idt_ptr);
 
-    /* Set up syscall interface via MSRs */
-    /* Enable SYSCALL/SYSRET */
+    /* 通过 MSR 设置系统调用接口 */
+    /* 启用 SYSCALL/SYSRET */
     uint64_t efer = hal_read_msr(MSR_IA32_EFER);
-    hal_write_msr(MSR_IA32_EFER, efer | 1);  /* SCE bit */
+    hal_write_msr(MSR_IA32_EFER, efer | 1);  /* SCE 位 */
 
-    /* Set up SYSCALL entry point */
+    /* 设置 SYSCALL 入口点 */
     hal_write_msr(MSR_IA32_STAR, ((uint64_t)0x1B << 48) | ((uint64_t)0x08 << 32));
     hal_write_msr(MSR_IA32_LSTAR, (uint64_t)syscall_entry);
-    hal_write_msr(MSR_IA32_FMASK, 0x200);  /* Clear IF on syscall */
+    hal_write_msr(MSR_IA32_FMASK, 0x200);  /* 系统调用时清除 IF */
 
-    /* Per-CPU scratch space allocation is deferred to syscall_init()
-     * because alloc_page() is not available until memory_init() runs.
-     * We just set GS_BASE to 0 for now. */
+    /* 每 CPU 暂存空间的分配推迟到 syscall_init()
+     * 因为 alloc_page() 在 memory_init() 运行前不可用。
+     * 目前先将 GS_BASE 设为 0。 */
     hal_write_msr(MSR_IA32_GS_BASE, 0);
     hal_write_msr(MSR_IA32_KERNEL_GS_BASE, 0);
 }

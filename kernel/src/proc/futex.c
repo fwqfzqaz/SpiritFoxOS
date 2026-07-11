@@ -74,7 +74,7 @@ int process_futex_wait(uint32_t *uaddr, uint32_t val, uint64_t timeout_ms)
 }
 
 /* ========================================================================
- * process_futex_wake() – wake processes waiting on a futex
+ * process_futex_wake() – 唤醒等待 futex 的进程
  * ======================================================================== */
 
 int process_futex_wake(uint32_t *uaddr, int count)

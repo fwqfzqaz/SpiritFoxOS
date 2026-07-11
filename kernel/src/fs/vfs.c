@@ -6,30 +6,30 @@
 #include "process.h"
 
 /* ========================================================================
- * Global VFS state
+ * 全局 VFS 状态
  * ======================================================================== */
-static int vfs_debug_resolve = 0;  /* Set to 1 to enable VFS_RESOLVE debug logs */
+static int vfs_debug_resolve = 0;  /* 设为 1 以启用 VFS_RESOLVE 调试日志 */
 
-/* Registered filesystem types */
+/* 已注册的文件系统类型 */
 #define VFS_MAX_FS_TYPES 8
 static vfs_filesystem_t *fs_types[VFS_MAX_FS_TYPES];
 static int fs_type_count = 0;
 
-/* Mount points */
+/* 挂载点 */
 static vfs_mount_t mounts[VFS_MAX_MOUNTS];
 static int mount_count = 0;
 
-/* Root dentry */
+/* 根目录项 */
 static vfs_dentry_t *root_dentry = NULL;
 static vfs_inode_t  *root_inode  = NULL;
 
-/* Current working directory */
+/* 当前工作目录 */
 static char cwd[VFS_MAX_PATH] = "/";
 
-/* File descriptor table (fallback for early boot before process_init) */
+/* 文件描述符表（process_init 之前早期启动时的后备） */
 static vfs_file_t *fd_table[VFS_MAX_FD];
 
-/* Get the active fd table - prefer per-process if available */
+/* 获取当前活跃的 fd 表 - 优先使用每进程表 */
 vfs_file_t **vfs_get_fd_table(void)
 {
     process_t *proc = process_current();
@@ -40,7 +40,7 @@ vfs_file_t **vfs_get_fd_table(void)
 }
 
 /* ========================================================================
- * Dentry helpers
+ * 目录项辅助函数
  * ======================================================================== */
 
 static vfs_dentry_t *dentry_alloc(const char *name, vfs_inode_t *inode)
@@ -61,7 +61,7 @@ static vfs_dentry_t *dentry_alloc(const char *name, vfs_inode_t *inode)
 static void dentry_add_child(vfs_dentry_t *parent, vfs_dentry_t *child)
 {
     child->parent = parent;
-    /* Add to beginning of child list */
+    /* 添加到子项列表头部 */
     child->next = parent->child;
     parent->child = child;
 }
@@ -78,20 +78,20 @@ static vfs_dentry_t *dentry_lookup(vfs_dentry_t *parent, const char *name)
 }
 
 /* ========================================================================
- * Path resolution
+ * 路径解析
  * ======================================================================== */
 
-/* Maximum symlink recursion depth */
+/* 最大符号链接递归深度 */
 #define VFS_MAX_SYMLINK_DEPTH 8
 
-/* Split a path into components. Returns number of components.
- * Components are stored in the provided array. */
+/* 将路径拆分为组件。返回组件数量。
+ * 组件存储在提供的数组中。 */
 static int path_split(const char *path, char components[][VFS_MAX_NAME], int max_components)
 {
     int count = 0;
     int i = 0;
 
-    /* Skip leading slashes */
+    /* 跳过前导斜杠 */
     while (path[i] == '/')
         i++;
 
@@ -103,7 +103,7 @@ static int path_split(const char *path, char components[][VFS_MAX_NAME], int max
         components[count][j] = '\0';
 
         if (j > 0) {
-            /* Skip "." */
+            /* 跳过 "." */
             if (strcmp(components[count], ".") != 0)
                 count++;
         }
@@ -115,25 +115,25 @@ static int path_split(const char *path, char components[][VFS_MAX_NAME], int max
     return count;
 }
 
-/* Internal path resolution with symlink following support.
- * depth: current symlink recursion depth
- * follow_last: if 0, don't follow symlink on the final path component
- *              (used by readlink); if 1, follow all symlinks */
+/* 内部路径解析，支持符号链接跟随。
+ * depth: 当前符号链接递归深度
+ * follow_last: 为 0 时不跟随最终路径组件的符号链接
+ *              （由 readlink 使用）；为 1 时跟随所有符号链接 */
 static vfs_dentry_t *vfs_resolve_dentry_internal(const char *path, int depth, int follow_last)
 {
     if (!root_dentry) return NULL;
-    if (depth > VFS_MAX_SYMLINK_DEPTH) return NULL;  /* Symlink loop */
+    if (depth > VFS_MAX_SYMLINK_DEPTH) return NULL;  /* 符号链接循环 */
 
     char components[32][VFS_MAX_NAME];
     int count;
 
-    /* Handle absolute vs relative paths */
+    /* 处理绝对路径与相对路径 */
     char full_path[VFS_MAX_PATH];
     if (path[0] == '/') {
         strncpy(full_path, path, VFS_MAX_PATH - 1);
         full_path[VFS_MAX_PATH - 1] = '\0';
     } else {
-        /* Relative to CWD - simple concatenation */
+        /* 相对于当前工作目录 - 简单拼接 */
         int cwd_len = strlen(cwd);
         int path_len = strlen(path);
         if (cwd_len + 1 + path_len >= VFS_MAX_PATH)
@@ -146,56 +146,56 @@ static vfs_dentry_t *vfs_resolve_dentry_internal(const char *path, int depth, in
         strcpy(full_path + cwd_len, path);
     }
 
-    /* Handle special case: root */
+    /* 处理特殊情况：根路径 */
     if (strcmp(full_path, "/") == 0)
         return root_dentry;
 
     count = path_split(full_path, components, 32);
     if (count == 0) return root_dentry;
 
-    /* Walk the dentry tree */
+    /* 遍历目录项树 */
     vfs_dentry_t *current = root_dentry;
     if (vfs_debug_resolve) printf("[VFS_RESOLVE] resolving '%s', %d components\n", full_path, count);
 
     for (int i = 0; i < count; i++) {
-        /* Handle ".." */
+        /* 处理 ".." */
         if (strcmp(components[i], "..") == 0) {
             if (current->parent)
                 current = current->parent;
             continue;
         }
 
-        /* Check mount point */
+        /* 检查挂载点 */
         if (current->mounted && current->mount_root) {
             current = current->mount_root;
         }
 
-        /* Look up child */
+        /* 查找子项 */
         if (vfs_debug_resolve) printf("[VFS_RESOLVE] looking up '%s' in dentry '%s' (mounted=%d)\n", components[i], current->name ? current->name : "?", current->mounted);
         vfs_dentry_t *child = dentry_lookup(current, components[i]);
         if (!child) {
             if (vfs_debug_resolve) printf("[VFS_RESOLVE] component '%s' NOT FOUND in '%s'\n", components[i], current->name ? current->name : "?");
-            return NULL;  /* Not found */
+            return NULL;  /* 未找到 */
         }
         if (vfs_debug_resolve) printf("[VFS_RESOLVE] found '%s' at %p (mounted=%d)\n", components[i], (void *)child, child->mounted);
 
-        /* Check if this component is a symlink that should be followed */
+        /* 检查此组件是否为需要跟随的符号链接 */
         int is_last = (i == count - 1);
         if (child->inode && child->inode->type == VFS_TYPE_SYMLINK &&
             child->inode->symlink_target[0] != '\0' &&
             (follow_last || !is_last)) {
-            /* Construct new path from symlink target + remaining components */
+            /* 从符号链接目标和剩余组件构建新路径 */
             char new_path[VFS_MAX_PATH];
             int new_len = 0;
 
             if (child->inode->symlink_target[0] == '/') {
-                /* Absolute symlink - use target directly */
+                /* 绝对符号链接 - 直接使用目标 */
                 int tgt_len = strlen(child->inode->symlink_target);
                 if (tgt_len >= VFS_MAX_PATH) return NULL;
                 memcpy(new_path, child->inode->symlink_target, tgt_len);
                 new_len = tgt_len;
             } else {
-                /* Relative symlink - build path from parent directory */
+                /* 相对符号链接 - 从父目录构建路径 */
                 new_path[0] = '/';
                 new_len = 1;
                 for (int j = 0; j < i; j++) {

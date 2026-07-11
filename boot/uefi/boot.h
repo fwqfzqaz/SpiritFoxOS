@@ -68,7 +68,7 @@ typedef uint8_t UINT8;
 
 #define EFI_ERROR(status)         (((EFI_STATUS)(status)) != EFI_SUCCESS)
 
-/* Memory types */
+/* 内存类型 */
 #define EfiReservedMemoryType     0
 #define EfiLoaderCode             1
 #define EfiLoaderData             2
@@ -95,7 +95,7 @@ typedef struct {
     uint8_t  Data4[8];
 } EFI_GUID;
 
-/* GOP pixel format */
+/* GOP 像素格式 */
 typedef enum {
     PixelRedGreenBlueReserved8BitPerColor,
     PixelBlueGreenRedReserved8BitPerColor,
@@ -113,7 +113,7 @@ typedef struct {
     uint32_t PixelsPerScanLine;
 } EFI_GRAPHICS_OUTPUT_MODE_INFORMATION;
 
-/* GOP Mode */
+/* GOP 模式 */
 typedef struct {
     uint32_t MaxMode;
     uint32_t Mode;
@@ -136,12 +136,12 @@ typedef EFI_STATUS (__attribute__((ms_abi)) *EFI_GRAPHICS_SET_MODE)(
 struct _EFI_GRAPHICS_OUTPUT_PROTOCOL {
     EFI_GRAPHICS_QUERY_MODE QueryMode;
     EFI_GRAPHICS_SET_MODE   SetMode;
-    /* Blt omitted - not needed */
+    /* Blt 已省略 - 不需要 */
     void *Blt;
     EFI_GRAPHICS_OUTPUT_PROTOCOL_MODE *Mode;
 };
 
-/* EFI Memory Descriptor */
+/* EFI 内存描述符 */
 typedef struct {
     uint32_t Type;
     uint32_t Pad;
@@ -151,15 +151,15 @@ typedef struct {
     uint64_t Attribute;
 } EFI_MEMORY_DESCRIPTOR;
 
-/* EFI File Info */
+/* EFI 文件信息 */
 typedef struct {
     uint64_t Size;
     uint64_t FileSize;
     uint64_t PhysicalSize;
     uint32_t Attribute;
     uint32_t Pad;
-    /* Time fields omitted for simplicity */
-    uint8_t  FileName[1]; /* Variable length */
+    /* 时间字段为简便起见已省略 */
+    uint8_t  FileName[1]; /* 可变长度 */
 } EFI_FILE_INFO;
 
 /* EFI File Protocol */
@@ -204,24 +204,24 @@ struct _EFI_SIMPLE_FILE_SYSTEM_PROTOCOL {
     EFI_SIMPLE_FILE_OPEN_VOLUME OpenVolume;
 };
 
-/* Loaded Image Protocol - exact UEFI spec layout for x86_64 */
+/* 已加载映像协议 - x86_64 的精确 UEFI 规范布局 */
 typedef struct {
     uint32_t Revision;                   /* 0x00 */
     EFI_HANDLE ParentHandle;             /* 0x08 */
     EFI_PHYSICAL_ADDRESS SystemTable;    /* 0x10 */
-    EFI_HANDLE DeviceHandle;             /* 0x18 - offset 0x18 on x86_64 */
+    EFI_HANDLE DeviceHandle;             /* 0x18 - x86_64 上偏移 0x18 */
     void *FilePath;                      /* 0x20 */
     void *Reserved;                      /* 0x28 */
     uint32_t LoadOptionsSize;            /* 0x30 */
     void *LoadOptions;                   /* 0x38 */
     void *ImageBase;                     /* 0x40 */
     uint64_t ImageSize;                  /* 0x48 */
-    int ImageCodeType;                   /* 0x50 - EFI_MEMORY_TYPE is int */
+    int ImageCodeType;                   /* 0x50 - EFI_MEMORY_TYPE 为 int */
     int ImageDataType;                   /* 0x54 */
     void *Unload;                        /* 0x58 */
 } EFI_LOADED_IMAGE_PROTOCOL;
 
-/* Boot Services function pointer types */
+/* 引导服务函数指针类型 */
 typedef EFI_STATUS (__attribute__((ms_abi)) *EFI_ALLOCATE_PAGES)(
     int Type, int MemoryType, UINTN Pages, EFI_PHYSICAL_ADDRESS *Memory);
 typedef EFI_STATUS (__attribute__((ms_abi)) *EFI_FREE_PAGES)(
@@ -241,27 +241,27 @@ typedef EFI_STATUS (__attribute__((ms_abi)) *EFI_EXIT_BOOT_SERVICES)(
 typedef void (__attribute__((ms_abi)) *EFI_COPY_MEM)(void *Destination, const void *Source, UINTN Length);
 typedef void (__attribute__((ms_abi)) *EFI_SET_MEM)(void *Buffer, UINTN Size, UINT8 Value);
 
-/* Boot Services Table - exact UEFI spec layout for x86_64 */
+/* 引导服务表 - x86_64 的精确 UEFI 规范布局 */
 typedef struct {
-    /* Header (24 bytes) */
+    /* 头部 (24 字节) */
     uint64_t TableSignature;        /* 0x000 */
     uint32_t TableRevision;         /* 0x008 */
     uint32_t HeaderSize;            /* 0x00C */
     uint32_t Crc32;                 /* 0x010 */
     uint32_t Reserved;              /* 0x014 */
 
-    /* Task priority functions */
+    /* 任务优先级函数 */
     void *RaiseTPL;                 /* 0x018 */
     void *RestoreTPL;               /* 0x020 */
 
-    /* Memory functions */
+    /* 内存函数 */
     EFI_ALLOCATE_PAGES   AllocatePages;      /* 0x028 */
     EFI_FREE_PAGES       FreePages;          /* 0x030 */
     EFI_GET_MEMORY_MAP   GetMemoryMap;       /* 0x038 */
     EFI_ALLOCATE_POOL    AllocatePool;       /* 0x040 */
     EFI_FREE_POOL        FreePool;           /* 0x048 */
 
-    /* Event & timer functions */
+    /* 事件与定时器函数 */
     void *CreateEvent;                         /* 0x050 */
     void *SetTimer;                            /* 0x058 */
     void *WaitForEvent;                        /* 0x060 */
@@ -269,7 +269,7 @@ typedef struct {
     void *CloseEvent;                          /* 0x070 */
     void *CheckEvent;                          /* 0x078 */
 
-    /* Protocol handler functions */
+    /* 协议处理函数 */
     void *InstallProtocolInterface;            /* 0x080 */
     void *ReinstallProtocolInterface;          /* 0x088 */
     void *UninstallProtocolInterface;          /* 0x090 */
@@ -280,7 +280,7 @@ typedef struct {
     void *LocateDevicePath;                    /* 0x0B8 */
     void *InstallConfigurationTable;           /* 0x0C0 */
 
-    /* Image functions */
+    /* 映像函数 */
     void *LoadImage;                           /* 0x0C8 */
     void *StartImage;                          /* 0x0D0 */
     void *Exit;                                /* 0x0D8 */
@@ -288,16 +288,16 @@ typedef struct {
 
     EFI_EXIT_BOOT_SERVICES ExitBootServices;   /* 0x0E8 */
 
-    /* Misc functions */
+    /* 杂项函数 */
     void *GetNextMonotonicCount;               /* 0x0F0 */
     void *Stall;                               /* 0x0F8 */
     void *SetWatchdogTimer;                    /* 0x100 */
 
-    /* Driver support functions */
+    /* 驱动支持函数 */
     void *ConnectController;                   /* 0x108 */
     void *DisconnectController;                /* 0x110 */
 
-    /* Protocol open/close functions */
+    /* 协议打开/关闭函数 */
     void *OpenProtocol;                        /* 0x118 */
     void *CloseProtocol;                       /* 0x120 */
     void *OpenProtocolInformation;             /* 0x128 */
@@ -318,23 +318,23 @@ typedef struct {
     void *CreateEventEx;                       /* 0x170 */
 } EFI_BOOT_SERVICES;
 
-/* Runtime Services - we just need the pointer */
+/* 运行时服务 - 我们只需要指针 */
 typedef struct {
     uint64_t TableSignature;
     uint32_t TableRevision;
     uint32_t HeaderSize;
     uint32_t Crc32;
     uint32_t Reserved;
-    /* Rest omitted - kernel will access via efi_runtime_services pointer */
+    /* 其余部分已省略 - 内核将通过 efi_runtime_services 指针访问 */
 } EFI_RUNTIME_SERVICES;
 
-/* Configuration Table Entry */
+/* 配置表项 */
 typedef struct {
     EFI_GUID VendorGuid;
     void *VendorTable;
 } EFI_CONFIGURATION_TABLE;
 
-/* Simple Text Output Protocol */
+/* 简单文本输出协议 */
 typedef struct _EFI_SIMPLE_TEXT_OUTPUT_PROTOCOL EFI_SIMPLE_TEXT_OUTPUT_PROTOCOL;
 
 typedef EFI_STATUS (__attribute__((ms_abi)) *EFI_TEXT_STRING)(
@@ -343,10 +343,10 @@ typedef EFI_STATUS (__attribute__((ms_abi)) *EFI_TEXT_STRING)(
 struct _EFI_SIMPLE_TEXT_OUTPUT_PROTOCOL {
     void *Reset;
     EFI_TEXT_STRING OutputString;
-    /* More fields omitted */
+    /* 更多字段已省略 */
 };
 
-/* System Table - exact UEFI spec layout for x86_64 */
+/* 系统表 - x86_64 的精确 UEFI 规范布局 */
 typedef struct {
     uint64_t TableSignature;                        /* 0x00 */
     uint32_t TableRevision;                         /* 0x08 */
@@ -386,7 +386,7 @@ typedef struct {
 #define ACPI_20_TABLE_GUID \
     {0x8868E871, 0xE4F1, 0x11D3, {0xBC, 0x22, 0x00, 0x80, 0xC7, 0x3C, 0x88, 0x81}}
 
-/* ELF definitions for kernel loading */
+/* 内核加载用 ELF 定义 */
 #define EI_MAG0     0
 #define EI_MAG1     1
 #define EI_MAG2     2

@@ -1,7 +1,7 @@
 /*
- * fb.c - Framebuffer driver for SpiritFoxOS
- * Based on the working version from GitHub commit 4ccad7e6
- * Uses Bochs VBE DISPI for mode setting, double buffering with identity mapping
+ * fb.c - SpiritFoxOS 帧缓冲驱动
+ * 基于 GitHub 提交 4ccad7e6 的工作版本
+ * 使用 Bochs VBE DISPI 进行模式设置，采用双缓冲与恒等映射
  */
 
 #include "fb.h"
@@ -10,7 +10,7 @@
 #include "string.h"
 #include "pci.h"
 
-/* ---------- Bochs VBE DISPI interface ---------- */
+/* ---------- Bochs VBE DISPI 接口 ---------- */
 #define VBE_DISPI_IOPORT_INDEX  0x1CE
 #define VBE_DISPI_IOPORT_DATA   0x1CF
 
@@ -24,7 +24,7 @@
 #define VBE_DISPI_LFB_ENABLED       0x40
 #define VBE_DISPI_NOCLEARMEM        0x80
 
-/* QEMU std VGA framebuffer base address */
+/* QEMU 标准 VGA 帧缓冲基地址 */
 #define VBE_LFB_PHYS_ADDR  0xE0000000
 
 static inline void vbe_outw(uint16_t port, uint16_t val)
@@ -41,11 +41,32 @@ static inline uint16_t vbe_inw(uint16_t port)
 
 static void vbe_set_mode(uint16_t xres, uint16_t yres, uint16_t bpp)
 {
-    /* Disable VBE first */
+    /* 检查 VBE 是否已经以目标分辨率启用。
+     * 若是，则跳过模式设置，避免因禁用再重新启用 VBE 导致闪烁
+     * （这会短暂显示空白/文本模式画面）。 */
+    vbe_outw(VBE_DISPI_IOPORT_INDEX, VBE_DISPI_INDEX_ENABLE);
+    uint16_t cur_enable = vbe_inw(VBE_DISPI_IOPORT_DATA);
+
+    vbe_outw(VBE_DISPI_IOPORT_INDEX, VBE_DISPI_INDEX_XRES);
+    uint16_t cur_xres = vbe_inw(VBE_DISPI_IOPORT_DATA);
+
+    vbe_outw(VBE_DISPI_IOPORT_INDEX, VBE_DISPI_INDEX_YRES);
+    uint16_t cur_yres = vbe_inw(VBE_DISPI_IOPORT_DATA);
+
+    vbe_outw(VBE_DISPI_IOPORT_INDEX, VBE_DISPI_INDEX_BPP);
+    uint16_t cur_bpp = vbe_inw(VBE_DISPI_IOPORT_DATA);
+
+    if ((cur_enable & VBE_DISPI_ENABLED) && cur_xres == xres &&
+        cur_yres == yres && cur_bpp == bpp) {
+        /* 已经处于目标模式 - 无需重置 */
+        return;
+    }
+
+    /* 先禁用 VBE（切换模式时必须） */
     vbe_outw(VBE_DISPI_IOPORT_INDEX, VBE_DISPI_INDEX_ENABLE);
     vbe_outw(VBE_DISPI_IOPORT_DATA, 0);
 
-    /* Set resolution */
+    /* 设置分辨率 */
     vbe_outw(VBE_DISPI_IOPORT_INDEX, VBE_DISPI_INDEX_XRES);
     vbe_outw(VBE_DISPI_IOPORT_DATA, xres);
     vbe_outw(VBE_DISPI_IOPORT_INDEX, VBE_DISPI_INDEX_YRES);
@@ -53,23 +74,23 @@ static void vbe_set_mode(uint16_t xres, uint16_t yres, uint16_t bpp)
     vbe_outw(VBE_DISPI_IOPORT_INDEX, VBE_DISPI_INDEX_BPP);
     vbe_outw(VBE_DISPI_IOPORT_DATA, bpp);
 
-    /* Enable linear framebuffer mode (don't clear memory) */
+    /* 启用线性帧缓冲模式（不清除显存） */
     vbe_outw(VBE_DISPI_IOPORT_INDEX, VBE_DISPI_INDEX_ENABLE);
     vbe_outw(VBE_DISPI_IOPORT_DATA,
              VBE_DISPI_ENABLED | VBE_DISPI_LFB_ENABLED | VBE_DISPI_NOCLEARMEM);
 }
 
-/* ---------- Framebuffer state ---------- */
+/* ---------- 帧缓冲状态 ---------- */
 static uint32_t fb_width;
 static uint32_t fb_height;
 static uint32_t fb_pitch;
 static uint32_t fb_bpp;
-static uint32_t *fb_front;     /* Front buffer (hardware LFB) */
-static uint32_t *fb_back;      /* Back buffer (double buffering) */
-static size_t   fb_size;       /* Total framebuffer size in bytes */
+static uint32_t *fb_front;     /* 前缓冲区（硬件 LFB） */
+static uint32_t *fb_back;      /* 后缓冲区（双缓冲） */
+static size_t   fb_size;       /* 帧缓冲总大小（字节） */
 static int fb_initialized;
 
-/* ---------- 8x16 PC BIOS font ---------- */
+/* ---------- 8x16 PC BIOS 字体 ---------- */
 static const uint8_t font8x16[128][16] = {
     [0 ... 31] = {0},
     [32] = {0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00},
@@ -170,7 +191,7 @@ static const uint8_t font8x16[128][16] = {
     [127]= {0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF},
 };
 
-/* ---------- Serial debug helper ---------- */
+/* ---------- 串口调试辅助 ---------- */
 static void fb_debug(const char *s)
 {
     while (*s) {
@@ -192,7 +213,7 @@ static void fb_debug_hex(uintptr_t val)
     }
 }
 
-/* ---------- Implementation ---------- */
+/* ---------- 实现 ---------- */
 
 void fb_init(BootInfo *info)
 {
@@ -201,9 +222,8 @@ void fb_init(BootInfo *info)
         return;
     }
 
-    /* If already initialized with the same resolution, just clear and return.
-     * This prevents leaking the back buffer on re-entry (e.g., entering
-     * graphical mode a second time from the shell). */
+    /* 若已以相同分辨率初始化，则仅清屏并返回。
+     * 这防止在重新进入时泄漏后缓冲区（例如从 shell 第二次进入图形模式）。 */
     if (fb_initialized && fb_width == info->width && fb_height == info->height && fb_back) {
         memset(fb_back, 0, fb_size);
         return;
@@ -213,26 +233,26 @@ void fb_init(BootInfo *info)
     uint32_t width, height, pitch, bpp;
 
     if (info->boot_type == BOOT_TYPE_UEFI && info->framebuffer_base != 0) {
-        /* UEFI boot: GOP already set up the graphics mode and framebuffer.
-         * Use the GOP-provided parameters directly instead of VBE DISPI. */
+        /* UEFI 启动：GOP 已设置好图形模式和帧缓冲。
+         * 直接使用 GOP 提供的参数，而非 VBE DISPI。 */
         width  = info->width;
         height = info->height;
         pitch  = info->pitch;
         bpp    = info->bpp;
         lfb_addr = (uintptr_t)info->framebuffer_base;
     } else {
-        /* Legacy BIOS boot: set VBE graphics mode via Bochs DISPI interface */
+        /* 传统 BIOS 启动：通过 Bochs DISPI 接口设置 VBE 图形模式 */
         vbe_set_mode(1024, 768, 32);
 
         width  = 1024;
         height = 768;
-        pitch  = 1024 * 4;  /* 4096 bytes per scanline */
+        pitch  = 1024 * 4;  /* 每条扫描线 4096 字节 */
         bpp    = 32;
 
-        /* Find the VGA device via PCI and read its BAR0 for the framebuffer address.
-         * QEMU's std-vga may map the LFB at different addresses depending on
-         * configuration (e.g., 0xFD000000 instead of the Bochs default 0xE0000000). */
-        lfb_addr = VBE_LFB_PHYS_ADDR; /* fallback default */
+        /* 通过 PCI 查找 VGA 设备并读取其 BAR0 获取帧缓冲地址。
+         * QEMU 的 std-vga 可能根据配置将 LFB 映射到不同地址
+         * （例如 0xFD000000 而非 Bochs 默认的 0xE0000000）。 */
+        lfb_addr = VBE_LFB_PHYS_ADDR; /* 回退默认值 */
         int num_pci = pci_get_device_count();
         for (int i = 0; i < num_pci; i++) {
             const pci_device_t *dev = pci_get_device(i);
@@ -251,28 +271,26 @@ void fb_init(BootInfo *info)
     fb_bpp    = bpp;
     fb_size   = (size_t)fb_pitch * fb_height;
 
-    /* Ensure the framebuffer LFB memory is identity-mapped with
-     * cache disabled (MMIO region - must use PCD/PWT flags). */
+    /* 确保帧缓冲 LFB 内存已恒等映射且禁用缓存
+     *（MMIO 区域 - 必须使用 PCD/PWT 标志）。 */
     hal_ensure_mapped_mmio(lfb_addr, fb_size);
 
     fb_front = (uint32_t *)(uintptr_t)lfb_addr;
 
-    /* Allocate back buffer using contiguous physical pages.
-     * For UEFI boot with framebuffer at high addresses, skip back buffer
-     * to avoid potential issues with large contiguous allocation and
-     * write directly to the front buffer. */
-    if (info->boot_type == BOOT_TYPE_UEFI) {
-        /* UEFI: write directly to front buffer (no double buffering)
-         * to avoid allocating 3MB of contiguous memory which may
-         * fail or fragment the early physical memory. */
-        fb_back = NULL;
-    } else {
+    /* 为双缓冲分配后缓冲区。
+     * 若无后缓冲区，渲染将直接写入前缓冲区，
+     * 导致可见的撕裂/闪烁，尤其在图形模式下。 */
+    {
         size_t bb_pages = (fb_size + 4095) / 4096;
         uintptr_t bb_phys = (uintptr_t)alloc_pages(bb_pages);
 
-        if (bb_phys && bb_phys < 0x100000000ULL) {
+        if (bb_phys) {
             fb_back = (uint32_t *)bb_phys;
-            hal_ensure_mapped(bb_phys, fb_size);
+            if (bb_phys < 0x100000000ULL) {
+                hal_ensure_mapped(bb_phys, fb_size);
+            } else {
+                hal_ensure_mapped_mmio(bb_phys, fb_size);
+            }
             memset(fb_back, 0, fb_size);
         } else {
             fb_back = NULL;
@@ -280,18 +298,6 @@ void fb_init(BootInfo *info)
     }
 
     fb_initialized = 1;
-
-    /* Debug: print framebuffer info */
-    fb_debug("[fb_init] ");
-    fb_debug("base="); fb_debug_hex(lfb_addr);
-    fb_debug(" size="); fb_debug_hex(fb_size);
-    fb_debug(" w="); fb_debug_hex(width);
-    fb_debug(" h="); fb_debug_hex(height);
-    fb_debug(" pitch="); fb_debug_hex(pitch);
-    fb_debug(" bpp="); fb_debug_hex(bpp);
-    fb_debug(" back="); fb_debug_hex((uintptr_t)fb_back);
-    fb_debug(" front="); fb_debug_hex((uintptr_t)fb_front);
-    fb_debug("\n");
 }
 
 uint32_t fb_get_width(void)   { return fb_width; }
@@ -388,12 +394,15 @@ void fb_swap_buffer(void)
     if (!fb_initialized) return;
     if (!fb_back) return;
 
-    /* Use memcpy for fast buffer swap - same as the working GitHub version */
+    /* 将后缓冲区复制到前缓冲区（硬件显示源）。
+     * memcpy 速度足够快（约 3MB），在 QEMU 中撕裂极小。
+     * 我们避免使用 VGA VSync（0x3DA 位 3），因为 QEMU 的 VBE 模式
+     * 可能无法可靠地模拟垂直回扫信号，且轮询可能导致系统无限挂起。 */
     memcpy(fb_front, fb_back, fb_size);
 }
 
-/* Flush only a rectangular region from back buffer to front buffer.
- * This avoids copying the entire 3MB framebuffer for small updates. */
+/* 仅将矩形区域从后缓冲区刷新到前缓冲区。
+ * 这避免了为小面积更新复制整个 3MB 帧缓冲。 */
 void fb_flush_rect(int x, int y, int w, int h)
 {
     if (!fb_initialized || !fb_back) return;
@@ -444,17 +453,17 @@ void fb_draw_string(int x, int y, const char *s, fb_color_t fg, fb_color_t bg)
     }
 }
 
-/* ---------- Framebuffer text terminal ---------- */
+/* ---------- 帧缓冲文本终端 ---------- */
 #define FB_TERM_CHAR_W  8
 #define FB_TERM_CHAR_H  16
 
 static int fb_term_cols;
 static int fb_term_rows;
-static int fb_term_cx;       /* cursor column */
-static int fb_term_cy;       /* cursor row */
+static int fb_term_cx;       /* 光标列 */
+static int fb_term_cy;       /* 光标行 */
 static fb_color_t fb_term_fg;
 static fb_color_t fb_term_bg;
-static int fb_term_active;   /* whether fb terminal mode is active */
+static int fb_term_active;   /* 帧缓冲终端模式是否激活 */
 
 void fb_term_init(void)
 {
@@ -464,7 +473,7 @@ void fb_term_init(void)
     fb_term_cx = 0;
     fb_term_cy = 0;
     fb_term_fg = FB_COLOR_LIGHT_GRAY;
-    fb_term_bg = 0x000A0A0A;  /* near-black */
+    fb_term_bg = 0x000A0A0A;  /* 近黑色 */
     fb_term_active = 1;
     fb_clear(fb_term_bg);
     fb_swap_buffer();
@@ -477,36 +486,41 @@ int fb_term_is_active(void)
 
 static void fb_term_scroll(void)
 {
-    /* Copy each row up by one character height */
+    if (!fb_back) {
+        /* 无后缓冲区：就地滚动前缓冲区 */
+        size_t row_bytes = fb_pitch * FB_TERM_CHAR_H;
+        int stride = fb_pitch / 4;
+        int scroll_offset = FB_TERM_CHAR_H * stride;
+        uint32_t bg32 = fb_term_bg;
+
+        memmove(fb_front, fb_front + scroll_offset, row_bytes * (fb_term_rows - 1));
+        uint32_t *last_row_front = fb_front + (fb_term_rows - 1) * FB_TERM_CHAR_H * stride;
+        for (size_t i = 0; i < row_bytes / 4; i++) {
+            last_row_front[i] = bg32;
+        }
+        return;
+    }
+
+    /* 双缓冲：滚动后缓冲区，然后复制到前缓冲区 */
     size_t row_bytes = fb_pitch * FB_TERM_CHAR_H;
     int stride = fb_pitch / 4;
     int scroll_offset = FB_TERM_CHAR_H * stride;
     uint32_t bg32 = fb_term_bg;
 
-    if (fb_back) {
-        /* Double buffering: scroll back buffer, then copy to front buffer */
-        memmove(fb_back, fb_back + scroll_offset, row_bytes * (fb_term_rows - 1));
-        /* Clear the last row in back buffer */
-        uint32_t *last_row = fb_back + (fb_term_rows - 1) * FB_TERM_CHAR_H * stride;
-        for (size_t i = 0; i < row_bytes / 4; i++) {
-            last_row[i] = bg32;
-        }
+    /* 滚动后缓冲区 */
+    memmove(fb_back, fb_back + scroll_offset, row_bytes * (fb_term_rows - 1));
+    /* 清除后缓冲区最后一行 */
+    uint32_t *last_row = fb_back + (fb_term_rows - 1) * FB_TERM_CHAR_H * stride;
+    for (size_t i = 0; i < row_bytes / 4; i++) {
+        last_row[i] = bg32;
+    }
 
-        /* Scroll front buffer in-place too, avoiding a full 3MB memcpy */
-        memmove(fb_front, fb_front + scroll_offset, row_bytes * (fb_term_rows - 1));
-        /* Clear the last row in front buffer */
-        uint32_t *last_row_front = fb_front + (fb_term_rows - 1) * FB_TERM_CHAR_H * stride;
-        for (size_t i = 0; i < row_bytes / 4; i++) {
-            last_row_front[i] = bg32;
-        }
-    } else {
-        /* No back buffer (UEFI direct rendering): scroll front buffer in-place */
-        memmove(fb_front, fb_front + scroll_offset, row_bytes * (fb_term_rows - 1));
-        /* Clear the last row in front buffer */
-        uint32_t *last_row_front = fb_front + (fb_term_rows - 1) * FB_TERM_CHAR_H * stride;
-        for (size_t i = 0; i < row_bytes / 4; i++) {
-            last_row_front[i] = bg32;
-        }
+    /* 同时就地滚动前缓冲区，避免完整的 3MB 内存复制 */
+    memmove(fb_front, fb_front + scroll_offset, row_bytes * (fb_term_rows - 1));
+    /* 清除前缓冲区最后一行 */
+    uint32_t *last_row_front = fb_front + (fb_term_rows - 1) * FB_TERM_CHAR_H * stride;
+    for (size_t i = 0; i < row_bytes / 4; i++) {
+        last_row_front[i] = bg32;
     }
 }
 
@@ -520,10 +534,10 @@ void fb_term_putchar(char c)
     } else if (c == '\r') {
         fb_term_cx = 0;
     } else if (c == '\b') {
-        /* Backspace */
+        /* 退格 */
         if (fb_term_cx > 0) {
             fb_term_cx--;
-            /* Clear the character cell */
+            /* 清除字符单元 */
             fb_fill_rect(fb_term_cx * FB_TERM_CHAR_W,
                          fb_term_cy * FB_TERM_CHAR_H,
                          FB_TERM_CHAR_W, FB_TERM_CHAR_H, fb_term_bg);
@@ -533,7 +547,7 @@ void fb_term_putchar(char c)
         }
         return;
     } else {
-        /* Draw character at cursor position */
+        /* 在光标位置绘制字符 */
         int px = fb_term_cx * FB_TERM_CHAR_W;
         int py = fb_term_cy * FB_TERM_CHAR_H;
         fb_draw_char(px, py, c, fb_term_fg, fb_term_bg);
@@ -542,11 +556,11 @@ void fb_term_putchar(char c)
             fb_term_cx = 0;
             fb_term_cy++;
         }
-        /* Flush only the 8x16 character cell instead of the whole 3MB buffer */
+        /* 仅刷新 8x16 字符单元，而非整个 3MB 缓冲区 */
         fb_flush_rect(px, py, FB_TERM_CHAR_W, FB_TERM_CHAR_H);
     }
 
-    /* Handle scroll */
+    /* 处理滚动 */
     if (fb_term_cy >= fb_term_rows) {
         fb_term_scroll();
         fb_term_cy = fb_term_rows - 1;

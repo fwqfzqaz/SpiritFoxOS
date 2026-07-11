@@ -5,20 +5,20 @@
 #include "vga.h"
 
 /* ========================================================================
- * devfs - Device filesystem
+ * devfs - 设备文件系统
  *
- * Auto-populates /dev with block device entries. Reading/writing device
- * files delegates to the blkdev layer.
+ * 自动在 /dev 下填充块设备条目。对设备文件的读写操作
+ * 委托给 blkdev 层处理。
  * ======================================================================== */
 
-/* Next inode number */
+/* 下一个 inode 编号 */
 static uint64_t devfs_next_ino = 1;
 
-/* Reference to devfs root dentry (set during mount) */
+/* devfs 根目录项引用（挂载时设置） */
 static vfs_dentry_t *devfs_root_dentry = NULL;
 
 /* ========================================================================
- * devfs block device read/write
+ * devfs 块设备读写
  * ======================================================================== */
 
 static int devfs_blkdev_read(vfs_file_t *file, void *buf, size_t count)
@@ -26,9 +26,9 @@ static int devfs_blkdev_read(vfs_file_t *file, void *buf, size_t count)
     (void)file;
     (void)buf;
     (void)count;
-    /* Block device read via VFS requires sector-aligned operations.
-     * For now, return not-supported. Full implementation would use
-     * blkdev_read with the file offset converted to LBA. */
+    /* 通过 VFS 进行块设备读取需要扇区对齐操作。
+     * 目前返回不支持。完整实现应使用 blkdev_read，
+     * 将文件偏移转换为 LBA。 */
     return -1;
 }
 
@@ -41,7 +41,7 @@ static int devfs_blkdev_write(vfs_file_t *file, const void *buf, size_t count)
 }
 
 /* ========================================================================
- * devfs filesystem operations
+ * devfs 文件系统操作
  * ======================================================================== */
 
 static int devfs_mount(vfs_superblock_t *sb, uint8_t blkdev_id, const char *options)
@@ -49,7 +49,7 @@ static int devfs_mount(vfs_superblock_t *sb, uint8_t blkdev_id, const char *opti
     (void)blkdev_id;
     (void)options;
 
-    /* Create root inode */
+    /* 创建根 inode */
     vfs_inode_t *root = (vfs_inode_t *)alloc_page();
     if (!root) return -1;
     memset(root, 0, PAGE_SIZE);
@@ -63,7 +63,7 @@ static int devfs_mount(vfs_superblock_t *sb, uint8_t blkdev_id, const char *opti
     root->sb = sb;
     root->fs_data = NULL;
 
-    /* Create root dentry */
+    /* 创建根目录项 */
     vfs_dentry_t *root_dentry = (vfs_dentry_t *)alloc_page();
     if (!root_dentry) {
         free_page(root);
@@ -79,7 +79,7 @@ static int devfs_mount(vfs_superblock_t *sb, uint8_t blkdev_id, const char *opti
 
     devfs_root_dentry = root_dentry;
 
-    /* Auto-populate with existing block devices */
+    /* 自动填充已有的块设备 */
     for (int i = 0; i < BLKDEV_MAX_DEVICES; i++) {
         blkdev_t *dev = blkdev_get((uint8_t)i);
         if (dev && dev->in_use) {
@@ -87,7 +87,7 @@ static int devfs_mount(vfs_superblock_t *sb, uint8_t blkdev_id, const char *opti
         }
     }
 
-    /* Add /dev/null */
+    /* 添加 /dev/null */
     {
         vfs_inode_t *null_ino = (vfs_inode_t *)alloc_page();
         if (null_ino) {
@@ -95,7 +95,7 @@ static int devfs_mount(vfs_superblock_t *sb, uint8_t blkdev_id, const char *opti
             null_ino->ino = devfs_next_ino++;
             null_ino->type = VFS_TYPE_CHARDEV;
             null_ino->mode = VFS_S_IRUSR | VFS_S_IWUSR;
-            null_ino->chardev_id = 0;  /* minor 0 = null */
+            null_ino->chardev_id = 0;  /* 次设备号 0 = null */
             null_ino->sb = sb;
             null_ino->fs_data = NULL;
 
@@ -111,7 +111,7 @@ static int devfs_mount(vfs_superblock_t *sb, uint8_t blkdev_id, const char *opti
         }
     }
 
-    /* Add /dev/console */
+    /* 添加 /dev/console */
     {
         vfs_inode_t *con_ino = (vfs_inode_t *)alloc_page();
         if (con_ino) {
@@ -119,7 +119,7 @@ static int devfs_mount(vfs_superblock_t *sb, uint8_t blkdev_id, const char *opti
             con_ino->ino = devfs_next_ino++;
             con_ino->type = VFS_TYPE_CHARDEV;
             con_ino->mode = VFS_S_IRUSR | VFS_S_IWUSR;
-            con_ino->chardev_id = 1;  /* minor 1 = console */
+            con_ino->chardev_id = 1;  /* 次设备号 1 = console */
             con_ino->sb = sb;
             con_ino->fs_data = NULL;
 
@@ -161,7 +161,7 @@ static void devfs_destroy_inode(vfs_inode_t *inode)
 }
 
 /* ========================================================================
- * Filesystem type definition
+ * 文件系统类型定义
  * ======================================================================== */
 
 vfs_filesystem_t devfs_fs = {
@@ -173,18 +173,18 @@ vfs_filesystem_t devfs_fs = {
 };
 
 /* ========================================================================
- * Dynamic device entry management
+ * 动态设备条目管理
  * ======================================================================== */
 
 void devfs_add_blkdev(uint8_t dev_id, const char *name)
 {
     if (!devfs_root_dentry) return;
 
-    /* Find the superblock from root dentry */
+    /* 从根目录项获取超级块 */
     vfs_superblock_t *sb = devfs_root_dentry->inode ?
                             (vfs_superblock_t *)devfs_root_dentry->inode->sb : NULL;
 
-    /* Create block device inode */
+    /* 创建块设备 inode */
     vfs_inode_t *blk_ino = (vfs_inode_t *)alloc_page();
     if (!blk_ino) return;
     memset(blk_ino, 0, PAGE_SIZE);
@@ -203,7 +203,7 @@ void devfs_add_blkdev(uint8_t dev_id, const char *name)
     blk_ino->read = devfs_blkdev_read;
     blk_ino->write = devfs_blkdev_write;
 
-    /* Create dentry */
+    /* 创建目录项 */
     vfs_dentry_t *blk_de = (vfs_dentry_t *)alloc_page();
     if (!blk_de) {
         free_page(blk_ino);
@@ -214,7 +214,7 @@ void devfs_add_blkdev(uint8_t dev_id, const char *name)
     blk_de->inode = blk_ino;
     blk_de->parent = devfs_root_dentry;
 
-    /* Add to root's child list */
+    /* 添加到根的子目录列表 */
     blk_de->next = devfs_root_dentry->child;
     devfs_root_dentry->child = blk_de;
 
@@ -225,7 +225,7 @@ void devfs_remove_blkdev(uint8_t dev_id)
 {
     if (!devfs_root_dentry) return;
 
-    /* Find and remove the dentry with matching blkdev_id */
+    /* 查找并移除匹配 blkdev_id 的目录项 */
     vfs_dentry_t **pp = &devfs_root_dentry->child;
     while (*pp) {
         vfs_dentry_t *de = *pp;
@@ -240,7 +240,7 @@ void devfs_remove_blkdev(uint8_t dev_id)
 }
 
 /* ========================================================================
- * Initialization
+ * 初始化
  * ======================================================================== */
 
 void devfs_init(void)

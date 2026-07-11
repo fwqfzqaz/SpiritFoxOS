@@ -16,12 +16,12 @@
 #include "elf64.h"
 #include "autorun.h"
 
-/* ---------- Screen helpers ---------- */
+/* ---------- 屏幕辅助函数 ---------- */
 static void shell_clear_screen(void) {
     vga_clear();
 }
 
-/* ---------- Stdin/Stdout override for redirection and pipes ---------- */
+/* ---------- 标准输入/输出覆盖，用于重定向和管道 ---------- */
 static int shell_stdin_fd = -1;
 static int shell_stdout_fd = -1;
 
@@ -48,7 +48,7 @@ static void shell_putchar(char c)
     shell_write(&c, 1);
 }
 
-/* ---------- VFS commands ---------- */
+/* ---------- VFS 命令 ---------- */
 
 static int cmd_ls(int argc, char** argv) {
     const char *path = vfs_get_cwd();
@@ -84,11 +84,11 @@ static int cmd_ls(int argc, char** argv) {
             strcat(tmp, " [chardev]\n");
             shell_puts(tmp);
         } else {
-            /* Simple formatting without printf for size */
+            /* 不使用 printf 的简单格式化显示大小 */
             strcpy(tmp, "  ");
             strcat(tmp, name);
             strcat(tmp, "  (");
-            /* Convert size to string */
+            /* 将大小转换为字符串 */
             char numbuf[20];
             int pos = 0;
             uint64_t sz = stat.size;
@@ -141,7 +141,7 @@ static int cmd_cat(int argc, char** argv) {
     int use_stdin = 0;
 
     if (argc < 2) {
-        /* Read from shell_stdin_fd if available */
+        /* 如果可用则从 shell_stdin_fd 读取 */
         if (shell_stdin_fd >= 0) {
             fd = shell_stdin_fd;
             use_stdin = 1;
@@ -217,7 +217,7 @@ static int cmd_rmdir(int argc, char** argv) {
 }
 
 static int cmd_writefile(int argc, char** argv) {
-    /* writefile <path> <text> - write text to a file */
+    /* writefile <path> <text> - 将文本写入文件 */
     if (argc < 3) {
         printf("writefile: usage: writefile <path> <text>\n");
         return -1;
@@ -277,7 +277,7 @@ static int cmd_vfstest(int argc, char** argv) {
         }
     }
 
-    /* Test 2: mkdir /tmp */
+    /* 测试 2：mkdir /tmp */
     printf("[Test 2] mkdir /tmp ... ");
     {
         int ret = vfs_mkdir("/tmp", VFS_S_IRUSR | VFS_S_IWUSR | VFS_S_IXUSR);
@@ -325,7 +325,7 @@ static int cmd_vfstest(int argc, char** argv) {
         }
     }
 
-    /* Test 5: read from /hello.txt */
+    /* 测试 5：从 /hello.txt 读取 */
     printf("[Test 5] read /hello.txt ... ");
     {
         int fd = vfs_open("/hello.txt", VFS_O_RDONLY, 0);
@@ -374,7 +374,7 @@ static int cmd_vfstest(int argc, char** argv) {
         }
     }
 
-    /* Test 7: cd /tmp */
+    /* 测试 7：cd /tmp */
     printf("[Test 7] cd /tmp ... ");
     {
         int ret = vfs_chdir("/tmp");
@@ -409,7 +409,7 @@ static int cmd_vfstest(int argc, char** argv) {
         }
     }
 
-    /* Test 9: rm /hello.txt */
+    /* 测试 9：rm /hello.txt */
     printf("[Test 9] rm /hello.txt ... ");
     {
         int ret = vfs_unlink("/hello.txt");
@@ -436,7 +436,7 @@ static int cmd_vfstest(int argc, char** argv) {
         }
     }
 
-    /* Test 11: Pipe test */
+    /* 测试 11：管道测试 */
     printf("[Test 11] pipe ... ");
     {
         int pipefd[2];
@@ -490,7 +490,7 @@ static int cmd_vfstest(int argc, char** argv) {
     return failed > 0 ? -1 : 0;
 }
 
-/* ---------- Extra utility commands ---------- */
+/* ---------- 额外实用命令 ---------- */
 
 static int cmd_cp(int argc, char** argv) {
     if (argc < 3) {
@@ -526,7 +526,7 @@ static int cmd_mv(int argc, char** argv) {
         printf("mv: usage: mv <src> <dst>\n");
         return -1;
     }
-    /* Copy then delete - no rename across filesystems */
+    /* 复制后删除 - 不支持跨文件系统重命名 */
     int src_fd = vfs_open(argv[1], VFS_O_RDONLY, 0);
     if (src_fd < 0) {
         printf("mv: cannot open '%s'\n", argv[1]);
@@ -633,7 +633,7 @@ static int cmd_dmesg(int argc, char** argv) {
 #include "process.h"
 #include "syscall.h"
 
-/* Forward declaration */
+/* 前向声明 */
 static int shell_atoi(const char *s);
 
 static int cmd_reg(int argc, char** argv) {
@@ -771,7 +771,7 @@ static void user_proc_launcher(void *arg)
            (unsigned long long)self->entry_point,
            (unsigned long long)self->stack_top);
 
-    /* Set up the user-mode trap frame */
+    /* 设置用户态陷阱帧 */
     process_setup_frame(self, self->entry_point, self->stack_top, 0);
     printf("[exec] setup_frame done, trap_frame=%p pml4=%llx\n",
            (void *)self->trap_frame, (unsigned long long)self->pml4);
@@ -782,7 +782,7 @@ static void user_proc_launcher(void *arg)
     printf("[exec] about to call process_enter_user, frame=%p\n",
            (void *)self->trap_frame);
 
-    /* Jump to user mode via iretq */
+    /* 通过 iretq 跳转到用户态 */
     process_enter_user(self->trap_frame);
 }
 
@@ -794,7 +794,7 @@ static int cmd_exec(int argc, char** argv) {
 
     const char *path = argv[1];
 
-    /* Check the file exists */
+    /* 检查文件是否存在 */
     int fd = vfs_open(path, VFS_O_RDONLY, 0);
     if (fd < 0) {
         printf("exec: cannot open '%s' (err=%d)\n", path, fd);
@@ -802,7 +802,7 @@ static int cmd_exec(int argc, char** argv) {
     }
     vfs_close(fd);
 
-    /* Create a kernel thread that will transition to user mode */
+    /* 创建一个将转换到用户态的内核线程 */
     printf("[exec] creating kthread for '%s'...\n", path);
     process_t *proc = process_create_kthread(user_proc_launcher, (void *)path);
     if (!proc) {
@@ -812,7 +812,7 @@ static int cmd_exec(int argc, char** argv) {
 
     printf("exec: launched '%s' as PID %d (state=%d)\n", path, proc->pid, proc->state);
 
-    /* Debug: verify stack contents right after creation */
+    /* 调试：创建后立即验证栈内容 */
     {
         volatile uint64_t *vp = (volatile uint64_t *)proc->kernel_rsp;
         printf("[exec] pre-sched: krsp=%lx v[0]=%lx v[6]=%lx v[7]=%lx v[8]=%lx\n",
@@ -880,7 +880,7 @@ static int cmd_fileassoc(int argc, char** argv) {
             printf("No association for %s\n", argv[2]);
         }
     } else if (strcmp(argv[1], "list") == 0) {
-        /* List all file associations by scanning HKEY_FILEASSOC */
+        /* 通过扫描 HKEY_FILEASSOC 列出所有文件关联 */
         char names[32][128];
         int count = registry_list_keys("HKEY_FILEASSOC", names, 32);
         printf("File associations (%d):\n", count);
@@ -914,7 +914,7 @@ static int shell_atoi(const char *s) {
     return n;
 }
 
-/* ---------- Original commands ---------- */
+/* ---------- 原始命令 ---------- */
 
 static int cmd_help(int argc, char** argv) {
     (void)argc; (void)argv;
@@ -1156,7 +1156,7 @@ static const ShellCommand builtin_commands[] = {
     { "stat",      cmd_stat,      "Show file info" },
     { "hexdump",   cmd_hexdump,   "Hex dump file" },
     { "dmesg",     cmd_dmesg,     "Show kernel log" },
-    /* Registry / Package / Sandbox */
+    /* 注册表 / 包管理 / 沙箱 */
     { "reg",       cmd_reg,       "Registry operations" },
     { "pkg",       cmd_pkg,       "Package manager" },
     { "sandbox",   cmd_sandbox,   "Sandbox status" },
@@ -1167,7 +1167,7 @@ static const ShellCommand builtin_commands[] = {
 
 #define NUM_BUILTIN (sizeof(builtin_commands) / sizeof(builtin_commands[0]))
 
-/* ---------- Command history ---------- */
+/* ---------- 命令历史 ---------- */
 
 #define SHELL_HISTORY_SIZE 32
 
@@ -1176,7 +1176,7 @@ static int  shell_history_count = 0;
 static int  shell_history_idx = 0;    /* Next write position (ring buffer) */
 static int  shell_history_scroll = 0; /* Offset from most recent when browsing */
 
-/* Saved input before history browsing started */
+/* 开始浏览历史前保存的输入 */
 static char shell_saved_input[SHELL_MAX_LINE];
 static int  shell_has_saved_input = 0;
 
@@ -1185,7 +1185,7 @@ static void shell_history_add(const char *line)
     int len = strlen(line);
     if (len == 0) return;
 
-    /* Don't add duplicate of most recent entry */
+    /* 不添加与最近条目重复的内容 */
     if (shell_history_count > 0) {
         int last = (shell_history_idx - 1 + SHELL_HISTORY_SIZE) % SHELL_HISTORY_SIZE;
         if (strcmp(shell_history[last], line) == 0)
@@ -1217,7 +1217,7 @@ static void shell_tab_complete(void)
     if (input_len == 0)
         return;
 
-    /* Find the start of the current word */
+    /* 查找当前单词的起始位置 */
     int word_start = input_len;
     while (word_start > 0 && input[word_start - 1] != ' ')
         word_start--;
@@ -1239,7 +1239,7 @@ static void shell_tab_complete(void)
             }
         }
     } else {
-        /* Complete filename from current directory */
+        /* 从当前目录补全文件名 */
         const char *cwd = vfs_get_cwd();
         int fd = vfs_open(cwd, VFS_O_RDONLY | VFS_O_DIRECTORY, 0);
         if (fd >= 0) {
@@ -1259,7 +1259,7 @@ static void shell_tab_complete(void)
     }
 
     if (match_count == 0) {
-        /* No match - do nothing */
+        /* 无匹配 - 不做任何操作 */
         return;
     }
 
@@ -1267,7 +1267,7 @@ static void shell_tab_complete(void)
         /* Single match - complete it */
         const char *match = matches[0];
         int match_len = strlen(match);
-        /* Append the unmatched portion */
+        /* 追加未匹配的部分 */
         int append_start = word_len;
         int append_len = match_len - append_start;
 
@@ -1280,7 +1280,7 @@ static void shell_tab_complete(void)
             int new_len = input_len + append_len + 1;
             terminal_set_input(buf, new_len);
         } else if (!is_command && append_len > 0) {
-            /* For file completion, append remaining chars */
+            /* 对于文件补全，追加剩余字符 */
             char buf[SHELL_MAX_LINE];
             memcpy(buf, input, input_len);
             memcpy(buf + input_len, match + append_start, append_len);
@@ -1316,7 +1316,7 @@ static void shell_tab_complete(void)
         for (int i = 0; i < match_count; i++) {
             printf("  %s", matches[i]);
             if (!is_command) {
-                /* Check if directory for trailing / - skip for brevity in multi-match */
+                /* 检查是否为目录并添加尾部 / - 多匹配时省略以简洁 */
             }
             printf("\n");
         }
@@ -1334,7 +1334,7 @@ static void shell_key_handler(char key)
 
     if (uk == TERM_CHAR_UP) {
         if (shell_history_scroll < shell_history_count) {
-            /* Save current input before first scroll */
+            /* 在首次滚动前保存当前输入
             if (shell_history_scroll == 0) {
                 const char *cur = terminal_get_input();
                 int cur_len = terminal_get_input_len();
@@ -1352,7 +1352,7 @@ static void shell_key_handler(char key)
         if (shell_history_scroll > 0) {
             shell_history_scroll--;
             if (shell_history_scroll == 0) {
-                /* Restore saved input */
+                /* Restore saved input saved input */
                 if (shell_has_saved_input) {
                     terminal_set_input(shell_saved_input, strlen(shell_saved_input));
                 } else {
@@ -1370,13 +1370,13 @@ static void shell_key_handler(char key)
     }
 }
 
-/* ---------- Line editing ---------- */
+/* ---------- 行编辑-- */
 
 static void shell_read_line(char* buf, int maxlen) {
     terminal_readline(buf, maxlen);
 }
 
-/* ---------- Command parsing ---------- */
+/* ---------- Command parsingand parsing ---------- */
 
 static int shell_parse_line(char* line, char** argv, int max_args) {
     int argc = 0;
@@ -1388,7 +1388,7 @@ static int shell_parse_line(char* line, char** argv, int max_args) {
     return argc;
 }
 
-/* ---------- Public API ---------- */
+/* ---------- 公共 API ---------- */
 
 static const char *logo_ascii[] = {
     "                               *****                      ******",
@@ -1416,7 +1416,7 @@ static const char *logo_ascii[] = {
 void shell_init(void) {
     terminal_set_key_callback(shell_key_handler);
 
-    /* Show splash logo for 2 seconds */
+    /* 显示启动画面 2 秒 */
     vga_clear();
     vga_set_color(0x0B, 0x00); /* Cyan on black */
     for (int i = 0; logo_ascii[i] != NULL; i++) {
@@ -1435,13 +1435,13 @@ void shell_init(void) {
     printf("========================================\n");
 }
 
-/* ---------- Pipeline and redirection execution ---------- */
+/* ---------- 管道和重定向执行 ---------- */
 
 #define MAX_PIPE_STAGES 8
 
-/* Parse a single command stage for redirections.
- * Returns the argc for the command (excluding redirection tokens).
- * Sets stdin_file, stdout_file, append_mode. */
+/* 解析单个命令阶段的重定向。
+ * 返回命令的 argc（不含重定向标记）。
+ * 设置 stdin_file、stdout_file、append_mode。 */
 static int parse_stage(char **argv, int raw_argc,
                        char **stdin_file, char **stdout_file, int *append_mode)
 {
@@ -1480,17 +1480,17 @@ static int parse_stage(char **argv, int raw_argc,
     return argc;
 }
 
-/* Execute a single command with optional stdin/stdout override */
+/* Execute a single command with optional single commanoverridewith optional single commanoverridewiih optional stngle commanoverridewith optional stdin/stdout override */
 static int execute_with_fds(const char *cmd, int argc, char **argv)
 {
-    /* Search built-in commands */
+    /* 搜索内置命令 */
     for (size_t i = 0; i < NUM_BUILTIN; i++) {
         if (strcmp(cmd, builtin_commands[i].name) == 0) {
             return builtin_commands[i].handler(argc, argv);
         }
     }
 
-    /* Try module command handler */
+    /* 尝试模块命令处理程序 */
     int ret = module_handle_command(cmd, argc, argv);
     if (ret != -1)
         return ret;
@@ -1504,13 +1504,13 @@ void shell_run(void) {
     char* argv[SHELL_MAX_ARGS];
 
     while (1) {
-        /* Show CWD in prompt */
+        /* 在提示符中显示当前工作目录 */
         const char *cwd_path = vfs_get_cwd();
         printf("%s> ", cwd_path);
 
         shell_read_line(line, SHELL_MAX_LINE);
 
-        /* Add to history and reset scroll */
+        /* 添加到历史并重置滚动 */
         shell_history_add(line);
         shell_history_scroll = 0;
         shell_has_saved_input = 0;
@@ -1552,7 +1552,7 @@ void shell_run(void) {
             int saved_stdin = -1, saved_stdout = -1;
             int redir_in_fd = -1, redir_out_fd = -1;
 
-            /* Setup input redirection */
+            /* 设置输入重定向 */
             if (stdin_file) {
                 redir_in_fd = vfs_open(stdin_file, VFS_O_RDONLY, 0);
                 if (redir_in_fd < 0) {
@@ -1604,7 +1604,7 @@ void shell_run(void) {
                 int stage_argc = shell_parse_line(stages[s], stage_argv, SHELL_MAX_ARGS);
                 if (stage_argc == 0) continue;
 
-                /* Parse redirections within this stage */
+                /* 解析此阶段内的重定向 */
                 char *stdin_file = NULL, *stdout_file = NULL;
                 int append_mode = 0;
                 int argc = parse_stage(stage_argv, stage_argc, &stdin_file, &stdout_file, &append_mode);
@@ -1617,7 +1617,7 @@ void shell_run(void) {
 
                 /* Setup stdin for this stage */
                 if (s > 0 && prev_pipe_read_fd >= 0) {
-                    /* Read from previous pipe */
+                    /* 从上一个管道读取 */
                     saved_stdin = shell_stdin_fd;
                     shell_stdin_fd = prev_pipe_read_fd;
                 } else if (stdin_file) {
@@ -1630,7 +1630,7 @@ void shell_run(void) {
 
                 /* Setup stdout for this stage */
                 if (!is_last) {
-                    /* Create pipe to next stage */
+                    /* 创建到下一阶段的管道 */
                     if (vfs_pipe(pipe_fd) != 0) {
                         printf("shell: pipe failed\n");
                         break;
@@ -1656,7 +1656,7 @@ void shell_run(void) {
                 /* Restore stdout and close pipe write end */
                 if (!is_last) {
                     shell_stdout_fd = saved_stdout;
-                    vfs_close(pipe_fd[1]); /* Close write end */
+                    vfs_close(pipe_fd[1]); /* 关闭写入端 */
 
                     /* Close previous pipe read end (if any) */
                     if (prev_pipe_read_fd >= 0 && s > 0) {
@@ -1683,7 +1683,7 @@ void shell_run(void) {
                 }
             }
 
-            /* Cleanup any remaining pipe fds */
+            /* 清理所有剩余的管道 fd */
             if (prev_pipe_read_fd >= 0) {
                 vfs_close(prev_pipe_read_fd);
             }

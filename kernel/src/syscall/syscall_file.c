@@ -9,7 +9,7 @@
 #include "errno.h"
 #include "mmu.h"
 
-/* Convert vfs_inode_t to linux_stat_t */
+/* 将 vfs_inode_t 转换为 linux_stat_t */
 static void inode_to_stat(const vfs_inode_t *inode, linux_stat_t *stat)
 {
     stat->st_dev     = 0;
@@ -50,17 +50,17 @@ int64_t sys_write(trap_frame_t *frame)
     const void *buf = (const void *)frame->rsi;
     size_t count = (size_t)frame->rdx;
 
-    /* Handle stdout/stderr by writing directly to serial + VGA.
-     * New user processes may not have fd 1/2 open in the VFS,
-     * so we bypass VFS and write to the console directly. */
+    /* 直接写入串口 + VGA 来处理 stdout/stderr。
+     * 新的用户进程可能没有在 VFS 中打开 fd 1/2，
+     * 因此绕过 VFS 直接写入控制台。 */
     if (fd == 1 || fd == 2) {
         const char *p = (const char *)buf;
         for (size_t i = 0; i < count; i++) {
-            /* Write to serial port (COM1) */
+            /* 写入串口 (COM1) */
             while (!(hal_inb(0x3FD) & 0x20))
                 ;
             hal_outb(0x3F8, (uint8_t)p[i]);
-            /* Also write to VGA terminal */
+            /* 同时写入 VGA 终端 */
             terminal_putchar(p[i]);
         }
         return (int64_t)count;
@@ -183,7 +183,7 @@ int64_t sys_stat(trap_frame_t *frame)
 
     (void)path;
 
-    /* Open, fstat, close */
+    /* 打开、fstat、关闭 */
     int fd = vfs_open(path, VFS_O_RDONLY, 0);
     if (fd < 0)
         return -ENOENT;
@@ -201,7 +201,7 @@ int64_t sys_stat(trap_frame_t *frame)
 
 int64_t sys_lstat(trap_frame_t *frame)
 {
-    /* Same as stat for now (no symlinks in VFS yet) */
+    /* 目前与 stat 相同（VFS 尚不支持符号链接） */
     return sys_stat(frame);
 }
 
@@ -212,7 +212,7 @@ int64_t sys_access(trap_frame_t *frame)
 
     (void)mode;
 
-    /* Just check if the file exists */
+    /* Just check if the file existsk if the file exists */
     int fd = vfs_open(path, VFS_O_RDONLY, 0);
     if (fd < 0)
         return -ENOENT;
@@ -222,7 +222,7 @@ int64_t sys_access(trap_frame_t *frame)
 
 int64_t sys_readlink(trap_frame_t *frame)
 {
-    /* No symlinks in VFS yet */
+    /* VFS 尚不支持符号链接 */
     return -ENOENT;
 }
 
@@ -236,7 +236,7 @@ int64_t sys_newfstatat(trap_frame_t *frame)
     (void)dirfd;
     (void)flags;
 
-    /* Same as stat for now */
+    /* 目前与 stat 相同 */
     int fd = vfs_open(pathname, VFS_O_RDONLY, 0);
     if (fd < 0)
         return -ENOENT;
@@ -265,7 +265,7 @@ int64_t sys_readlinkat(trap_frame_t *frame)
     (void)buf;
     (void)bufsiz;
 
-    /* No symlinks in VFS yet */
+    /* VFS 尚不支持符号链接 */
     return -ENOENT;
 }
 
@@ -298,8 +298,8 @@ int64_t sys_getdents(trap_frame_t *frame)
     (void)dirp;
     (void)count;
 
-    /* Read directory entries using vfs_readdir */
-    /* Simple stub: return 0 (no entries) */
+    /* 使用 vfs_readdir 读取目录项 */
+    /* 简单桩函数：返回 0（无目录项） */
     (void)fd;
     return 0;
 }
@@ -336,7 +336,7 @@ int64_t sys_chown(trap_frame_t *frame)
 int64_t sys_fcntl(trap_frame_t *frame)
 {
     (void)frame;
-    return 0;  /* Stub */
+    return 0;  /* 桩函数 */
 }
 
 int64_t sys_flock(trap_frame_t *frame)
@@ -363,7 +363,7 @@ int64_t sys_pipe2(trap_frame_t *frame)
     int flags = (int)frame->rsi;
     (void)flags;
 
-    /* Use VFS pipe */
+    /* 使用 VFS 管道 */
     int fds[2];
     int ret = vfs_pipe(fds);
     if (ret < 0)

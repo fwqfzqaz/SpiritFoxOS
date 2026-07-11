@@ -14,7 +14,7 @@
 #include "vfs.h"
 
 /* ========================================================================
- * Constants
+ * 常量
  * ======================================================================== */
 
 #define GUNZIP_OK            0
@@ -40,17 +40,17 @@
 #define GZIP_FLAG_FNAME    0x08
 #define GZIP_FLAG_FCOMMENT 0x10
 
-/* Max bits for a Huffman code */
+/* 哈夫曼编码的最大位数 */
 #define MAX_BITS       15
-/* Number of length codes */
+/* 长度码数量 */
 #define NUM_LIT_CODES  286
-/* Number of distance codes */
+/* 距离码数量 */
 #define NUM_DIST_CODES 30
-/* Number of code length codes */
+/* 码长码数量 */
 #define NUM_CL_CODES   19
 
 /* ========================================================================
- * CRC32 table and computation
+ * CRC32 表和计算
  * ======================================================================== */
 
 static const uint32_t crc32_table[256] = {
@@ -130,15 +130,15 @@ static uint32_t crc32_update(uint32_t crc, const void *buf, size_t len)
 }
 
 /* ========================================================================
- * Bitstream reader
+ * 位流读取器
  * ======================================================================== */
 
 typedef struct {
     const uint8_t *data;
-    size_t         size;    /* total bytes in source */
-    size_t         bytepos; /* current byte position */
-    unsigned int   bitbuf;  /* bits we've loaded but not yet consumed */
-    int            bitcnt;  /* number of bits in bitbuf */
+    size_t         size;    /* 源数据总字节数 */
+    size_t         bytepos; /* 当前字节位置 */
+    unsigned int   bitbuf;  /* 已加载但未消费的位 */
+    int            bitcnt;  /* bitbuf 中的位数 */
 } bitstream_t;
 
 static void bs_init(bitstream_t *bs, const uint8_t *data, size_t size)
@@ -150,7 +150,7 @@ static void bs_init(bitstream_t *bs, const uint8_t *data, size_t size)
     bs->bitcnt = 0;
 }
 
-/* Load more bits into the bitstream buffer */
+/* 向位流缓冲区加载更多位 */
 static int bs_load(bitstream_t *bs)
 {
     while (bs->bitcnt <= 24 && bs->bytepos < bs->size) {
@@ -161,7 +161,7 @@ static int bs_load(bitstream_t *bs)
     return (bs->bitcnt > 0) ? 0 : -1;
 }
 
-/* Peek at n bits without consuming them (n must be <= 24) */
+/* 查看但不清费 n 位（n 必须 <= 24） */
 static int bs_peek(bitstream_t *bs, int n, unsigned int *val)
 {
     if (bs->bitcnt < n) {
@@ -204,7 +204,7 @@ static void bs_align(bitstream_t *bs)
 static int bs_read_bytes(bitstream_t *bs, int n, unsigned int *val)
 {
     bs_align(bs);
-    /* discard any remaining partial bits */
+    /* 丢弃剩余的部分位 */
     bs->bitbuf = 0;
     bs->bitcnt = 0;
 
@@ -218,19 +218,18 @@ static int bs_read_bytes(bitstream_t *bs, int n, unsigned int *val)
 }
 
 /* ========================================================================
- * Huffman decoding
+ * 哈夫曼解码
  * ======================================================================== */
 
 typedef struct {
-    uint16_t counts[MAX_BITS + 1]; /* number of codes of each length */
-    uint16_t symbols[288];         /* symbols sorted by code */
+    uint16_t counts[MAX_BITS + 1]; /* 每种长度的编码数量 */
+    uint16_t symbols[288];         /* 按编码排序的符号 */
 } huffman_t;
 
 /*
- * Build a Huffman decoding table from an array of code lengths.
- * code_lengths[i] = bit-length of code for symbol i (0 = not present).
- * num_symbols = total number of symbols.
- * max_sym = max symbol value that can appear in the symbols array.
+ * 从码长数组构建哈夫曼解码表。
+ * code_lengths[i] = 符号 i 的编码位长（0 = 不存在）。
+ * num_symbols = 符号总数。
  */
 static int huffman_build(huffman_t *h, const uint8_t *code_lengths,
                          int num_symbols)
@@ -240,7 +239,7 @@ static int huffman_build(huffman_t *h, const uint8_t *code_lengths,
 
     memset(h, 0, sizeof(*h));
 
-    /* Count code lengths */
+    /* 统计码长 */
     for (i = 0; i < num_symbols; i++) {
         if (code_lengths[i] > MAX_BITS) {
             printf("[gunzip] invalid code length %d for symbol %d\n",
@@ -250,20 +249,20 @@ static int huffman_build(huffman_t *h, const uint8_t *code_lengths,
         h->counts[code_lengths[i]]++;
     }
 
-    /* Offset of first code of each length */
+    /* 每种长度的第一个编码偏移 */
     h->counts[0] = 0;
     next_code[0] = 0;
     for (i = 1; i <= MAX_BITS; i++) {
         next_code[i] = (next_code[i - 1] + h->counts[i - 1]) << 1;
-        /* Overflow check: codes of length i must fit in i bits */
+        /* 溢出检查：长度为 i 的编码必须能放入 i 位 */
         if (next_code[i] + h->counts[i] > (1u << i)) {
             printf("[gunzip] huffman code overflow at length %d\n", i);
             return GUNZIP_ERR_HUFFMAN;
         }
     }
 
-    /* Build symbol table sorted by code */
-    /* We use counts as an index into symbols[] */
+    /* 构建按编码排序的符号表 */
+    /* 将 counts 用作 symbols[] 的索引 */
     uint16_t offsets[MAX_BITS + 1];
     offsets[0] = 0;
     for (i = 1; i <= MAX_BITS; i++)
@@ -279,7 +278,7 @@ static int huffman_build(huffman_t *h, const uint8_t *code_lengths,
 }
 
 /*
- * Decode one symbol from the bitstream using the Huffman table.
+ * 使用哈夫曼表从位流中解码一个符号。
  */
 static int huffman_decode(bitstream_t *bs, const huffman_t *h,
                           unsigned int *sym)
@@ -306,12 +305,12 @@ static int huffman_decode(bitstream_t *bs, const huffman_t *h,
 }
 
 /* ========================================================================
- * RFC 1951 DEFLATE tables
+ * RFC 1951 DEFLATE 表
  * ======================================================================== */
 
 /*
- * Length code base values and extra bits (codes 257..285).
- * Index 0 = code 257, index 28 = code 285.
+ * 长度码基础值和额外位（码 257..285）。
+ * 索引 0 = 码 257，索引 28 = 码 285。
  */
 static const uint16_t len_base[29] = {
     3, 4, 5, 6, 7, 8, 9, 10,       /* 257-264 */
@@ -334,7 +333,7 @@ static const uint8_t len_extra[29] = {
 };
 
 /*
- * Distance code base values and extra bits (codes 0..29).
+ * 距离码基础值和额外位（码 0..29）。
  */
 static const uint16_t dist_base[30] = {
     1, 2, 3, 4, 5, 7, 9, 13,
@@ -351,14 +350,14 @@ static const uint8_t dist_extra[30] = {
 };
 
 /*
- * Order of code length code lengths in the dynamic block header.
+ * 动态块头部中码长码长度的顺序。
  */
 static const uint8_t cl_order[NUM_CL_CODES] = {
     16, 17, 18, 0, 8, 7, 9, 6, 10, 5, 11, 4, 12, 3, 13, 2, 14, 1, 15
 };
 
 /* ========================================================================
- * Fixed Huffman tables (block type 1)
+ * 固定哈夫曼表（块类型 1）
  * ======================================================================== */
 
 static huffman_t fixed_lit;
@@ -370,15 +369,15 @@ static void build_fixed_tables(void)
     uint8_t lengths[288];
     int i;
 
-    /* Literal/length: 0-143 = 8 bits, 144-255 = 9 bits,
-     * 256-279 = 7 bits, 280-287 = 8 bits */
+    /* 字面量/长度：0-143 = 8 位，144-255 = 9 位，
+     * 256-279 = 7 位，280-287 = 8 位 */
     for (i = 0; i <= 143; i++)   lengths[i] = 8;
     for (i = 144; i <= 255; i++) lengths[i] = 9;
     for (i = 256; i <= 279; i++) lengths[i] = 7;
     for (i = 280; i <= 287; i++) lengths[i] = 8;
     huffman_build(&fixed_lit, lengths, 288);
 
-    /* Distance: all 32 codes are 5 bits */
+    /* 距离：全部 32 个码为 5 位 */
     for (i = 0; i < 32; i++) lengths[i] = 5;
     huffman_build(&fixed_dist, lengths, 32);
 
@@ -386,13 +385,13 @@ static void build_fixed_tables(void)
 }
 
 /* ========================================================================
- * Inflate output buffer
+ * 膨胀输出缓冲区
  * ======================================================================== */
 
 typedef struct {
     uint8_t *data;
-    size_t   cap;     /* allocated capacity */
-    size_t   pos;     /* current write position */
+    size_t   cap;     /* 已分配容量 */
+    size_t   pos;     /* 当前写入位置 */
 } output_t;
 
 static int out_init(output_t *o, size_t cap)
@@ -423,7 +422,7 @@ static int out_ensure(output_t *o, size_t additional)
     if (o->pos + additional <= o->cap)
         return GUNZIP_OK;
 
-    /* Grow to at least pos + additional, double if larger */
+    /* 至少增长到 pos + additional，若更大则翻倍 */
     size_t new_cap = o->cap * 2;
     if (new_cap < o->pos + additional)
         new_cap = o->pos + additional;
@@ -468,7 +467,7 @@ static int out_copy_match(output_t *o, size_t dist, size_t len)
     int rc = out_ensure(o, len);
     if (rc < 0) return rc;
 
-    /* Must copy byte-by-byte because source and dest may overlap */
+    /* 必须逐字节复制，因为源和目标可能重叠 */
     size_t src = o->pos - dist;
     for (size_t i = 0; i < len; i++) {
         o->data[o->pos++] = o->data[src + i];
@@ -477,13 +476,13 @@ static int out_copy_match(output_t *o, size_t dist, size_t len)
 }
 
 /* ========================================================================
- * DEFLATE inflate implementation
+ * DEFLATE 膨胀实现
  * ======================================================================== */
 
 /*
- * Decode a dynamic Huffman block (type 2).
- * Reads the code length tables and builds literal+length and distance
- * Huffman trees, then inflates the data.
+ * 解码动态哈夫曼块（类型 2）。
+ * 读取码长表并构建字面量+长度和距离哈夫曼树，
+ * 然后膨胀数据。
  */
 static int inflate_dynamic_block(bitstream_t *bs, output_t *out)
 {
@@ -493,14 +492,14 @@ static int inflate_dynamic_block(bitstream_t *bs, output_t *out)
     int i;
     int num_lit, num_dist;
 
-    /* Read table counts */
+    /* 读取表计数 */
     if (bs_read(bs, 5, &hlit) < 0)  return GUNZIP_ERR_DATA;
     if (bs_read(bs, 5, &hdist) < 0) return GUNZIP_ERR_DATA;
     if (bs_read(bs, 4, &hclen) < 0) return GUNZIP_ERR_DATA;
 
-    hlit  += 257;   /* number of literal/length codes */
-    hdist += 1;     /* number of distance codes */
-    hclen += 4;     /* number of code length codes */
+    hlit  += 257;   /* 字面量/长度码数量 */
+    hdist += 1;     /* 距离码数量 */
+    hclen += 4;     /* 码长码数量 */
 
     num_lit  = (int)hlit;
     num_dist = (int)hdist;
@@ -511,7 +510,7 @@ static int inflate_dynamic_block(bitstream_t *bs, output_t *out)
         return GUNZIP_ERR_DATA;
     }
 
-    /* Read code length code lengths */
+    /* 读取码长码长度 */
     memset(cl_lengths, 0, sizeof(cl_lengths));
     for (i = 0; i < (int)hclen; i++) {
         unsigned int val;
@@ -520,12 +519,12 @@ static int inflate_dynamic_block(bitstream_t *bs, output_t *out)
         cl_lengths[cl_order[i]] = (uint8_t)val;
     }
 
-    /* Build code length Huffman table */
+    /* 构建码长哈夫曼表 */
     huffman_t cl_table;
     int rc = huffman_build(&cl_table, cl_lengths, NUM_CL_CODES);
     if (rc < 0) return rc;
 
-    /* Decode literal/length + distance code lengths */
+    /* 解码字面量/长度 + 距离码长 */
     int total = num_lit + num_dist;
     memset(lit_lengths, 0, sizeof(lit_lengths));
 
@@ -539,10 +538,10 @@ static int inflate_dynamic_block(bitstream_t *bs, output_t *out)
         }
 
         if (sym < 16) {
-            /* Literal code length */
+            /* 字面量码长 */
             lit_lengths[i++] = (uint8_t)sym;
         } else if (sym == 16) {
-            /* Repeat previous length 3-6 times */
+            /* 重复前一个长度 3-6 次 */
             unsigned int rep;
             if (bs_read(bs, 2, &rep) < 0) return GUNZIP_ERR_DATA;
             rep += 3;
@@ -555,7 +554,7 @@ static int inflate_dynamic_block(bitstream_t *bs, output_t *out)
             while (rep--)
                 lit_lengths[i++] = prev;
         } else if (sym == 17) {
-            /* Repeat zero 3-10 times */
+            /* 重复零 3-10 次 */
             unsigned int rep;
             if (bs_read(bs, 3, &rep) < 0) return GUNZIP_ERR_DATA;
             rep += 3;
@@ -563,7 +562,7 @@ static int inflate_dynamic_block(bitstream_t *bs, output_t *out)
             while (rep--)
                 lit_lengths[i++] = 0;
         } else if (sym == 18) {
-            /* Repeat zero 11-138 times */
+            /* 重复零 11-138 次 */
             unsigned int rep;
             if (bs_read(bs, 7, &rep) < 0) return GUNZIP_ERR_DATA;
             rep += 11;
@@ -576,13 +575,13 @@ static int inflate_dynamic_block(bitstream_t *bs, output_t *out)
         }
     }
 
-    /* Build literal/length and distance Huffman tables */
+    /* 构建字面量/长度和距离哈夫曼表 */
     huffman_t lit_table, dist_table;
 
     rc = huffman_build(&lit_table, lit_lengths, num_lit);
     if (rc < 0) return rc;
 
-    /* Distance table: if all zero lengths, distance codes are not used */
+    /* 距离表：若所有长度为零，则不使用距离码 */
     int has_dist = 0;
     for (int j = 0; j < num_dist; j++) {
         if (lit_lengths[num_lit + j] != 0) {
@@ -598,7 +597,7 @@ static int inflate_dynamic_block(bitstream_t *bs, output_t *out)
         memset(&dist_table, 0, sizeof(dist_table));
     }
 
-    /* Inflate using the two tables */
+    /* 使用两个表进行膨胀 */
     for (;;) {
         unsigned int sym;
         rc = huffman_decode(bs, &lit_table, &sym);
@@ -608,14 +607,14 @@ static int inflate_dynamic_block(bitstream_t *bs, output_t *out)
         }
 
         if (sym < 256) {
-            /* Literal byte */
+            /* 字面量字节 */
             rc = out_write_byte(out, (uint8_t)sym);
             if (rc < 0) return rc;
         } else if (sym == 256) {
-            /* End of block */
+            /* 块结束 */
             break;
         } else {
-            /* Length/distance pair */
+            /* 长度/距离对 */
             unsigned int len_idx = sym - 257;
             if (len_idx >= 29) {
                 printf("[gunzip] invalid length code %u\n", sym);
@@ -630,7 +629,7 @@ static int inflate_dynamic_block(bitstream_t *bs, output_t *out)
                 length += extra;
             }
 
-            /* Decode distance */
+            /* 解码距离 */
             unsigned int dist_sym;
             if (!has_dist) {
                 printf("[gunzip] distance code with no distance table\n");
@@ -663,7 +662,7 @@ static int inflate_dynamic_block(bitstream_t *bs, output_t *out)
 }
 
 /*
- * Inflate a fixed Huffman block (type 1).
+ * 膨胀固定哈夫曼块（类型 1）。
  */
 static int inflate_fixed_block(bitstream_t *bs, output_t *out)
 {
@@ -684,7 +683,7 @@ static int inflate_fixed_block(bitstream_t *bs, output_t *out)
         } else if (sym == 256) {
             break;
         } else {
-            /* Length/distance pair */
+            /* 长度/距离对 */
             unsigned int len_idx = sym - 257;
             if (len_idx >= 29) {
                 printf("[gunzip] fixed block: invalid length code %u\n", sym);
@@ -699,7 +698,7 @@ static int inflate_fixed_block(bitstream_t *bs, output_t *out)
                 length += extra;
             }
 
-            /* Decode distance */
+            /* 解码距离 */
             unsigned int dist_sym;
             rc = huffman_decode(bs, &fixed_dist, &dist_sym);
             if (rc < 0) {
@@ -729,18 +728,18 @@ static int inflate_fixed_block(bitstream_t *bs, output_t *out)
 }
 
 /*
- * Inflate a stored (uncompressed) block (type 0).
+ * 膨胀存储（未压缩）块（类型 0）。
  */
 static int inflate_stored_block(bitstream_t *bs, output_t *out)
 {
     unsigned int len, nlen;
 
-    /* Align to byte boundary */
+    /* 对齐到字节边界 */
     bs_align(bs);
     bs->bitbuf = 0;
     bs->bitcnt = 0;
 
-    /* Read LEN and NLEN */
+    /* 读取 LEN 和 NLEN */
     if (bs->bytepos + 4 > bs->size) {
         printf("[gunzip] stored block: truncated header\n");
         return GUNZIP_ERR_DATA;
@@ -764,11 +763,11 @@ static int inflate_stored_block(bitstream_t *bs, output_t *out)
         return GUNZIP_ERR_DATA;
     }
 
-    /* Ensure output has space */
+    /* 确保输出有空间 */
     int rc = out_ensure(out, len);
     if (rc < 0) return rc;
 
-    /* Copy raw data */
+    /* 复制原始数据 */
     memcpy(out->data + out->pos, bs->data + bs->bytepos, len);
     out->pos += len;
     bs->bytepos += len;
@@ -777,8 +776,8 @@ static int inflate_stored_block(bitstream_t *bs, output_t *out)
 }
 
 /*
- * Main inflate loop: process deflate blocks.
- * `src` points to the raw deflate stream (after gzip header if applicable).
+ * 主膨胀循环：处理 DEFLATE 块。
+ * `src` 指向原始 DEFLATE 流（若适用，在 gzip 头之后）。
  */
 static int inflate_stream(bitstream_t *bs, output_t *out)
 {
@@ -823,19 +822,19 @@ static int inflate_stream(bitstream_t *bs, output_t *out)
 }
 
 /* ========================================================================
- * Public API
+ * 公共 API
  * ======================================================================== */
 
 /*
- * zlib_inflate - Raw DEFLATE decompression
+ * zlib_inflate - 原始 DEFLATE 解压
  *
- * @src:      pointer to raw deflate-compressed data
- * @src_size: size of compressed data in bytes
- * @dst:      pre-allocated output buffer
- * @dst_cap:  capacity of the output buffer
- * @dst_size: on success, receives the number of decompressed bytes
+ * @src:      指向原始 DEFLATE 压缩数据的指针
+ * @src_size: 压缩数据字节数
+ * @dst:      预分配的输出缓冲区
+ * @dst_cap:  输出缓冲区容量
+ * @dst_size: 成功时接收解压字节数
  *
- * Returns GUNZIP_OK (0) on success, negative error code on failure.
+ * 成功返回 GUNZIP_OK (0)，失败返回负错误码。
  */
 int zlib_inflate(const void *src, size_t src_size, void *dst,
                  size_t dst_cap, size_t *dst_size)
@@ -854,7 +853,7 @@ int zlib_inflate(const void *src, size_t src_size, void *dst,
 
     bs_init(&bs, (const uint8_t *)src, src_size);
 
-    /* Use the caller-provided buffer directly */
+    /* 直接使用调用者提供的缓冲区 */
     out.data = (uint8_t *)dst;
     out.cap  = dst_cap;
     out.pos  = 0;
@@ -870,15 +869,15 @@ int zlib_inflate(const void *src, size_t src_size, void *dst,
 }
 
 /*
- * gunzip - Decompress gzip data (RFC 1952)
+ * gunzip - 解压 gzip 数据（RFC 1952）
  *
- * @src:      pointer to gzip-compressed data
- * @src_size: size of compressed data in bytes
- * @dst:      on success, receives a kmalloc'd buffer with decompressed data
- * @dst_size: on success, receives the size of the decompressed data
+ * @src:      指向 gzip 压缩数据的指针
+ * @src_size: 压缩数据字节数
+ * @dst:      成功时接收 kmalloc 分配的解压数据缓冲区
+ * @dst_size: 成功时接收解压数据大小
  *
- * Returns GUNZIP_OK (0) on success, negative error code on failure.
- * Caller must kfree(*dst) when done.
+ * 成功返回 GUNZIP_OK (0)，失败返回负错误码。
+ * 调用者完成后必须 kfree(*dst)。
  */
 int gunzip(const void *src, size_t src_size, void **dst, size_t *dst_size)
 {
@@ -901,15 +900,15 @@ int gunzip(const void *src, size_t src_size, void **dst, size_t *dst_size)
         return GUNZIP_ERR_MAGIC;
     }
 
-    /* ---- Parse gzip header (RFC 1952) ---- */
+    /* ---- 解析 gzip 头（RFC 1952）---- */
 
-    /* Magic bytes */
+    /* 魔数 */
     if (data[0] != GZIP_MAGIC_0 || data[1] != GZIP_MAGIC_1) {
         printf("[gunzip] bad gzip magic: 0x%02x 0x%02x\n", data[0], data[1]);
         return GUNZIP_ERR_MAGIC;
     }
 
-    /* Compression method */
+    /* 压缩方法 */
     if (data[2] != GZIP_METHOD_DEFLATE) {
         printf("[gunzip] unsupported compression method %u\n", data[2]);
         return GUNZIP_ERR_METHOD;
@@ -917,13 +916,13 @@ int gunzip(const void *src, size_t src_size, void **dst, size_t *dst_size)
 
     uint8_t flags = data[3];
 
-    /* Reserved bits must be zero */
+    /* 保留位必须为零 */
     if (flags & 0xe0) {
         printf("[gunzip] reserved flag bits set: 0x%02x\n", flags);
         return GUNZIP_ERR_FLAGS;
     }
 
-    /* Skip: MTIME(4), XFL(1), OS(1) = 6 bytes */
+    /* 跳过：MTIME(4), XFL(1), OS(1) = 6 字节 */
     pos = 10;
 
     /* FEXTRA */
@@ -940,7 +939,7 @@ int gunzip(const void *src, size_t src_size, void **dst, size_t *dst_size)
         while (pos < src_size && data[pos] != '\0')
             pos++;
         if (pos >= src_size) return GUNZIP_ERR_DATA;
-        pos++; /* skip the null terminator */
+        pos++; /* 跳过空终止符 */
     }
 
     /* FCOMMENT */
@@ -954,7 +953,7 @@ int gunzip(const void *src, size_t src_size, void **dst, size_t *dst_size)
     /* FHCRC */
     if (flags & GZIP_FLAG_FHCRC) {
         if (pos + 2 > src_size) return GUNZIP_ERR_DATA;
-        pos += 2;  /* skip header CRC16 */
+        pos += 2;  /* 跳过头 CRC16 */
     }
 
     if (pos >= src_size) {
@@ -962,13 +961,13 @@ int gunzip(const void *src, size_t src_size, void **dst, size_t *dst_size)
         return GUNZIP_ERR_DATA;
     }
 
-    /* ---- Find the trailer (CRC32 + ISIZE) at the end ---- */
+    /* ---- 在末尾找到尾部（CRC32 + ISIZE）---- */
     if (src_size < pos + 8) {
         printf("[gunzip] no room for gzip trailer\n");
         return GUNZIP_ERR_DATA;
     }
 
-    /* The trailer is the last 8 bytes of the gzip stream */
+    /* 尾部是 gzip 流的最后 8 字节 */
     size_t trailer_off = src_size - 8;
     uint32_t expected_crc = (uint32_t)data[trailer_off]
                           | ((uint32_t)data[trailer_off + 1] << 8)
@@ -979,9 +978,9 @@ int gunzip(const void *src, size_t src_size, void **dst, size_t *dst_size)
                            | ((uint32_t)data[trailer_off + 6] << 16)
                            | ((uint32_t)data[trailer_off + 7] << 24);
 
-    /* ---- Inflate ---- */
+    /* ---- 膨胀 ---- */
 
-    /* Start with a reasonable initial output size */
+    /* 从合理的初始输出大小开始 */
     size_t init_cap = src_size * 4;
     if (init_cap < 4096) init_cap = 4096;
     if (init_cap > MAX_DECOMPRESSED_SIZE) init_cap = MAX_DECOMPRESSED_SIZE;
@@ -997,7 +996,7 @@ int gunzip(const void *src, size_t src_size, void **dst, size_t *dst_size)
         return rc;
     }
 
-    /* ---- Verify CRC32 ---- */
+    /* ---- 验证 CRC32 ---- */
     uint32_t actual_crc = crc32_update(0, out.data, out.pos);
     if (actual_crc != expected_crc) {
         printf("[gunzip] CRC32 mismatch: expected 0x%08x got 0x%08x\n",
@@ -1006,7 +1005,7 @@ int gunzip(const void *src, size_t src_size, void **dst, size_t *dst_size)
         return GUNZIP_ERR_CRC;
     }
 
-    /* ---- Verify ISIZE (original size mod 2^32) ---- */
+    /* ---- 验证 ISIZE（原始大小 mod 2^32）---- */
     if ((uint32_t)(out.pos & 0xffffffff) != expected_size) {
         printf("[gunzip] ISIZE mismatch: expected %u got %u\n",
                expected_size, (unsigned)(out.pos & 0xffffffff));
@@ -1021,20 +1020,20 @@ int gunzip(const void *src, size_t src_size, void **dst, size_t *dst_size)
 }
 
 /* ========================================================================
- * Streaming gzip decompression via VFS
+ * 通过 VFS 的流式 gzip 解压
  *
- * Reads compressed data incrementally from a VFS file descriptor,
- * decompresses using a fixed output buffer with sliding window,
- * and calls a user callback for each chunk of decompressed data.
- * Maximum memory usage: ~4.25MB (4MB output + 256KB input).
+ * 从 VFS 文件描述符增量读取压缩数据，
+ * 使用固定输出缓冲区和滑动窗口进行解压，
+ * 并对每个解压数据块调用用户回调。
+ * 最大内存使用：约 4.25MB（4MB 输出 + 256KB 输入）。
  * ======================================================================== */
 
-#define GUNZIP_STREAM_IN_BUF_SIZE   (256 * 1024)   /* 256KB input buffer */
-#define GUNZIP_STREAM_OUT_BUF_SIZE  (4 * 1024 * 1024) /* 4MB output buffer */
-#define STREAM_WINDOW_SIZE          (32 * 1024)     /* 32KB sliding window */
+#define GUNZIP_STREAM_IN_BUF_SIZE   (256 * 1024)   /* 256KB 输入缓冲区 */
+#define GUNZIP_STREAM_OUT_BUF_SIZE  (4 * 1024 * 1024) /* 4MB 输出缓冲区 */
+#define STREAM_WINDOW_SIZE          (32 * 1024)     /* 32KB 滑动窗口 */
 
 /* ========================================================================
- * Incremental CRC32 (no initial/final XOR – caller handles that)
+ * 增量 CRC32（无初始/最终 XOR —— 调用者处理）
  * ======================================================================== */
 
 static uint32_t crc32_update_inc(uint32_t crc, const void *buf, size_t len)
@@ -1046,17 +1045,17 @@ static uint32_t crc32_update_inc(uint32_t crc, const void *buf, size_t len)
 }
 
 /* ========================================================================
- * VFS-backed bitstream reader
+ * 基于 VFS 的位流读取器
  * ======================================================================== */
 
 typedef struct {
     int          fd;
-    size_t       read_pos;    /* next file position to read from */
-    size_t       data_end;    /* file position marking end of deflate data */
-    uint8_t     *buf;         /* input buffer */
-    size_t       buf_size;    /* allocated size of input buffer */
-    size_t       buf_valid;   /* number of valid bytes in buf */
-    size_t       bytepos;     /* current read position within buf */
+    size_t       read_pos;    /* 下一个要读取的文件位置 */
+    size_t       data_end;    /* 标记 DEFLATE 数据结束的文件位置 */
+    uint8_t     *buf;         /* 输入缓冲区 */
+    size_t       buf_size;    /* 输入缓冲区已分配大小 */
+    size_t       buf_valid;   /* 缓冲区中有效字节数 */
+    size_t       bytepos;     /* 缓冲区中当前读取位置 */
     unsigned int bitbuf;
     int          bitcnt;
 } vfs_bs_t;
@@ -1075,11 +1074,11 @@ static void vfs_bs_init(vfs_bs_t *vbs, int fd, uint8_t *buf, size_t buf_size,
     vbs->bitcnt    = 0;
 }
 
-/* Refill the input buffer from VFS.  Moves remaining data to the start
- * and reads new data after it.  Returns 0 on success, -1 on error. */
+/* 从 VFS 重新填充输入缓冲区。将剩余数据移到开头，
+ * 然后在后面读入新数据。成功返回 0，错误返回 -1。 */
 static int vfs_bs_refill(vfs_bs_t *vbs)
 {
-    /* Move unconsumed data to the start of the buffer */
+    /* 将未消费的数据移到缓冲区开头 */
     if (vbs->bytepos > 0) {
         size_t remaining = (vbs->bytepos <= vbs->buf_valid)
                          ? vbs->buf_valid - vbs->bytepos : 0;
@@ -1089,7 +1088,7 @@ static int vfs_bs_refill(vfs_bs_t *vbs)
         vbs->bytepos   = 0;
     }
 
-    /* Read more data from VFS */
+    /* 从 VFS 读取更多数据 */
     size_t space    = vbs->buf_size - vbs->buf_valid;
     size_t can_read = vbs->data_end - vbs->read_pos;
     if (can_read == 0 && vbs->buf_valid == 0)
@@ -1108,7 +1107,7 @@ static int vfs_bs_refill(vfs_bs_t *vbs)
     return 0;
 }
 
-/* Load more bits into the bitstream register */
+/* 向位流寄存器加载更多位 */
 static int vfs_bs_load(vfs_bs_t *vbs)
 {
     while (vbs->bitcnt <= 24) {
@@ -1161,13 +1160,13 @@ static void vfs_bs_align(vfs_bs_t *vbs)
 }
 
 /* ========================================================================
- * Streaming output buffer with sliding window
+ * 带滑动窗口的流式输出缓冲区
  * ======================================================================== */
 
 typedef struct {
     uint8_t          *data;
     size_t            cap;
-    size_t            pos;      /* current write position */
+    size_t            pos;      /* 当前写入位置 */
     gunzip_output_cb  cb;
     void             *cb_ctx;
 } stream_output_t;
@@ -1198,8 +1197,8 @@ static void stream_out_free(stream_output_t *o)
     o->pos = 0;
 }
 
-/* Flush output, call callback, then keep a sliding window for
- * back-reference support.  If is_final, discard the window. */
+/* 刷新输出，调用回调，然后保留滑动窗口用于
+ * 回引支持。若 is_final，则丢弃窗口。 */
 static int stream_out_flush(stream_output_t *o, int is_final)
 {
     if (o->pos == 0)
@@ -1214,7 +1213,7 @@ static int stream_out_flush(stream_output_t *o, int is_final)
         return GUNZIP_OK;
     }
 
-    /* Keep sliding window for back-references */
+    /* 保留滑动窗口用于回引 */
     size_t window = (o->pos > STREAM_WINDOW_SIZE) ? STREAM_WINDOW_SIZE : o->pos;
     if (window > 0 && window < o->pos)
         memmove(o->data, o->data + o->pos - window, window);
@@ -1222,8 +1221,8 @@ static int stream_out_flush(stream_output_t *o, int is_final)
     return GUNZIP_OK;
 }
 
-/* Ensure the output buffer has room for `additional` bytes.
- * May flush and compact the buffer. */
+/* 确保输出缓冲区有 `additional` 字节空间。
+ * 可能刷新并压缩缓冲区。 */
 static int stream_out_ensure(stream_output_t *o, size_t additional)
 {
     if (o->pos + additional <= o->cap)
@@ -1260,7 +1259,7 @@ static int stream_out_copy_match(stream_output_t *o, size_t dist, size_t len)
     int rc = stream_out_ensure(o, len);
     if (rc < 0) return rc;
 
-    /* Byte-by-byte copy for overlapping matches */
+    /* 逐字节复制以处理重叠匹配 */
     size_t src = o->pos - dist;
     for (size_t i = 0; i < len; i++)
         o->data[o->pos++] = o->data[src + i];
@@ -1269,10 +1268,10 @@ static int stream_out_copy_match(stream_output_t *o, size_t dist, size_t len)
 }
 
 /* ========================================================================
- * VFS-streaming inflate helpers
+ * VFS 流式膨胀辅助函数
  * ======================================================================== */
 
-/* Huffman decode using VFS bitstream (same algorithm, different types) */
+/* 使用 VFS 位流的哈夫曼解码（算法相同，类型不同） */
 static int huffman_decode_vfs(vfs_bs_t *bs, const huffman_t *h,
                               unsigned int *sym)
 {
@@ -1297,14 +1296,14 @@ static int huffman_decode_vfs(vfs_bs_t *bs, const huffman_t *h,
     return GUNZIP_ERR_HUFFMAN;
 }
 
-/* Inflate a stored (uncompressed) block from VFS bitstream */
+/* 从 VFS 位流膨胀存储（未压缩）块 */
 static int inflate_stored_block_vfs(vfs_bs_t *vbs, stream_output_t *out)
 {
     vfs_bs_align(vbs);
     vbs->bitbuf = 0;
     vbs->bitcnt = 0;
 
-    /* Ensure we have at least 4 bytes for LEN/NLEN */
+    /* 确保至少有 4 字节用于 LEN/NLEN */
     if (vbs->bytepos + 4 > vbs->buf_valid) {
         if (vfs_bs_refill(vbs) < 0)
             return GUNZIP_ERR_DATA;
@@ -1323,7 +1322,7 @@ static int inflate_stored_block_vfs(vfs_bs_t *vbs, stream_output_t *out)
         return GUNZIP_ERR_DATA;
     }
 
-    /* Copy raw data to output in chunks */
+    /* 将原始数据分块复制到输出 */
     size_t remaining = len;
     while (remaining > 0) {
         if (vbs->bytepos >= vbs->buf_valid) {
@@ -1353,7 +1352,7 @@ static int inflate_stored_block_vfs(vfs_bs_t *vbs, stream_output_t *out)
     return GUNZIP_OK;
 }
 
-/* Inflate a fixed Huffman block (type 1) from VFS bitstream */
+/* 从 VFS 位流膨胀固定哈夫曼块（类型 1） */
 static int inflate_fixed_block_vfs(vfs_bs_t *vbs, stream_output_t *out)
 {
     if (!fixed_tables_built)
@@ -1402,7 +1401,7 @@ static int inflate_fixed_block_vfs(vfs_bs_t *vbs, stream_output_t *out)
     return GUNZIP_OK;
 }
 
-/* Inflate a dynamic Huffman block (type 2) from VFS bitstream */
+/* 从 VFS 位流膨胀动态哈夫曼块（类型 2） */
 static int inflate_dynamic_block_vfs(vfs_bs_t *vbs, stream_output_t *out)
 {
     unsigned int hlit, hdist, hclen;
@@ -1423,7 +1422,7 @@ static int inflate_dynamic_block_vfs(vfs_bs_t *vbs, stream_output_t *out)
     if (num_lit > NUM_LIT_CODES || num_dist > NUM_DIST_CODES)
         return GUNZIP_ERR_DATA;
 
-    /* Read code length code lengths */
+    /* 读取码长码长度 */
     memset(cl_lengths, 0, sizeof(cl_lengths));
     for (i = 0; i < (int)hclen; i++) {
         unsigned int val;
@@ -1436,7 +1435,7 @@ static int inflate_dynamic_block_vfs(vfs_bs_t *vbs, stream_output_t *out)
     int rc = huffman_build(&cl_table, cl_lengths, NUM_CL_CODES);
     if (rc < 0) return rc;
 
-    /* Decode literal/length + distance code lengths */
+    /* 解码字面量/长度 + 距离码长 */
     int total = num_lit + num_dist;
     memset(lit_lengths, 0, sizeof(lit_lengths));
 
@@ -1472,7 +1471,7 @@ static int inflate_dynamic_block_vfs(vfs_bs_t *vbs, stream_output_t *out)
         }
     }
 
-    /* Build Huffman tables */
+    /* 构建哈夫曼表 */
     huffman_t lit_table;
     rc = huffman_build(&lit_table, lit_lengths, num_lit);
     if (rc < 0) return rc;
@@ -1490,7 +1489,7 @@ static int inflate_dynamic_block_vfs(vfs_bs_t *vbs, stream_output_t *out)
         memset(&dist_table, 0, sizeof(dist_table));
     }
 
-    /* Inflate symbols */
+    /* 膨胀符号 */
     for (;;) {
         unsigned int sym;
         rc = huffman_decode_vfs(vbs, &lit_table, &sym);
@@ -1535,7 +1534,7 @@ static int inflate_dynamic_block_vfs(vfs_bs_t *vbs, stream_output_t *out)
     return GUNZIP_OK;
 }
 
-/* Main inflate loop using VFS bitstream and streaming output */
+/* 使用 VFS 位流和流式输出的主膨胀循环 */
 static int inflate_stream_vfs(vfs_bs_t *vbs, stream_output_t *out)
 {
     int bfinal;
@@ -1572,14 +1571,14 @@ static int inflate_stream_vfs(vfs_bs_t *vbs, stream_output_t *out)
 }
 
 /* ========================================================================
- * Internal context for CRC32 verification wrapping the user callback
+ * 用于 CRC32 验证的内部上下文，包装用户回调
  * ======================================================================== */
 
 typedef struct {
     gunzip_output_cb user_cb;
     void            *user_ctx;
-    uint32_t         crc;        /* running CRC (init 0xFFFFFFFF, finalize with XOR) */
-    size_t           total_out;  /* total decompressed bytes */
+    uint32_t         crc;        /* 运行中 CRC（初始 0xFFFFFFFF，最终 XOR） */
+    size_t           total_out;  /* 总解压字节数 */
 } gz_stream_internal_t;
 
 static int gz_stream_cb_wrapper(const void *data, size_t len, void *ctx)
@@ -1591,20 +1590,20 @@ static int gz_stream_cb_wrapper(const void *data, size_t len, void *ctx)
 }
 
 /* ========================================================================
- * gunzip_stream_vfs - Public streaming API
+ * gunzip_stream_vfs - 公共流式 API
  * ======================================================================== */
 
 int gunzip_stream_vfs(int fd, size_t gz_offset, size_t gz_size,
                       gunzip_output_cb output_cb, void *ctx)
 {
-    uint8_t tmp[264];  /* enough for gzip header + FEXTRA/FNAME/FCOMMENT/FHCRC */
+    uint8_t tmp[264];  /* 足够存放 gzip 头 + FEXTRA/FNAME/FCOMMENT/FHCRC */
     size_t pos;
     size_t deflate_start, deflate_end;
 
-    if (!output_cb || gz_size < 18)  /* 10 header + 8 trailer minimum */
+    if (!output_cb || gz_size < 18)  /* 最少 10 头 + 8 尾部 */
         return GUNZIP_ERR_DATA;
 
-    /* ---- 1. Read gzip trailer (last 8 bytes) ---- */
+    /* ---- 1. 读取 gzip 尾部（最后 8 字节）---- */
     uint8_t trailer[8];
     vfs_seek(fd, (int64_t)(gz_offset + gz_size - 8), VFS_SEEK_SET);
     if (vfs_read(fd, trailer, 8) != 8)
@@ -1619,7 +1618,7 @@ int gunzip_stream_vfs(int fd, size_t gz_offset, size_t gz_size,
                            | ((uint32_t)trailer[6] << 16)
                            | ((uint32_t)trailer[7] << 24);
 
-    /* ---- 2. Read and parse gzip header ---- */
+    /* ---- 2. 读取并解析 gzip 头 ---- */
     vfs_seek(fd, (int64_t)gz_offset, VFS_SEEK_SET);
     if (vfs_read(fd, tmp, 10) != 10)
         return GUNZIP_ERR_DATA;
@@ -1683,7 +1682,7 @@ int gunzip_stream_vfs(int fd, size_t gz_offset, size_t gz_size,
         return GUNZIP_ERR_DATA;
     }
 
-    /* ---- 3. Allocate buffers ---- */
+    /* ---- 3. 分配缓冲区 ---- */
     uint8_t *in_buf = (uint8_t *)kmalloc(GUNZIP_STREAM_IN_BUF_SIZE);
     if (!in_buf) return GUNZIP_ERR_MEMORY;
 
@@ -1701,7 +1700,7 @@ int gunzip_stream_vfs(int fd, size_t gz_offset, size_t gz_size,
         return rc;
     }
 
-    /* ---- 4. Initialize VFS bitstream and inflate ---- */
+    /* ---- 4. 初始化 VFS 位流并膨胀 ---- */
     vfs_bs_t vbs;
     vfs_bs_init(&vbs, fd, in_buf, GUNZIP_STREAM_IN_BUF_SIZE,
                 deflate_start, deflate_end);
@@ -1713,13 +1712,13 @@ int gunzip_stream_vfs(int fd, size_t gz_offset, size_t gz_size,
         return rc;
     }
 
-    /* ---- 5. Flush remaining output ---- */
+    /* ---- 5. 刷新剩余输出 ---- */
     rc = stream_out_flush(&out, 1);
     stream_out_free(&out);
     kfree(in_buf);
     if (rc < 0) return rc;
 
-    /* ---- 6. Verify CRC32 and ISIZE ---- */
+    /* ---- 6. 验证 CRC32 和 ISIZE ---- */
     ictx.crc ^= 0xFFFFFFFF;
 
     if (ictx.crc != expected_crc) {

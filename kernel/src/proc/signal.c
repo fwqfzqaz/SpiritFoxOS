@@ -1,8 +1,8 @@
 /*
- * SpiritFoxOS Signal Delivery
+ * SpiritFoxOS 信号投递
  *
- * Checks and delivers pending signals to user-mode processes.
- * Extracted from process.c for modularity.
+ * 检查并向用户态进程投递待处理信号。
+ * 从 process.c 中提取以实现模块化。
  */
 
 #include "process.h"
@@ -13,11 +13,11 @@
 extern process_t *current;
 
 /* ========================================================================
- * process_signal_deliver() – check and deliver pending signals
+ * process_signal_deliver() – 检查并投递待处理信号
  *
- * Called before returning to user mode.  If a signal is pending and
- * not blocked, set up the user stack to jump to the signal handler.
- * After the handler runs, it calls sigreturn to resume the original context.
+ * 在返回用户态之前调用。如果有待处理且未被阻塞的信号，
+ * 设置用户栈以跳转到信号处理函数。
+ * 处理函数运行后，调用 sigreturn 恢复原始上下文。
  * ======================================================================== */
 
 void process_signal_deliver(void)
@@ -40,13 +40,13 @@ void process_signal_deliver(void)
     if (sig == 0)
         return;
 
-    /* Clear the pending bit */
+    /* 清除待处理位 */
     current->pending_signals &= ~(1ULL << (sig - 1));
 
     uint64_t handler = current->signal_handlers[sig - 1];
 
-    /* Default action: for SIGKILL/SIGSTOP terminate/stop,
-     * for others ignore if handler is 0 */
+    /* 默认动作：对于 SIGKILL/SIGSTOP 终止/停止，
+     * 对于其他信号，如果处理函数为 0 则忽略 */
     if (handler == 0) {
         if (sig == SIGKILL || sig == SIGSTOP) {
             process_exit(128 + sig);
@@ -56,31 +56,31 @@ void process_signal_deliver(void)
         return;
     }
 
-    /* If no trap frame, we can't deliver (kernel thread) */
+    /* 如果没有 trap frame，无法投递（内核线程） */
     if (!current->trap_frame)
         return;
 
-    /* Set up signal handler invocation on the user stack.
-     * We push a signal frame that the signal handler can return from
-     * via sigreturn.  The frame layout on the user stack:
+    /* 在用户栈上设置信号处理函数调用。
+     * 我们压入一个信号帧，信号处理函数可以通过
+     * sigreturn 从中返回。用户栈上的帧布局：
      *
-     *   [trap_frame_t copy]  – saved context for sigreturn
-     *   [signal number]      – first arg to handler
+     *   [trap_frame_t 副本]  – sigreturn 的已保存上下文
+     *   [信号编号]           – 处理函数的第一个参数
      *
-     * The handler's return address points to a trampoline that
-     * executes rt_sigreturn syscall.  For simplicity, we use
-     * current->signal_restorer as the return address.
+     * 处理函数的返回地址指向一个跳板，
+     * 执行 rt_sigreturn 系统调用。为简化起见，我们
+     * 使用 current->signal_restorer 作为返回地址。
      */
 
-    /* Read current trap frame from the kernel stack */
+    /* 从内核栈读取当前 trap frame */
     trap_frame_t *tf = current->trap_frame;
     uint64_t user_sp = tf->rsp;
 
-    /* Push a copy of the trap frame onto the user stack */
+    /* 将 trap frame 副本压入用户栈 */
     user_sp -= sizeof(trap_frame_t);
     write_user_mem(current, user_sp, tf, sizeof(trap_frame_t));
 
-    /* Push signal number */
+    /* 压入信号编号 */
     user_sp -= 8;
     uint64_t sig64 = (uint64_t)sig;
     write_user_mem(current, user_sp, &sig64, 8);
@@ -96,7 +96,7 @@ void process_signal_deliver(void)
     uint64_t ret_addr = current->signal_restorer ? current->signal_restorer : 0;
     write_user_mem(current, user_sp, &ret_addr, 8);
 
-    /* Modify the trap frame to invoke handler */
+    /* 修改 trap frame 以调用处理函数 */
     tf->rip = handler;
     tf->rsp = user_sp;
     tf->rdi = (uint64_t)sig;

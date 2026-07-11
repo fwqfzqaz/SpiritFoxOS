@@ -1,9 +1,9 @@
 /*
- * sandbox.c - SpiritFoxOS Sandbox Implementation
+ * sandbox.c - SpiritFoxOS 沙箱实现
  *
- * Provides lightweight permission-based sandboxing for SFK applications.
- * Each sandboxed process has a policy controlling file access, network,
- * devices, and signals based on the granted SFK permissions.
+ * 为 SFK 应用提供基于权限的轻量级沙箱机制。
+ * 每个沙箱进程都有一个策略，根据授予的 SFK 权限
+ * 控制文件访问、网络、设备和信号。
  */
 
 #include "sandbox.h"
@@ -13,7 +13,7 @@
 #include "vga.h"
 
 /* ========================================================================
- * Constants
+ * 常量
  * ======================================================================== */
 
 #define SANDBOX_MAX_ENTRIES 64
@@ -36,7 +36,7 @@ typedef struct {
 static sandbox_entry_t sandbox_table[SANDBOX_MAX_ENTRIES];
 
 /* ========================================================================
- * Helpers
+ * 辅助函数
  * ======================================================================== */
 
 static int snprintf_local(char *buf, size_t size, const char *fmt, ...)
@@ -79,7 +79,7 @@ static int snprintf_local(char *buf, size_t size, const char *fmt, ...)
     return (int)(out - buf);
 }
 
-/* Simple hash for PID -> table index */
+/* PID 到表索引的简单哈希 */
 static unsigned int sandbox_hash(int pid)
 {
     unsigned int h = (unsigned int)pid;
@@ -108,7 +108,7 @@ static sandbox_entry_t *sandbox_find_entry(int pid)
     return NULL;
 }
 
-/* Find a free slot in the table (linear probe) */
+/* 在表中查找空闲槽位（线性探测） */
 static sandbox_entry_t *sandbox_alloc_entry(int pid)
 {
     unsigned int start = sandbox_hash(pid);
@@ -124,14 +124,14 @@ static sandbox_entry_t *sandbox_alloc_entry(int pid)
     return NULL;
 }
 
-/* Check if a path starts with a given prefix */
+/* 检查路径是否以给定前缀开头 */
 static int path_starts_with(const char *path, const char *prefix)
 {
     size_t plen = strlen(prefix);
     if (strncmp(path, prefix, plen) != 0) {
         return 0;
     }
-    /* Match either exact or followed by '/' */
+    /* 匹配精确或后跟 '/' */
     if (path[plen] == '/' || path[plen] == '\0') {
         return 1;
     }
@@ -160,7 +160,7 @@ void sandbox_create_policy(const char *pkg_id, uint32_t granted_perms,
     policy->type = SANDBOX_LIGHT;
     policy->granted_perms = granted_perms;
 
-    /* Configure allowed paths based on granted permissions */
+    /* 根据授予的权限配置允许的路径 */
     if (granted_perms & SFK_PERM_FILE_READ) {
         strncpy(policy->allowed_paths[policy->n_allowed_paths],
                 "/home", sizeof(policy->allowed_paths[0]) - 1);
@@ -184,7 +184,7 @@ void sandbox_create_policy(const char *pkg_id, uint32_t granted_perms,
         policy->n_allowed_paths++;
     }
 
-    /* Shared libraries are readable by all sandboxed apps */
+    /* 所有沙箱应用均可读取共享库 */
     if (policy->n_allowed_paths < 8) {
         strncpy(policy->allowed_paths[policy->n_allowed_paths],
                 "/usr", sizeof(policy->allowed_paths[0]) - 1);
@@ -222,9 +222,9 @@ void sandbox_create_policy(const char *pkg_id, uint32_t granted_perms,
         policy->n_allowed_devices++;
     }
 
-    /* Network permission */
+    /* 网络权限 */
     if (granted_perms & SFK_PERM_NETWORK) {
-        /* No specific host restrictions by default - allow all */
+        /* 默认无特定主机限制 - 允许所有 */
     }
 }
 
@@ -240,13 +240,13 @@ int sandbox_apply(process_t *proc, sandbox_policy_t *policy)
         return -1;
     }
 
-    /* Check if this PID already has a sandbox entry */
+    /* 检查此 PID 是否已有沙箱条目 */
     entry = sandbox_find_entry(proc->pid);
     if (entry) {
         /* Update existing entry */
         memcpy(&entry->policy, policy, sizeof(sandbox_policy_t));
     } else {
-        /* Allocate new entry */
+        /* 分配新条目 */
         entry = sandbox_alloc_entry(proc->pid);
         if (!entry) {
             printf("[sandbox] No free sandbox slots for PID %d\n", proc->pid);
@@ -258,7 +258,7 @@ int sandbox_apply(process_t *proc, sandbox_policy_t *policy)
         memcpy(&entry->policy, policy, sizeof(sandbox_policy_t));
     }
 
-    /* Set process SFK flags and permissions */
+    /* 设置进程 SFK 标志和权限 */
     proc->sfk_perms = policy->granted_perms;
     proc->flags |= PROC_FLAG_SFK;
 
@@ -266,7 +266,7 @@ int sandbox_apply(process_t *proc, sandbox_policy_t *policy)
 }
 
 /* ========================================================================
- * sandbox_check - Check if a process is allowed to perform an action
+ * sandbox_check - 检查进程是否被允许执行某操作
  * ======================================================================== */
 
 int sandbox_check(int pid, int action, const void *target)
@@ -305,9 +305,9 @@ int sandbox_check(int pid, int action, const void *target)
 }
 
 /* ========================================================================
- * sandbox_check_file_access - Check file access permission
+ * sandbox_check_file_access - 检查文件访问权限
  *
- * access_type: 0 = read, 1 = write
+ * access_type: 0 = 读, 1 = 写
  * ======================================================================== */
 
 int sandbox_check_file_access(int pid, const char *path, int access_type)
@@ -320,7 +320,7 @@ int sandbox_check_file_access(int pid, const char *path, int access_type)
         return 1;
     }
 
-    /* Always deny access to system directories for sandboxed apps */
+    /* 始终拒绝沙箱应用访问系统目录 */
     for (i = 0; i < entry->policy.n_denied_paths; i++) {
         if (path_starts_with(path, entry->policy.denied_paths[i])) {
             sandbox_log_violation(pid, access_type == 0 ?
@@ -331,7 +331,7 @@ int sandbox_check_file_access(int pid, const char *path, int access_type)
         }
     }
 
-    /* Check specific /etc, /boot, /kernel deny (hardcoded safety net) */
+    /* 检查特定的 /etc、/boot、/kernel 拒绝规则（硬编码安全网） */
     if (path_starts_with(path, "/etc") ||
         path_starts_with(path, "/boot") ||
         path_starts_with(path, "/kernel")) {
@@ -342,7 +342,7 @@ int sandbox_check_file_access(int pid, const char *path, int access_type)
         return 0;
     }
 
-    /* Allow access to app's own directory: /opt/sfk/<pkg_id>/ */
+    /* 允许访问应用自身目录：/opt/sfk/<pkg_id>/ */
     char own_dir[256];
     snprintf_local(own_dir, sizeof(own_dir), "/opt/sfk/%s", entry->pkg_id);
     if (path_starts_with(path, own_dir)) {
@@ -358,7 +358,7 @@ int sandbox_check_file_access(int pid, const char *path, int access_type)
         }
     }
 
-    /* Check write permission */
+    /* 检查写入权限 */
     if (access_type == 1) {
         if (!(entry->policy.granted_perms & SFK_PERM_FILE_WRITE)) {
             sandbox_log_violation(pid, SANDBOX_VIOLATION_FILE_WRITE, path);
@@ -366,7 +366,7 @@ int sandbox_check_file_access(int pid, const char *path, int access_type)
         }
     }
 
-    /* Check read permission */
+    /* 检查读取权限 */
     if (access_type == 0) {
         if (!(entry->policy.granted_perms & SFK_PERM_FILE_READ)) {
             sandbox_log_violation(pid, SANDBOX_VIOLATION_FILE_READ, path);
@@ -374,7 +374,7 @@ int sandbox_check_file_access(int pid, const char *path, int access_type)
         }
     }
 
-    /* Check against allowed paths */
+    /* 检查允许路径列表 */
     for (i = 0; i < entry->policy.n_allowed_paths; i++) {
         if (path_starts_with(path, entry->policy.allowed_paths[i])) {
             return 1;
@@ -390,7 +390,7 @@ int sandbox_check_file_access(int pid, const char *path, int access_type)
 }
 
 /* ========================================================================
- * sandbox_check_network - Check network access permission
+ * sandbox_check_network - 检查网络访问权限
  * ======================================================================== */
 
 int sandbox_check_network(int pid, const char *host, uint16_t port)
@@ -428,7 +428,7 @@ int sandbox_check_network(int pid, const char *host, uint16_t port)
 }
 
 /* ========================================================================
- * sandbox_check_device - Check device access permission
+ * sandbox_check_device - 检查设备访问权限
  * ======================================================================== */
 
 int sandbox_check_device(int pid, const char *device)
@@ -441,7 +441,7 @@ int sandbox_check_device(int pid, const char *device)
         return 1;
     }
 
-    /* Check audio devices via SFK_PERM_AUDIO */
+    /* 通过 SFK_PERM_AUDIO 检查音频设备 */
     if (strcmp(device, "/dev/audio") == 0 || strcmp(device, "/dev/dsp") == 0) {
         if (entry->policy.granted_perms & SFK_PERM_AUDIO) {
             return 1;
@@ -450,9 +450,9 @@ int sandbox_check_device(int pid, const char *device)
         return 0;
     }
 
-    /* Check general device access via SFK_PERM_DEVICE_ACCESS */
+    /* 通过 SFK_PERM_DEVICE_ACCESS 检查通用设备访问 */
     if (entry->policy.granted_perms & SFK_PERM_DEVICE_ACCESS) {
-        /* Check against allowed_devices list */
+        /* 检查允许的设备列表 */
         if (entry->policy.n_allowed_devices > 0) {
             for (i = 0; i < entry->policy.n_allowed_devices; i++) {
                 if (path_starts_with(device, entry->policy.allowed_devices[i])) {
@@ -470,7 +470,7 @@ int sandbox_check_device(int pid, const char *device)
 }
 
 /* ========================================================================
- * sandbox_check_signal - Check signal permission
+ * sandbox_check_signal - 检查信号权限
  * ======================================================================== */
 
 int sandbox_check_signal(int pid, int target_pid, int sig)
@@ -482,7 +482,7 @@ int sandbox_check_signal(int pid, int target_pid, int sig)
         return 1;
     }
 
-    /* SIGKILL requires SFK_PERM_PROCESS_KILL */
+    /* SIGKILL 需要 SFK_PERM_PROCESS_KILL 权限 */
     if (sig == 9) { /* SIGKILL */
         if (!(entry->policy.granted_perms & SFK_PERM_PROCESS_KILL)) {
             char detail[64];
@@ -497,7 +497,7 @@ int sandbox_check_signal(int pid, int target_pid, int sig)
 }
 
 /* ========================================================================
- * sandbox_log_violation - Log a sandbox violation
+ * sandbox_log_violation - 记录沙箱违规
  * ======================================================================== */
 
 void sandbox_log_violation(int pid, int violation_type, const char *detail)
@@ -536,7 +536,7 @@ void sandbox_log_violation(int pid, int violation_type, const char *detail)
 }
 
 /* ========================================================================
- * sandbox_get_policy - Get sandbox policy for a process
+ * sandbox_get_policy - 获取进程的沙箱策略
  * ======================================================================== */
 
 sandbox_policy_t *sandbox_get_policy(int pid)
@@ -552,7 +552,7 @@ sandbox_policy_t *sandbox_get_policy(int pid)
 }
 
 /* ========================================================================
- * sandbox_remove - Remove sandbox for a process
+ * sandbox_remove - 移除进程的沙箱
  * ======================================================================== */
 
 void sandbox_remove(int pid)
@@ -569,7 +569,7 @@ void sandbox_remove(int pid)
 }
 
 /* ========================================================================
- * sandbox_dump - Dump all active sandboxes
+ * sandbox_dump - 转储所有活跃沙箱
  * ======================================================================== */
 
 void sandbox_dump(void)

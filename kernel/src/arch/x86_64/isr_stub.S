@@ -1,116 +1,116 @@
-; isr_stub.S - ISR/IRQ stubs for x86_64 SpiritFoxOS
-; NASM syntax
+; isr_stub.S - x86_64 SpiritFoxOS 的 ISR/IRQ 存根
+; NASM 语法
 
 [bits 64]
 
-; External C handlers
+; 外部 C 处理程序
 extern isr_handler
 extern irq_handler
 extern spurious_handler
 
 ; ========================================
-; Macro: Generic ISR stub (no error code)
+; 宏：通用 ISR 存根（无错误码）
 ; ========================================
 %macro ISR_NOERR 1
 global isr%1
 isr%1:
-    push 0              ; push dummy error code
-    push %1             ; push interrupt number
+    push 0              ; 压入虚拟错误码
+    push %1             ; 压入中断号
     jmp isr_common
 %endmacro
 
 ; ========================================
-; Macro: ISR stub with error code
+; 宏：带错误码的 ISR 存根
 ; ========================================
 %macro ISR_ERR 1
 global isr%1
 isr%1:
-    ; error code already pushed by CPU
-    push %1             ; push interrupt number
+    ; 错误码已由 CPU 压入
+    push %1             ; 压入中断号
     jmp isr_common
 %endmacro
 
 ; ========================================
-; Macro: IRQ stub
+; 宏：IRQ 存根
 ; ========================================
 %macro IRQ_STUB 2
 global irq%1
 irq%1:
-    push 0              ; push dummy error code
-    push %2             ; push interrupt number (IRQ + 32)
+    push 0              ; 压入虚拟错误码
+    push %2             ; 压入中断号（IRQ + 32）
     jmp irq_common
 %endmacro
 
 ; ========================================
-; CPU Exception ISR 0-31
+; CPU 异常 ISR 0-31
 ; ========================================
-ISR_NOERR 0     ; Divide by zero
-ISR_NOERR 1     ; Debug
-ISR_NOERR 2     ; NMI
-ISR_NOERR 3     ; Breakpoint
-ISR_NOERR 4     ; Overflow
-ISR_NOERR 5     ; Bound range exceeded
-ISR_NOERR 6     ; Invalid opcode
-ISR_NOERR 7     ; Device not available
-ISR_ERR   8     ; Double fault (error code)
-ISR_NOERR 9     ; Coprocessor segment overrun
-ISR_ERR   10    ; Invalid TSS (error code)
-ISR_ERR   11    ; Segment not present (error code)
-ISR_ERR   12    ; Stack segment fault (error code)
-ISR_ERR   13    ; General protection fault (error code)
-ISR_ERR   14    ; Page fault (error code)
-ISR_NOERR 15    ; Reserved
-ISR_NOERR 16    ; x87 FPU error
-ISR_ERR   17    ; Alignment check (error code)
-ISR_NOERR 18    ; Machine check
-ISR_NOERR 19    ; SIMD floating point
-ISR_NOERR 20    ; Virtualization
-ISR_NOERR 21    ; Reserved
-ISR_NOERR 22    ; Reserved
-ISR_NOERR 23    ; Reserved
-ISR_NOERR 24    ; Reserved
-ISR_NOERR 25    ; Reserved
-ISR_NOERR 26    ; Reserved
-ISR_NOERR 27    ; Reserved
-ISR_NOERR 28    ; Reserved
-ISR_NOERR 29    ; Reserved
-ISR_ERR   30    ; Security (error code)
-ISR_NOERR 31    ; Reserved
+ISR_NOERR 0     ; 除以零
+ISR_NOERR 1     ; 调试
+ISR_NOERR 2     ; 不可屏蔽中断
+ISR_NOERR 3     ; 断点
+ISR_NOERR 4     ; 溢出
+ISR_NOERR 5     ; 边界范围超出
+ISR_NOERR 6     ; 无效操作码
+ISR_NOERR 7     ; 设备不可用
+ISR_ERR   8     ; 双重故障（错误码）
+ISR_NOERR 9     ; 协处理器段越界
+ISR_ERR   10    ; 无效 TSS（错误码）
+ISR_ERR   11    ; 段不存在（错误码）
+ISR_ERR   12    ; 栈段故障（错误码）
+ISR_ERR   13    ; 一般保护故障（错误码）
+ISR_ERR   14    ; 缺页异常（错误码）
+ISR_NOERR 15    ; 保留
+ISR_NOERR 16    ; x87 FPU 错误
+ISR_ERR   17    ; 对齐检查（错误码）
+ISR_NOERR 18    ; 机器检查
+ISR_NOERR 19    ; SIMD 浮点异常
+ISR_NOERR 20    ; 虚拟化
+ISR_NOERR 21    ; 保留
+ISR_NOERR 22    ; 保留
+ISR_NOERR 23    ; 保留
+ISR_NOERR 24    ; 保留
+ISR_NOERR 25    ; 保留
+ISR_NOERR 26    ; 保留
+ISR_NOERR 27    ; 保留
+ISR_NOERR 28    ; 保留
+ISR_NOERR 29    ; 保留
+ISR_ERR   30    ; 安全异常（错误码）
+ISR_NOERR 31    ; 保留
 
 ; ========================================
-; IRQ stubs (IRQ0 - IRQ15 mapped to INT 32-47)
+; IRQ 存根（IRQ0 - IRQ15 映射到 INT 32-47）
 ; ========================================
-IRQ_STUB 0,  32    ; Timer (PIT via IOAPIC)
-IRQ_STUB 1,  33    ; Keyboard (IRQ1 via IOAPIC)
-IRQ_STUB 2,  34    ; Cascade
+IRQ_STUB 0,  32    ; 定时器（通过 IOAPIC 的 PIT）
+IRQ_STUB 1,  33    ; 键盘（通过 IOAPIC 的 IRQ1）
+IRQ_STUB 2,  34    ; 级联
 IRQ_STUB 3,  35    ; COM2
 IRQ_STUB 4,  36    ; COM1
 IRQ_STUB 5,  37    ; LPT2
-IRQ_STUB 6,  38    ; Floppy
+IRQ_STUB 6,  38    ; 软驱
 IRQ_STUB 7,  39    ; LPT1
 IRQ_STUB 8,  40    ; RTC
-IRQ_STUB 9,  41    ; Free
-IRQ_STUB 10, 42    ; Free
-IRQ_STUB 11, 43    ; Free
-IRQ_STUB 12, 44    ; PS/2 Mouse
+IRQ_STUB 9,  41    ; 空闲
+IRQ_STUB 10, 42    ; 空闲
+IRQ_STUB 11, 43    ; 空闲
+IRQ_STUB 12, 44    ; PS/2 鼠标
 IRQ_STUB 13, 45    ; FPU
-IRQ_STUB 14, 46    ; Primary ATA
-IRQ_STUB 15, 47    ; Secondary ATA
+IRQ_STUB 14, 46    ; 主 ATA
+IRQ_STUB 15, 47    ; 从 ATA
 
 ; ========================================
-; Spurious interrupt stub (vector 255)
+; 伪中断存根（向量 255）
 ; ========================================
 global irq_spurious
 irq_spurious:
-    push 0              ; dummy error code
-    push 255            ; spurious vector number
+    push 0              ; 虚拟错误码
+    push 255            ; 伪中断向量号
     jmp spurious_common
 
 ; ========================================
-; Common ISR handler
+; ISR 公共处理程序
 ; ========================================
 isr_common:
-    ; Debug: output 'E' to COM1 to confirm exception reached
+    ; 调试：向 COM1 输出 'E' 以确认异常到达
     mov dx, 0x3F9
     in al, dx
     test al, 0x20
@@ -120,7 +120,7 @@ isr_common:
     out dx, al
 .skip_exc_debug:
 
-    ; Save all general-purpose registers
+    ; 保存所有通用寄存器
     push rax
     push rbx
     push rcx
@@ -137,31 +137,31 @@ isr_common:
     push r14
     push r15
 
-    ; Save data segment
+    ; 保存数据段
     mov ax, ds
     push rax
 
-    ; Load kernel data segment
+    ; 加载内核数据段
     mov ax, 0x10
     mov ds, ax
     mov es, ax
     mov fs, ax
     mov gs, ax
 
-    ; Pass interrupt number and error code as arguments
-    mov rdi, [rsp+128]   ; int_num
-    mov rsi, [rsp+136]   ; error_code
+    ; 传递中断号和错误码作为参数
+    mov rdi, [rsp+128]   ; 中断号
+    mov rsi, [rsp+136]   ; 错误码
     cld
     call isr_handler
 
-    ; Restore data segment
+    ; 恢复数据段
     pop rax
     mov ds, ax
     mov es, ax
     mov fs, ax
     mov gs, ax
 
-    ; Restore general-purpose registers
+    ; 恢复通用寄存器
     pop r15
     pop r14
     pop r13
@@ -178,15 +178,15 @@ isr_common:
     pop rbx
     pop rax
 
-    ; Remove interrupt number and error code
+    ; 移除中断号和错误码
     add rsp, 16
     iretq
 
 ; ========================================
-; Common IRQ handler
+; IRQ 公共处理程序
 ; ========================================
 irq_common:
-    ; Save all general-purpose registers
+    ; 保存所有通用寄存器
     push rax
     push rbx
     push rcx
@@ -203,31 +203,31 @@ irq_common:
     push r14
     push r15
 
-    ; Save data segment
+    ; 保存数据段
     mov ax, ds
     push rax
 
-    ; Load kernel data segment
+    ; 加载内核数据段
     mov ax, 0x10
     mov ds, ax
     mov es, ax
     mov fs, ax
     mov gs, ax
 
-    ; Pass interrupt number and error code as arguments
-    mov rdi, [rsp+128]   ; int_num
-    mov rsi, [rsp+136]   ; error_code
+    ; 传递中断号和错误码作为参数
+    mov rdi, [rsp+128]   ; 中断号
+    mov rsi, [rsp+136]   ; 错误码
     cld
     call irq_handler
 
-    ; Restore data segment
+    ; 恢复数据段
     pop rax
     mov ds, ax
     mov es, ax
     mov fs, ax
     mov gs, ax
 
-    ; Restore general-purpose registers
+    ; 恢复通用寄存器
     pop r15
     pop r14
     pop r13
@@ -244,15 +244,15 @@ irq_common:
     pop rbx
     pop rax
 
-    ; Remove interrupt number and error code
+    ; 移除中断号和错误码
     add rsp, 16
     iretq
 
 ; ========================================
-; Common spurious handler
+; 伪中断公共处理程序
 ; ========================================
 spurious_common:
-    ; Save all general-purpose registers
+    ; 保存所有通用寄存器
     push rax
     push rbx
     push rcx
@@ -269,31 +269,31 @@ spurious_common:
     push r14
     push r15
 
-    ; Save data segment
+    ; 保存数据段
     mov ax, ds
     push rax
 
-    ; Load kernel data segment
+    ; 加载内核数据段
     mov ax, 0x10
     mov ds, ax
     mov es, ax
     mov fs, ax
     mov gs, ax
 
-    ; Pass interrupt number and error code as arguments
-    mov rdi, [rsp+128]   ; int_num
-    mov rsi, [rsp+136]   ; error_code
+    ; 传递中断号和错误码作为参数
+    mov rdi, [rsp+128]   ; 中断号
+    mov rsi, [rsp+136]   ; 错误码
     cld
     call spurious_handler
 
-    ; Restore data segment
+    ; 恢复数据段
     pop rax
     mov ds, ax
     mov es, ax
     mov fs, ax
     mov gs, ax
 
-    ; Restore general-purpose registers
+    ; 恢复通用寄存器
     pop r15
     pop r14
     pop r13
@@ -310,84 +310,84 @@ spurious_common:
     pop rbx
     pop rax
 
-    ; Remove interrupt number and error code
+    ; 移除中断号和错误码
     add rsp, 16
     iretq
 
 ; ========================================
-; Legacy keyboard ISR entry point (kept for compatibility)
+; 传统键盘中断 ISR 入口点（保留用于兼容）
 ; ========================================
 global keyboard_isr
 keyboard_isr:
-    push 0              ; dummy error code
-    push 33             ; interrupt number for IRQ1
+    push 0              ; 虚拟错误码
+    push 33             ; IRQ1 的中断号
     jmp irq_common
 
 ; ========================================
-; Syscall entry point (syscall/sysret)
+; 系统调用入口点（syscall/sysret）
 ; ========================================
 global syscall_entry
 extern syscall_handler_c
 
 syscall_entry:
-    ; syscall instruction saves RIP to RCX and RFLAGS to R11
-    ; We need to swap to kernel stack via TSS.rsp0
-    swapgs                          ; Load kernel GS base
-    mov gs:0, rsp                   ; Save user RSP (use scratch space at GS:0)
-    mov rsp, gs:8                   ; Load kernel RSP from GS:8
+    ; syscall 指令将 RIP 保存到 RCX，RFLAGS 保存到 R11
+    ; 需要通过 TSS.rsp0 切换到内核栈
+    swapgs                          ; 加载内核 GS 基地址
+    mov gs:0, rsp                   ; 保存用户 RSP（使用 GS:0 处的暂存空间）
+    mov rsp, gs:8                   ; 从 GS:8 加载内核 RSP
 
-    ; Push trap frame matching trap_frame_t layout:
+    ; 压入与 trap_frame_t 布局匹配的陷阱帧：
     ;   r15, r14, r13, r12, r11, r10, r9, r8,
     ;   rdi, rsi, rdx, rcx, rbx, rbp, rax,
     ;   int_num, error_code,
     ;   rip, cs, rflags, rsp, ss
 
-    ; First push SS, RSP, RFLAGS, CS, RIP (iretq frame)
-    ; syscall gives us: RCX=user_rip, R11=user_rflags
-    ; User RSP was saved to gs:0
-    push 0x23                       ; SS = user data selector (0x20 | 3 = 0x23)
-    push qword [gs:0]               ; User RSP
-    push r11                        ; RFLAGS (saved by syscall in r11)
-    push 0x1B                       ; CS = user code selector (0x18 | 3 = 0x1B)
-    push rcx                        ; User RIP (saved by syscall in rcx)
+    ; 首先压入 SS, RSP, RFLAGS, CS, RIP（iretq 帧）
+    ; syscall 提供给我们：RCX=用户_rip，R11=用户_rflags
+    ; 用户 RSP 已保存到 gs:0
+    push 0x23                       ; SS = 用户数据选择子（0x20 | 3 = 0x23）
+    push qword [gs:0]               ; 用户 RSP
+    push r11                        ; RFLAGS（由 syscall 保存在 r11 中）
+    push 0x1B                       ; CS = 用户代码选择子（0x18 | 3 = 0x1B）
+    push rcx                        ; 用户 RIP（由 syscall 保存在 rcx 中）
 
-    ; Push error code and interrupt number
-    push 0                          ; Dummy error code
-    push 0x80                       ; Syscall vector number
+    ; 压入错误码和中断号
+    push 0                          ; 虚拟错误码
+    push 0x80                       ; 系统调用向量号
 
-    ; Push general purpose registers IN trap_frame_t ORDER
-    push rax                        ; offset 112
-    push rbp                        ; offset 104
-    push rbx                        ; offset 96
-    push rcx                        ; offset 88
-    push rdx                        ; offset 80
-    push rsi                        ; offset 72
-    push rdi                        ; offset 64
-    push r8                         ; offset 56
-    push r9                         ; offset 48
-    push r10                        ; offset 40
-    push r11                        ; offset 32
-    push r12                        ; offset 24
-    push r13                        ; offset 16
-    push r14                        ; offset 8
-    push r15                        ; offset 0
+    ; 按 trap_frame_t 顺序压入通用寄存器
+    push rax                        ; 偏移 112
+    push rbp                        ; 偏移 104
+    push rbx                        ; 偏移 96
+    push rcx                        ; 偏移 88
+    push rdx                        ; 偏移 80
+    push rsi                        ; 偏移 72
+    push rdi                        ; 偏移 64
+    push r8                         ; 偏移 56
+    push r9                         ; 偏移 48
+    push r10                        ; 偏移 40
+    push r11                        ; 偏移 32
+    push r12                        ; 偏移 24
+    push r13                        ; 偏移 16
+    push r14                        ; 偏移 8
+    push r15                        ; 偏移 0
 
-    ; Load kernel data segment
+    ; 加载内核数据段
     mov ax, 0x10
     mov ds, ax
     mov es, ax
     mov fs, ax
     mov gs, ax
 
-    ; Call C handler with pointer to trap frame
+    ; 调用 C 处理程序，传入陷阱帧指针
     mov rdi, rsp
     cld
     call syscall_handler_c
 
-    ; Return path - restore and iretq
-    ; Restore kernel data segment is already set
+    ; 返回路径 - 恢复并 iretq
+    ; 内核数据段已设置，无需恢复
 
-    ; Restore GPRs in trap_frame_t order
+    ; 按 trap_frame_t 顺序恢复通用寄存器
     pop r15
     pop r14
     pop r13
@@ -404,37 +404,37 @@ syscall_entry:
     pop rbp
     pop rax
 
-    ; Remove int_num and error_code
+    ; 移除中断号和错误码
     add rsp, 16
 
-    ; Set GS for swapgs and restore user RSP
-    swapgs                          ; Restore user GS
+    ; 设置 GS 以便 swapgs 并恢复用户 RSP
+    swapgs                          ; 恢复用户 GS
 
-    ; iretq will restore RIP, CS, RFLAGS, RSP, SS
+    ; iretq 将恢复 RIP, CS, RFLAGS, RSP, SS
     iretq
 
 ; ========================================
-; Context switch function (pure assembly)
+; 上下文切换函数（纯汇编）
 ;
 ; void arch_switch_to(uint64_t *old_rsp_ptr, uint64_t new_rsp);
 ;
-; Saves callee-saved registers, switches RSP, restores registers,
-; and returns.  When first switching to a new kernel thread,
-; the new stack must contain:
-;   [top] arg        <- popped into rsi
-;   entry            <- popped into rdi
-;   kthread_trampoline <- return address (popped by ret)
+; 保存被调用者保存的寄存器，切换 RSP，恢复寄存器，
+; 然后返回。首次切换到新的内核线程时，
+; 新栈必须包含：
+;   [栈顶] arg        <- 弹出到 rsi
+;   entry            <- 弹出到 rdi
+;   kthread_trampoline <- 返回地址（由 ret 弹出）
 ;   rbp (0)
 ;   rbx (0)
 ;   r12 (0)
 ;   r13 (0)
 ;   r14 (0)
 ;   r15 (0)
-;   <- kernel_rsp points here
+;   <- kernel_rsp 指向此处
 ; ========================================
 global arch_switch_to
 arch_switch_to:
-    ; Save callee-saved registers
+    ; 保存被调用者保存的寄存器
     push rbp
     push rbx
     push r12
@@ -442,14 +442,14 @@ arch_switch_to:
     push r14
     push r15
 
-    ; Save old RSP
+    ; 保存旧 RSP
     mov rax, rdi            ; rax = old_rsp_ptr
-    mov [rax], rsp          ; *old_rsp_ptr = current RSP
+    mov [rax], rsp          ; *old_rsp_ptr = 当前 RSP
 
-    ; Load new RSP
+    ; 加载新 RSP
     mov rsp, rsi            ; rsp = new_rsp
 
-    ; Restore callee-saved registers from new stack
+    ; 从新栈恢复被调用者保存的寄存器
     pop r15
     pop r14
     pop r13
@@ -457,24 +457,24 @@ arch_switch_to:
     pop rbx
     pop rbp
 
-    ; Return - will pop return address from new stack
+    ; 返回 - 将从新栈弹出返回地址
     ret
 
 ; ========================================
-; Kernel thread trampoline (pure assembly)
+; 内核线程跳板（纯汇编）
 ;
-; After arch_switch_to returns (via ret), execution lands here.
-; The stack contains: entry, arg (pushed during thread creation).
-; We pop them into rdi/rsi and call the C wrapper kthread_entry.
+; arch_switch_to 返回后（通过 ret），执行到达此处。
+; 栈中包含：entry, arg（在线程创建时压入）。
+; 将它们弹出到 rdi/rsi 并调用 C 封装函数 kthread_entry。
 ; ========================================
 extern kthread_entry
 
 global kthread_trampoline_asm
 kthread_trampoline_asm:
-    pop rdi             ; entry function pointer
-    pop rsi             ; argument
+    pop rdi             ; 入口函数指针
+    pop rsi             ; 参数
     call kthread_entry  ; kthread_entry(entry, arg)
-    ; Should never return, but just in case
+    ; 不应返回，但以防万一
 .halt:
     cli
     hlt

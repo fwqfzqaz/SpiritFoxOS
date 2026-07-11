@@ -7,7 +7,7 @@ static pci_device_t pci_devices[PCI_MAX_DEVICES];
 static int pci_device_count = 0;
 
 /* ========================================================================
- * PCI Configuration Space Access (Mechanism 1)
+ * PCI 配置空间访问（机制 1）
  * ======================================================================== */
 
 uint32_t pci_read_config(uint8_t bus, uint8_t dev, uint8_t func, uint8_t offset)
@@ -35,7 +35,7 @@ void pci_write_config(uint8_t bus, uint8_t dev, uint8_t func, uint8_t offset, ui
 }
 
 /* ========================================================================
- * PCI device enumeration
+ * PCI 设备枚举
  * ======================================================================== */
 
 static void pci_scan_function(uint8_t bus, uint8_t dev, uint8_t func)
@@ -46,7 +46,7 @@ static void pci_scan_function(uint8_t bus, uint8_t dev, uint8_t func)
     uint16_t vendor = id & 0xFFFF;
     uint16_t device = (id >> 16) & 0xFFFF;
 
-    /* No device present */
+    /* 无设备存在 */
     if (vendor == 0xFFFF) return;
 
     pci_device_t *pcidev = &pci_devices[pci_device_count];
@@ -65,33 +65,33 @@ static void pci_scan_function(uint8_t bus, uint8_t dev, uint8_t func)
     uint32_t ht = pci_read_config(bus, dev, func, 0x0C);
     pcidev->header_type = (ht >> 16) & 0xFF;
 
-    /* Read BARs (only for type 0 headers) */
+    /* 读取 BAR（仅适用于类型 0 头部） */
     if ((pcidev->header_type & PCI_HEADER_TYPE_MASK) == 0) {
         for (int i = 0; i < 6; i++) {
             pcidev->bars[i] = pci_read_config(bus, dev, func, 0x10 + i * 4);
         }
     }
 
-    /* Read interrupt info */
+    /* 读取中断信息 */
     uint32_t irq_info = pci_read_config(bus, dev, func, 0x3C);
     pcidev->interrupt_line = irq_info & 0xFF;
     pcidev->interrupt_pin  = (irq_info >> 8) & 0xFF;
 
     pci_device_count++;
 
-    /* If this is a PCI-to-PCI bridge, scan secondary bus */
+    /* 如果是 PCI-to-PCI 桥，扫描次级总线 */
     if (pcidev->class_code == PCI_CLASS_BRIDGE &&
         pcidev->subclass == 0x04) {
-        /* Read secondary bus number from bridge config */
+        /* 从桥配置中读取次级总线号 */
         uint32_t bus_info = pci_read_config(bus, dev, func, 0x18);
         uint8_t secondary_bus = (bus_info >> 8) & 0xFF;
         if (secondary_bus != 0) {
-            /* Scan secondary bus - limit depth to prevent infinite recursion */
+            /* 扫描次级总线 - 限制深度以防止无限递归 */
             for (int d = 0; d < 32; d++) {
                 uint32_t bridged_id = pci_read_config(secondary_bus, d, 0, 0x00);
                 if ((bridged_id & 0xFFFF) != 0xFFFF) {
                     pci_scan_function(secondary_bus, d, 0);
-                    /* Check multi-function */
+                    /* 检查多功能设备 */
                     uint32_t bridged_ht = pci_read_config(secondary_bus, d, 0, 0x0C);
                     if (bridged_ht & (PCI_HEADER_TYPE_MULTI << 16)) {
                         for (int f = 1; f < 8; f++) {
@@ -113,10 +113,10 @@ static void pci_scan_bus(uint8_t bus)
         uint32_t id = pci_read_config(bus, dev, 0, 0x00);
         if ((id & 0xFFFF) == 0xFFFF) continue;
 
-        /* Scan function 0 */
+        /* 扫描功能 0 */
         pci_scan_function(bus, dev, 0);
 
-        /* Check if multi-function device */
+        /* 检查是否为多功能设备 */
         uint32_t ht = pci_read_config(bus, dev, 0, 0x0C);
         if ((ht >> 16) & PCI_HEADER_TYPE_MULTI) {
             for (int func = 1; func < 8; func++) {
@@ -130,7 +130,7 @@ static void pci_scan_bus(uint8_t bus)
 }
 
 /* ========================================================================
- * PCI class code to name mapping
+ * PCI 类代码到名称的映射
  * ======================================================================== */
 
 const char* pci_class_name(uint8_t class_code)
@@ -161,7 +161,7 @@ const char* pci_class_name(uint8_t class_code)
 }
 
 /* ========================================================================
- * Public API
+ * 公共 API
  * ======================================================================== */
 
 void pci_init(void)
@@ -169,7 +169,7 @@ void pci_init(void)
     pci_device_count = 0;
     memset(pci_devices, 0, sizeof(pci_devices));
 
-    /* Scan bus 0 (and recursively any bridged buses) */
+    /* 扫描总线 0（以及递归扫描所有桥接总线） */
     pci_scan_bus(0);
 
     printf("[PCI] Found %d device(s)\n", pci_device_count);

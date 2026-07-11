@@ -5,23 +5,22 @@
 #include "vga.h"
 
 /* ========================================================================
- * fat32 - FAT32 filesystem driver with read/write support
+ * fat32 - 支持读写的 FAT32 文件系统驱动
  *
- * Interfaces with the VFS layer to provide directory listing, file
- * reading, file writing, file/directory creation and deletion from a
- * FAT32-formatted block device.
+ * 与 VFS 层对接，提供 FAT32 格式块设备上的目录列表、文件读取、
+ * 文件写入、文件/目录创建和删除功能。
  * ======================================================================== */
 
-/* Next inode number */
+/* 下一个 inode 编号 */
 static uint64_t fat32_next_ino = 1;
 
 /* ========================================================================
- * Low-level helpers
+ * 底层辅助函数
  * ======================================================================== */
 
-/* Read a full cluster from disk into buf.
- * buf must be at least (sectors_per_cluster * bytes_per_sector) bytes.
- * Returns 0 on success, negative on error. */
+/* 从磁盘读取完整簇到 buf。
+ * buf 至少需要 (sectors_per_cluster * bytes_per_sector) 字节。
+ * 成功返回 0，失败返回负数。 */
 static int fat32_read_cluster(fat32_sb_data_t *sb_data, uint32_t cluster, void *buf)
 {
     if (cluster < 2)
@@ -34,9 +33,9 @@ static int fat32_read_cluster(fat32_sb_data_t *sb_data, uint32_t cluster, void *
     return blkdev_read(sb_data->blkdev_id, lba, count, buf);
 }
 
-/* Write a full cluster from buf to disk.
- * buf must be at least (sectors_per_cluster * bytes_per_sector) bytes.
- * Returns 0 on success, negative on error. */
+/* 将 buf 中的完整簇写入磁盘。
+ * buf 至少需要 (sectors_per_cluster * bytes_per_sector) 字节。
+ * 成功返回 0，失败返回负数。 */
 static int fat32_write_cluster(fat32_sb_data_t *sb_data, uint32_t cluster, const void *buf)
 {
     if (cluster < 2)
@@ -49,20 +48,20 @@ static int fat32_write_cluster(fat32_sb_data_t *sb_data, uint32_t cluster, const
     return blkdev_write(sb_data->blkdev_id, lba, count, buf);
 }
 
-/* Read the FAT table entry for a given cluster.
- * Returns the next cluster number, or a value >= FAT32_EOC_MIN for end-of-chain. */
+/* 读取给定簇的 FAT 表项。
+ * 返回下一个簇号，或 >= FAT32_EOC_MIN 的值表示链结束。 */
 static uint32_t fat32_get_fat_entry(fat32_sb_data_t *sb_data, uint32_t cluster)
 {
-    /* Each FAT entry is 4 bytes */
+    /* 每个 FAT 表项为 4 字节 */
     uint64_t fat_offset = (uint64_t)cluster * 4;
     uint64_t fat_sector = sb_data->fat_start_sector + fat_offset / sb_data->bytes_per_sector;
     uint32_t entry_offset = fat_offset % sb_data->bytes_per_sector;
 
-    /* Read the sector containing the FAT entry */
-    /* We use a full page as a scratch buffer */
+    /* 读取包含 FAT 表项的扇区 */
+    /* 使用完整页面作为临时缓冲区 */
     void *sector_buf = alloc_page();
     if (!sector_buf)
-        return 0x0FFFFFFF; /* Return EOC on allocation failure */
+        return 0x0FFFFFFF; /* 分配失败时返回 EOC */
 
     int ret = blkdev_read(sb_data->blkdev_id, fat_sector, 1, sector_buf);
     if (ret != 0) {
@@ -73,21 +72,21 @@ static uint32_t fat32_get_fat_entry(fat32_sb_data_t *sb_data, uint32_t cluster)
     uint32_t entry = *(uint32_t *)((uint8_t *)sector_buf + entry_offset);
     free_page(sector_buf);
 
-    /* FAT32 uses only lower 28 bits */
+    /* FAT32 仅使用低 28 位 */
     return entry & 0x0FFFFFFF;
 }
 
-/* Write a FAT table entry for a given cluster.
- * Preserves the top 4 bits of the existing entry.
- * Returns 0 on success, negative on error. */
+/* 写入给定簇的 FAT 表项。
+ * 保留现有表项的高 4 位。
+ * 成功返回 0，失败返回负数。 */
 static int fat32_set_fat_entry(fat32_sb_data_t *sb_data, uint32_t cluster, uint32_t value)
 {
-    /* Each FAT entry is 4 bytes */
+    /* 每个 FAT 表项为 4 字节 */
     uint64_t fat_offset = (uint64_t)cluster * 4;
     uint64_t fat_sector = sb_data->fat_start_sector + fat_offset / sb_data->bytes_per_sector;
     uint32_t entry_offset = fat_offset % sb_data->bytes_per_sector;
 
-    /* Read the sector containing the FAT entry */
+    /* 读取包含 FAT 表项的扇区 */
     void *sector_buf = alloc_page();
     if (!sector_buf)
         return -1;
@@ -98,31 +97,31 @@ static int fat32_set_fat_entry(fat32_sb_data_t *sb_data, uint32_t cluster, uint3
         return -2;
     }
 
-    /* Modify the entry, preserving top 4 bits */
+    /* 修改表项，保留高 4 位 */
     uint32_t *entry_ptr = (uint32_t *)((uint8_t *)sector_buf + entry_offset);
     *entry_ptr = (*entry_ptr & 0xF0000000) | (value & 0x0FFFFFFF);
 
-    /* Write the sector back */
+    /* 将扇区写回 */
     ret = blkdev_write(sb_data->blkdev_id, fat_sector, 1, sector_buf);
     free_page(sector_buf);
 
     return ret;
 }
 
-/* Allocate a free cluster from the FAT table.
- * Scans from next_free_cluster hint.
- * Marks the allocated cluster as end-of-chain.
- * Returns 0 on success, negative on error. */
+/* 从 FAT 表中分配一个空闲簇。
+ * 从 next_free_cluster 提示位置开始扫描。
+ * 将分配的簇标记为链结束。
+ * 成功返回 0，失败返回负数。 */
 static int fat32_alloc_cluster(fat32_sb_data_t *sb_data, uint32_t *out_cluster)
 {
     uint32_t start = sb_data->next_free_cluster;
     if (start < 2) start = 2;
 
-    /* Scan FAT entries for a free one (value == 0) */
+    /* 扫描 FAT 表项寻找空闲项（值 == 0） */
     for (uint32_t i = start; i < sb_data->total_clusters + 2; i++) {
         uint32_t val = fat32_get_fat_entry(sb_data, i);
         if (val == 0) {
-            /* Found a free cluster - mark it as end-of-chain */
+            /* 找到空闲簇 - 标记为链结束 */
             int ret = fat32_set_fat_entry(sb_data, i, 0x0FFFFFFF);
             if (ret != 0)
                 return ret;
@@ -134,7 +133,7 @@ static int fat32_alloc_cluster(fat32_sb_data_t *sb_data, uint32_t *out_cluster)
         }
     }
 
-    /* Wrap around and try from cluster 2 */
+    /* 回绕并从簇 2 开始尝试 */
     for (uint32_t i = 2; i < start; i++) {
         uint32_t val = fat32_get_fat_entry(sb_data, i);
         if (val == 0) {
@@ -149,12 +148,12 @@ static int fat32_alloc_cluster(fat32_sb_data_t *sb_data, uint32_t *out_cluster)
         }
     }
 
-    return -1;  /* No free clusters */
+    return -1;  /* 没有空闲簇 */
 }
 
-/* Append a new cluster to the end of a cluster chain.
- * last_cluster is the current last cluster in the chain.
- * Returns 0 on success, negative on error. */
+/* 在簇链末尾追加新簇。
+ * last_cluster 是链中当前的最后一个簇。
+ * 成功返回 0，失败返回负数。 */
 static int fat32_append_cluster(fat32_sb_data_t *sb_data, uint32_t last_cluster, uint32_t *out_new_cluster)
 {
     uint32_t new_cluster;
@@ -162,15 +161,15 @@ static int fat32_append_cluster(fat32_sb_data_t *sb_data, uint32_t last_cluster,
     if (ret != 0)
         return ret;
 
-    /* Update the last cluster's FAT entry to point to the new one */
+    /* 更新最后一个簇的 FAT 表项，指向新簇 */
     ret = fat32_set_fat_entry(sb_data, last_cluster, new_cluster);
     if (ret != 0) {
-        /* Free the allocated cluster on failure */
+        /* 失败时释放已分配的簇 */
         fat32_set_fat_entry(sb_data, new_cluster, 0);
         return ret;
     }
 
-    /* Zero out the new cluster so we don't leak old data */
+    /* 将新簇清零，避免泄漏旧数据 */
     void *zero_buf = alloc_page();
     if (zero_buf) {
         memset(zero_buf, 0, PAGE_SIZE);
@@ -182,25 +181,25 @@ static int fat32_append_cluster(fat32_sb_data_t *sb_data, uint32_t last_cluster,
     return 0;
 }
 
-/* Convert an 8.3 filename to a null-terminated string.
- * Removes trailing spaces, inserts '.' between name and extension. */
+/* 将 8.3 格式文件名转换为以空字符结尾的字符串。
+ * 去除尾部空格，在文件名和扩展名之间插入 '.'。 */
 static void fat32_format_83_name(const uint8_t *name83, char *out, int out_len)
 {
     int i = 0;
     int pos = 0;
 
-    /* Copy name part (8 bytes), strip trailing spaces */
+    /* 复制文件名部分（8 字节），去除尾部空格 */
     for (i = 7; i >= 0 && name83[i] == ' '; i--) {}
     int name_end = i;
 
     for (i = 0; i <= name_end && pos < out_len - 1; i++) {
         char c = (char)name83[i];
-        /* Convert to lowercase for display (FAT32 stores uppercase) */
+        /* 转换为小写显示（FAT32 以大写存储） */
         if (c >= 'A' && c <= 'Z') c = c - 'A' + 'a';
         out[pos++] = c;
     }
 
-    /* Extension part (3 bytes), strip trailing spaces */
+    /* 扩展名部分（3 字节），去除尾部空格 */
     for (i = 2; i >= 0 && name83[8 + i] == ' '; i--) {}
     int ext_end = i;
 
@@ -217,8 +216,8 @@ static void fat32_format_83_name(const uint8_t *name83, char *out, int out_len)
     out[pos] = '\0';
 }
 
-/* Compare an 8.3 FAT name with a null-terminated search name.
- * The search name is case-insensitive. */
+/* 将 8.3 FAT 文件名与以空字符结尾的搜索名进行比较。
+ * 搜索名不区分大小写。 */
 static int fat32_name_match(const uint8_t *name83, const char *search)
 {
     char formatted[VFS_MAX_NAME];
@@ -226,18 +225,18 @@ static int fat32_name_match(const uint8_t *name83, const char *search)
     return strcmp(formatted, search) == 0;
 }
 
-/* Convert a null-terminated filename to 8.3 FAT format.
- * Converts to uppercase, pads with spaces.
- * out83 must be at least 11 bytes. */
+/* 将以空字符结尾的文件名转换为 8.3 FAT 格式。
+ * 转换为大写，用空格填充。
+ * out83 至少需要 11 字节。 */
 static void fat32_name_to_83(const char *name, uint8_t *out83)
 {
-    /* Initialize with spaces */
+    /* 用空格初始化 */
     memset(out83, ' ', 11);
 
     int i = 0;
     int pos = 0;
 
-    /* Copy name part (up to 8 chars, stop at '.') */
+    /* 复制文件名部分（最多 8 个字符，遇到 '.' 停止） */
     while (name[i] && name[i] != '.' && pos < 8) {
         char c = name[i];
         if (c >= 'a' && c <= 'z') c = c - 'a' + 'A';
@@ -245,7 +244,7 @@ static void fat32_name_to_83(const char *name, uint8_t *out83)
         i++;
     }
 
-    /* Skip to extension */
+    /* 跳到扩展名 */
     if (name[i] == '.') {
         i++;
         pos = 8;
@@ -259,13 +258,13 @@ static void fat32_name_to_83(const char *name, uint8_t *out83)
 }
 
 /* ========================================================================
- * Directory iteration and path resolution
+ * 目录遍历与路径解析
  * ======================================================================== */
 
-/* Iterate directory entries in a cluster chain.
- * On success, fills in entry with the found directory entry and
- * sets *out_cluster to the cluster containing the entry.
- * Returns 0 on found, negative on not found. */
+/* 遍历簇链中的目录项。
+ * 成功时，用找到的目录项填充 entry，
+ * 并将 *out_cluster 设为包含该条目的簇。
+ * 找到返回 0，未找到返回负数。 */
 static int fat32_dir_lookup(fat32_sb_data_t *sb_data, uint32_t dir_cluster,
                             const char *name, fat32_dir_entry_t *entry)
 {
@@ -288,25 +287,25 @@ static int fat32_dir_lookup(fat32_sb_data_t *sb_data, uint32_t dir_cluster,
         for (uint32_t i = 0; i < entries_per_cluster; i++) {
             uint8_t first_byte = entries[i].name[0];
 
-            /* End of directory */
+            /* 目录结束 */
             if (first_byte == 0x00) {
                 free_page(cluster_buf);
                 return -1;
             }
 
-            /* Deleted entry - skip */
+            /* 已删除的条目 - 跳过 */
             if (first_byte == 0xE5)
                 continue;
 
-            /* Skip LFN entries */
+            /* 跳过 LFN 条目 */
             if (entries[i].attr == FAT32_ATTR_LFN)
                 continue;
 
-            /* Skip volume ID */
+            /* 跳过卷标识 */
             if (entries[i].attr & FAT32_ATTR_VOLUME_ID)
                 continue;
 
-            /* Check if name matches */
+            /* 检查名称是否匹配 */
             if (fat32_name_match(entries[i].name, name)) {
                 if (entry)
                     memcpy(entry, &entries[i], sizeof(fat32_dir_entry_t));
@@ -315,28 +314,28 @@ static int fat32_dir_lookup(fat32_sb_data_t *sb_data, uint32_t dir_cluster,
             }
         }
 
-        /* Follow cluster chain */
+        /* 沿簇链继续 */
         cluster = fat32_get_fat_entry(sb_data, cluster);
     }
 
     free_page(cluster_buf);
-    return -1;  /* Not found */
+    return -1;  /* 未找到 */
 }
 
-/* Resolve a path from the root directory.
- * Fills in start_cluster and file_size with the result.
- * Returns 0 on success, negative on failure. */
+/* 从根目录解析路径。
+ * 用结果填充 start_cluster 和 file_size。
+ * 成功返回 0，失败返回负数。 */
 static int __attribute__((unused)) fat32_resolve(fat32_sb_data_t *sb_data, const char *path,
                          uint32_t *start_cluster, uint32_t *file_size, uint32_t *is_dir)
 {
     if (!path || path[0] == '\0')
         return -1;
 
-    /* Skip leading slashes */
+    /* 跳过前导斜杠 */
     const char *p = path;
     while (*p == '/') p++;
 
-    /* If empty path after slashes, return root dir */
+    /* 如果斜杠后为空路径，返回根目录 */
     if (*p == '\0') {
         *start_cluster = sb_data->root_dir_cluster;
         *file_size = 0;
@@ -344,11 +343,11 @@ static int __attribute__((unused)) fat32_resolve(fat32_sb_data_t *sb_data, const
         return 0;
     }
 
-    /* Walk path components */
+    /* 遍历路径组件 */
     uint32_t current_cluster = sb_data->root_dir_cluster;
 
     while (*p) {
-        /* Extract next path component */
+        /* 提取下一个路径组件 */
         char component[VFS_MAX_NAME];
         int ci = 0;
         while (*p && *p != '/' && ci < VFS_MAX_NAME - 1) {
@@ -356,19 +355,19 @@ static int __attribute__((unused)) fat32_resolve(fat32_sb_data_t *sb_data, const
         }
         component[ci] = '\0';
 
-        /* Skip slashes */
+        /* 跳过斜杠 */
         while (*p == '/') p++;
 
-        /* Look up this component in the current directory */
+        /* 在当前目录中查找此组件 */
         fat32_dir_entry_t entry;
         int ret = fat32_dir_lookup(sb_data, current_cluster, component, &entry);
         if (ret != 0)
-            return -2;  /* Not found */
+            return -2;  /* 未找到 */
 
-        /* Get cluster from entry */
+        /* 从条目获取簇号 */
         uint32_t entry_cluster = (uint32_t)entry.cluster_hi << 16 | entry.cluster_lo;
 
-        /* Is this the last component? */
+        /* 这是最后一个组件吗？ */
         if (*p == '\0') {
             *start_cluster = entry_cluster;
             *file_size = entry.file_size;
@@ -376,9 +375,9 @@ static int __attribute__((unused)) fat32_resolve(fat32_sb_data_t *sb_data, const
             return 0;
         }
 
-        /* Intermediate component must be a directory */
+        /* 中间组件必须是目录 */
         if (!(entry.attr & FAT32_ATTR_DIRECTORY))
-            return -3;  /* Not a directory */
+            return -3;  /* 不是目录 */
 
         current_cluster = entry_cluster;
     }
@@ -387,7 +386,7 @@ static int __attribute__((unused)) fat32_resolve(fat32_sb_data_t *sb_data, const
 }
 
 /* ========================================================================
- * FAT32 inode read operation
+ * FAT32 inode 读取操作
  * ======================================================================== */
 
 static int fat32_inode_read(vfs_file_t *file, void *buf, size_t count)
@@ -402,18 +401,18 @@ static int fat32_inode_read(vfs_file_t *file, void *buf, size_t count)
     uint32_t cluster_size = (uint32_t)sb_data->sectors_per_cluster * sb_data->bytes_per_sector;
     uint64_t file_size = inode_data->file_size;
 
-    /* Calculate remaining bytes */
+    /* 计算剩余字节数 */
     uint64_t remaining = file_size - file->offset;
     if (remaining > count)
         remaining = count;
     if (remaining == 0)
         return 0;
 
-    /* Walk cluster chain to find the cluster containing the current offset */
+    /* 遍历簇链，找到包含当前偏移的簇 */
     uint32_t cluster = inode_data->start_cluster;
     uint64_t offset = file->offset;
 
-    /* Skip whole clusters to reach the right one */
+    /* 跳过整个簇以到达正确的簇 */
     while (offset >= cluster_size && cluster >= 2 && cluster < FAT32_EOC_MIN) {
         offset -= cluster_size;
         cluster = fat32_get_fat_entry(sb_data, cluster);
@@ -422,7 +421,7 @@ static int fat32_inode_read(vfs_file_t *file, void *buf, size_t count)
     if (cluster < 2 || cluster >= FAT32_EOC_MIN)
         return 0;
 
-    /* Read data cluster by cluster */
+    /* 逐簇读取数据 */
     size_t done = 0;
     void *cluster_buf = alloc_page();
     if (!cluster_buf)
@@ -434,7 +433,7 @@ static int fat32_inode_read(vfs_file_t *file, void *buf, size_t count)
             break;
         }
 
-        /* How much to copy from this cluster */
+        /* 从此簇复制多少数据 */
         uint32_t in_cluster = cluster_size - (uint32_t)offset;
         size_t to_copy = remaining - done;
         if (to_copy > in_cluster)
@@ -444,9 +443,9 @@ static int fat32_inode_read(vfs_file_t *file, void *buf, size_t count)
                (uint8_t *)cluster_buf + offset, to_copy);
 
         done += to_copy;
-        offset = 0;  /* Subsequent clusters start at offset 0 */
+        offset = 0;  /* 后续簇从偏移 0 开始 */
 
-        /* Follow chain */
+        /* 沿链继续 */
         cluster = fat32_get_fat_entry(sb_data, cluster);
     }
 
@@ -456,13 +455,13 @@ static int fat32_inode_read(vfs_file_t *file, void *buf, size_t count)
 }
 
 /* ========================================================================
- * Directory entry write helpers
+ * 目录项写入辅助函数
  * ======================================================================== */
 
-/* Update an existing directory entry on disk (e.g., file size change).
- * Searches parent_cluster's directory entries for one matching name83,
- * then updates the file_size field and writes back.
- * Returns 0 on success, negative on error. */
+/* 更新磁盘上已有的目录项（如文件大小变更）。
+ * 搜索 parent_cluster 目录项中匹配 name83 的条目，
+ * 然后更新 file_size 字段并写回。
+ * 成功返回 0，失败返回负数。 */
 static int fat32_update_direntry(fat32_sb_data_t *sb_data, uint32_t parent_cluster,
                                   const uint8_t *name83, uint32_t new_start_cluster,
                                   uint32_t new_file_size)
@@ -488,7 +487,7 @@ static int fat32_update_direntry(fat32_sb_data_t *sb_data, uint32_t parent_clust
             uint8_t first_byte = entries[i].name[0];
             if (first_byte == 0x00) {
                 free_page(cluster_buf);
-                return -1;  /* Not found */
+                return -1;  /* 未找到 */
             }
             if (first_byte == 0xE5)
                 continue;
@@ -497,14 +496,14 @@ static int fat32_update_direntry(fat32_sb_data_t *sb_data, uint32_t parent_clust
             if (entries[i].attr & FAT32_ATTR_VOLUME_ID)
                 continue;
 
-            /* Compare 8.3 name */
+            /* 比较 8.3 文件名 */
             if (memcmp(entries[i].name, name83, 11) == 0) {
-                /* Found - update the entry */
+                /* 找到 - 更新条目 */
                 entries[i].file_size = new_file_size;
                 entries[i].cluster_hi = (uint16_t)(new_start_cluster >> 16);
                 entries[i].cluster_lo = (uint16_t)(new_start_cluster & 0xFFFF);
 
-                /* Write the cluster back */
+                /* 将簇写回 */
                 ret = fat32_write_cluster(sb_data, cluster, cluster_buf);
                 free_page(cluster_buf);
                 return ret;
@@ -515,12 +514,12 @@ static int fat32_update_direntry(fat32_sb_data_t *sb_data, uint32_t parent_clust
     }
 
     free_page(cluster_buf);
-    return -1;  /* Not found */
+    return -1;  /* 未找到 */
 }
 
-/* Create a new directory entry in a parent directory's cluster chain.
- * Finds a free slot (deleted entry or end-of-entries), or extends the chain.
- * Returns 0 on success, negative on error. */
+/* 在父目录的簇链中创建新的目录项。
+ * 查找空闲槽位（已删除条目或条目末尾），或扩展链。
+ * 成功返回 0，失败返回负数。 */
 static int fat32_create_direntry(fat32_sb_data_t *sb_data, uint32_t parent_cluster,
                                   const char *name, uint32_t start_cluster,
                                   uint32_t file_size, uint8_t attr)
@@ -528,7 +527,7 @@ static int fat32_create_direntry(fat32_sb_data_t *sb_data, uint32_t parent_clust
     uint32_t cluster_size = (uint32_t)sb_data->sectors_per_cluster * sb_data->bytes_per_sector;
     uint32_t entries_per_cluster = cluster_size / sizeof(fat32_dir_entry_t);
 
-    /* Build the 8.3 name */
+    /* 构建 8.3 文件名 */
     uint8_t name83[11];
     fat32_name_to_83(name, name83);
 
@@ -548,11 +547,11 @@ static int fat32_create_direntry(fat32_sb_data_t *sb_data, uint32_t parent_clust
 
         fat32_dir_entry_t *entries = (fat32_dir_entry_t *)cluster_buf;
         for (uint32_t i = 0; i < entries_per_cluster; i++) {
-            /* Find a free slot: deleted entry (0xE5) or end marker (0x00) */
+            /* 查找空闲槽位：已删除条目（0xE5）或结束标记（0x00） */
             if (entries[i].name[0] == 0xE5 || entries[i].name[0] == 0x00) {
                 int was_end = (entries[i].name[0] == 0x00);
 
-                /* Fill in the directory entry */
+                /* 填充目录项 */
                 memcpy(entries[i].name, name83, 11);
                 entries[i].attr = attr;
                 entries[i].nt_reserved = 0;
@@ -566,13 +565,13 @@ static int fat32_create_direntry(fat32_sb_data_t *sb_data, uint32_t parent_clust
                 entries[i].cluster_lo = (uint16_t)(start_cluster & 0xFFFF);
                 entries[i].file_size = file_size;
 
-                /* If we're using the end-of-entries slot, make sure the
-                 * next entry is also marked as end-of-entries if there is room */
+                /* 如果使用了条目末尾槽位，确保下一个条目
+                 * 也标记为条目末尾（如果有空间） */
                 if (was_end && i + 1 < entries_per_cluster) {
                     entries[i + 1].name[0] = 0x00;
                 }
 
-                /* Write the cluster back */
+                /* 将簇写回 */
                 ret = fat32_write_cluster(sb_data, cluster, cluster_buf);
                 free_page(cluster_buf);
                 return ret;
@@ -583,10 +582,10 @@ static int fat32_create_direntry(fat32_sb_data_t *sb_data, uint32_t parent_clust
         cluster = fat32_get_fat_entry(sb_data, cluster);
     }
 
-    /* No free slot found - extend the directory's cluster chain */
+    /* 未找到空闲槽位 - 扩展目录的簇链 */
     if (prev_cluster < 2 || prev_cluster >= FAT32_EOC_MIN) {
         free_page(cluster_buf);
-        return -3;  /* Can't extend */
+        return -3;  /* 无法扩展 */
     }
 
     uint32_t new_cluster;
@@ -596,7 +595,7 @@ static int fat32_create_direntry(fat32_sb_data_t *sb_data, uint32_t parent_clust
         return ret;
     }
 
-    /* Zero the new cluster (already done by fat32_append_cluster) and write the entry */
+    /* 将新簇清零（已由 fat32_append_cluster 完成）并写入条目 */
     memset(cluster_buf, 0, cluster_size);
     fat32_dir_entry_t *entries = (fat32_dir_entry_t *)cluster_buf;
     memcpy(entries[0].name, name83, 11);
@@ -611,7 +610,7 @@ static int fat32_create_direntry(fat32_sb_data_t *sb_data, uint32_t parent_clust
     entries[0].modify_date = 0;
     entries[0].cluster_lo = (uint16_t)(start_cluster & 0xFFFF);
     entries[0].file_size = file_size;
-    /* Mark next entry as end-of-entries */
+    /* 将下一个条目标记为条目末尾 */
     entries[1].name[0] = 0x00;
 
     ret = fat32_write_cluster(sb_data, new_cluster, cluster_buf);
@@ -620,7 +619,7 @@ static int fat32_create_direntry(fat32_sb_data_t *sb_data, uint32_t parent_clust
 }
 
 /* ========================================================================
- * FAT32 inode write operation
+ * FAT32 inode 写入操作
  * ======================================================================== */
 
 static int fat32_inode_write(vfs_file_t *file, const void *buf, size_t count)
@@ -634,7 +633,7 @@ static int fat32_inode_write(vfs_file_t *file, const void *buf, size_t count)
 
     uint32_t cluster_size = (uint32_t)sb_data->sectors_per_cluster * sb_data->bytes_per_sector;
 
-    /* If file has no clusters yet, allocate the first one */
+    /* 如果文件还没有簇，分配第一个 */
     if (inode_data->start_cluster == 0 || inode_data->start_cluster < 2) {
         uint32_t first_cluster;
         int ret = fat32_alloc_cluster(sb_data, &first_cluster);
@@ -643,8 +642,8 @@ static int fat32_inode_write(vfs_file_t *file, const void *buf, size_t count)
         inode_data->start_cluster = first_cluster;
     }
 
-    /* Walk cluster chain to find the cluster containing the current offset.
-     * If offset is beyond the current chain, extend it. */
+    /* 遍历簇链，找到包含当前偏移的簇。
+     * 如果偏移超出当前链，则扩展链。 */
     uint64_t offset = file->offset;
     uint32_t cluster = inode_data->start_cluster;
     uint64_t offset_remaining = offset;
@@ -652,7 +651,7 @@ static int fat32_inode_write(vfs_file_t *file, const void *buf, size_t count)
     while (offset_remaining >= cluster_size) {
         uint32_t next = fat32_get_fat_entry(sb_data, cluster);
         if (next >= FAT32_EOC_MIN) {
-            /* Need to extend the chain */
+            /* 需要扩展链 */
             uint32_t new_cluster;
             int ret = fat32_append_cluster(sb_data, cluster, &new_cluster);
             if (ret != 0)
@@ -664,42 +663,42 @@ static int fat32_inode_write(vfs_file_t *file, const void *buf, size_t count)
         offset_remaining -= cluster_size;
     }
 
-    /* Now cluster is the cluster containing our write offset,
-     * and offset_remaining is the offset within that cluster. */
+    /* 现在 cluster 是包含写入偏移的簇，
+     * offset_remaining 是该簇内的偏移。 */
 
-    /* Read-modify-write: read the cluster, overlay new data, write back */
+    /* 读-改-写：读取簇，覆盖新数据，写回 */
     size_t done = 0;
     void *cluster_buf = alloc_page();
     if (!cluster_buf)
         return -4;
 
     while (done < count) {
-        /* Read the current cluster */
+        /* 读取当前簇 */
         int ret = fat32_read_cluster(sb_data, cluster, cluster_buf);
         if (ret != 0) {
             break;
         }
 
-        /* How much to write in this cluster */
+        /* 在此簇中写入多少数据 */
         uint32_t in_cluster = cluster_size - (uint32_t)offset_remaining;
         size_t to_copy = count - done;
         if (to_copy > in_cluster)
             to_copy = in_cluster;
 
-        /* Overlay the new data */
+        /* 覆盖新数据 */
         memcpy((uint8_t *)cluster_buf + offset_remaining,
                (const uint8_t *)buf + done, to_copy);
 
-        /* Write the cluster back */
+        /* 将簇写回 */
         ret = fat32_write_cluster(sb_data, cluster, cluster_buf);
         if (ret != 0) {
             break;
         }
 
         done += to_copy;
-        offset_remaining = 0;  /* Subsequent clusters start at offset 0 */
+        offset_remaining = 0;  /* 后续簇从偏移 0 开始 */
 
-        /* If we need to write more, follow/extend the chain */
+        /* 如果需要写入更多数据，沿链继续或扩展 */
         if (done < count) {
             uint32_t next = fat32_get_fat_entry(sb_data, cluster);
             if (next >= FAT32_EOC_MIN) {
@@ -716,7 +715,7 @@ static int fat32_inode_write(vfs_file_t *file, const void *buf, size_t count)
 
     free_page(cluster_buf);
 
-    /* Update file offset and size */
+    /* 更新文件偏移和大小 */
     file->offset += done;
     uint64_t new_size = file->offset;
     if (new_size > inode_data->file_size)
@@ -724,7 +723,7 @@ static int fat32_inode_write(vfs_file_t *file, const void *buf, size_t count)
     if (new_size > inode->size)
         inode->size = new_size;
 
-    /* Update the directory entry on disk */
+    /* 更新磁盘上的目录项 */
     fat32_update_direntry(sb_data, inode_data->parent_cluster,
                           inode_data->name83, inode_data->start_cluster,
                           inode_data->file_size);
@@ -733,7 +732,7 @@ static int fat32_inode_write(vfs_file_t *file, const void *buf, size_t count)
 }
 
 /* ========================================================================
- * FAT32 VFS create/mkdir/unlink callbacks
+ * FAT32 VFS 创建/创建目录/取消链接回调
  * ======================================================================== */
 
 static int fat32_create(vfs_dentry_t *parent, const char *name, vfs_inode_t *inode)
@@ -745,19 +744,19 @@ static int fat32_create(vfs_dentry_t *parent, const char *name, vfs_inode_t *ino
     fat32_sb_data_t *sb_data = (fat32_sb_data_t *)parent->inode->sb->fs_data;
     fat32_inode_data_t *inode_data = (fat32_inode_data_t *)inode->fs_data;
 
-    /* Create directory entry on disk with start_cluster=0 (no data yet) */
+    /* 在磁盘上创建目录项，start_cluster=0（尚无数据） */
     int ret = fat32_create_direntry(sb_data, parent_data->start_cluster,
                                      name, 0, 0, FAT32_ATTR_ARCHIVE);
     if (ret != 0)
         return ret;
 
-    /* Store the 8.3 name and parent cluster for future updates */
+    /* 存储 8.3 文件名和父簇号，用于后续更新 */
     fat32_name_to_83(name, inode_data->name83);
     inode_data->parent_cluster = parent_data->start_cluster;
     inode_data->start_cluster = 0;
     inode_data->file_size = 0;
 
-    /* Set up inode operations */
+    /* 设置 inode 操作 */
     inode->read = fat32_inode_read;
     inode->write = fat32_inode_write;
 
@@ -773,13 +772,13 @@ static int fat32_mkdir_cb(vfs_dentry_t *parent, const char *name, vfs_inode_t *i
     fat32_sb_data_t *sb_data = (fat32_sb_data_t *)parent->inode->sb->fs_data;
     fat32_inode_data_t *inode_data = (fat32_inode_data_t *)inode->fs_data;
 
-    /* Allocate a cluster for the new directory */
+    /* 为新目录分配一个簇 */
     uint32_t dir_cluster;
     int ret = fat32_alloc_cluster(sb_data, &dir_cluster);
     if (ret != 0)
         return ret;
 
-    /* Zero out the new cluster and write "." and ".." entries */
+    /* 将新簇清零并写入 "." 和 ".." 条目 */
     void *cluster_buf = alloc_page();
     if (!cluster_buf) {
         fat32_set_fat_entry(sb_data, dir_cluster, 0);
@@ -789,7 +788,7 @@ static int fat32_mkdir_cb(vfs_dentry_t *parent, const char *name, vfs_inode_t *i
 
     fat32_dir_entry_t *entries = (fat32_dir_entry_t *)cluster_buf;
 
-    /* "." entry */
+    /* "." 条目 */
     memset(entries[0].name, ' ', 11);
     entries[0].name[0] = '.';
     entries[0].attr = FAT32_ATTR_DIRECTORY;
@@ -797,7 +796,7 @@ static int fat32_mkdir_cb(vfs_dentry_t *parent, const char *name, vfs_inode_t *i
     entries[0].cluster_lo = (uint16_t)(dir_cluster & 0xFFFF);
     entries[0].file_size = 0;
 
-    /* ".." entry */
+    /* ".." 条目 */
     memset(entries[1].name, ' ', 11);
     entries[1].name[0] = '.';
     entries[1].name[1] = '.';
@@ -806,10 +805,10 @@ static int fat32_mkdir_cb(vfs_dentry_t *parent, const char *name, vfs_inode_t *i
     entries[1].cluster_lo = (uint16_t)(parent_data->start_cluster & 0xFFFF);
     entries[1].file_size = 0;
 
-    /* End-of-entries marker */
+    /* 条目末尾标记 */
     entries[2].name[0] = 0x00;
 
-    /* Write the cluster to disk */
+    /* 将簇写入磁盘 */
     ret = fat32_write_cluster(sb_data, dir_cluster, cluster_buf);
     free_page(cluster_buf);
     if (ret != 0) {
@@ -817,7 +816,7 @@ static int fat32_mkdir_cb(vfs_dentry_t *parent, const char *name, vfs_inode_t *i
         return ret;
     }
 
-    /* Create directory entry in parent */
+    /* 在父目录中创建目录项 */
     ret = fat32_create_direntry(sb_data, parent_data->start_cluster,
                                  name, dir_cluster, 0, FAT32_ATTR_DIRECTORY);
     if (ret != 0) {
@@ -825,7 +824,7 @@ static int fat32_mkdir_cb(vfs_dentry_t *parent, const char *name, vfs_inode_t *i
         return ret;
     }
 
-    /* Update inode data */
+    /* 更新 inode 数据 */
     fat32_name_to_83(name, inode_data->name83);
     inode_data->parent_cluster = parent_data->start_cluster;
     inode_data->start_cluster = dir_cluster;
@@ -842,7 +841,7 @@ static int fat32_unlink_cb(vfs_dentry_t *dentry)
     fat32_inode_data_t *inode_data = (fat32_inode_data_t *)dentry->inode->fs_data;
     fat32_sb_data_t *sb_data = (fat32_sb_data_t *)dentry->inode->sb->fs_data;
 
-    /* Mark the directory entry as deleted (first byte = 0xE5) */
+    /* 将目录项标记为已删除（首字节 = 0xE5） */
     uint32_t cluster_size = (uint32_t)sb_data->sectors_per_cluster * sb_data->bytes_per_sector;
     uint32_t entries_per_cluster = cluster_size / sizeof(fat32_dir_entry_t);
 
@@ -863,7 +862,7 @@ static int fat32_unlink_cb(vfs_dentry_t *dentry)
         for (uint32_t i = 0; i < entries_per_cluster; i++) {
             if (entries[i].name[0] == 0x00) {
                 free_page(cluster_buf);
-                return -4;  /* Entry not found */
+                return -4;  /* 条目未找到 */
             }
             if (entries[i].name[0] == 0xE5)
                 continue;
@@ -873,12 +872,12 @@ static int fat32_unlink_cb(vfs_dentry_t *dentry)
                 continue;
 
             if (memcmp(entries[i].name, inode_data->name83, 11) == 0) {
-                /* Found - mark as deleted */
+                /* 找到 - 标记为已删除 */
                 entries[i].name[0] = 0xE5;
                 ret = fat32_write_cluster(sb_data, cluster, cluster_buf);
                 free_page(cluster_buf);
 
-                /* Free all clusters in the file's chain */
+                /* 释放文件链中的所有簇 */
                 if (inode_data->start_cluster >= 2) {
                     uint32_t cl = inode_data->start_cluster;
                     while (cl >= 2 && cl < FAT32_EOC_MIN) {
@@ -896,51 +895,51 @@ static int fat32_unlink_cb(vfs_dentry_t *dentry)
     }
 
     free_page(cluster_buf);
-    return -4;  /* Entry not found */
+    return -4;  /* 条目未找到 */
 }
 
 /* ========================================================================
- * Directory population helper
+ * 目录填充辅助函数
  *
- * Reads all directory entries from a FAT32 directory cluster chain and
- * creates VFS dentry/inode pairs under the given parent dentry.
+ * 从 FAT32 目录簇链中读取所有目录项，
+ * 并在给定父目录项下创建 VFS 目录项/inode 对。
  * ======================================================================== */
 
 /* ========================================================================
- * LFN (Long File Name) support
+ * LFN（长文件名）支持
  *
- * LFN entries precede the 8.3 entry and store the long name in UCS-2.
- * Each LFN entry holds up to 13 characters. They are stored in reverse
- * order (highest sequence number first).
+ * LFN 条目位于 8.3 条目之前，以 UCS-2 存储长文件名。
+ * 每个 LFN 条目最多容纳 13 个字符。它们以逆序存储
+ * （序列号最高的在前）。
  * ======================================================================== */
 
-#define LFN_MAX_ENTRIES  20   /* Max LFN entries = 20 * 13 = 260 chars */
+#define LFN_MAX_ENTRIES  20   /* 最大 LFN 条目数 = 20 * 13 = 260 字符 */
 #define LFN_MAX_CHARS   255
 
-/* Extract UCS-2 characters from a LFN directory entry.
- * Each LFN entry stores 13 UCS-2 characters at fixed offsets:
- *   chars 0-4:  bytes 1-10   (5 chars)
- *   chars 5-10: bytes 14-25  (6 chars)
- *   chars 11-12: bytes 28-31 (2 chars)
- * A 0x0000 or 0xFFFF character marks the end of the name. */
+/* 从 LFN 目录项中提取 UCS-2 字符。
+ * 每个 LFN 条目在固定偏移处存储 13 个 UCS-2 字符：
+ *   字符 0-4:  字节 1-10   (5 个字符)
+ *   字符 5-10: 字节 14-25  (6 个字符)
+ *   字符 11-12: 字节 28-31 (2 个字符)
+ * 0x0000 或 0xFFFF 字符表示名称结束。 */
 static int lfn_extract_chars(const fat32_dir_entry_t *entry, uint16_t *chars)
 {
     int count = 0;
     const uint8_t *raw = (const uint8_t *)entry;
 
-    /* Characters 0-4: bytes 1-10 */
+    /* 字符 0-4：字节 1-10 */
     for (int i = 0; i < 5; i++) {
         uint16_t ch = raw[1 + i * 2] | ((uint16_t)raw[2 + i * 2] << 8);
         if (ch == 0x0000 || ch == 0xFFFF) return count;
         chars[count++] = ch;
     }
-    /* Characters 5-10: bytes 14-25 */
+    /* 字符 5-10：字节 14-25 */
     for (int i = 0; i < 6; i++) {
         uint16_t ch = raw[14 + i * 2] | ((uint16_t)raw[15 + i * 2] << 8);
         if (ch == 0x0000 || ch == 0xFFFF) return count;
         chars[count++] = ch;
     }
-    /* Characters 11-12: bytes 28-31 */
+    /* 字符 11-12：字节 28-31 */
     for (int i = 0; i < 2; i++) {
         uint16_t ch = raw[28 + i * 2] | ((uint16_t)raw[29 + i * 2] << 8);
         if (ch == 0x0000 || ch == 0xFFFF) return count;
@@ -960,14 +959,14 @@ static int fat32_populate_dir(vfs_superblock_t *sb, vfs_dentry_t *parent,
     if (!cluster_buf)
         return -1;
 
-    /* LFN accumulation state */
+    /* LFN 累积状态 */
     uint16_t lfn_chars[LFN_MAX_CHARS];
     int      lfn_char_count = 0;
-    int      lfn_seq_expected = 0;  /* Expected next sequence number (descending) */
+    int      lfn_seq_expected = 0;  /* 期望的下一个序列号（递减） */
 
-    /* Collect all entries across all clusters first, then process.
-     * This simplifies LFN handling across cluster boundaries. */
-    /* For simplicity, we process cluster-by-cluster but carry LFN state across. */
+    /* 先收集所有簇中的所有条目，然后再处理。
+     * 这简化了跨簇边界的 LFN 处理。 */
+    /* 为简化起见，我们逐簇处理，但跨簇携带 LFN 状态。 */
 
     uint32_t cluster = dir_cluster;
 
@@ -982,35 +981,35 @@ static int fat32_populate_dir(vfs_superblock_t *sb, vfs_dentry_t *parent,
         for (uint32_t i = 0; i < entries_per_cluster; i++) {
             uint8_t first_byte = entries[i].name[0];
 
-            /* End of directory */
+            /* 目录结束 */
             if (first_byte == 0x00) {
                 free_page(cluster_buf);
                 return 0;
             }
 
-            /* Deleted entry - skip and reset LFN state */
+            /* 已删除条目 - 跳过并重置 LFN 状态 */
             if (first_byte == 0xE5) {
                 lfn_char_count = 0;
                 lfn_seq_expected = 0;
                 continue;
             }
 
-            /* Handle LFN entries */
+            /* 处理 LFN 条目 */
             if (entries[i].attr == FAT32_ATTR_LFN) {
                 uint8_t seq = entries[i].name[0];
                 int is_last = (seq & 0x40) != 0;
-                seq &= 0x3F;  /* Mask off the last-entry bit */
+                seq &= 0x3F;  /* 屏蔽末尾条目位 */
 
                 if (is_last) {
-                    /* This is the first LFN entry (highest sequence number) */
+                    /* 这是第一个 LFN 条目（最高序列号） */
                     lfn_char_count = 0;
                     lfn_seq_expected = seq;
 
-                    /* Extract characters and place them at the correct position */
+                    /* 提取字符并放置到正确位置 */
                     uint16_t chars[13];
                     int nchars = lfn_extract_chars(&entries[i], chars);
 
-                    /* Calculate starting position for this segment */
+                    /* 计算此段的起始位置 */
                     int start_pos = (seq - 1) * 13;
                     if (start_pos + nchars <= LFN_MAX_CHARS) {
                         for (int j = 0; j < nchars; j++) {
@@ -1020,7 +1019,7 @@ static int fat32_populate_dir(vfs_superblock_t *sb, vfs_dentry_t *parent,
                     }
                     lfn_seq_expected = seq - 1;
                 } else if (seq == lfn_seq_expected && lfn_seq_expected > 0) {
-                    /* Continuing LFN sequence */
+                    /* 继续的 LFN 序列 */
                     uint16_t chars[13];
                     int nchars = lfn_extract_chars(&entries[i], chars);
 
@@ -1029,59 +1028,59 @@ static int fat32_populate_dir(vfs_superblock_t *sb, vfs_dentry_t *parent,
                         for (int j = 0; j < nchars; j++) {
                             lfn_chars[start_pos + j] = chars[j];
                         }
-                        /* Don't update lfn_char_count for middle entries;
-                         * it was set by the first (last-seq) entry */
+                        /* 不要为中间条目更新 lfn_char_count；
+                         * 它已由第一个（最后序列号）条目设置 */
                     }
                     lfn_seq_expected = seq - 1;
                 } else {
-                    /* Out-of-sequence LFN, reset */
+                    /* 序列外的 LFN，重置 */
                     lfn_char_count = 0;
                     lfn_seq_expected = 0;
                 }
                 continue;
             }
 
-            /* Skip volume ID */
+            /* 跳过卷标识 */
             if (entries[i].attr & FAT32_ATTR_VOLUME_ID) {
                 lfn_char_count = 0;
                 lfn_seq_expected = 0;
                 continue;
             }
 
-            /* This is a normal 8.3 entry - determine the name */
+            /* 这是一个普通 8.3 条目 - 确定名称 */
             char name[VFS_MAX_NAME];
 
             if (lfn_char_count > 0 && lfn_seq_expected == 0) {
-                /* We have a complete LFN - convert UCS-2 to ASCII/UTF-8 */
+                /* 有完整的 LFN - 将 UCS-2 转换为 ASCII/UTF-8 */
                 int pos = 0;
                 for (int j = 0; j < lfn_char_count && pos < VFS_MAX_NAME - 1; j++) {
                     if (lfn_chars[j] < 0x80) {
                         name[pos++] = (char)lfn_chars[j];
                     } else {
-                        /* Non-ASCII: use '?' placeholder */
+                        /* 非 ASCII：使用 '?' 占位符 */
                         name[pos++] = '?';
                     }
                 }
                 name[pos] = '\0';
             } else {
-                /* No valid LFN, use 8.3 name */
+                /* 无有效 LFN，使用 8.3 文件名 */
                 fat32_format_83_name(entries[i].name, name, VFS_MAX_NAME);
             }
 
-            /* Reset LFN state */
+            /* 重置 LFN 状态 */
             lfn_char_count = 0;
             lfn_seq_expected = 0;
 
-            /* Skip "." and ".." */
+            /* 跳过 "." 和 ".." */
             if (name[0] == '.' && (name[1] == '\0' ||
                 (name[1] == '.' && name[2] == '\0')))
                 continue;
 
-            /* Get starting cluster */
+            /* 获取起始簇 */
             uint32_t entry_cluster = (uint32_t)entries[i].cluster_hi << 16 | entries[i].cluster_lo;
             int is_dir = (entries[i].attr & FAT32_ATTR_DIRECTORY) ? 1 : 0;
 
-            /* Check if dentry already exists */
+            /* 检查目录项是否已存在 */
             vfs_dentry_t *existing = NULL;
             vfs_dentry_t *child = parent->child;
             while (child) {
@@ -1094,7 +1093,7 @@ static int fat32_populate_dir(vfs_superblock_t *sb, vfs_dentry_t *parent,
             if (existing)
                 continue;
 
-            /* Create inode */
+            /* 创建 inode */
             vfs_inode_t *new_inode = (vfs_inode_t *)alloc_page();
             if (!new_inode) continue;
             memset(new_inode, 0, PAGE_SIZE);
@@ -1108,7 +1107,7 @@ static int fat32_populate_dir(vfs_superblock_t *sb, vfs_dentry_t *parent,
             new_inode->nlinks = 1;
             new_inode->sb = sb;
 
-            /* Allocate inode private data */
+            /* 分配 inode 私有数据 */
             fat32_inode_data_t *inode_data = (fat32_inode_data_t *)alloc_page();
             if (!inode_data) {
                 free_page(new_inode);
@@ -1121,13 +1120,13 @@ static int fat32_populate_dir(vfs_superblock_t *sb, vfs_dentry_t *parent,
             memcpy(inode_data->name83, entries[i].name, 11);
             new_inode->fs_data = inode_data;
 
-            /* Set read/write operations for files */
+            /* 为文件设置读/写操作 */
             if (!is_dir) {
                 new_inode->read = fat32_inode_read;
                 new_inode->write = fat32_inode_write;
             }
 
-            /* Create dentry */
+            /* 创建目录项 */
             vfs_dentry_t *new_dentry = (vfs_dentry_t *)alloc_page();
             if (!new_dentry) {
                 free_page(inode_data);
@@ -1139,12 +1138,12 @@ static int fat32_populate_dir(vfs_superblock_t *sb, vfs_dentry_t *parent,
             new_dentry->inode = new_inode;
             new_dentry->parent = parent;
 
-            /* Add to parent's child list */
+            /* 添加到父目录的子目录列表 */
             new_dentry->next = parent->child;
             parent->child = new_dentry;
         }
 
-        /* Follow cluster chain */
+        /* 沿簇链继续 */
         cluster = fat32_get_fat_entry(sb_data, cluster);
     }
 
@@ -1153,18 +1152,18 @@ static int fat32_populate_dir(vfs_superblock_t *sb, vfs_dentry_t *parent,
 }
 
 /* ========================================================================
- * Recursive directory tree population
+ * 递归目录树填充
  *
- * Walks the FAT32 directory tree and creates corresponding VFS dentries.
+ * 遍历 FAT32 目录树，创建对应的 VFS 目录项。
  * ======================================================================== */
 
 static void fat32_populate_recursive(vfs_superblock_t *sb, vfs_dentry_t *parent,
                                      uint32_t dir_cluster)
 {
-    /* First, populate this directory */
+    /* 首先填充此目录 */
     fat32_populate_dir(sb, parent, dir_cluster);
 
-    /* Then recurse into subdirectories */
+    /* 然后递归进入子目录 */
     vfs_dentry_t *child = parent->child;
     while (child) {
         if (child->inode && child->inode->type == VFS_TYPE_DIR && child->inode->fs_data) {
@@ -1176,13 +1175,13 @@ static void fat32_populate_recursive(vfs_superblock_t *sb, vfs_dentry_t *parent,
 }
 
 /* ========================================================================
- * FAT32 filesystem operations
+ * FAT32 文件系统操作
  * ======================================================================== */
 
 static int fat32_mount(vfs_superblock_t *sb, uint8_t blkdev_id, const char *options)
 {
-    /* Parse block device ID from options string if provided.
-     * Format: "blkdev=N" */
+    /* 如果提供了选项字符串，从中解析块设备 ID。
+     * 格式："blkdev=N" */
     uint8_t dev_id = blkdev_id;
 
     if (options) {
@@ -1207,7 +1206,7 @@ static int fat32_mount(vfs_superblock_t *sb, uint8_t blkdev_id, const char *opti
         return -1;
     }
 
-    /* Read BPB from sector 0 */
+    /* 从扇区 0 读取 BPB */
     void *sector_buf = alloc_page();
     if (!sector_buf)
         return -2;
@@ -1221,14 +1220,14 @@ static int fat32_mount(vfs_superblock_t *sb, uint8_t blkdev_id, const char *opti
 
     fat32_bpb_t *bpb = (fat32_bpb_t *)sector_buf;
 
-    /* Validate FAT32 signature */
+    /* 验证 FAT32 签名 */
     if (bpb->signature != 0xAA55) {
         printf("[FAT32] Invalid boot signature: 0x%04X\n", bpb->signature);
         free_page(sector_buf);
         return -4;
     }
 
-    /* Verify this is actually FAT32 */
+    /* 验证这确实是 FAT32 */
     if (bpb->bytes_per_sector == 0 ||
         (bpb->bytes_per_sector & (bpb->bytes_per_sector - 1)) != 0) {
         printf("[FAT32] Invalid bytes_per_sector: %u\n", bpb->bytes_per_sector);
@@ -1242,13 +1241,13 @@ static int fat32_mount(vfs_superblock_t *sb, uint8_t blkdev_id, const char *opti
         return -6;
     }
 
-    /* Check for "FAT32" in fs_type field */
+    /* 检查 fs_type 字段中的 "FAT32" */
     if (memcmp(bpb->fs_type, "FAT32   ", 8) != 0) {
         printf("[FAT32] fs_type mismatch: %.8s\n", bpb->fs_type);
-        /* Some FAT32 images may not have this set correctly, continue anyway */
+        /* 某些 FAT32 镜像可能未正确设置此项，继续执行 */
     }
 
-    /* Allocate superblock private data */
+    /* 分配超级块私有数据 */
     fat32_sb_data_t *sb_data = (fat32_sb_data_t *)alloc_page();
     if (!sb_data) {
         free_page(sector_buf);
@@ -1263,14 +1262,14 @@ static int fat32_mount(vfs_superblock_t *sb, uint8_t blkdev_id, const char *opti
     sb_data->sectors_per_fat = bpb->sectors_per_fat_32;
     sb_data->root_dir_cluster = bpb->root_dir_cluster;
 
-    /* Calculate FAT start sector */
+    /* 计算 FAT 起始扇区 */
     sb_data->fat_start_sector = bpb->reserved_sectors;
 
-    /* Calculate data start sector */
+    /* 计算数据起始扇区 */
     sb_data->data_start_sector = bpb->reserved_sectors +
                                   (uint32_t)bpb->num_fats * bpb->sectors_per_fat_32;
 
-    /* Calculate total clusters */
+    /* 计算总簇数 */
     uint32_t total_sectors = bpb->total_sectors_32;
     if (total_sectors == 0)
         total_sectors = bpb->total_sectors_16;
@@ -1289,7 +1288,7 @@ static int fat32_mount(vfs_superblock_t *sb, uint8_t blkdev_id, const char *opti
            sb_data->fat_start_sector, sb_data->data_start_sector,
            sb_data->root_dir_cluster, sb_data->total_clusters);
 
-    /* Create root inode */
+    /* 创建根 inode */
     vfs_inode_t *root = (vfs_inode_t *)alloc_page();
     if (!root) {
         free_page(sb_data);
@@ -1305,7 +1304,7 @@ static int fat32_mount(vfs_superblock_t *sb, uint8_t blkdev_id, const char *opti
     root->nlinks = 2;
     root->sb = sb;
 
-    /* Allocate root inode private data */
+    /* 分配根 inode 私有数据 */
     fat32_inode_data_t *root_data = (fat32_inode_data_t *)alloc_page();
     if (!root_data) {
         free_page(root);
@@ -1318,7 +1317,7 @@ static int fat32_mount(vfs_superblock_t *sb, uint8_t blkdev_id, const char *opti
     root_data->file_size = 0;
     root->fs_data = root_data;
 
-    /* Create root dentry */
+    /* 创建根目录项 */
     vfs_dentry_t *root_dentry = (vfs_dentry_t *)alloc_page();
     if (!root_dentry) {
         free_page(root_data);
@@ -1337,7 +1336,7 @@ static int fat32_mount(vfs_superblock_t *sb, uint8_t blkdev_id, const char *opti
 
     free_page(sector_buf);
 
-    /* Populate the directory tree */
+    /* 填充目录树 */
     fat32_populate_recursive(sb, root_dentry, sb_data->root_dir_cluster);
 
     return 0;
@@ -1361,7 +1360,7 @@ static vfs_inode_t *fat32_alloc_inode(vfs_superblock_t *sb)
     inode->ino = fat32_next_ino++;
     inode->sb = sb;
 
-    /* Allocate inode private data */
+    /* 分配 inode 私有数据 */
     fat32_inode_data_t *data = (fat32_inode_data_t *)alloc_page();
     if (!data) {
         free_page(inode);
@@ -1383,7 +1382,7 @@ static void fat32_destroy_inode(vfs_inode_t *inode)
 }
 
 /* ========================================================================
- * Filesystem type definition
+ * 文件系统类型定义
  * ======================================================================== */
 
 vfs_filesystem_t fat32_fs = {
@@ -1398,7 +1397,7 @@ vfs_filesystem_t fat32_fs = {
 };
 
 /* ========================================================================
- * Initialization
+ * 初始化
  * ======================================================================== */
 
 void fat32_init(void)

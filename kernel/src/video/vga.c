@@ -3,7 +3,7 @@
 #include "fb.h"
 #include <stdarg.h>
 
-/* Serial port (COM1) for QEMU debug output */
+/* 串口（COM1）用于QEMU调试输出 */
 #define COM1 0x3F8
 
 static inline void serial_putchar(char c)
@@ -24,16 +24,16 @@ static void serial_init(void)
     hal_outb(COM1 + 4, 0x0B);
 }
 
-/* Text-mode VGA */
+/* 文本模式VGA */
 #define VGA_TEXT_ADDR   0xB8000
 #define VGA_COLS        80
 #define VGA_ROWS        25
 
-/* VGA color attributes */
+/* VGA颜色属性 */
 #define VGA_ATTR(fg, bg) ((uint8_t)(((bg) << 4) | ((fg) & 0x0F)))
 #define VGA_WHITE_ON_BLACK VGA_ATTR(0x0F, 0x00)
 
-/* Cursor control ports */
+/* 光标控制端口 */
 #define VGA_CTRL_REGISTER 0x3D4
 #define VGA_DATA_REGISTER 0x3D5
 #define VGA_CURSOR_HIGH   14
@@ -56,7 +56,7 @@ static void update_cursor(void)
 
 static void scroll(void)
 {
-    /* Shift all rows up by one */
+    /* 所有行上移一行 */
     for (int y = 0; y < VGA_ROWS - 1; y++) {
         for (int x = 0; x < VGA_COLS; x++) {
             int src = (y + 1) * VGA_COLS + x;
@@ -65,7 +65,7 @@ static void scroll(void)
         }
     }
 
-    /* Clear the last row */
+    /* 清除最后一行 */
     for (int x = 0; x < VGA_COLS; x++) {
         vga_buffer[(VGA_ROWS - 1) * VGA_COLS + x] = (uint16_t)text_attr << 8 | ' ';
     }
@@ -82,11 +82,11 @@ void vga_init(BootInfo* info)
     vga_clear();
     serial_init();
 
-    /* Initialize framebuffer driver. For UEFI boot, this uses the
-     * GOP-provided framebuffer; for BIOS boot, it uses VBE DISPI. */
+    /* 初始化帧缓冲驱动。UEFI启动时使用GOP提供的帧缓冲；
+     * BIOS启动时使用VBE DISPI。 */
     fb_init(info);
 
-    /* If framebuffer is initialized, set up the fb text terminal */
+    /* 如果帧缓冲已初始化，则设置帧缓冲文本终端 */
     if (fb_term_is_active() == 0) {
         fb_term_init();
     }
@@ -94,10 +94,10 @@ void vga_init(BootInfo* info)
 
 void vga_putchar(char c)
 {
-    /* Always output to serial port for QEMU logging */
+    /* 始终输出到串口用于QEMU日志 */
     serial_putchar(c);
 
-    /* If fb terminal is active, render to framebuffer instead of VGA text buffer */
+    /* 如果帧缓冲终端激活，则渲染到帧缓冲而非VGA文本缓冲 */
     if (fb_term_is_active()) {
         fb_term_putchar(c);
         return;
@@ -192,7 +192,7 @@ void terminal_clear(void)
     vga_clear();
 }
 
-/* ---- Enhanced printf implementation ---- */
+/* ---- 增强版printf实现 ---- */
 
 static void print_unsigned_padded(uint64_t val, int base, int uppercase, int width, int zero_pad)
 {
@@ -212,14 +212,14 @@ static void print_unsigned_padded(uint64_t val, int base, int uppercase, int wid
         }
     }
 
-    /* Pad to width */
+    /* 填充到指定宽度 */
     int num_digits = i;
     while (num_digits < width) {
         vga_putchar(pad_char);
         num_digits++;
     }
 
-    /* Print digits in reverse order */
+    /* 逆序输出数字 */
     while (--i >= 0) {
         vga_putchar(buf[i]);
     }
@@ -246,21 +246,21 @@ int printf(const char* fmt, ...)
         if (*fmt == '%') {
             fmt++;
 
-            /* Parse flags */
+            /* 解析标志 */
             int zero_pad = 0;
             if (*fmt == '0') {
                 zero_pad = 1;
                 fmt++;
             }
 
-            /* Parse width */
+            /* 解析宽度 */
             int width = 0;
             while (*fmt >= '0' && *fmt <= '9') {
                 width = width * 10 + (*fmt - '0');
                 fmt++;
             }
 
-            /* Parse length modifier */
+            /* 解析长度修饰符 */
             int long_long = 0;
             if (*fmt == 'l') {
                 fmt++;

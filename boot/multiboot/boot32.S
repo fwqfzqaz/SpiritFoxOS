@@ -1,5 +1,5 @@
-# boot32.S - Long mode trampoline for SpiritFoxOS
-# Entry point for multiboot, sets up long mode and jumps to 64-bit kernel
+# boot32.S - SpiritFoxOS 长模式跳板
+# Multiboot 入口点，设置长模式并跳转到 64 位内核
 
 .section .text
 
@@ -7,52 +7,52 @@
 
 #define COM1 0x3F8
 
-# Multiboot entry point
-# GRUB passes: eax=0x2BADB002, ebx=multiboot_info pointer
+# Multiboot 入口点
+# GRUB 传递: eax=0x2BADB002, ebx=multiboot_info 指针
 _start:
-    # Set up a small stack (below BootInfo at 0x9000)
+    # 设置一个小栈（在 0x9000 的 BootInfo 下方）
     movl $0x8000, %esp
 
-    # Push args for C function: _start_c(magic, mbi)
-    pushl %ebx          # mbi pointer (second arg)
-    pushl %eax          # magic (first arg)
+    # 为 C 函数压入参数: _start_c(magic, mbi)
+    pushl %ebx          # mbi 指针（第二个参数）
+    pushl %eax          # magic（第一个参数）
     call _start_c
 
-    # _start_c returns p4_table physical address in %eax
-    # (it's actually noreturn, but just in case)
+    # _start_c 在 %eax 中返回 p4_table 物理地址
+    # （实际上是 noreturn，但以防万一）
 .halt:
     cli
     hlt
     jmp .halt
 
 
-# ---- Enable long mode and jump to 64-bit kernel ----
-# Called from C with: enable_long_mode(uint32_t p4_table_addr)
-# cdecl: argument on stack at 4(%esp)
+# ---- 启用长模式并跳转到 64 位内核 ----
+# 从 C 调用: enable_long_mode(uint32_t p4_table_addr)
+# cdecl: 参数在栈上 4(%esp) 处
 
 .global enable_long_mode
 
-# 64-bit GDT
+# 64 位 GDT
 .align 16
 gdt64_start:
-    .quad 0x0000000000000000              # 0x00: null descriptor
-    .quad 0x00AF9A000000FFFF              # 0x08: 64-bit code segment (L=1, D=0)
-    .quad 0x00CF92000000FFFF              # 0x10: data segment
+    .quad 0x0000000000000000              # 0x00: 空描述符
+    .quad 0x00AF9A000000FFFF              # 0x08: 64 位代码段 (L=1, D=0)
+    .quad 0x00CF92000000FFFF              # 0x10: 数据段
 gdt64_end:
 
 .align 4
 gdt64_ptr:
-    .word gdt64_end - gdt64_start - 1     # limit
-    .long gdt64_start                     # base (32-bit, identity mapped)
+    .word gdt64_end - gdt64_start - 1     # 段限
+    .long gdt64_start                     # 基地址（32 位，恒等映射）
 
 enable_long_mode:
-    # Get p4_table address from stack (cdecl first arg)
-    # Save in %ebx because serial output clobbers %eax/%al
+    # 从栈中获取 p4_table 地址（cdecl 第一个参数）
+    # 保存在 %ebx 中，因为串口输出会破坏 %eax/%al
     movl 4(%esp), %ebx
 
-    # Debug: 'P' - starting
-    # IMPORTANT: Read Line Status Register at COM1+5 (0x3FD) to check TX ready
-    # Reading from COM1 (0x3F8) is the DATA register, not the status register!
+    # 调试: 'P' - 开始
+    # 重要: 读取 COM1+5 (0x3FD) 的线路状态寄存器以检查发送就绪
+    # 读取 COM1 (0x3F8) 是数据寄存器，不是状态寄存器！
     movw $(COM1 + 5), %dx
 1:  inb %dx, %al
     test $0x20, %al
@@ -61,10 +61,10 @@ enable_long_mode:
     movb $'P', %al
     outb %al, %dx
 
-    # Step 1: Load P4 into CR3 (use saved %ebx, not clobbered %eax)
+    # 步骤 1: 将 P4 加载到 CR3（使用保存的 %ebx，而非被破坏的 %eax）
     movl %ebx, %cr3
 
-    # Debug: '3' - CR3 loaded
+    # 调试: '3' - CR3 已加载
     movw $(COM1 + 5), %dx
 1:  inb %dx, %al
     test $0x20, %al
@@ -73,12 +73,12 @@ enable_long_mode:
     movb $'3', %al
     outb %al, %dx
 
-    # Step 2: Enable PAE in CR4
+    # 步骤 2: 在 CR4 中启用 PAE
     movl %cr4, %eax
     orl $(1 << 5), %eax
     movl %eax, %cr4
 
-    # Debug: 'A' - PAE enabled
+    # 调试: 'A' - PAE 已启用
     movw $(COM1 + 5), %dx
 1:  inb %dx, %al
     test $0x20, %al
@@ -87,13 +87,13 @@ enable_long_mode:
     movb $'A', %al
     outb %al, %dx
 
-    # Step 3: Enable long mode in EFER MSR
+    # 步骤 3: 在 EFER MSR 中启用长模式
     movl $0xC0000080, %ecx
     rdmsr
     orl $(1 << 8), %eax
     wrmsr
 
-    # Debug: 'E' - EFER.LME set
+    # 调试: 'E' - EFER.LME 已设置
     movw $(COM1 + 5), %dx
 1:  inb %dx, %al
     test $0x20, %al
@@ -102,10 +102,10 @@ enable_long_mode:
     movb $'E', %al
     outb %al, %dx
 
-    # Step 4: Load 64-bit GDT (before enabling paging, still in 32-bit mode)
+    # 步骤 4: 加载 64 位 GDT（在启用分页之前，仍处于 32 位模式）
     lgdt gdt64_ptr
 
-    # Debug: 'G' - GDT loaded
+    # 调试: 'G' - GDT 已加载
     movw $(COM1 + 5), %dx
 1:  inb %dx, %al
     test $0x20, %al
@@ -114,13 +114,13 @@ enable_long_mode:
     movb $'G', %al
     outb %al, %dx
 
-    # Step 5: Enable paging in CR0 - CRITICAL MOMENT
-    # After this, CPU is in compatibility sub-mode of long mode
+    # 步骤 5: 在 CR0 中启用分页 - 关键时刻
+    # 此后 CPU 处于长模式的兼容子模式
     movl %cr0, %eax
     orl $(1 << 31), %eax
     movl %eax, %cr0
 
-    # Debug: 'S' - paging enabled, still in compat mode
+    # 调试: 'S' - 分页已启用，仍处于兼容模式
     movw $(COM1 + 5), %dx
 1:  inb %dx, %al
     test $0x20, %al
@@ -129,17 +129,17 @@ enable_long_mode:
     movb $'S', %al
     outb %al, %dx
 
-    # Step 6: Far jump to 64-bit code segment to enter true 64-bit mode
-    # This is executed in compatibility mode (32-bit decoding), so ljmpl works
+    # 步骤 6: 远跳转到 64 位代码段以进入真正的 64 位模式
+    # 此指令在兼容模式（32 位解码）下执行，因此 ljmpl 可用
     ljmpl $0x08, $lm_entry
 
 lm_entry:
-    # Now in 64-bit long mode!
-    # All instructions from here are decoded in 64-bit mode context
-    # but were assembled as 32-bit code, so we must be careful with
-    # addressing modes (no absolute memory references, use register-indirect)
+    # 现在处于 64 位长模式！
+    # 从这里开始的所有指令都在 64 位模式上下文中解码
+    # 但它们是作为 32 位代码汇编的，所以必须注意
+    # 寻址方式（不使用绝对内存引用，使用寄存器间接寻址）
 
-    # Debug: '6' - we made it to 64-bit mode!
+    # 调试: '6' - 成功进入 64 位模式！
     movw $(COM1 + 5), %dx
 1:  inb %dx, %al
     test $0x20, %al
@@ -148,7 +148,7 @@ lm_entry:
     movb $'6', %al
     outb %al, %dx
 
-    # Set up data segments for 64-bit mode
+    # 为 64 位模式设置数据段
     movw $0x10, %ax
     movw %ax, %ds
     movw %ax, %es
@@ -156,13 +156,13 @@ lm_entry:
     movw %ax, %gs
     movw %ax, %ss
 
-    # Set up stack at 2MB (well within identity-mapped region)
+    # 在 2MB 处设置栈（在恒等映射区域内）
     movl $0x200000, %esp
 
-    # Pass BootInfo pointer (0x9000) in edi (System V ABI first arg)
+    # 在 edi 中传递 BootInfo 指针 (0x9000)（System V ABI 第一个参数）
     movl $0x9000, %edi
 
-    # Debug: 'J' - about to jump to kernel
+    # 调试: 'J' - 即将跳转到内核
     movw $(COM1 + 5), %dx
 1:  inb %dx, %al
     test $0x20, %al
@@ -171,13 +171,13 @@ lm_entry:
     movb $'J', %al
     outb %al, %dx
 
-    # Jump to the 64-bit kernel at 0x100000
-    # Use register-indirect jump to avoid 32-bit vs 64-bit addressing mismatch
-    # (jmpl *kernel_addr uses abs32 addressing which becomes RIP-relative in 64-bit mode)
+    # 跳转到 0x100000 处的 64 位内核
+    # 使用寄存器间接跳转以避免 32 位与 64 位寻址不匹配
+    # （jmpl *kernel_addr 使用 abs32 寻址，在 64 位模式下会变为 RIP 相对寻址）
     movl $0x100000, %eax
     jmp *%eax
 
-    # Should never reach here
+    # 不应到达此处
 .halt2:
     cli
     hlt

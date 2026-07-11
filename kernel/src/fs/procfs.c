@@ -1,9 +1,9 @@
 /*
- * SpiritFoxOS /proc Filesystem
+ * SpiritFoxOS /proc 文件系统
  *
- * Provides a minimal /proc filesystem with process information,
- * CPU info, memory info, uptime, and kernel version.
- * Uses memfs-backed files that are refreshed by procfs_update().
+ * 提供最小化的 /proc 文件系统，包含进程信息、
+ * CPU 信息、内存信息、运行时间和内核版本。
+ * 使用 memfs 支持的文件，由 procfs_update() 刷新。
  */
 
 #include "procfs.h"
@@ -16,7 +16,7 @@
 #include "vga.h"
 
 /* ========================================================================
- * Constants
+ * 常量
  * ======================================================================== */
 
 #define MAX_PROCS_INTERNAL 256
@@ -24,7 +24,7 @@
 #define SPIRITFOX_VERSION  "SpiritFoxOS 0.1.0 (x86_64)"
 
 /* ========================================================================
- * Simple integer-to-string helper (no snprintf available in kernel)
+ * 简单的整数转字符串辅助函数（内核中没有 snprintf）
  * ======================================================================== */
 
 static int itoa_local(char *buf, int val)
@@ -64,7 +64,7 @@ static int uitoa_local(char *buf, uint64_t val)
     return out;
 }
 
-/* Simple string append into buffer, returns new offset */
+/* 简单的字符串追加到缓冲区，返回新偏移 */
 static int buf_append(char *buf, int offset, const char *str)
 {
     while (*str && offset < PROCFS_BUF_SIZE - 1)
@@ -73,7 +73,7 @@ static int buf_append(char *buf, int offset, const char *str)
     return offset;
 }
 
-/* Append an integer */
+/* 追加一个整数 */
 static int buf_append_int(char *buf, int offset, int val)
 {
     char tmp[12];
@@ -81,7 +81,7 @@ static int buf_append_int(char *buf, int offset, int val)
     return buf_append(buf, offset, tmp);
 }
 
-/* Append an unsigned integer */
+/* 追加一个无符号整数 */
 static int buf_append_uint(char *buf, int offset, uint64_t val)
 {
     char tmp[20];
@@ -90,7 +90,7 @@ static int buf_append_uint(char *buf, int offset, uint64_t val)
 }
 
 /* ========================================================================
- * Helper: write content to a /proc file path
+ * 辅助函数：将内容写入 /proc 文件路径
  * ======================================================================== */
 
 static void procfs_write_file(const char *path, const char *content)
@@ -103,7 +103,7 @@ static void procfs_write_file(const char *path, const char *content)
 }
 
 /* ========================================================================
- * Content generators
+ * 内容生成器
  * ======================================================================== */
 
 static void procfs_gen_version(void)
@@ -119,7 +119,7 @@ static void procfs_gen_uptime(void)
     uint64_t sec = ms / 1000;
     off = buf_append_uint(buf, off, sec);
     off = buf_append(buf, off, ".");
-    /* fractional part (3 digits of ms) */
+    /* 小数部分（毫秒的 3 位数字） */
     uint64_t frac = ms % 1000;
     if (frac < 100) off = buf_append(buf, off, "0");
     if (frac < 10)  off = buf_append(buf, off, "0");
@@ -171,7 +171,7 @@ static void procfs_gen_cpuinfo(void)
     hal_cpuid_t cpuid_data;
     hal_cpuid(0, 0, &cpuid_data);
 
-    /* Vendor string (EBX, EDX, ECX from CPUID leaf 0) */
+    /* 厂商字符串（来自 CPUID 叶 0 的 EBX、EDX、ECX） */
     char vendor[13];
     uint32_t *vb = (uint32_t *)vendor;
     vb[0] = cpuid_data.ebx;
@@ -224,7 +224,7 @@ static void procfs_gen_pid_status(int pid)
     char buf[PROCFS_BUF_SIZE];
     int off = 0;
 
-    /* Write /proc/<pid>/status */
+    /* 写入 /proc/<pid>/status */
     off = buf_append(buf, off, "Name:\tProcess");
     off = buf_append_int(buf, off, pid);
     off = buf_append(buf, off, "\n");
@@ -266,11 +266,11 @@ static void procfs_gen_pid_cmdline(int pid)
     char path[64];
     char buf[64];
 
-    /* Simple cmdline: just the process name placeholder */
+    /* 简单的 cmdline：仅进程名占位符 */
     int off = 0;
     off = buf_append(buf, off, "proc:");
     off = buf_append_int(buf, off, pid);
-    off = buf_append(buf, off, "\0");  /* cmdline is NUL-separated */
+    off = buf_append(buf, off, "\0");  /* cmdline 以 NUL 分隔 */
 
     strcpy(path, "/proc/");
     int plen = 6;
@@ -290,9 +290,9 @@ static void procfs_gen_pid_maps(int pid)
     char buf[PROCFS_BUF_SIZE];
     int off = 0;
 
-    /* Text region: entry_point to brk */
+    /* 代码段：entry_point 到 brk */
     off = buf_append(buf, off, "0x");
-    /* entry point hex - use simple hex conversion */
+    /* 入口点十六进制 - 使用简单十六进制转换 */
     {
         char hex[17];
         for (int i = 15; i >= 0; i--) {
@@ -313,7 +313,7 @@ static void procfs_gen_pid_maps(int pid)
     }
     off = buf_append(buf, off, " rwxp 00000000 00:00 0  [text]\n");
 
-    /* Stack region */
+    /* 栈区域 */
     off = buf_append(buf, off, "0x");
     {
         uint64_t stack_base = p->stack_top - PROC_STACK_SIZE;
@@ -344,35 +344,35 @@ static void procfs_gen_pid_maps(int pid)
 }
 
 /* ========================================================================
- * Create /proc/<pid> directory and its files for a given pid
+ * 为指定 pid 创建 /proc/<pid> 目录及其文件
  * ======================================================================== */
 
 static void procfs_create_pid_dir(int pid)
 {
     char path[64];
 
-    /* /proc/<pid>/ */
+    /* /proc/<pid>/ 目录 */
     strcpy(path, "/proc/");
     int plen = 6;
     plen += itoa_local(path + plen, pid);
     path[plen] = '\0';
     vfs_mkdir(path, VFS_S_IRUSR | VFS_S_IXUSR);
 
-    /* /proc/<pid>/status */
+    /* /proc/<pid>/status 文件 */
     strcpy(path + plen, "/status");
     {
         int fd = vfs_open(path, VFS_O_CREAT | VFS_O_WRONLY, VFS_S_IRUSR);
         if (fd >= 0) vfs_close(fd);
     }
 
-    /* /proc/<pid>/cmdline */
+    /* /proc/<pid>/cmdline 文件 */
     strcpy(path + plen, "/cmdline");
     {
         int fd = vfs_open(path, VFS_O_CREAT | VFS_O_WRONLY, VFS_S_IRUSR);
         if (fd >= 0) vfs_close(fd);
     }
 
-    /* /proc/<pid>/maps */
+    /* /proc/<pid>/maps 文件 */
     strcpy(path + plen, "/maps");
     {
         int fd = vfs_open(path, VFS_O_CREAT | VFS_O_WRONLY, VFS_S_IRUSR);
@@ -381,15 +381,15 @@ static void procfs_create_pid_dir(int pid)
 }
 
 /* ========================================================================
- * Public API
+ * 公共 API
  * ======================================================================== */
 
 void procfs_init(void)
 {
-    /* Create /proc directory */
+    /* 创建 /proc 目录 */
     vfs_mkdir("/proc", VFS_S_IRUSR | VFS_S_IXUSR);
 
-    /* /proc/version - simple static content */
+    /* /proc/version - 简单静态内容 */
     {
         int fd = vfs_open("/proc/version", VFS_O_CREAT | VFS_O_WRONLY, VFS_S_IRUSR);
         if (fd >= 0) {
@@ -398,7 +398,7 @@ void procfs_init(void)
         }
     }
 
-    /* /proc/uptime */
+    /* /proc/uptime 文件 */
     {
         int fd = vfs_open("/proc/uptime", VFS_O_CREAT | VFS_O_WRONLY, VFS_S_IRUSR);
         if (fd >= 0) {
@@ -407,7 +407,7 @@ void procfs_init(void)
         }
     }
 
-    /* /proc/meminfo */
+    /* /proc/meminfo 文件 */
     {
         int fd = vfs_open("/proc/meminfo", VFS_O_CREAT | VFS_O_WRONLY, VFS_S_IRUSR);
         if (fd >= 0) {
@@ -416,7 +416,7 @@ void procfs_init(void)
         }
     }
 
-    /* /proc/self */
+    /* /proc/self 目录 */
     vfs_mkdir("/proc/self", VFS_S_IRUSR | VFS_S_IXUSR);
     {
         int fd = vfs_open("/proc/self/status", VFS_O_CREAT | VFS_O_WRONLY, VFS_S_IRUSR);
@@ -429,17 +429,17 @@ void procfs_init(void)
 
 void procfs_update(void)
 {
-    /* Update static files */
+    /* 更新静态文件 */
     procfs_gen_version();
     procfs_gen_uptime();
     procfs_gen_meminfo();
     procfs_gen_cpuinfo();
 
-    /* Update /proc/self (current process info) */
+    /* 更新 /proc/self（当前进程信息） */
     {
         process_t *cur = process_current();
         if (cur) {
-            /* Write self/status with current process info */
+            /* 写入 self/status，包含当前进程信息 */
             char buf[PROCFS_BUF_SIZE];
             int off = 0;
 
@@ -469,7 +469,7 @@ void procfs_update(void)
 
             procfs_write_file("/proc/self/status", buf);
 
-            /* self/cmdline */
+            /* self/cmdline 文件 */
             {
                 char cbuf[64];
                 int coff = 0;
@@ -481,7 +481,7 @@ void procfs_update(void)
         }
     }
 
-    /* Update per-process files */
+    /* 更新各进程文件 */
     for (int i = 0; i < MAX_PROCS_INTERNAL; i++) {
         process_t *p = process_get(i);
         if (p) {

@@ -11,7 +11,7 @@ static acpi_sdt_header_t *xsdt = NULL;
 static uint32_t rsdt_entry_count = 0;
 static int use_xsdt = 0;
 
-/* MADT parsed results */
+/* MADT 解析结果 */
 static uintptr_t lapic_addr = 0;
 static uintptr_t ioapic_addr = 0;
 static uint32_t  ioapic_gsi_base = 0;
@@ -34,10 +34,10 @@ static acpi_rsdp_t *acpi_scan_for_rsdp(uintptr_t start, uintptr_t end)
         const char *sig = (const char *)addr;
         if (memcmp(sig, "RSD PTR ", 8) != 0)
             continue;
-        /* Validate first 20 bytes (ACPI 1.0 checksum) */
+        /* 验证前 20 字节（ACPI 1.0 校验和） */
         if (!acpi_checksum((const void *)addr, 20))
             continue;
-        /* If revision >= 2, also validate extended checksum over full length */
+        /* 如果修订版 >= 2，还需验证完整长度的扩展校验和 */
         acpi_rsdp_t *candidate = (acpi_rsdp_t *)addr;
         if (candidate->revision >= 2) {
             hal_ensure_mapped(addr, candidate->length);
@@ -51,25 +51,25 @@ static acpi_rsdp_t *acpi_scan_for_rsdp(uintptr_t start, uintptr_t end)
 
 static acpi_rsdp_t *acpi_find_rsdp(void)
 {
-    /* Step 1: Search EBDA */
+    /* 步骤 1：搜索 EBDA */
     hal_ensure_mapped(0x40E, 2);
     uint16_t ebda_segment = *(volatile uint16_t *)0x40E;
     uintptr_t ebda_addr = (uintptr_t)ebda_segment << 4;
     if (ebda_addr >= 0x100000)
-        ebda_addr = 0; /* sanity check */
+        ebda_addr = 0; /* 合理性检查 */
     if (ebda_addr != 0) {
         acpi_rsdp_t *found = acpi_scan_for_rsdp(ebda_addr, ebda_addr + 0x400);
         if (found)
             return found;
     }
 
-    /* Step 2: Search 0xE0000 - 0xFFFFF */
+    /* 步骤 2：搜索 0xE0000 - 0xFFFFF */
     return acpi_scan_for_rsdp(0xE0000, 0x100000);
 }
 
 void acpi_init(void)
 {
-    /* Try RSDP from boot info first (UEFI provides it directly) */
+    /* 首先尝试从启动信息获取 RSDP（UEFI 直接提供） */
     if (g_boot_info && g_boot_info->acpi_rsdp != 0) {
         uintptr_t rsdp_addr = (uintptr_t)g_boot_info->acpi_rsdp;
         hal_ensure_mapped(rsdp_addr, sizeof(acpi_rsdp_t));
@@ -87,7 +87,7 @@ void acpi_init(void)
         }
     }
 
-    /* Fall back to traditional scanning if RSDP not found via boot info */
+    /* 如果通过启动信息未找到 RSDP，则回退到传统扫描 */
     if (!rsdp) {
         rsdp = acpi_find_rsdp();
     }
@@ -95,7 +95,7 @@ void acpi_init(void)
     if (!rsdp)
         return;
 
-    /* Prefer XSDT for ACPI 2.0+ (UEFI provides revision >= 2) */
+    /* 优先使用 XSDT 用于 ACPI 2.0+（UEFI 提供修订版 >= 2） */
     if (rsdp->revision >= 2 && rsdp->xsdt_address != 0) {
         hal_ensure_mapped(rsdp->xsdt_address, sizeof(acpi_sdt_header_t));
         xsdt = (acpi_sdt_header_t *)(uintptr_t)rsdp->xsdt_address;
@@ -109,7 +109,7 @@ void acpi_init(void)
         }
     }
 
-    /* Fall back to RSDT */
+    /* 回退到 RSDT */
     if (!use_xsdt) {
         hal_ensure_mapped(rsdp->rsdt_address, sizeof(acpi_sdt_header_t));
         rsdt = (acpi_sdt_header_t *)(uintptr_t)rsdp->rsdt_address;
@@ -123,25 +123,25 @@ void acpi_init(void)
         rsdt_entry_count = (rsdt->length - sizeof(acpi_sdt_header_t)) / sizeof(uint32_t);
     }
 
-    /* Parse MADT */
+    /* 解析 MADT */
     void *madt_ptr = acpi_find_table("APIC");
     if (madt_ptr) {
         acpi_sdt_header_t *madt_hdr = (acpi_sdt_header_t *)madt_ptr;
         madt_start = madt_ptr;
         madt_length = madt_hdr->length;
 
-        /* MADT layout: header (36 bytes) + 4-byte local APIC addr + 4-byte flags + entries */
+        /* MADT 布局：头部（36 字节）+ 4 字节本地 APIC 地址 + 4 字节标志 + 条目 */
         if (madt_hdr->length >= sizeof(acpi_sdt_header_t) + 8) {
             uint32_t *madt_fields = (uint32_t *)((uintptr_t)madt_ptr + sizeof(acpi_sdt_header_t));
             lapic_addr = (uintptr_t)madt_fields[0];
         }
 
-        /* Walk MADT entries */
+        /* 遍历 MADT 条目 */
         uintptr_t entry_offset = sizeof(acpi_sdt_header_t) + 8;
         while (entry_offset < madt_hdr->length) {
             madt_entry_t *entry = (madt_entry_t *)((uintptr_t)madt_ptr + entry_offset);
             if (entry->length == 0)
-                break; /* prevent infinite loop on malformed data */
+                break; /* 防止畸形数据导致的无限循环 */
 
             if (entry->type == MADT_TYPE_IOAPIC) {
                 madt_ioapic_t *ioapic = (madt_ioapic_t *)entry;
@@ -165,7 +165,7 @@ void *acpi_find_table(const char *signature)
         return NULL;
 
     if (use_xsdt) {
-        /* XSDT: 64-bit entries */
+        /* XSDT：64 位条目 */
         uint64_t *entries = (uint64_t *)((uintptr_t)xsdt + sizeof(acpi_sdt_header_t));
         for (uint32_t i = 0; i < rsdt_entry_count; i++) {
             uintptr_t entry_addr = (uintptr_t)entries[i];
@@ -179,7 +179,7 @@ void *acpi_find_table(const char *signature)
             }
         }
     } else {
-        /* RSDT: 32-bit entries */
+        /* RSDT：32 位条目 */
         if (!rsdt) return NULL;
         for (uint32_t i = 0; i < rsdt_entry_count; i++) {
             uint32_t entry_addr = ((uint32_t *)((uintptr_t)rsdt + sizeof(acpi_sdt_header_t)))[i];

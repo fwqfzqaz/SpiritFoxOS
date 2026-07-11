@@ -1,8 +1,8 @@
 /*
- * SpiritFoxOS Scheduler
+ * SpiritFoxOS 调度器
  *
- * Round-robin process scheduler with context switching.
- * Extracted from process.c for modularity.
+ * 带上下文切换的轮转进程调度器。
+ * 从 process.c 中提取以实现模块化。
  */
 
 #include "process.h"
@@ -14,7 +14,7 @@
 #include "serial.h"
 #include "vga.h"
 
-/* Process table - defined in process.c */
+/* Processctable esdefinedain ble - defid in process.c */
 extern process_t proc_table[];
 extern process_t *current;
 extern int need_reschedule;
@@ -23,19 +23,19 @@ extern int need_reschedule;
 extern void arch_switch_to(uint64_t *old_rsp_ptr, uint64_t new_rsp);
 #define switch_to(old_rsp_ptr, new_rsp) arch_switch_to(old_rsp_ptr, new_rsp)
 
-/* Assembly trampoline - defined in isr_stub.S */
+/* 汇编跳板 - 定义在 isr_stub.S 中 */
 extern void kthread_trampoline_asm(void);
 
 /* ========================================================================
- * Constants
+ * 常量
  * ======================================================================== */
 
 #define MAX_PROCS          256
-#define DEFAULT_TIMESLICE  20      /* 20ms at 1000Hz */
-#define KERNEL_STACK_PAGES 2       /* 2 pages = 8KB kernel stack */
+#define DEFAULT_TIMESLICE  20      /* 1000Hz 下 20ms */
+#define KERNEL_STACK_PAGES 2       /* 2 页 = 8KB 内核栈 */
 
 /* ========================================================================
- * PID allocation
+ * PID 分配
  * ======================================================================== */
 
 static int alloc_pid(void)
@@ -66,7 +66,7 @@ process_t *process_current(void)
 }
 
 /* ========================================================================
- * Reschedule flag
+ * 重新调度标志
  * ======================================================================== */
 
 int need_reschedule_check(void)
@@ -91,7 +91,7 @@ void process_yield(void)
 }
 
 /* ========================================================================
- * process_sleep()
+ * process_sleep() - 进程休眠
  * ======================================================================== */
 
 void process_sleep(uint64_t ms)
@@ -104,7 +104,7 @@ void process_sleep(uint64_t ms)
 }
 
 /* ========================================================================
- * Scheduler tick (called from timer interrupt)
+ * 调度器时钟（从定时器中断调用）
  * ======================================================================== */
 
 void scheduler_tick(void)
@@ -115,7 +115,7 @@ void scheduler_tick(void)
     current->cpu_time++;
     current->priority--;
 
-    /* Wake sleeping processes whose time has come */
+    /* 唤醒时间已到的休眠进程 */
     uint64_t now = timer_get_ms();
     for (int i = 0; i < MAX_PROCS; i++) {
         if (proc_table[i].state == PROC_BLOCKED &&
@@ -131,7 +131,7 @@ void scheduler_tick(void)
 }
 
 /* ========================================================================
- * Scheduler - round-robin context switch
+ * 调度器 - 轮转上下文切换
  * ======================================================================== */
 
 __attribute__((noinline))
@@ -152,7 +152,7 @@ void scheduler_schedule(void)
         }
     }
 
-    /* No other READY process */
+    /* 没有其他 READY 进程 */
     if (next < 0) {
         if (current->state == PROC_RUNNING ||
             current->state == PROC_READY) {
@@ -160,7 +160,7 @@ void scheduler_schedule(void)
             current->priority = DEFAULT_TIMESLICE;
             return;
         }
-        /* Current is not runnable – find anyone */
+        /* 当前进程不可运行 – 查找任意进程 */
         for (int i = 0; i < MAX_PROCS; i++) {
             if (proc_table[i].state == PROC_READY) {
                 next = i;
@@ -181,7 +181,7 @@ void scheduler_schedule(void)
     process_t *old   = current;
     process_t *new_p = &proc_table[next];
 
-    /* Same process – no switch needed */
+    /* 同一进程 – 无需切换 */
     if (old == new_p) {
         old->state = PROC_RUNNING;
         old->priority = DEFAULT_TIMESLICE;
@@ -200,18 +200,18 @@ void scheduler_schedule(void)
     if (old->pml4 != new_p->pml4)
         hal_write_cr3(new_p->pml4);
 
-    /* Update TSS rsp0 for interrupt privilege transitions */
+    /* 更新 TSS rsp0 用于中断特权级转换 */
     if (new_p->kernel_stack) {
         tss.rsp0 = (uint64_t)new_p->kernel_stack +
                     (KERNEL_STACK_PAGES * PAGE_SIZE);
     } else {
-        /* PID 0 uses the boot stack; approximate rsp0 */
+        /* PID 0 使用启动栈；近似 rsp0 */
         uint64_t rsp_approx;
         __asm__ volatile ("mov %%rsp, %0" : "=r"(rsp_approx));
         tss.rsp0 = rsp_approx + 512;
     }
 
-    /* Debug output BEFORE the context switch */
+    /* 上下文切换前的调试输出 */
     printf("[SCHED] PID%d -> PID%d krsp=%lx stack[0]=%lx stack[1]=%lx stack[2]=%lx stack[3]=%lx\n",
            old->pid, new_p->pid,
            (unsigned long)new_p->kernel_rsp,
@@ -220,15 +220,15 @@ void scheduler_schedule(void)
            (unsigned long)((uint64_t *)new_p->kernel_rsp)[2],
            (unsigned long)((uint64_t *)new_p->kernel_rsp)[3]);
 
-    /* Context switch */
+    /* 上下文切换 */
     current = new_p;
     switch_to(&old->kernel_rsp, new_p->kernel_rsp);
 
-    /* Execution reaches here when THIS process is scheduled back in. */
+    /* 当本进程被重新调度时，执行到达此处。 */
 }
 
 /* ========================================================================
- * scheduler_start() - enter the idle loop (never returns)
+ * scheduler_start() - 进入空闲循环（永不返回）
  * ======================================================================== */
 
 void scheduler_start(void)

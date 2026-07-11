@@ -1,16 +1,16 @@
 #include "keyboard.h"
 #include "hal.h"
 
-/* Circular buffer */
+/* 环形缓冲区 */
 static char key_buffer[KEYBOARD_BUFFER_SIZE];
 static volatile uint32_t buf_head;
 static volatile uint32_t buf_tail;
 
-/* Keyboard state */
+/* 键盘状态 */
 static int shift_pressed;
 static int caps_lock;
 
-/* US keyboard layout scancode set 1 - unshifted */
+/* 美式键盘布局扫描码集 1 - 未按 Shift */
 static const char scancode_to_ascii[128] = {
     0,  27, '1','2','3','4','5','6','7','8','9','0','-','=', '\b',
     '\t','q','w','e','r','t','y','u','i','o','p','[',']','\n',
@@ -26,7 +26,7 @@ static const char scancode_to_ascii[128] = {
     0, 0, 0, 0, 0, 0, 0, 0
 };
 
-/* US keyboard layout scancode set 1 - shifted */
+/* 美式键盘布局扫描码集 1 - 已按 Shift */
 static const char scancode_to_ascii_shift[128] = {
     0,  27, '!','@','#','$','%','^','&','*','(',')','_','+', '\b',
     '\t','Q','W','E','R','T','Y','U','I','O','P','{','}','\n',
@@ -69,10 +69,10 @@ void keyboard_handler(void)
 {
     uint8_t scancode = hal_inb(0x60);
 
-    /* NOTE: EOI is now sent by the central irq_handler() in idt.c,
-     * which calls apic_eoi(). We no longer send PIC EOI here. */
+    /* 注意：EOI 现在由 idt.c 中的中央 irq_handler() 发送，
+     * 该函数调用 apic_eoi()。我们不再在此处发送 PIC EOI。 */
 
-    /* Extended scancode prefix */
+    /* 扩展扫描码前缀 */
     static int e0_prefix = 0;
 
     if (scancode == 0xE0) {
@@ -80,17 +80,17 @@ void keyboard_handler(void)
         return;
     }
 
-    /* Handle extended (E0-prefixed) scancodes */
+    /* 处理扩展（E0 前缀）扫描码 */
     if (e0_prefix) {
         e0_prefix = 0;
 
-        /* Extended key release: high bit set */
+        /* 扩展键释放：高位置位 */
         if (scancode & 0x80) {
-            /* Just ignore extended key releases */
+            /* 忽略扩展键释放 */
             return;
         }
 
-        /* Extended key press */
+        /* 扩展键按下 */
         switch (scancode) {
         case 0x48: buffer_put(KEY_UP);     return;
         case 0x50: buffer_put(KEY_DOWN);   return;
@@ -105,7 +105,7 @@ void keyboard_handler(void)
         }
     }
 
-    /* Key release: high bit set */
+    /* 按键释放：高位置位 */
     if (scancode & 0x80) {
         uint8_t released = scancode & 0x7F;
         if (released == 0x2A || released == 0x36) {
@@ -114,13 +114,13 @@ void keyboard_handler(void)
         return;
     }
 
-    /* Key press */
+    /* 按键按下 */
     switch (scancode) {
-    case 0x2A: /* Left shift */
-    case 0x36: /* Right shift */
+    case 0x2A: /* 左 Shift */
+    case 0x36: /* 右 Shift */
         shift_pressed = 1;
         return;
-    case 0x3A: /* Caps lock */
+    case 0x3A: /* 大写锁定 */
         caps_lock = !caps_lock;
         return;
     default:
@@ -138,7 +138,7 @@ void keyboard_handler(void)
         c = scancode_to_ascii[scancode];
     }
 
-    /* Apply caps lock to letters */
+    /* 对字母应用大写锁定 */
     if (caps_lock && c >= 'a' && c <= 'z') {
         c -= 32;
     } else if (caps_lock && c >= 'A' && c <= 'Z') {
@@ -157,16 +157,16 @@ void keyboard_init(void)
     shift_pressed = 0;
     caps_lock = 0;
 
-    /* Keyboard IRQ is now routed through IOAPIC by apic_init().
-     * No need to enable IRQ1 on PIC anymore. */
+    /* 键盘 IRQ 现在由 apic_init() 通过 IOAPIC 路由。
+     * 不再需要在 PIC 上使能 IRQ1。 */
 }
 
 char keyboard_get_char(void)
 {
     while (buffer_empty()) {
-        /* Poll PS/2 controller: if keyboard has data but IRQ didn't fire,
-         * read it manually. This handles cases where the IOAPIC/LAPIC
-         * fails to deliver the interrupt (e.g., stale IRQ line after UEFI). */
+        /* 轮询 PS/2 控制器：如果键盘有数据但 IRQ 未触发，
+         * 则手动读取。这处理 IOAPIC/LAPIC 未能
+         * 传递中断的情况（例如 UEFI 后的陈旧 IRQ 线）。 */
         if (hal_inb(0x64) & 0x01) {
             keyboard_handler();
         }

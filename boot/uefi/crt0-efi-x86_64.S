@@ -12,14 +12,14 @@
     .text
     .globl _start
 _start:
-    /* Align stack to 16 bytes */
+    /* 将栈对齐到 16 字节 */
     andq $-16, %rsp
 
-    /* rcx = ImageHandle, rdx = SystemTable already in place */
-    /* efi_main is ms_abi, so it expects (rcx, rdx) - just call it */
+    /* rcx = ImageHandle, rdx = SystemTable 已经就位 */
+    /* efi_main 是 ms_abi，所以它期望 (rcx, rdx) - 直接调用 */
     call efi_main
 
-    /* If efi_main returns, halt */
+    /* 如果 efi_main 返回，则停机 */
     cli
 .Lhalt:
     hlt

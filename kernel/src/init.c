@@ -89,6 +89,9 @@ void init_core(BootInfo *boot_info)
         serial_puts("[SpiritFoxOS] Cleared CR0.WP for UEFI boot\n");
     }
 
+    serial_puts("[SpiritFoxOS] pci_init...\n");
+    pci_init();
+
     serial_puts("[SpiritFoxOS] vga_init...\n");
     vga_init(boot_info);
 
@@ -110,9 +113,6 @@ void init_hardware(void)
 
     serial_puts("[SpiritFoxOS] timer_init...\n");
     timer_init();
-
-    serial_puts("[SpiritFoxOS] pci_init...\n");
-    pci_init();
 
     serial_puts("[SpiritFoxOS] keyboard_init...\n");
     keyboard_init();

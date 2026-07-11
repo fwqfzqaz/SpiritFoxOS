@@ -7,7 +7,7 @@
 #include "errno.h"
 
 /* ========================================================================
- * Syscall name lookup table (for debugging)
+ * 系统调用名称查找表（用于调试）
  * ======================================================================== */
 
 static const char *syscall_names[] = {
@@ -144,7 +144,7 @@ const char *syscall_name(uint64_t num)
 }
 
 /* ========================================================================
- * Main syscall dispatcher
+ * 主系统调用分发器
  * ======================================================================== */
 
 void syscall_handler_c(trap_frame_t *frame)
@@ -152,7 +152,7 @@ void syscall_handler_c(trap_frame_t *frame)
     uint64_t syscall_num = frame->rax;
     int64_t ret;
 
-    /* Debug: log write/exit/exit_group syscalls via serial */
+    /* 调试：通过串口记录 write/exit/exit_group 系统调用 */
     if (syscall_num == 1 || syscall_num == 60 || syscall_num == 231) {
         serial_puts("[SYSCALL] num=0x");
         serial_put_hex(syscall_num);
@@ -162,7 +162,7 @@ void syscall_handler_c(trap_frame_t *frame)
     }
 
     switch (syscall_num) {
-    /* File I/O */
+    /* 文件 I/O */
     case SYS_read:          ret = sys_read(frame);          break;
     case SYS_write:         ret = sys_write(frame);         break;
     case SYS_open:          ret = sys_open(frame);          break;
@@ -198,7 +198,7 @@ void syscall_handler_c(trap_frame_t *frame)
     case SYS_pipe2:         ret = sys_pipe2(frame);         break;
     case SYS_dup3:          ret = sys_dup3(frame);          break;
 
-    /* Memory */
+    /* 内存 */
     case SYS_mmap:          ret = sys_mmap(frame);          break;
     case SYS_brk:           ret = sys_brk(frame);           break;
     case SYS_mprotect:      ret = sys_mprotect(frame);      break;
@@ -209,7 +209,7 @@ void syscall_handler_c(trap_frame_t *frame)
     case SYS_mlockall:      ret = sys_mlockall(frame);      break;
     case SYS_munlockall:    ret = sys_munlockall(frame);    break;
 
-    /* Process management */
+    /* 进程管理 */
     case SYS_fork:          ret = sys_fork(frame);          break;
     case SYS_execve:        ret = sys_execve(frame);        break;
     case SYS_exit:          ret = sys_exit(frame);          break;
@@ -230,11 +230,11 @@ void syscall_handler_c(trap_frame_t *frame)
     case SYS_set_tid_address: ret = sys_set_tid_address(frame); break;
     case SYS_exit_group:    ret = sys_exit_group(frame);    break;
 
-    /* Threading */
+    /* 线程 */
     case SYS_clone:         ret = sys_clone(frame);         break;
     case SYS_vfork:         ret = sys_vfork(frame);         break;
 
-    /* Signal handling */
+    /* 信号处理 */
     case SYS_rt_sigaction:  ret = sys_rt_sigaction(frame);  break;
     case SYS_rt_sigprocmask: ret = sys_rt_sigprocmask(frame); break;
     case SYS_rt_sigreturn:  ret = sys_rt_sigreturn(frame);  break;
@@ -244,7 +244,7 @@ void syscall_handler_c(trap_frame_t *frame)
     case SYS_tkill:         ret = sys_tkill(frame);         break;
     case SYS_rt_sigsuspend: ret = sys_rt_sigsuspend(frame); break;
 
-    /* Identity */
+    /* 身份 */
     case SYS_getresuid:     ret = sys_getresuid(frame);     break;
     case SYS_getresgid:     ret = sys_getresgid(frame);     break;
     case SYS_capget:        ret = sys_capget(frame);        break;
@@ -259,10 +259,10 @@ void syscall_handler_c(trap_frame_t *frame)
     case SYS_gettimeofday:  ret = sys_gettimeofday(frame);  break;
     case SYS_time:          ret = sys_time(frame);          break;
 
-    /* Scheduling */
+    /* 调度 */
     case SYS_sched_yield:   ret = sys_sched_yield(frame);   break;
 
-    /* Misc */
+    /* 杂项 */
     case SYS_uname:         ret = sys_uname(frame);         break;
     case SYS_poll:          ret = sys_poll(frame);          break;
     case SYS_getrandom:     ret = sys_getrandom(frame);     break;
@@ -275,7 +275,7 @@ void syscall_handler_c(trap_frame_t *frame)
     case SYS_membarrier:    ret = sys_membarrier(frame);    break;
     case SYS_rseq:          ret = sys_rseq(frame);          break;
 
-    /* Network syscalls */
+    /* 网络系统调用 */
     case SYS_socket:        ret = sys_socket(frame);        break;
     case SYS_connect:       ret = sys_connect(frame);       break;
     case SYS_accept:        ret = sys_accept(frame);        break;
@@ -290,21 +290,21 @@ void syscall_handler_c(trap_frame_t *frame)
     case SYS_setsockopt:    ret = sys_setsockopt(frame);    break;
     case SYS_getsockopt:    ret = sys_getsockopt(frame);    break;
 
-    /* epoll */
+    /* epoll 相关 */
     case SYS_epoll_create:  ret = sys_epoll_create(frame);  break;
     case SYS_epoll_create1: ret = sys_epoll_create1(frame); break;
     case SYS_epoll_ctl:     ret = sys_epoll_ctl(frame);     break;
     case SYS_epoll_wait:    ret = sys_epoll_wait(frame);    break;
 
-    /* eventfd */
+    /* eventfd 相关 */
     case SYS_eventfd:       ret = sys_eventfd(frame);       break;
     case SYS_eventfd2:      ret = sys_eventfd2(frame);      break;
 
-    /* signalfd */
+    /* signalfd 相关 */
     case SYS_signalfd:      ret = sys_signalfd(frame);      break;
     case SYS_signalfd4:     ret = sys_signalfd4(frame);     break;
 
-    /* timerfd */
+    /* timerfd 相关 */
     case SYS_timerfd_create:  ret = sys_timerfd_create(frame);  break;
     case SYS_timerfd_settime: ret = sys_timerfd_settime(frame); break;
     case SYS_timerfd_gettime: ret = sys_timerfd_gettime(frame); break;
@@ -315,19 +315,19 @@ void syscall_handler_c(trap_frame_t *frame)
     case SYS_inotify_add_watch: ret = sys_inotify_add_watch(frame); break;
     case SYS_inotify_rm_watch:  ret = sys_inotify_rm_watch(frame);  break;
 
-    /* SFK-specific syscalls */
+    /* SFK 特有系统调用 */
     case SYS_sfk_check_perm:   ret = sys_sfk_check_perm(frame);   break;
     case SYS_sfk_get_pkg_info: ret = sys_sfk_get_pkg_info(frame); break;
 
-    /* Registry syscalls */
+    /* 注册表系统调用 */
     case SYS_reg_read:      ret = sys_reg_read(frame);      break;
     case SYS_reg_write:     ret = sys_reg_write(frame);     break;
     case SYS_reg_list:      ret = sys_reg_list(frame);      break;
 
-    /* ioctl - not implemented */
+    /* ioctl - 未实现 */
     case SYS_ioctl:         ret = -ENOTTY;                  break;
 
-    /* ppoll stub */
+    /* ppoll 桩函数 */
     case SYS_ppoll:         ret = 0;                        break;
 
     default:
@@ -335,7 +335,7 @@ void syscall_handler_c(trap_frame_t *frame)
         break;
     }
 
-    /* Deliver pending signals before returning to user mode */
+    /* 返回用户态之前投递待处理信号 */
     process_signal_deliver();
 
     frame->rax = (uint64_t)ret;
@@ -352,17 +352,17 @@ uint64_t syscall_handler(trap_frame_t *frame)
 }
 
 /* ========================================================================
- * Syscall subsystem initialization
+ * 系统调用子系统初始化
  * ======================================================================== */
 
 void syscall_init(void)
 {
-    /* Allocate per-CPU scratch space for syscall entry.
-     * This must be done after memory_init() so alloc_page() works.
-     * The syscall entry point uses swapgs + gs:0/gs:8 to access
-     * user_rsp and kernel_rsp:
-     *   offset 0: saved user RSP (written by syscall entry)
-     *   offset 8: kernel RSP (written before entering user mode) */
+    /* 为系统调用入口分配每CPU的暂存空间。
+     * 必须在 memory_init() 之后执行，以便 alloc_page() 可用。
+     * 系统调用入口点使用 swapgs + gs:0/gs:8 来访问
+     * user_rsp 和 kernel_rsp：
+     *   偏移 0：保存的用户态 RSP（由系统调用入口写入）
+     *   偏移 8：内核态 RSP（进入用户态之前写入） */
     static void *syscall_cpu_area = NULL;
     if (!syscall_cpu_area) {
         syscall_cpu_area = alloc_page();
@@ -377,7 +377,7 @@ void syscall_init(void)
     hal_write_msr(MSR_IA32_GS_BASE, 0);
     hal_write_msr(MSR_IA32_KERNEL_GS_BASE, (uint64_t)(uintptr_t)syscall_cpu_area);
 
-    /* Verify */
+    /* 验证 */
     uint64_t verify = hal_read_msr(MSR_IA32_KERNEL_GS_BASE);
     printf("[SYSCALL] KERNEL_GS_BASE=%llx\n", (unsigned long long)verify);
 }

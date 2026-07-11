@@ -5,13 +5,13 @@
 
 void serial_init(void)
 {
-    hal_outb(COM1 + 1, 0x00);    // Disable interrupts
-    hal_outb(COM1 + 3, 0x80);    // Enable DLAB
-    hal_outb(COM1 + 0, 0x03);    // Baud rate divisor lo (115200)
-    hal_outb(COM1 + 1, 0x00);    // Baud rate divisor hi
-    hal_outb(COM1 + 3, 0x03);    // 8 bits, no parity, one stop bit
-    hal_outb(COM1 + 2, 0xC7);    // Enable FIFO
-    hal_outb(COM1 + 4, 0x0B);    // IRQs enabled, RTS/DSR set
+    hal_outb(COM1 + 1, 0x00);    // 禁用中断
+    hal_outb(COM1 + 3, 0x80);    // 使能 DLAB
+    hal_outb(COM1 + 0, 0x03);    // 波特率除数低位 (115200)
+    hal_outb(COM1 + 1, 0x00);    // 波特率除数高位
+    hal_outb(COM1 + 3, 0x03);    // 8 位数据位，无校验，1 位停止位
+    hal_outb(COM1 + 2, 0xC7);    // 使能 FIFO
+    hal_outb(COM1 + 4, 0x0B);    // 使能 IRQ，RTS/DSR 已设置
 }
 
 void serial_putchar(char c)

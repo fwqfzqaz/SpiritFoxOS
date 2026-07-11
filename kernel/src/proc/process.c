@@ -1,8 +1,8 @@
 /*
- * SpiritFoxOS Process Management
+ * SpiritFoxOS 进程管理
  *
- * Core process creation, lifecycle, and COW support.
- * Scheduler, signals, futex, and user-mode code are in separate files:
+ * 核心进程创建、生命周期和 COW 支持。
+ * 调度器、信号、futex 和用户态代码在单独的文件中：
  *   scheduler.c, signal.c, futex.c, process_user.c
  */
 
@@ -21,17 +21,17 @@
 #include "clone.h"
 
 /* ========================================================================
- * Constants
+ * 常量
  * ======================================================================== */
 
-#define PTE_COW (1ULL << 9)  /* Custom bit for COW tracking */
+#define PTE_COW (1ULL << 9)  /* COW 跟踪的自定义位 */
 
 #define MAX_PROCS          256
-#define DEFAULT_TIMESLICE  20      /* 20ms at 1000Hz */
-#define KERNEL_STACK_PAGES 2       /* 2 pages = 8KB kernel stack */
+#define DEFAULT_TIMESLICE  20      /* 1000Hz 下 20ms */
+#define KERNEL_STACK_PAGES 2       /* 2 页 = 8KB 内核栈 */
 
 /* ========================================================================
- * Process table (non-static: shared with scheduler.c, signal.c, etc.)
+ * 进程表（非 static：与 scheduler.c, signal.c 等共享）
  * ======================================================================== */
 
 process_t proc_table[MAX_PROCS];
@@ -39,16 +39,16 @@ process_t *current = NULL;
 int need_reschedule = 0;
 
 /* ========================================================================
- * Context switch primitive - in isr_stub.S
+ * 上下文切换原语 - 位于 isr_stub.S
  * ======================================================================== */
 
 extern void arch_switch_to(uint64_t *old_rsp_ptr, uint64_t new_rsp);
 
-/* Assembly trampoline - in isr_stub.S */
+/* 汇编跳板 - 位于 isr_stub.S */
 extern void kthread_trampoline_asm(void);
 
 /* ========================================================================
- * PID allocation (used only in this file)
+ * PID 分配（仅在此文件中使用）
  * ======================================================================== */
 
 static int alloc_pid(void)
@@ -61,10 +61,10 @@ static int alloc_pid(void)
 }
 
 /* ========================================================================
- * Kernel thread trampoline
+ * 内核线程跳板
  * ======================================================================== */
 
-/* Called from the trampoline with (entry, arg) in rdi, rsi */
+/* 从跳板调用，(entry, arg) 在 rdi, rsi 中 */
 __attribute__((used)) void kthread_entry(void (*entry)(void *), void *arg)
 {
     printf("[kthread_entry] entry=%p arg=%p\n", (void *)entry, arg);
@@ -74,18 +74,18 @@ __attribute__((used)) void kthread_entry(void (*entry)(void *), void *arg)
 }
 
 /* ========================================================================
- * process_init()
+ * process_init() - 进程初始化
  * ======================================================================== */
 
 void process_init(void)
 {
     memset(proc_table, 0, sizeof(proc_table));
 
-    /* Initialize the TSS */
+    /* 初始化 TSS */
     memset(&tss, 0, sizeof(tss));
     tss.iomap_base = sizeof(tss_t);
 
-    /* Create PID 0 – the idle/kernel process */
+    /* Createeateeateethe idleekernel process idleDkernel process idle–kernel process idle/kernel process */
     process_t *p = &proc_table[0];
     p->pid       = 0;
     p->ppid      = -1;
@@ -98,9 +98,9 @@ void process_init(void)
     p->sleep_until = 0;
     p->cpu_time  = 0;
 
-    /* Memory – share the kernel page table */
+    /* 内存 – 共享内核页表 */
     p->pml4         = hal_read_cr3();
-    p->kernel_stack = NULL;       /* PID 0 uses the boot stack */
+    p->kernel_stack = NULL;       /* PID 0 使用启动栈 */
     p->entry_point  = 0;
     p->brk          = 0;
     p->stack_top    = 0;
@@ -122,7 +122,7 @@ void process_init(void)
     p->sfk_perms = 0;
     memset(p->sfk_pkg_id, 0, sizeof(p->sfk_pkg_id));
 
-    /* Process tree */
+    /* 进程树 */
     p->parent  = NULL;
     p->next    = NULL;
     p->child   = NULL;
@@ -137,7 +137,7 @@ void process_init(void)
 }
 
 /* ========================================================================
- * process_create_kthread()
+ * process_create_kthread() - 创建内核线程
  * ======================================================================== */
 
 process_t *process_create_kthread(void (*entry)(void *), void *arg)
@@ -149,14 +149,14 @@ process_t *process_create_kthread(void (*entry)(void *), void *arg)
     process_t *p = &proc_table[pid];
     memset(p, 0, sizeof(process_t));
 
-    /* Allocate kernel stack (2 contiguous pages) */
+    /* 分配内核栈（2 个连续页） */
     void *stack = alloc_pages(KERNEL_STACK_PAGES);
     if (!stack)
         return NULL;
 
     uint64_t stack_top = (uint64_t)stack + (KERNEL_STACK_PAGES * PAGE_SIZE);
 
-    /* Fill in process attributes */
+    /* 填充进程属性 */
     p->pid           = pid;
     p->ppid          = current ? current->pid : 0;
     p->state         = PROC_READY;
@@ -193,7 +193,7 @@ process_t *process_create_kthread(void (*entry)(void *), void *arg)
     p->child   = NULL;
     p->sibling = NULL;
 
-    /* Link into parent's child list */
+    /* 链入父进程的子进程列表 */
     if (current) {
         if (!current->child) {
             current->child = p;
@@ -205,11 +205,11 @@ process_t *process_create_kthread(void (*entry)(void *), void *arg)
         }
     }
 
-    /* Build initial stack frame for arch_switch_to */
+    /* 构建 arch_switch_to 的初始栈帧 */
     uint64_t *sp = (uint64_t *)stack_top;
-    *--sp = (uint64_t)arg;                   /* for rsi via trampoline */
-    *--sp = (uint64_t)entry;                 /* for rdi via trampoline */
-    *--sp = (uint64_t)kthread_trampoline_asm;    /* return address */
+    *--sp = (uint64_t)arg;                   /* 通过跳板传递给 rsi */
+    *--sp = (uint64_t)entry;                 /* 通过跳板传递给 rdi */
+    *--sp = (uint64_t)kthread_trampoline_asm;    /* 返回地址 */
     *--sp = 0;  /* rbp */
     *--sp = 0;  /* rbx */
     *--sp = 0;  /* r12 */
@@ -228,7 +228,7 @@ process_t *process_create_kthread(void (*entry)(void *), void *arg)
            (unsigned long)sp[3], (unsigned long)sp[4], (unsigned long)sp[5],
            (unsigned long)sp[6], (unsigned long)sp[7], (unsigned long)sp[8]);
 
-    /* Verify: volatile read-back from kernel_rsp */
+    /* 验证：从 kernel_rsp 进行 volatile 回读 */
     {
         volatile uint64_t *vp = (volatile uint64_t *)p->kernel_rsp;
         printf("[kthread_create] verify: v[0]=%lx v[6]=%lx v[7]=%lx v[8]=%lx\n",
@@ -240,7 +240,7 @@ process_t *process_create_kthread(void (*entry)(void *), void *arg)
 }
 
 /* ========================================================================
- * process_fork()
+ * process_fork() - 进程分叉
  * ======================================================================== */
 
 int process_fork(void)
@@ -269,9 +269,9 @@ int process_fork(void)
     child->sleep_until = 0;
     child->cpu_time  = 0;
 
-    /* ---- COW: Create new PML4, share user pages as read-only ---- */
+    /* ---- COW：创建新 PML4，将用户页共享为只读 ---- */
     {
-        /* 1. Allocate new PML4 */
+        /* 1. 分配新 PML4 */
         void *new_pml4_page = alloc_page();
         if (!new_pml4_page) {
             child->state = PROC_UNUSED;
@@ -281,19 +281,19 @@ int process_fork(void)
         uint64_t *dst_pml4 = (uint64_t *)new_pml4_page;
         uint64_t *src_pml4 = (uint64_t *)(uintptr_t)current->pml4;
 
-        /* 2. Copy kernel half (entries 256-511) */
+        /* 2. 复制内核半区（项 256-511） */
         for (int i = 256; i < 512; i++)
             dst_pml4[i] = src_pml4[i];
 
-        /* 3. Copy user half (entries 0-255) - share page tables
-         *    and mark all user pages as read-only for COW */
+        /* 3. 复制用户半区（项 0-255）- 共享页表
+         *    并将所有用户页标记为只读以实现 COW */
         for (int i = 0; i < 256; i++) {
             if (src_pml4[i] & PTE_PRESENT) {
-                /* Share the PDPT page by mapping it in both */
+                /* 通过在两者中映射来共享 PDPT 页 */
                 dst_pml4[i] = src_pml4[i];
 
-                /* Walk PDPT -> PD -> PT and clear PTE_WRITABLE,
-                 * set PTE_COW */
+                /* 遍历 PDPT -> PD -> PT，清除 PTE_WRITABLE，
+                 * 设置 PTE_COW */
                 uint64_t *pdpt = (uint64_t *)(src_pml4[i] & PTE_ADDR_MASK);
                 for (int j = 0; j < 512; j++) {
                     if (!(pdpt[j] & PTE_PRESENT)) continue;
@@ -315,12 +315,12 @@ int process_fork(void)
 
         child->pml4 = (uint64_t)(uintptr_t)new_pml4_page;
 
-        /* Mark both parent and child as COW processes */
+        /* 将父进程和子进程都标记为 COW 进程 */
         child->flags  |= PROC_FLAG_COW;
         current->flags |= PROC_FLAG_COW;
     }
 
-    /* Allocate a new kernel stack for the child */
+    /* 为子进程分配新的内核栈 */
     void *stack = alloc_pages(KERNEL_STACK_PAGES);
     if (!stack) {
         child->state = PROC_UNUSED;
@@ -358,7 +358,7 @@ int process_fork(void)
     child->mmap_base   = current->mmap_base;
     child->mmap_current = current->mmap_current;
 
-    /* Process tree */
+    /* 进程树 */
     child->parent  = current;
     child->next    = NULL;
     child->child   = NULL;
@@ -391,7 +391,7 @@ int process_fork(void)
         child->kernel_rsp = child_rsp;
         child->trap_frame = NULL;
 
-        /* Patch trap frame rax to 0 so the child returns 0 from fork */
+        /* 将 trap frame 的 rax 修补为 0，使子进程从 fork 返回 0 */
         if (current->trap_frame) {
             int64_t tf_offset = (int64_t)((uint64_t)current->trap_frame -
                                            parent_stack_top);
@@ -451,7 +451,7 @@ void process_exit(int code)
     if (current->parent && current->parent->state == PROC_BLOCKED)
         current->parent->state = PROC_READY;
 
-    /* Reparent children to PID 0 */
+    /* 将子进程重新挂载到 PID 0 */
     process_t *ch = current->child;
     while (ch) {
         ch->ppid = 0;
@@ -472,7 +472,7 @@ void process_exit(int code)
     need_reschedule = 1;
     scheduler_schedule();
 
-    /* Should never reach here - scheduler switches to another process */
+    /* 不应到达此处 - 调度器会切换到另一个进程 */
     __builtin_unreachable();
 }
 
@@ -509,7 +509,7 @@ int process_wait(int pid, int *status, int options)
     if (!current)
         return -1;
 
-    /* Scan for zombie children */
+    /* 扫描僵尸子进程 */
     process_t *child = current->child;
     process_t *prev  = NULL;
 
@@ -522,18 +522,18 @@ int process_wait(int pid, int *status, int options)
         child = child->sibling;
     }
 
-    /* Validate that the specific child exists */
+    /* 验证指定的子进程是否存在 */
     if (pid != -1) {
         process_t *target = process_get(pid);
         if (!target || target->ppid != current->pid)
             return -1;
     }
 
-    /* Block until a child exits */
+    /* 阻塞直到子进程退出 */
     current->state = PROC_BLOCKED;
     scheduler_schedule();
 
-    /* Woke up – rescan for zombies */
+    /* 被唤醒 – 重新扫描僵尸进程 */
     child = current->child;
     prev  = NULL;
     while (child) {
@@ -547,7 +547,7 @@ int process_wait(int pid, int *status, int options)
 }
 
 /* ========================================================================
- * process_kill()
+ * process_kill() - 终止进程
  * ======================================================================== */
 
 int process_kill(int pid, int sig)
@@ -568,13 +568,13 @@ int process_kill(int pid, int sig)
 }
 
 /* ========================================================================
- * process_clone() – create a new thread (or process) via clone syscall
+ * process_clone() – 通过 clone 系统调用创建新线程（或进程）
  *
- * Supports CLONE_VM (shared address space for threads) and CLONE_THREAD.
- * If CLONE_VM is set, the child shares the parent's PML4.
+ * 支持 CLONE_VM（线程共享地址空间）和 CLONE_THREAD。
+ * 如果设置了 CLONE_VM，子进程共享父进程的 PML4。
  *
- * Dead code branches fixed: CLONE_FILES and CLONE_SIGHAND blocks that
- * had identical if/else bodies are now simplified to just the code once.
+ * 已修复的死代码分支：CLONE_FILES 和 CLONE_SIGHAND 块中
+ * 相同的 if/else 体现在已简化为单次代码。
  * ======================================================================== */
 
 int process_clone(uint64_t flags, uint64_t child_stack,
@@ -629,8 +629,8 @@ int process_clone(uint64_t flags, uint64_t child_stack,
     }
     strcpy(child->cwd, current->cwd);
 
-    /* Signal handling: always copy from parent
-     * (previously had dead if/else with CLONE_SIGHAND – both branches were identical) */
+    /* 信号处理：始终从父进程复制
+     *（之前有 CLONE_SIGHAND 的死 if/else – 两个分支完全相同） */
     child->signal_mask     = current->signal_mask;
     child->pending_signals = 0;
     memcpy(child->signal_handlers, current->signal_handlers,
@@ -643,7 +643,7 @@ int process_clone(uint64_t flags, uint64_t child_stack,
     child->sfk_perms = current->sfk_perms;
     strcpy(child->sfk_pkg_id, current->sfk_pkg_id);
 
-    /* Process tree */
+    /* 进程树 */
     child->parent  = current;
     child->next    = NULL;
     child->child   = NULL;
@@ -658,7 +658,7 @@ int process_clone(uint64_t flags, uint64_t child_stack,
         sib->sibling = child;
     }
 
-    /* Copy kernel stack and patch trap frame, similar to fork */
+    /* 复制内核栈并修补 trap frame，类似于 fork */
     if (current->kernel_stack) {
         uint64_t parent_stack_top = (uint64_t)current->kernel_stack +
                                      (KERNEL_STACK_PAGES * PAGE_SIZE);
@@ -675,7 +675,7 @@ int process_clone(uint64_t flags, uint64_t child_stack,
 
         child->kernel_rsp = child_rsp;
 
-        /* Patch trap frame rax=0 (child returns 0 from clone) */
+        /* 修补 trap frame rax=0（子进程从 clone 返回 0） */
         if (current->trap_frame) {
             int64_t tf_offset = (int64_t)((uint64_t)current->trap_frame -
                                            parent_stack_top);
@@ -690,7 +690,7 @@ int process_clone(uint64_t flags, uint64_t child_stack,
             child->trap_frame = child_tf;
         }
     } else {
-        /* Parent is PID 0 using boot stack */
+        /* 父进程是 PID 0，使用启动栈 */
         uint64_t child_stack_top = (uint64_t)stack +
                                     (KERNEL_STACK_PAGES * PAGE_SIZE);
         uint64_t *sp = (uint64_t *)child_stack_top;
@@ -707,13 +707,13 @@ int process_clone(uint64_t flags, uint64_t child_stack,
         child->trap_frame = NULL;
     }
 
-    /* CLONE_SETTLS: set thread-local storage via arch_prctl */
+    /* CLONE_SETTLS：通过 arch_prctl 设置线程本地存储 */
     if ((flags & CLONE_SETTLS) && newtls) {
-        /* The newtls parameter is the struct user_desc* or direct FS base.
-         * For 64-bit, it's the FS base address directly. */
-        /* This will be applied when the child is scheduled in */
-        /* Store in a place we can access later - for simplicity,
-         * we don't implement full TLS setup here */
+        /* newtls 参数是 struct user_desc* 或直接的 FS 基地址。
+         * 对于 64 位，它直接就是 FS 基地址。 */
+        /* 这将在子进程被调度时应用 */
+        /* 存储在稍后可以访问的位置 - 为简化起见，
+         * 我们在此不实现完整的 TLS 设置 */
     }
 
     /* CLONE_PARENT_SETTID: store child tid at ptid */
@@ -756,7 +756,7 @@ int process_cow_page_fault(uint64_t fault_addr)
     if (!pte || !(*pte & PTE_PRESENT))
         return -1;
 
-    /* Check COW marker (bit 9) */
+    /* 检查 COW 标记（位 9） */
     if (!(*pte & PTE_COW))
         return -1;
 

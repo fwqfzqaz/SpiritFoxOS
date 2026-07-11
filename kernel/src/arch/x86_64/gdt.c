@@ -61,10 +61,10 @@ void gdt_set_tss(uint64_t rsp0)
     uint32_t base  = (uint64_t)&tss & 0xFFFFFFFF;
     uint32_t limit = sizeof(tss_t) - 1;
 
-    /* TSS low descriptor (entry 5): 64-bit TSS, present */
+    /* TSS 低位描述符（条目 5）：64 位 TSS，存在 */
     gdt_set_gate(5, base, limit, 0x89, 0x00);
 
-    /* TSS high descriptor (entry 6): upper 32 bits of base address */
+    /* TSS 高位描述符（条目 6）：基地址的高 32 位 */
     uint32_t base_high = (uint64_t)&tss >> 32;
     gdt[6].limit_low   = base_high & 0xFFFF;
     gdt[6].base_low    = (base_high >> 16) & 0xFFFF;
@@ -79,35 +79,35 @@ void gdt_init(void)
     gdt_ptr.limit = sizeof(GDTEntry) * GDT_ENTRIES - 1;
     gdt_ptr.base  = (uint64_t)&gdt;
 
-    /* Null descriptor */
+    /* 空描述符 */
     gdt_set_gate(0, 0, 0, 0, 0);
 
-    /* Kernel code segment: base=0, limit=4GB, 64-bit code, ring 0
-     * gran=0xA0: G=1(4KB), D=0, L=1(64-bit), AVL=0 */
+    /* 内核代码段：基地址=0，界限=4GB，64 位代码，特权级 0
+     * gran=0xA0：G=1(4KB)，D=0，L=1(64位)，AVL=0 */
     gdt_set_gate(1, 0, 0xFFFFF, 0x9A, 0xA0);
 
-    /* Kernel data segment: base=0, limit=4GB, read/write, ring 0
-     * gran=0xC0: G=1(4KB), D/B=1(32-bit), L=0, AVL=0 */
+    /* 内核数据段：基地址=0，界限=4GB，读/写，特权级 0
+     * gran=0xC0：G=1(4KB)，D/B=1(32位)，L=0，AVL=0 */
     gdt_set_gate(2, 0, 0xFFFFF, 0x92, 0xC0);
 
-    /* User code segment: base=0, limit=4GB, 64-bit code, ring 3
-     * gran=0xA0: G=1(4KB), D=0, L=1(64-bit), AVL=0 */
+    /* 用户代码段：基地址=0，界限=4GB，64 位代码，特权级 3
+     * gran=0xA0：G=1(4KB)，D=0，L=1(64位)，AVL=0 */
     gdt_set_gate(3, 0, 0xFFFFF, 0xFA, 0xA0);
 
-    /* User data segment: base=0, limit=4GB, read/write, ring 3
-     * gran=0xC0: G=1(4KB), D/B=1(32-bit), L=0, AVL=0 */
+    /* 用户数据段：基地址=0，界限=4GB，读/写，特权级 3
+     * gran=0xC0：G=1(4KB)，D/B=1(32位)，L=0，AVL=0 */
     gdt_set_gate(4, 0, 0xFFFFF, 0xF2, 0xC0);
 
-    /* Initialize TSS */
+    /* 初始化 TSS */
     for (int i = 0; i < (int)sizeof(tss_t); i++)
         ((uint8_t *)&tss)[i] = 0;
     tss.iomap_base = sizeof(tss_t);
 
-    /* Set up TSS descriptors (entries 5 and 6) */
+    /* 设置 TSS 描述符（条目 5 和 6） */
     gdt_set_tss(0);
 
     gdt_flush((uint64_t)&gdt_ptr);
 
-    /* Load the task register */
+    /* 加载任务寄存器 */
     __asm__ volatile ("ltr %0" : : "r"((uint16_t)GDT_TSS_SEL));
 }

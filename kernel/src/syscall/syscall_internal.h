@@ -3,7 +3,7 @@
 
 #include "syscall.h"
 
-/* All syscall handler signatures - shared between dispatcher and implementation files */
+/* 所有系统调用处理函数签名 - 分发器和实现文件共用 */
 typedef int64_t (*syscall_handler_t)(trap_frame_t *frame);
 
 /* File I/O syscalls (syscall_file.c) */
@@ -42,7 +42,7 @@ int64_t sys_fadvise64(trap_frame_t *frame);
 int64_t sys_pipe2(trap_frame_t *frame);
 int64_t sys_dup3(trap_frame_t *frame);
 
-/* Process/thread/signal syscalls (syscall_process.c) */
+/* 进程/线程/信号系统调用 (syscall_process.c) */
 int64_t sys_fork(trap_frame_t *frame);
 int64_t sys_execve(trap_frame_t *frame);
 int64_t sys_exit(trap_frame_t *frame);
@@ -78,7 +78,7 @@ int64_t sys_capset(trap_frame_t *frame);
 int64_t sys_prctl(trap_frame_t *frame);
 int64_t sys_prlimit64(trap_frame_t *frame);
 
-/* Memory syscalls (syscall_mem.c) */
+/* 内存系统调用 (syscall_mem.c) */
 int64_t sys_mmap(trap_frame_t *frame);
 int64_t sys_brk(trap_frame_t *frame);
 int64_t sys_mprotect(trap_frame_t *frame);
@@ -89,7 +89,7 @@ int64_t sys_munlock(trap_frame_t *frame);
 int64_t sys_mlockall(trap_frame_t *frame);
 int64_t sys_munlockall(trap_frame_t *frame);
 
-/* Network syscalls (syscall_net.c) */
+/* 网络系统调用 (syscall_net.c) */
 int64_t sys_socket(trap_frame_t *frame);
 int64_t sys_connect(trap_frame_t *frame);
 int64_t sys_accept(trap_frame_t *frame);
@@ -104,7 +104,7 @@ int64_t sys_socketpair(trap_frame_t *frame);
 int64_t sys_setsockopt(trap_frame_t *frame);
 int64_t sys_getsockopt(trap_frame_t *frame);
 
-/* Misc syscalls (syscall_misc.c) */
+/* 杂项系统调用 (syscall_misc.c) */
 int64_t sys_uname(trap_frame_t *frame);
 int64_t sys_gettimeofday(trap_frame_t *frame);
 int64_t sys_clock_gettime(trap_frame_t *frame);

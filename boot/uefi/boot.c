@@ -1,7 +1,7 @@
 /*
- * SpiritFoxOS UEFI Bootloader
- * Self-contained - no dependency on gnu-efi
- * All EFI calls go through SystemTable function pointers with ms_abi
+ * SpiritFoxOS UEFI 引导加载程序
+ * 自包含 - 不依赖 gnu-efi
+ * 所有 EFI 调用通过 SystemTable 函数指针进行，使用 ms_abi 调用约定
  */
 #include "boot.h"
 
@@ -13,7 +13,7 @@
 
 typedef void (*kernel_entry_t)(BootInfo *boot_info);
 
-/* ---- Helpers ---- */
+/* ---- 辅助函数 ---- */
 
 static int compare_guid(const EFI_GUID *a, const EFI_GUID *b)
 {
@@ -63,7 +63,7 @@ static void print_decimal(EFI_SYSTEM_TABLE *st, uint32_t val)
     print(st, &buf[i + 1]);
 }
 
-/* ---- Memory Map ---- */
+/* ---- 内存映射 ---- */
 
 static EFI_STATUS get_memory_map(
     EFI_SYSTEM_TABLE *st,
@@ -107,7 +107,7 @@ static EFI_STATUS setup_gop(EFI_SYSTEM_TABLE *st,
     return st->BootServices->LocateProtocol(&gop_guid, NULL, (void **)gop);
 }
 
-/* ---- Kernel ELF Loader ---- */
+/* ---- 内核 ELF 加载器 ---- */
 
 static EFI_STATUS load_kernel_elf(
     EFI_SYSTEM_TABLE *st, EFI_HANDLE image_handle,
@@ -128,7 +128,7 @@ static EFI_STATUS load_kernel_elf(
     Elf64_Phdr *phdr;
     UINTN i;
 
-    /* Get loaded image protocol for device handle */
+    /* 获取设备句柄的已加载映像协议 */
     print(st, L"  HandleProtocol(loaded_image)...\r\n");
     status = st->BootServices->HandleProtocol(
         image_handle, &li_guid, (void **)&loaded_image);
@@ -145,7 +145,7 @@ static EFI_STATUS load_kernel_elf(
     print_hex(st, (uint64_t)(uintptr_t)loaded_image->DeviceHandle);
     print(st, L"\r\n");
 
-    /* Get file system protocol */
+    /* 获取文件系统协议 */
     print(st, L"  HandleProtocol(filesystem)...\r\n");
     status = st->BootServices->HandleProtocol(
         loaded_image->DeviceHandle, &fs_guid, (void **)&fs);
@@ -169,7 +169,7 @@ static EFI_STATUS load_kernel_elf(
         return status;
     }
 
-    /* Open kernel file */
+    /* 打开内核文件 */
     print(st, L"  Opening kernel file...\r\n");
     status = root->FileOpen(root, &kernel_file, KERNEL_PATH,
                         EFI_FILE_MODE_READ, 0);
@@ -184,7 +184,7 @@ static EFI_STATUS load_kernel_elf(
     }
     print(st, L"  Kernel file opened OK\r\n");
 
-    /* Get file info */
+    /* 获取文件信息 */
     file_info_size = 0;
     file_info = NULL;
     {
@@ -215,7 +215,7 @@ static EFI_STATUS load_kernel_elf(
     kernel_size = file_info->FileSize;
     st->BootServices->FreePool(file_info);
 
-    /* Read kernel into buffer */
+    /* 将内核读入缓冲区 */
     status = st->BootServices->AllocatePool(
         EfiLoaderData, kernel_size, &kernel_buffer);
     if (EFI_ERROR(status)) {
@@ -255,7 +255,7 @@ static EFI_STATUS load_kernel_elf(
         return EFI_LOAD_ERROR;
     }
 
-    /* Load program segments */
+    /* 加载程序段 */
     phdr = (Elf64_Phdr *)((uint8_t *)kernel_buffer + ehdr->e_phoff);
     for (i = 0; i < ehdr->e_phnum; i++) {
         if (phdr[i].p_type != PT_LOAD)
@@ -281,7 +281,7 @@ static EFI_STATUS load_kernel_elf(
         uint8_t *dst = (uint8_t *)phdr[i].p_paddr;
         st->BootServices->CopyMem(dst, src, phdr[i].p_filesz);
 
-        /* Zero BSS */
+        /* 清零 BSS */
         if (phdr[i].p_memsz > phdr[i].p_filesz) {
             st->BootServices->SetMem(
                 dst + phdr[i].p_filesz,
@@ -303,7 +303,7 @@ static uint64_t find_acpi_rsdp(EFI_SYSTEM_TABLE *st)
     EFI_GUID acpi_10_guid = ACPI_TABLE_GUID;
     UINTN i;
 
-    /* Prefer ACPI 2.0 */
+    /* 优先使用 ACPI 2.0 */
     for (i = 0; i < st->NumberOfTableEntries; i++) {
         if (!compare_guid(&st->ConfigurationTable[i].VendorGuid, &acpi_20_guid))
             return (uint64_t)(uintptr_t)st->ConfigurationTable[i].VendorTable;
@@ -316,9 +316,9 @@ static uint64_t find_acpi_rsdp(EFI_SYSTEM_TABLE *st)
     return 0;
 }
 
-/* ---- Build Boot Info ---- */
+/* ---- 构建 Boot Info ---- */
 
-/* Kernel's MemoryMapEntry layout (differs from UEFI EFI_MEMORY_DESCRIPTOR) */
+/* 内核的 MemoryMapEntry 布局（与 UEFI EFI_MEMORY_DESCRIPTOR 不同） */
 typedef struct {
     uint64_t physical_start;
     uint64_t virtual_start;
@@ -359,15 +359,15 @@ static void build_boot_info(
     info->magic = BOOT_INFO_MAGIC;
     info->boot_type = BOOT_TYPE_UEFI;
 
-    /* Framebuffer info (saved before ExitBootServices) */
+    /* 帧缓冲信息（在 ExitBootServices 之前保存） */
     info->framebuffer_base = fb_base;
     info->framebuffer_size = fb_size;
     info->width = fb_width;
     info->height = fb_height;
-    info->pitch = fb_width * 4;  /* Calculate from width and bpp */
+    info->pitch = fb_width * 4;  /* 根据宽度和每像素位数计算 */
     info->bpp = fb_bpp;
 
-    /* Memory map (already converted) */
+    /* 内存映射（已转换） */
     info->memory_map = (uint64_t)(uintptr_t)converted_map;
     info->memory_map_size = num_entries * sizeof(KernelMemoryMapEntry);
     info->memory_map_descriptor_size = sizeof(KernelMemoryMapEntry);
@@ -376,7 +376,7 @@ static void build_boot_info(
     /* ACPI RSDP */
     info->acpi_rsdp = find_acpi_rsdp(st);
 
-    /* UEFI Runtime Services */
+    /* UEFI 运行时服务 */
     info->efi_runtime_services = (uint64_t)(uintptr_t)st->RuntimeServices;
 
     /* Total usable memory */
@@ -392,7 +392,7 @@ static void build_boot_info(
     }
 }
 
-/* ---- Main Entry Point ---- */
+/* ---- 主入口点 ---- */
 
 EFI_STATUS __attribute__((ms_abi)) efi_main(
     EFI_HANDLE image_handle, EFI_SYSTEM_TABLE *system_table)
@@ -420,13 +420,13 @@ EFI_STATUS __attribute__((ms_abi)) efi_main(
     kernel_entry_t kernel;
     KernelMemoryMapEntry *converted_map = NULL;
     UINTN num_entries;
-    UINTN max_entries = 256;  /* Pre-allocate for worst case */
+    UINTN max_entries = 256;  /* 为最坏情况预分配 */
     UINTN converted_buf_size;
 
     print(system_table, L"SpiritFoxOS UEFI Bootloader\r\n");
     print(system_table, L"========================\r\n");
 
-    /* Debug: print system table info */
+    /* 调试: 打印系统表信息 */
     print(system_table, L"SystemTable at: 0x");
     print_hex(system_table, (uint64_t)(uintptr_t)system_table);
     print(system_table, L"\r\n");
@@ -437,7 +437,7 @@ EFI_STATUS __attribute__((ms_abi)) efi_main(
     print_hex(system_table, (uint64_t)(uintptr_t)image_handle);
     print(system_table, L"\r\n");
 
-    /* Step 0: Pre-allocate buffer for converted memory map */
+    /* 步骤 0: 为转换后的内存映射预分配缓冲区 */
     converted_buf_size = max_entries * sizeof(KernelMemoryMapEntry);
     status = system_table->BootServices->AllocatePool(
         EfiLoaderData, converted_buf_size, (void **)&converted_map);
@@ -446,9 +446,9 @@ EFI_STATUS __attribute__((ms_abi)) efi_main(
         while (1) __asm__ volatile("pause");
     }
 
-    /* Step 1: GOP - Save framebuffer info BEFORE ExitBootServices.
-     * After ExitBootServices, GOP protocol memory may be freed by UEFI,
-     * making gop->Mode->Info pointers invalid. */
+    /* 步骤 1: GOP - 在 ExitBootServices 之前保存帧缓冲信息。
+     * ExitBootServices 之后，GOP 协议内存可能被 UEFI 释放，
+     * 导致 gop->Mode->Info 指针无效。 */
     uint64_t saved_fb_base = 0;
     uint64_t saved_fb_size = 0;
     uint32_t saved_width = 0;
@@ -491,7 +491,7 @@ EFI_STATUS __attribute__((ms_abi)) efi_main(
     print_hex(system_table, (uint64_t)(uintptr_t)kernel_entry);
     print(system_table, L"\r\n");
 
-    /* Step 3: Memory map */
+    /* 步骤 3: 内存映射 */
     print(system_table, L"Getting memory map...\r\n");
     status = get_memory_map(system_table, &memory_map, &map_size,
                             &map_key, &desc_size, &desc_ver);
@@ -504,13 +504,13 @@ EFI_STATUS __attribute__((ms_abi)) efi_main(
     print_decimal(system_table, (uint32_t)num_entries);
     print(system_table, L"\r\n");
 
-    /* Step 4: Exit boot services (may need retry) */
+    /* 步骤 4: 退出引导服务（可能需要重试） */
     print(system_table, L"Exiting boot services...\r\n");
     status = system_table->BootServices->ExitBootServices(
         image_handle, map_key);
     if (EFI_ERROR(status)) {
-        /* Stale map key - retry with fresh map.
-         * Do NOT allocate memory between get_memory_map and ExitBootServices! */
+        /* 过期的映射键 - 使用新的映射重试。
+         * 在 get_memory_map 和 ExitBootServices 之间不要分配内存！ */
         system_table->BootServices->FreePool(memory_map);
         status = get_memory_map(system_table, &memory_map, &map_size,
                                 &map_key, &desc_size, &desc_ver);
@@ -524,7 +524,7 @@ EFI_STATUS __attribute__((ms_abi)) efi_main(
             while (1) __asm__ volatile("pause");
     }
 
-    /* Step 5: Convert memory map and build boot info (AFTER ExitBootServices) */
+    /* 步骤 5: 转换内存映射并构建启动信息（在 ExitBootServices 之后） */
     if (num_entries > max_entries)
         num_entries = max_entries;
     convert_memory_map(memory_map, num_entries, desc_size, converted_map);
@@ -535,7 +535,7 @@ EFI_STATUS __attribute__((ms_abi)) efi_main(
                     converted_map, num_entries,
                     desc_size, memory_map, boot_info_ptr);
 
-    /* Step 6: Jump to kernel */
+    /* 步骤 6: 跳转到内核 */
     kernel = (kernel_entry_t)kernel_entry;
     kernel(boot_info_ptr);
 
