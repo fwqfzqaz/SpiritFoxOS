@@ -267,7 +267,7 @@ static reg_value_t *alloc_value(reg_key_t *key, const char *name)
     reg_value_t *val = find_value(key, name);
     if (val) return val;
 
-    /* 需要添加新值新
+    /* 需要添加新值 */
     if (key->nvalues >= key->values_capacity) {
         uint32_t new_cap = key->values_capacity == 0 ? 4 : key->values_capacity * 2;
         if (new_cap > REG_MAX_VALUES) new_cap = REG_MAX_VALUES;
@@ -731,10 +731,10 @@ int registry_load(const char *path)
 
     cache_invalidate_all();
 
-    /* 逐行解析文件
+    /* 逐行解析文件 */
     char *line = buf;
     while (line && *line) {
-        /* Find end of line end of line end of line end of line end of line end of line end of line end of line end of line end of line end of line end of line end of line end of line end of line end of line */
+        /* Find end of line */
         char *eol = line;
         while (*eol && *eol != '\n') eol++;
         int line_len = (int)(eol - line);
@@ -744,7 +744,7 @@ int registry_load(const char *path)
         if (strncmp(line, "KEY ", 4) == 0) {
             /* KEY <path> - 确保键存在 */
             char *key_path = line + 4;
-            /*空去除尾部空白
+            /* 去除尾部空白 */
             char *end = key_path + strlen(key_path) - 1;
             while (end > key_path && (*end == ' ' || *end == '\r')) *end-- = '\0';
 
@@ -756,14 +756,14 @@ int registry_load(const char *path)
             char kpath[256];
             uint32_t vtype;
 
-            /*解解析值名称
+            /* 解析值名称 */
             int i = 0;
             while (*p && *p != ' ' && i < REG_MAX_VALUE_NAME - 1)
                 vname[i++] = *p++;
             vname[i] = '\0';
             if (*p == ' ') p++;
 
-            /*解解析键路径
+            /* 解析键路径 */
             i = 0;
             while (*p && *p != ' ' && i < 255)
                 kpath[i++] = *p++;

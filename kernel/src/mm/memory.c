@@ -110,9 +110,13 @@ void memory_init(BootInfo* info, uintptr_t kernel_end)
             }
         }
     } else {
-        /* 旧版启动：使用低位内存或固定位置 */
-        if (bitmap_size <= 0x8000) {
-            page_bitmap = (uint8_t *)0x500;
+        /* 旧版启动：使用低位内存或固定位置。
+         * 注意：0x500-0x3FFF 被 loader 的 mmap 转换数据占用，
+         * 0x8000-0x9FFF 被 AP trampoline 使用，
+         * 0x9000-0x9FFF 被 BootInfo 使用。
+         * 安全区域：0x4000-0x7FFF 或内核之后。 */
+        if (bitmap_size <= 0x4000) {  /* 16KB 或更小（<= 128MB 内存） */
+            page_bitmap = (uint8_t *)0x4000;
         } else {
             /* 对于较大的位图，使用内核之后的内存加偏移 */
             page_bitmap = (uint8_t *)(kernel_end & ~(uintptr_t)0xFFF);

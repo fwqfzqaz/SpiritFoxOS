@@ -1334,7 +1334,7 @@ static void shell_key_handler(char key)
 
     if (uk == TERM_CHAR_UP) {
         if (shell_history_scroll < shell_history_count) {
-            /* 在首次滚动前保存当前输入
+            /* 在首次滚动前保存当前输入 */
             if (shell_history_scroll == 0) {
                 const char *cur = terminal_get_input();
                 int cur_len = terminal_get_input_len();
@@ -1352,7 +1352,7 @@ static void shell_key_handler(char key)
         if (shell_history_scroll > 0) {
             shell_history_scroll--;
             if (shell_history_scroll == 0) {
-                /* Restore saved input saved input */
+                /* Restore saved input */
                 if (shell_has_saved_input) {
                     terminal_set_input(shell_saved_input, strlen(shell_saved_input));
                 } else {

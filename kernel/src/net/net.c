@@ -57,10 +57,13 @@ static port_t next_ephemeral_port = 49152;
 static ipv4_addr_t loopback_ip = INADDR_LOOPBACK; /* 127.0.0.1 主机字节序 */
 static uint32_t tcp_initial_seq = 0x12345678;     /* 起始 ISN */
 
-/* 网络配置（IP 地址为网络字节序） */
-uint32_t net_local_ip    = 0x0A00020F;   /* 10.0.2.15 (QEMU user-mode default) */
-uint32_t net_gateway_ip  = 0x0A000202;   /* 10.0.2.2 */
-uint32_t net_netmask     = 0xFFFFFF00;   /* 255.255.255.0 */
+/* 网络配置（IP 地址为网络字节序）
+ * 默认值为 0（未配置），需要通过 DHCP 或手动配置。
+ * QEMU 用户模式网络的默认值为 10.0.2.15/24，网关 10.0.2.2，
+ * 可通过启动参数 net_ip/net_gw/net_mask 配置。 */
+uint32_t net_local_ip    = 0;    /* 未配置 - 等待 DHCP 或手动设置 */
+uint32_t net_gateway_ip  = 0;    /* 未配置 */
+uint32_t net_netmask     = 0;    /* 未配置 */
 uint8_t  net_local_mac[6] = {0};
 int      net_hw_initialized = 0;
 
@@ -990,6 +993,19 @@ void net_icmp_rx(const void *data, size_t len, uint32_t src_ip)
  * 公共 API - 初始化
  * ======================================================================== */
 
+/* 手动配置网络 IP 地址（网络字节序） */
+void net_configure_ip(uint32_t ip, uint32_t gateway, uint32_t netmask)
+{
+    net_local_ip   = ip;
+    net_gateway_ip = gateway;
+    net_netmask    = netmask;
+
+    uint32_t hip = ntohl(ip);
+    printf("[NET] IP configured: %u.%u.%u.%u\n",
+           (hip >> 24) & 0xFF, (hip >> 16) & 0xFF,
+           (hip >> 8) & 0xFF, hip & 0xFF);
+}
+
 void net_init(void)
 {
     memset(sockets, 0, sizeof(sockets));
@@ -1006,9 +1022,31 @@ void net_init(void)
     /* 从网卡获取 MAC 地址 */
     if (rtl8139_get_mac(net_local_mac) == 0) {
         net_hw_initialized = 1;
-        printf("[NET] TCP/IP stack initialized (IP: 10.0.2.15, MAC: %02x:%02x:%02x:%02x:%02x:%02x)\n",
-               net_local_mac[0], net_local_mac[1], net_local_mac[2],
-               net_local_mac[3], net_local_mac[4], net_local_mac[5]);
+
+        /* 如果 IP 未配置，检测是否运行在 QEMU 环境中。
+         * QEMU 默认的 rtl8139 网卡 MAC 通常以 52:54:00 开头。
+         * 如果是，自动配置 QEMU 用户模式网络的默认 IP。 */
+        if (net_local_ip == 0 && net_local_mac[0] == 0x52 &&
+            net_local_mac[1] == 0x54 && net_local_mac[2] == 0x00) {
+            net_local_ip    = 0x0A00020F;   /* 10.0.2.15 (QEMU default) */
+            net_gateway_ip  = 0x0A000202;   /* 10.0.2.2 */
+            net_netmask     = 0xFFFFFF00;   /* 255.255.255.0 */
+            printf("[NET] QEMU detected, auto-configured 10.0.2.15/24\n");
+        }
+
+        if (net_local_ip != 0) {
+            /* 将本地 IP 转为主机字节序显示 */
+            uint32_t hip = ntohl(net_local_ip);
+            printf("[NET] TCP/IP stack initialized (IP: %u.%u.%u.%u, MAC: %02x:%02x:%02x:%02x:%02x:%02x)\n",
+                   (hip >> 24) & 0xFF, (hip >> 16) & 0xFF,
+                   (hip >> 8) & 0xFF, hip & 0xFF,
+                   net_local_mac[0], net_local_mac[1], net_local_mac[2],
+                   net_local_mac[3], net_local_mac[4], net_local_mac[5]);
+        } else {
+            printf("[NET] TCP/IP stack initialized (MAC: %02x:%02x:%02x:%02x:%02x:%02x, IP unconfigured)\n",
+                   net_local_mac[0], net_local_mac[1], net_local_mac[2],
+                   net_local_mac[3], net_local_mac[4], net_local_mac[5]);
+        }
     } else {
         printf("[NET] TCP/IP stack initialized (loopback: 127.0.0.1, no NIC)\n");
     }

@@ -1,7 +1,7 @@
 # SpiritFoxOS - Makefile
 # 灵狐操作系统构建系统
 
-.PHONY: all clean kernel loader image iso run run-iso run-debug logo uefi-bootloader uefi-image run-uefi
+.PHONY: all clean kernel loader image iso run run-iso run-debug logo uefi-bootloader uefi-image run-uefi usb
 
 # =========================================
 # 工具链配置
@@ -199,10 +199,20 @@ iso: kernel loader
 	@echo 'serial --speed=115200 --unit=0 --word=8 --parity=no --stop=1' > $(ISO_DIR)/boot/grub/grub.cfg
 	@echo 'terminal_input serial console' >> $(ISO_DIR)/boot/grub/grub.cfg
 	@echo 'terminal_output serial console' >> $(ISO_DIR)/boot/grub/grub.cfg
-	@echo 'set timeout=1' >> $(ISO_DIR)/boot/grub/grub.cfg
+	@echo 'insmod all_video' >> $(ISO_DIR)/boot/grub/grub.cfg
+	@echo 'insmod gfxterm' >> $(ISO_DIR)/boot/grub/grub.cfg
+	@echo 'set timeout=5' >> $(ISO_DIR)/boot/grub/grub.cfg
 	@echo 'set default=0' >> $(ISO_DIR)/boot/grub/grub.cfg
-	@echo 'menuentry "SpiritFoxOS" {' >> $(ISO_DIR)/boot/grub/grub.cfg
+	@echo '' >> $(ISO_DIR)/boot/grub/grub.cfg
+	@echo 'menuentry "SpiritFoxOS (1024x768x32)" {' >> $(ISO_DIR)/boot/grub/grub.cfg
 	@echo '  echo "Loading SpiritFoxOS..."' >> $(ISO_DIR)/boot/grub/grub.cfg
+	@echo '  set gfxpayload=1024x768x32' >> $(ISO_DIR)/boot/grub/grub.cfg
+	@echo '  multiboot2 /boot/loader.elf' >> $(ISO_DIR)/boot/grub/grub.cfg
+	@echo '  module2 /boot/kernel.bin' >> $(ISO_DIR)/boot/grub/grub.cfg
+	@echo '}' >> $(ISO_DIR)/boot/grub/grub.cfg
+	@echo '' >> $(ISO_DIR)/boot/grub/grub.cfg
+	@echo 'menuentry "SpiritFoxOS (Text Mode)" {' >> $(ISO_DIR)/boot/grub/grub.cfg
+	@echo '  echo "Loading SpiritFoxOS (text mode)..."' >> $(ISO_DIR)/boot/grub/grub.cfg
 	@echo '  multiboot2 /boot/loader.elf' >> $(ISO_DIR)/boot/grub/grub.cfg
 	@echo '  module2 /boot/kernel.bin' >> $(ISO_DIR)/boot/grub/grub.cfg
 	@echo '}' >> $(ISO_DIR)/boot/grub/grub.cfg
@@ -360,6 +370,30 @@ build/fat32.img:
 		fi; \
 	fi
 	@echo "[FAT32] Image created (512MB)"
+
+# =========================================
+# USB 启动盘制作（实体机用）
+# 用法: make usb DEVICE=/dev/sdX
+# =========================================
+USB_DEVICE ?= /dev/sdX
+
+usb: iso
+	@if [ "$(USB_DEVICE)" = "/dev/sdX" ]; then \
+		echo "ERROR: 请指定 USB 设备路径，例如: make usb DEVICE=/dev/sdb"; \
+		echo "警告: 请确保指定的设备是 USB 驱动器，此操作将擦除其所有数据！"; \
+		exit 1; \
+	fi
+	@if [ ! -b "$(USB_DEVICE)" ]; then \
+		echo "ERROR: $(USB_DEVICE) 不是块设备"; \
+		exit 1; \
+	fi
+	@echo "[USB] 将 ISO 写入 $(USB_DEVICE) ..."
+	@echo "[USB] 警告: 这将擦除 $(USB_DEVICE) 上的所有数据！"
+	@echo "[USB] 3 秒后开始，按 Ctrl+C 取消..."
+	@sleep 3
+	@sudo dd if=$(ISO_FILE) of=$(USB_DEVICE) bs=4M status=progress
+	@sudo sync
+	@echo "[USB] 完成！可以从 USB 启动 SpiritFoxOS"
 
 # =========================================
 # 清理

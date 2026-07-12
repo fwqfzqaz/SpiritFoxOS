@@ -240,27 +240,162 @@ void fb_init(BootInfo *info)
         pitch  = info->pitch;
         bpp    = info->bpp;
         lfb_addr = (uintptr_t)info->framebuffer_base;
-    } else {
-        /* 传统 BIOS 启动：通过 Bochs DISPI 接口设置 VBE 图形模式 */
-        vbe_set_mode(1024, 768, 32);
+    } else if (info->boot_type == BOOT_TYPE_LEGACY && info->framebuffer_base != 0 && info->bpp >= 24) {
+        /* 传统 BIOS 启动且 GRUB 或加载器已设置了图形模式。
+         * 使用 BootInfo 中的分辨率参数，但帧缓冲基地址需要通过
+         * PCI 扫描获取实际 LFB BAR 地址，因为加载器中的地址
+         * 可能是硬编码的（如 VBE DISPI 默认 0xE0000000），
+         * 与实际 PCI BAR 映射不一致。 */
+        width  = info->width;
+        height = info->height;
+        pitch  = info->pitch;
+        bpp    = info->bpp;
 
-        width  = 1024;
-        height = 768;
-        pitch  = 1024 * 4;  /* 每条扫描线 4096 字节 */
-        bpp    = 32;
-
-        /* 通过 PCI 查找 VGA 设备并读取其 BAR0 获取帧缓冲地址。
-         * QEMU 的 std-vga 可能根据配置将 LFB 映射到不同地址
-         * （例如 0xFD000000 而非 Bochs 默认的 0xE0000000）。 */
-        lfb_addr = VBE_LFB_PHYS_ADDR; /* 回退默认值 */
+        /* 通过 PCI 查找 VGA 设备的实际帧缓冲 BAR 地址 */
+        lfb_addr = 0;
         int num_pci = pci_get_device_count();
         for (int i = 0; i < num_pci; i++) {
             const pci_device_t *dev = pci_get_device(i);
-            if (dev->class_code == PCI_CLASS_DISPLAY && dev->vendor_id == 0x1234) {
-                uint32_t bar0 = dev->bars[0];
-                if (bar0 & 0x01) continue;
-                lfb_addr = (uintptr_t)(bar0 & 0xFFFFFFF0);
-                break;
+            if (dev->class_code == PCI_CLASS_DISPLAY) {
+                /* 查找 BAR 中最大的内存区域作为帧缓冲 */
+                for (int b = 0; b < 6; b++) {
+                    uint32_t bar = dev->bars[b];
+                    if (bar == 0 || (bar & 0x01)) continue; /* 跳过 I/O 空间 */
+                    uint32_t bar_addr = bar & 0xFFFFFFF0;
+
+                    /* 通过写入全 1 来获取 BAR 大小 */
+                    uint32_t orig = pci_read_config(dev->bus, dev->device,
+                                                     dev->function, 0x10 + b * 4);
+                    pci_write_config(dev->bus, dev->device, dev->function,
+                                     0x10 + b * 4, 0xFFFFFFFF);
+                    uint32_t size_val = pci_read_config(dev->bus, dev->device,
+                                                         dev->function, 0x10 + b * 4);
+                    pci_write_config(dev->bus, dev->device, dev->function,
+                                     0x10 + b * 4, orig);
+
+                    uint32_t bar_size = ~(size_val & 0xFFFFFFF0) + 1;
+
+                    if (bar_size >= 1024 * 768 * 4) {
+                        lfb_addr = (uintptr_t)bar_addr;
+                        fb_debug("[FB] VGA BAR");
+                        fb_debug_hex(b);
+                        fb_debug(" addr=");
+                        fb_debug_hex(lfb_addr);
+                        fb_debug(" size=");
+                        fb_debug_hex(bar_size);
+                        fb_debug("\n");
+                        break;
+                    }
+                }
+                if (lfb_addr) break;
+            }
+        }
+
+        /* 如果 PCI 扫描未找到，使用 BootInfo 中的地址作为回退 */
+        if (lfb_addr == 0) {
+            lfb_addr = (uintptr_t)info->framebuffer_base;
+            fb_debug("[FB] No VGA BAR found, using BootInfo addr=");
+            fb_debug_hex(lfb_addr);
+            fb_debug("\n");
+        }
+    } else {
+        /* 传统 BIOS 启动：尝试通过 Bochs DISPI 接口设置 VBE 图形模式。
+         * 注意：Bochs VBE DISPI 仅在 QEMU/VirtualBox 中可用，
+         * 实体机应通过 GRUB gfxpayload 获取帧缓冲。 */
+
+        /* 检测 Bochs VBE DISPI 是否可用 */
+        vbe_outw(VBE_DISPI_IOPORT_INDEX, 0x00); /* VBE_DISPI_INDEX_ID */
+        uint16_t vbe_id = vbe_inw(VBE_DISPI_IOPORT_DATA);
+
+        if (vbe_id != 0xFFFF && vbe_id >= 0xB0C4) {
+            /* VBE DISPI 可用（QEMU/VirtualBox） */
+            vbe_set_mode(1024, 768, 32);
+
+            width  = 1024;
+            height = 768;
+            pitch  = 1024 * 4;
+            bpp    = 32;
+
+            /* 通过 PCI 查找 VGA 设备并读取其 BAR0 获取帧缓冲地址。
+             * QEMU 的 std-vga 可能根据配置将 LFB 映射到不同地址
+             * （例如 0xFD000000 而非 Bochs 默认的 0xE0000000）。 */
+            lfb_addr = VBE_LFB_PHYS_ADDR; /* 回退默认值 */
+            int num_pci = pci_get_device_count();
+            for (int i = 0; i < num_pci; i++) {
+                const pci_device_t *dev = pci_get_device(i);
+                if (dev->class_code == PCI_CLASS_DISPLAY && dev->vendor_id == 0x1234) {
+                    uint32_t bar0 = dev->bars[0];
+                    if (bar0 & 0x01) continue;
+                    lfb_addr = (uintptr_t)(bar0 & 0xFFFFFFF0);
+                    break;
+                }
+            }
+        } else {
+            /* 实体机且无 GRUB 帧缓冲 - 尝试通过 PCI 查找任意 VGA 设备 */
+            fb_debug("[FB] No VBE DISPI, scanning PCI for VGA...\n");
+            lfb_addr = 0;
+            int num_pci = pci_get_device_count();
+            for (int i = 0; i < num_pci; i++) {
+                const pci_device_t *dev = pci_get_device(i);
+                if (dev->class_code == PCI_CLASS_DISPLAY) {
+                    /* 查找 BAR 中最大的内存区域作为帧缓冲 */
+                    for (int b = 0; b < 6; b++) {
+                        uint32_t bar = dev->bars[b];
+                        if (bar == 0 || (bar & 0x01)) continue; /* 跳过 I/O 空间 */
+                        uint32_t bar_addr = bar & 0xFFFFFFF0;
+
+                        /* 通过写入全 1 来获取 BAR 大小 */
+                        uint32_t orig = pci_read_config(dev->bus, dev->device,
+                                                         dev->function, 0x10 + b * 4);
+                        pci_write_config(dev->bus, dev->device, dev->function,
+                                         0x10 + b * 4, 0xFFFFFFFF);
+                        uint32_t size_val = pci_read_config(dev->bus, dev->device,
+                                                             dev->function, 0x10 + b * 4);
+                        pci_write_config(dev->bus, dev->device, dev->function,
+                                         0x10 + b * 4, orig);
+
+                        /* 恢复 BAR 原值 */
+                        uint32_t bar_size = ~(size_val & 0xFFFFFFF0) + 1;
+
+                        /* 最大的 BAR 通常是帧缓冲 */
+                        if (bar_size >= 1024 * 768 * 4) {
+                            lfb_addr = (uintptr_t)bar_addr;
+                            fb_debug("[FB] VGA BAR");
+                            fb_debug_hex(b);
+                            fb_debug(" addr=");
+                            fb_debug_hex(lfb_addr);
+                            fb_debug(" size=");
+                            fb_debug_hex(bar_size);
+                            break;
+                        }
+                    }
+                    if (lfb_addr) break;
+                }
+            }
+
+            if (lfb_addr) {
+                /* 找到了 VGA 设备但不知道模式设置信息。
+                 * 使用 BootInfo 中 GRUB 提供的默认值或保守值。
+                 * 如果 GRUB 设置了 gfxpayload，info 中应有帧缓冲数据。 */
+                if (info->width > 0 && info->height > 0 && info->bpp >= 24) {
+                    width  = info->width;
+                    height = info->height;
+                    pitch  = info->pitch;
+                    bpp    = info->bpp;
+                } else {
+                    /* 无帧缓冲信息可用 - 使用 VGA 文本模式作为回退 */
+                    fb_debug("[FB] No FB info, using text mode fallback\n");
+                    width  = 80;
+                    height = 25;
+                    pitch  = 80 * 2;
+                    bpp    = 4;  /* 标记为文本模式 */
+                    lfb_addr = 0xB8000;
+                }
+            } else {
+                /* 完全没有 VGA 设备 - 使用串口输出 */
+                fb_debug("[FB] No display device found!\n");
+                fb_initialized = 0;
+                return;
             }
         }
     }
@@ -394,10 +529,16 @@ void fb_swap_buffer(void)
     if (!fb_initialized) return;
     if (!fb_back) return;
 
-    /* 将后缓冲区复制到前缓冲区（硬件显示源）。
-     * memcpy 速度足够快（约 3MB），在 QEMU 中撕裂极小。
-     * 我们避免使用 VGA VSync（0x3DA 位 3），因为 QEMU 的 VBE 模式
-     * 可能无法可靠地模拟垂直回扫信号，且轮询可能导致系统无限挂起。 */
+    /* 在实体机上等待 VSync 以减少撕裂。
+     * VGA 输入状态寄存器 0x3DA 位 3 = 垂直回扫。
+     * 在 QEMU VBE 模式下此信号可能不可靠，但实体机上有效。 */
+    int vsync_retries = 1000;
+    while (vsync_retries-- > 0) {
+        if (hal_inb(0x3DA) & 0x08)
+            break;
+    }
+
+    /* 将后缓冲区复制到前缓冲区（硬件显示源）。 */
     memcpy(fb_front, fb_back, fb_size);
 }
 

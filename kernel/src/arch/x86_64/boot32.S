@@ -118,15 +118,18 @@ gdt64_pointer:
 
 section .data align=16
 ; BootInfo struct - must match C struct layout (with proper alignment)
+; 注意：此为旧版 Multiboot1 引导存根，当前使用 boot/multiboot/ 下的
+; Multiboot2 加载器。此数据仅作回退，framebuffer_base=0 表示
+; 需要内核自行检测帧缓冲。
 boot_info_data:
     dd 0x5F1F0F05           ; magic (uint32_t)
-    dd 0                    ; padding for 8-byte alignment
-    dq 0xE0000000           ; framebuffer_base (uint64_t) - QEMU std VGA LFB
-    dq 1024 * 768 * 4       ; framebuffer_size (uint64_t)
-    dd 1024                 ; width (uint32_t)
-    dd 768                  ; height (uint32_t)
-    dd 4096                 ; pitch (uint32_t) - 1024 * 4
-    dd 32                   ; bpp (uint32_t)
+    dd 0                    ; boot_type (uint32_t) - legacy
+    dq 0                    ; framebuffer_base (uint64_t) - 0 = 需要内核检测
+    dq 0                    ; framebuffer_size (uint64_t)
+    dd 0                    ; width (uint32_t)
+    dd 0                    ; height (uint32_t)
+    dd 0                    ; pitch (uint32_t)
+    dd 0                    ; bpp (uint32_t)
     dq 0                    ; memory_map (uint64_t) - null
     dq 0                    ; memory_map_size (uint64_t)
     dq 0                    ; memory_map_descriptor_size (uint64_t)

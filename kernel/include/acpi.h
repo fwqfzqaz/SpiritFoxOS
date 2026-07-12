@@ -70,4 +70,12 @@ uintptr_t acpi_get_ioapic_addr(void);
 uint32_t acpi_get_ioapic_gsi_base(void);
 int acpi_get_irq_override(uint8_t isa_irq, uint32_t *gsi, uint16_t *flags);
 
+/* 获取指定 GSI 对应的 IOAPIC 地址和引脚偏移。
+ * 对于多个 IOAPIC 的实体机，需要根据 GSI 范围选择正确的 IOAPIC。 */
+int acpi_get_ioapic_for_gsi(uint32_t gsi, uintptr_t *ioapic_addr_out,
+                             uint32_t *pin_offset_out);
+
+/* 获取系统中 IOAPIC 的数量 */
+int acpi_get_ioapic_count(void);
+
 #endif

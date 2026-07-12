@@ -132,7 +132,7 @@ int64_t sys_mprotect(trap_frame_t *frame)
     if (length == 0)
         return -EINVAL;
 
-    /* addr 必须页对/
+    /* addr 必须页对齐 */
     if (addr & (PAGE_SIZE - 1))
         return -EINVAL;
 
@@ -178,7 +178,7 @@ int64_t sys_munmap(trap_frame_t *frame)
     if (length == 0)
         return -EINVAL;
 
-    /* addr 必须页对/
+    /* addr 必须页对齐 */
     if (addr & (PAGE_SIZE - 1))
         return -EINVAL;
 

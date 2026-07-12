@@ -39,6 +39,13 @@ uint32_t pci_read_config(uint8_t bus, uint8_t dev, uint8_t func, uint8_t offset)
 void pci_write_config(uint8_t bus, uint8_t dev, uint8_t func, uint8_t offset, uint32_t value);
 int pci_get_device_count(void);
 const pci_device_t* pci_get_device(int index);
+
+/* 按 vendor/device ID 查找 PCI 设备 */
+const pci_device_t* pci_find_device(uint16_t vendor_id, uint16_t device_id);
+
+/* 按类别查找第一个 PCI 设备 */
+const pci_device_t* pci_find_class(uint8_t class_code);
+
 void pci_list_devices(void);
 
 const char* pci_class_name(uint8_t class_code);

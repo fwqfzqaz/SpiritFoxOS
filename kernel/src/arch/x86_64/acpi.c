@@ -18,6 +18,17 @@ static uint32_t  ioapic_gsi_base = 0;
 static void     *madt_start = NULL;
 static uint32_t  madt_length = 0;
 
+/* 多 IOAPIC 支持 - 实体机可能有多个 IOAPIC */
+#define MAX_IOAPICS  8
+typedef struct {
+    uintptr_t addr;
+    uint32_t  gsi_base;
+    uint32_t  gsi_end;     /* gsi_base + max_redirections */
+} ioapic_info_t;
+
+static ioapic_info_t ioapic_list[MAX_IOAPICS];
+static int ioapic_count = 0;
+
 static int acpi_checksum(const void *table, size_t length)
 {
     const uint8_t *p = (const uint8_t *)table;
@@ -147,6 +158,15 @@ void acpi_init(void)
                 madt_ioapic_t *ioapic = (madt_ioapic_t *)entry;
                 ioapic_addr = (uintptr_t)ioapic->ioapic_addr;
                 ioapic_gsi_base = ioapic->gsi_base;
+
+                /* 添加到多 IOAPIC 列表 */
+                if (ioapic_count < MAX_IOAPICS) {
+                    ioapic_list[ioapic_count].addr = ioapic_addr;
+                    ioapic_list[ioapic_count].gsi_base = ioapic->gsi_base;
+                    /* gsi_end 暂时设为 0，由 apic_init() 中读取 IOAPIC 版本后更新 */
+                    ioapic_list[ioapic_count].gsi_end = 0;
+                    ioapic_count++;
+                }
             }
 
             entry_offset += entry->length;
@@ -236,4 +256,41 @@ int acpi_get_irq_override(uint8_t isa_irq, uint32_t *gsi, uint16_t *flags)
     }
 
     return -1;
+}
+
+int acpi_get_ioapic_for_gsi(uint32_t gsi, uintptr_t *ioapic_addr_out,
+                             uint32_t *pin_offset_out)
+{
+    /* 在多 IOAPIC 列表中查找负责此 GSI 的 IOAPIC */
+    for (int i = 0; i < ioapic_count; i++) {
+        if (ioapic_list[i].gsi_end > 0) {
+            /* gsi_end 已被 apic_init 更新 */
+            if (gsi >= ioapic_list[i].gsi_base && gsi < ioapic_list[i].gsi_end) {
+                if (ioapic_addr_out) *ioapic_addr_out = ioapic_list[i].addr;
+                if (pin_offset_out) *pin_offset_out = gsi - ioapic_list[i].gsi_base;
+                return 0;
+            }
+        } else {
+            /* 单 IOAPIC 回退：假设所有 GSI 都路由到此 IOAPIC */
+            if (gsi >= ioapic_list[i].gsi_base) {
+                if (ioapic_addr_out) *ioapic_addr_out = ioapic_list[i].addr;
+                if (pin_offset_out) *pin_offset_out = gsi - ioapic_list[i].gsi_base;
+                return 0;
+            }
+        }
+    }
+
+    /* 回退到默认 IOAPIC */
+    if (ioapic_addr != 0) {
+        if (ioapic_addr_out) *ioapic_addr_out = ioapic_addr;
+        if (pin_offset_out) *pin_offset_out = gsi - ioapic_gsi_base;
+        return 0;
+    }
+
+    return -1;
+}
+
+int acpi_get_ioapic_count(void)
+{
+    return ioapic_count;
 }

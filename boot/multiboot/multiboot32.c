@@ -7,6 +7,7 @@
  */
 
 #include <stdint.h>
+#include <stddef.h>
 
 /* ========== Multiboot2 头部 ========== */
 #define MB2_MAGIC       0xE85250D6
@@ -74,6 +75,8 @@ struct mb2_tag {
 #define MB2_TAG_BOOTDEV          5
 #define MB2_TAG_MMAP             6
 #define MB2_TAG_FRAMEBUFFER_INFO 8
+#define MB2_TAG_ACPI_OLD         14
+#define MB2_TAG_ACPI_NEW         15
 
 struct mb2_tag_module {
     uint32_t type;    /* 3 */
@@ -93,6 +96,29 @@ struct mb2_tag_framebuffer {
     uint8_t  framebuffer_bpp;
     uint8_t  framebuffer_type;
     /* 后面是 color_info */
+};
+
+/* Multiboot2 内存映射标签 */
+struct mb2_tag_mmap {
+    uint32_t type;            /* 6 */
+    uint32_t size;
+    uint32_t entry_size;      /* 每个条目的大小 */
+    uint32_t entry_version;   /* 版本，应为 0 */
+    /* 后面是条目 */
+};
+
+struct mb2_mmap_entry {
+    uint64_t addr;
+    uint64_t len;
+    uint32_t type;
+    uint32_t zero;            /* 保留 */
+};
+
+/* Multiboot2 ACPI 旧/新标签 */
+struct mb2_tag_acpi {
+    uint32_t type;            /* 14 或 15 */
+    uint32_t size;
+    /* 后面是 RSDP 数据 */
 };
 
 /* ========== 页表 ========== */
@@ -122,8 +148,46 @@ struct BootInfo64 {
 #define BOOTINFO_ADDR 0x9000
 
 /* ========== Bochs VBE LFB 地址 ========== */
-/* QEMU 标准 VGA 帧缓冲基地址 - 由内核的 fb.c 使用 */
+/* QEMU 标准 VGA 帧缓冲基地址 - 仅作为回退默认值 */
 #define VBE_LFB_PHYS_ADDR  0xE0000000
+
+/* ========== 存放 multiboot2 mmap 转换后数据的区域 ========== */
+/* 使用 0x500 - 0x3FFF 区域存放转换后的内存映射（最多约 60 条目）
+ * 0x400-0x4FF: BDA
+ * 0x500-0x7FFF: 通常空闲（传统低地址内存）
+ * 0x8000-0x9FFF: AP trampoline 使用
+ * 0x9000-0x9FFF: BootInfo 使用
+ * 0xA0000+: VGA 文本缓冲区
+ * 每个条目 48 字节，0x500-0x3FFF 约 15KB = ~320 个条目
+ */
+#define MMAP_CONVERT_ADDR  0x500
+#define MMAP_CONVERT_MAX   300
+
+/* 内核使用的内存映射条目格式（与 BootInfo MemoryMapEntry 匹配） */
+struct loader_mmap_entry {
+    uint64_t physical_start;
+    uint64_t virtual_start;
+    uint64_t number_of_pages;
+    uint64_t attribute;
+    uint32_t type;
+    uint32_t reserved;
+};
+
+/* multiboot2 内存类型到 UEFI 类型映射 */
+#define LOADER_MEM_RESERVED     0
+#define LOADER_MEM_CONVENTIONAL 7
+
+/* VBE DISPI 接口（用于 QEMU/VirtualBox 帧缓冲设置） */
+#define VBE_DISPI_IOPORT_INDEX  0x1CE
+#define VBE_DISPI_IOPORT_DATA   0x1CF
+#define VBE_DISPI_INDEX_ID      0x0
+#define VBE_DISPI_INDEX_XRES    0x1
+#define VBE_DISPI_INDEX_YRES    0x2
+#define VBE_DISPI_INDEX_BPP     0x3
+#define VBE_DISPI_INDEX_ENABLE  0x4
+#define VBE_DISPI_ENABLED       0x01
+#define VBE_DISPI_LFB_ENABLED   0x40
+#define VBE_DISPI_NOCLEARMEM    0x80
 
 /* ========== 串口调试 ========== */
 #define COM1 0x3F8
@@ -137,6 +201,18 @@ static inline uint8_t serial_inb(uint16_t port)
 {
     uint8_t ret;
     __asm__ volatile ("inb %1, %0" : "=a"(ret) : "Nd"(port));
+    return ret;
+}
+
+static inline void serial_outw(uint16_t port, uint16_t val)
+{
+    __asm__ volatile ("outw %0, %1" : : "a"(val), "Nd"(port));
+}
+
+static inline uint16_t serial_inw(uint16_t port)
+{
+    uint16_t ret;
+    __asm__ volatile ("inw %1, %0" : "=a"(ret) : "Nd"(port));
     return ret;
 }
 
@@ -214,6 +290,12 @@ void _start_c(uint32_t magic, struct mb2_info *mbi)
     uint64_t fb_addr = 0;
     uint32_t fb_width = 0, fb_height = 0, fb_pitch = 0, fb_bpp = 0;
     int fb_found = 0;
+    uint64_t acpi_rsdp = 0;
+    uint32_t mem_lower = 0, mem_upper = 0;
+
+    /* mmap 转换后的条目计数 */
+    uint32_t mmap_converted_count = 0;
+    uint64_t total_usable_memory = 0;
 
     if (mbi) {
         uint32_t offset = 8; /* 跳过 total_size 和 reserved */
@@ -257,6 +339,109 @@ void _start_c(uint32_t magic, struct mb2_info *mbi)
                 serial_puts(" bpp=");
                 serial_put_hex(fb_bpp);
                 serial_puts("\n");
+                break;
+            }
+            case MB2_TAG_BASIC_MEMINFO: {
+                /* basic_meminfo 标签：uint32_t mem_lower, mem_upper（KB） */
+                mem_lower = *(uint32_t *)((uint8_t *)tag + 8);
+                mem_upper = *(uint32_t *)((uint8_t *)tag + 12);
+                serial_puts("[LOADER] meminfo: lower=");
+                serial_put_hex(mem_lower);
+                serial_puts("KB upper=");
+                serial_put_hex(mem_upper);
+                serial_puts("KB\n");
+                break;
+            }
+            case MB2_TAG_MMAP: {
+                struct mb2_tag_mmap *mmap_tag = (struct mb2_tag_mmap *)tag;
+                uint32_t entry_size = mmap_tag->entry_size;
+                uint32_t mmap_data_size = mmap_tag->size - 16;
+                uint32_t entry_count = mmap_data_size / entry_size;
+                struct mb2_mmap_entry *entries = (struct mb2_mmap_entry *)((uint8_t *)tag + 16);
+
+                serial_puts("[LOADER] mmap: ");
+                serial_put_hex(entry_count);
+                serial_puts(" entries, entry_size=");
+                serial_put_hex(entry_size);
+                serial_puts("\n");
+
+                /* 立即转换 multiboot2 mmap 到内核格式，避免内核复制后数据被覆盖 */
+                struct loader_mmap_entry *dst = (struct loader_mmap_entry *)MMAP_CONVERT_ADDR;
+                for (uint32_t i = 0; i < entry_count && mmap_converted_count < MMAP_CONVERT_MAX; i++) {
+                    struct mb2_mmap_entry *src = (struct mb2_mmap_entry *)(
+                        (uint8_t *)entries + i * entry_size);
+
+                    dst[mmap_converted_count].physical_start = src->addr;
+                    dst[mmap_converted_count].virtual_start  = 0;
+                    dst[mmap_converted_count].number_of_pages = src->len / 4096;
+                    dst[mmap_converted_count].attribute = 0;
+                    dst[mmap_converted_count].reserved = 0;
+
+                    /* multiboot2 类型：1=可用, 2=保留, 3=ACPI可回收, 4=NVS, 5=缺陷内存 */
+                    switch (src->type) {
+                    case 1:  /* 可用 RAM */
+                        dst[mmap_converted_count].type = LOADER_MEM_CONVENTIONAL;
+                        total_usable_memory += src->len;
+                        break;
+                    case 3:  /* ACPI 可回收 */
+                        dst[mmap_converted_count].type = 9;
+                        break;
+                    case 4:  /* NVS */
+                        dst[mmap_converted_count].type = 10;
+                        break;
+                    case 5:  /* 缺陷内存 */
+                        dst[mmap_converted_count].type = 11;
+                        break;
+                    default:
+                        dst[mmap_converted_count].type = LOADER_MEM_RESERVED;
+                        break;
+                    }
+
+                    serial_puts("[LOADER] mmap[");
+                    serial_put_hex(mmap_converted_count);
+                    serial_puts("]: base=");
+                    serial_put_hex64(src->addr);
+                    serial_puts(" len=");
+                    serial_put_hex64(src->len);
+                    serial_puts(" type=");
+                    serial_put_hex(src->type);
+                    serial_puts("->");
+                    serial_put_hex(dst[mmap_converted_count].type);
+                    serial_puts("\n");
+
+                    mmap_converted_count++;
+                }
+                break;
+            }
+            case MB2_TAG_ACPI_OLD: {
+                /* ACPI 1.0 RSDP（标签数据即为 RSDP 本身） */
+                struct mb2_tag_acpi *acpi_tag = (struct mb2_tag_acpi *)tag;
+                uint32_t rsdp_size = acpi_tag->size - 8; /* 减去 tag header */
+                /* 验证 RSDP 签名 */
+                const char *sig = (const char *)((uint8_t *)tag + 8);
+                if (rsdp_size >= 20 && sig[0] == 'R' && sig[1] == 'S' &&
+                    sig[2] == 'D' && sig[3] == ' ' && sig[4] == 'P' &&
+                    sig[5] == 'T' && sig[6] == 'R' && sig[7] == ' ') {
+                    acpi_rsdp = (uint64_t)(uint32_t)((uint8_t *)tag + 8);
+                    serial_puts("[LOADER] ACPI 1.0 RSDP at ");
+                    serial_put_hex((uint32_t)acpi_rsdp);
+                    serial_puts("\n");
+                }
+                break;
+            }
+            case MB2_TAG_ACPI_NEW: {
+                /* ACPI 2.0+ RSDP */
+                struct mb2_tag_acpi *acpi_tag = (struct mb2_tag_acpi *)tag;
+                uint32_t rsdp_size = acpi_tag->size - 8;
+                const char *sig = (const char *)((uint8_t *)tag + 8);
+                if (rsdp_size >= 36 && sig[0] == 'R' && sig[1] == 'S' &&
+                    sig[2] == 'D' && sig[3] == ' ' && sig[4] == 'P' &&
+                    sig[5] == 'T' && sig[6] == 'R' && sig[7] == ' ') {
+                    acpi_rsdp = (uint64_t)(uint32_t)((uint8_t *)tag + 8);
+                    serial_puts("[LOADER] ACPI 2.0 RSDP at ");
+                    serial_put_hex((uint32_t)acpi_rsdp);
+                    serial_puts("\n");
+                }
                 break;
             }
             default:
@@ -325,23 +510,72 @@ void _start_c(uint32_t magic, struct mb2_info *mbi)
         serial_put_hex(bi->bpp);
         serial_puts("\n");
     } else {
-        /* 使用 0xE0000000 处的 Bochs VBE LFB - 由上面的 vbe_set_mode() 设置 */
-        serial_puts("[LOADER] Using Bochs VBE LFB at 0xE0000000\n");
-        bi->framebuffer_base = VBE_LFB_PHYS_ADDR;
-        bi->width  = 1024;
-        bi->height = 768;
-        bi->pitch  = 1024 * 4;  /* 每行 4096 字节（1024 像素 * 4 字节） */
-        bi->bpp    = 32;
-        bi->framebuffer_size = (uint64_t)bi->pitch * bi->height;
+        /* 无帧缓冲标签或分辨率太低 - 尝试使用 VBE 设置图形模式。
+         * Bochs DISPI 仅在 QEMU/VirtualBox 中可用，实体机需要 GRUB gfxpayload。 */
+        serial_puts("[LOADER] No suitable FB from GRUB, trying VBE DISPI...\n");
+
+        /* 检测 Bochs VBE DISPI 是否可用（仅 QEMU/VirtualBox） */
+        serial_outw(VBE_DISPI_IOPORT_INDEX, VBE_DISPI_INDEX_ID);
+        uint16_t vbe_id = serial_inw(VBE_DISPI_IOPORT_DATA);
+        if (vbe_id != 0xFFFF && vbe_id >= 0xB0C4) {
+            /* VBE DISPI 可用 - 设置 1024x768x32 */
+            serial_puts("[LOADER] VBE DISPI detected, setting 1024x768x32\n");
+            serial_outw(VBE_DISPI_IOPORT_INDEX, VBE_DISPI_INDEX_ENABLE);
+            serial_outw(VBE_DISPI_IOPORT_DATA, 0);
+            serial_outw(VBE_DISPI_IOPORT_INDEX, VBE_DISPI_INDEX_XRES);
+            serial_outw(VBE_DISPI_IOPORT_DATA, 1024);
+            serial_outw(VBE_DISPI_IOPORT_INDEX, VBE_DISPI_INDEX_YRES);
+            serial_outw(VBE_DISPI_IOPORT_DATA, 768);
+            serial_outw(VBE_DISPI_IOPORT_INDEX, VBE_DISPI_INDEX_BPP);
+            serial_outw(VBE_DISPI_IOPORT_DATA, 32);
+            serial_outw(VBE_DISPI_IOPORT_INDEX, VBE_DISPI_INDEX_ENABLE);
+            serial_outw(VBE_DISPI_IOPORT_DATA,
+                        VBE_DISPI_ENABLED | VBE_DISPI_LFB_ENABLED | VBE_DISPI_NOCLEARMEM);
+
+            bi->framebuffer_base = VBE_LFB_PHYS_ADDR;
+            bi->width  = 1024;
+            bi->height = 768;
+            bi->pitch  = 1024 * 4;
+            bi->bpp    = 32;
+            bi->framebuffer_size = (uint64_t)bi->pitch * bi->height;
+        } else {
+            /* 实体机且 GRUB 未设置图形模式 - 回退到文本模式 80x25 */
+            serial_puts("[LOADER] No VBE DISPI, falling back to text mode\n");
+            bi->framebuffer_base = 0xB8000;  /* VGA 文本缓冲区 */
+            bi->width  = 80;
+            bi->height = 25;
+            bi->pitch  = 80 * 2;  /* 每字符 2 字节 */
+            bi->bpp    = 4;       /* 标记为文本模式 */
+            bi->framebuffer_size = 80 * 25 * 2;
+        }
     }
 
-    bi->memory_map = 0;
-    bi->memory_map_size = 0;
-    bi->memory_map_descriptor_size = 0;
-    bi->memory_map_entry_count = 0;
-    bi->acpi_rsdp = 0;               /* 内核扫描 EBDA/0xE0000 */
+    /* ---- 转换后的 mmap 数据已存放在 MMAP_CONVERT_ADDR ---- */
+
+    bi->memory_map = MMAP_CONVERT_ADDR;
+    bi->memory_map_size = mmap_converted_count * sizeof(struct loader_mmap_entry);
+    bi->memory_map_descriptor_size = sizeof(struct loader_mmap_entry);
+    bi->memory_map_entry_count = mmap_converted_count;
+    bi->total_memory = total_usable_memory;
+
+    if (mmap_converted_count > 0) {
+        serial_puts("[LOADER] Total usable memory: ");
+        serial_put_hex64(total_usable_memory);
+        serial_puts(" bytes\n");
+    } else {
+        /* 无 mmap 标签 - 从 basic_meminfo 估算 */
+        bi->memory_map = 0;
+        bi->memory_map_size = 0;
+        bi->memory_map_descriptor_size = 0;
+        bi->memory_map_entry_count = 0;
+        bi->total_memory = (uint64_t)mem_upper * 1024;
+        serial_puts("[LOADER] No mmap, estimated total: ");
+        serial_put_hex64(bi->total_memory);
+        serial_puts(" bytes\n");
+    }
+
+    bi->acpi_rsdp = acpi_rsdp;
     bi->efi_runtime_services = 0;     /* 传统引导不可用 */
-    bi->total_memory = 0;             /* 32 位加载器未计算 */
 
     /* ---- 启用长模式 ---- */
     serial_puts("[LOADER] Calling enable_long_mode...\n");

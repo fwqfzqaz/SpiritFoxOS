@@ -169,9 +169,13 @@ void pci_init(void)
     pci_device_count = 0;
     memset(pci_devices, 0, sizeof(pci_devices));
 
-    /* 扫描总线 0（以及递归扫描所有桥接总线） */
+    /* 首先扫描总线 0。如果发现 PCI-to-PCI 桥，
+     * 递归扫描其子总线。对于大多数系统这已足够。 */
     pci_scan_bus(0);
 
+    /* 检查是否需要扫描更多总线。
+     * 某些实体机（特别是服务器）可能在更高的总线号上有设备，
+     * 但主 PCI 主机桥总是在总线 0 上。 */
     printf("[PCI] Found %d device(s)\n", pci_device_count);
 }
 
@@ -184,6 +188,27 @@ const pci_device_t* pci_get_device(int index)
 {
     if (index < 0 || index >= pci_device_count) return NULL;
     return &pci_devices[index];
+}
+
+const pci_device_t* pci_find_device(uint16_t vendor_id, uint16_t device_id)
+{
+    for (int i = 0; i < pci_device_count; i++) {
+        if (pci_devices[i].vendor_id == vendor_id &&
+            pci_devices[i].device_id == device_id) {
+            return &pci_devices[i];
+        }
+    }
+    return NULL;
+}
+
+const pci_device_t* pci_find_class(uint8_t class_code)
+{
+    for (int i = 0; i < pci_device_count; i++) {
+        if (pci_devices[i].class_code == class_code) {
+            return &pci_devices[i];
+        }
+    }
+    return NULL;
 }
 
 void pci_list_devices(void)

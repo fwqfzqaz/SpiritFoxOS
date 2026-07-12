@@ -226,6 +226,9 @@ extern uint32_t net_netmask;
 extern uint8_t  net_local_mac[6];
 extern int      net_hw_initialized;
 
+/* 手动配置网络 IP（用于实体机无 DHCP 时的静态配置） */
+void net_configure_ip(uint32_t ip, uint32_t gateway, uint32_t netmask);
+
 /* ARP functions */
 void net_arp_init(void);
 int  net_arp_resolve(uint32_t ip, uint8_t *mac_out);
