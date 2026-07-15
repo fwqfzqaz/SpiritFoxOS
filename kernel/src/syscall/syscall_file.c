@@ -7,7 +7,6 @@
 #include "string.h"
 #include "terminal.h"
 #include "errno.h"
-#include "mmu.h"
 
 /* 将 vfs_inode_t 转换为 linux_stat_t */
 static void inode_to_stat(const vfs_inode_t *inode, linux_stat_t *stat)
@@ -55,6 +54,7 @@ int64_t sys_write(trap_frame_t *frame)
      * 因此绕过 VFS 直接写入控制台。 */
     if (fd == 1 || fd == 2) {
         const char *p = (const char *)buf;
+
         for (size_t i = 0; i < count; i++) {
             /* 写入串口 (COM1) */
             while (!(hal_inb(0x3FD) & 0x20))

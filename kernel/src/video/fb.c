@@ -451,7 +451,9 @@ void fb_put_pixel(int x, int y, fb_color_t color)
     if ((uint32_t)x >= fb_width || (uint32_t)y >= fb_height) return;
 
     uint32_t *target = fb_back ? fb_back : fb_front;
-    target[y * (fb_pitch / 4) + x] = color;
+    uint32_t *addr = target + y * (fb_pitch / 4) + x;
+
+    *addr = color;
 }
 
 fb_color_t fb_get_pixel(int x, int y)

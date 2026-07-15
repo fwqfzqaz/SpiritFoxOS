@@ -69,7 +69,7 @@ static const char* exception_messages[] = {
 };
 
 /* ISR 处理程序 - 从汇编调用，用于异常（INT 0-31） */
-void isr_handler(uint64_t int_num, uint64_t error_code)
+void isr_handler(uint64_t int_num, uint64_t error_code, uint64_t fault_rip, uint64_t fault_rsp)
 {
     /* 对于缺页异常（向量 14），先尝试 COW 处理。
      * 错误码第 1 位 (W/R) = 1 表示写操作引起的缺页。
@@ -99,13 +99,30 @@ void isr_handler(uint64_t int_num, uint64_t error_code)
     serial_puts("] Error code: ");
     serial_put_hex(error_code);
 
-    /* 对于缺页异常，打印 CR2（缺页地址） */
+    /* 输出故障RIP */
+    serial_puts(" RIP: ");
+    serial_put_hex(fault_rip);
+    serial_puts(" RSP: ");
+    serial_put_hex(fault_rsp);
+
+    /* 输出CR2和进程信息 */
     if (int_num == 14) {
-        uint64_t cr2;
-        __asm__ volatile ("mov %%cr2, %0" : "=r"(cr2));
+        uint64_t cr2_val;
+        __asm__ volatile ("mov %%cr2, %0" : "=r"(cr2_val));
         serial_puts(" CR2: ");
-        serial_put_hex(cr2);
+        serial_put_hex(cr2_val);
+
+        /* 输出当前进程信息 */
+        process_t *cur = process_current();
+        if (cur) {
+            serial_puts(" PID=");
+            serial_put_dec((uint64_t)cur->pid);
+            serial_puts(" pml4=0x");
+            serial_put_hex(cur->pml4);
+        }
     }
+
+    /* 对于缺页异常，打印 CR2（缺页地址） - 已在上方处理 */
 
     serial_puts("\nSystem Halted.\n");
 

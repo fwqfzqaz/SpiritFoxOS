@@ -100,6 +100,13 @@ int process_exec(const char *path, const char *const argv[],
     /* Track whether the binary has a PT_INTERP (dynamic linker) */
     int has_interp = 0;
 
+    /* 清除 pml4 和 stack_top，强制 elf_load_with_base() 创建新的用户页表和映射栈。
+     * 对于从内核线程调用 process_exec() 的情况，proc->pml4 是内核页表，
+     * elf_load_with_base() 检查 !proc->pml4 来决定是否创建新页表。
+     * 如果不清零，用户段会被映射到内核页表中，导致严重错误。 */
+    current->pml4      = 0;
+    current->stack_top = 0;
+
     /* ---- 3. 加载 ELF（创建新 PML4，加载段，映射栈） ---- */
     {
         int fd = vfs_open(kpath, VFS_O_RDONLY, 0);
@@ -182,6 +189,7 @@ int process_exec(const char *path, const char *const argv[],
 
         /* Load the main binary */
         int load_ret;
+
         if (ehdr->e_type == ET_DYN) {
             /* PIE executable – load at a fixed base address */
             uint64_t pie_base = 0x400000ULL;
@@ -191,6 +199,14 @@ int process_exec(const char *path, const char *const argv[],
             /* 常规 ET_EXEC – 加载到原始虚拟地址 */
             load_ret = elf_load_with_base(current, buf, (size_t)file_size, 0);
         }
+
+        serial_puts("[exec] elf_load returned ");
+        serial_put_hex((uint64_t)load_ret);
+        serial_puts(" pml4=0x");
+        serial_put_hex(current->pml4);
+        serial_puts(" entry=0x");
+        serial_put_hex(current->entry_point);
+        serial_puts("\n");
 
         if (load_ret < 0) {
             kfree(buf);
@@ -252,8 +268,10 @@ int process_exec(const char *path, const char *const argv[],
         kfree(buf);
     }
 
-    /* ---- 4. Switch to new address space ---- */
-    hal_write_cr3(current->pml4);
+    /* ---- 4. Address space ready (CR3 switch deferred to iretq) ---- */
+    /* 注意：不在此处切换 CR3！所有内核操作必须使用内核页表。
+     * CR3 切换在 process_enter_user() 的 iretq 之前完成，
+     * 以避免内核在进程页表下运行时数据被意外破坏。 */
 
     /* ---- 5. Reset signal state (POSIX: caught signals → default on exec) ---- */
     current->pending_signals = 0;
@@ -514,102 +532,52 @@ void process_enter_user(trap_frame_t *frame)
                     (KERNEL_STACK_PAGES * PAGE_SIZE);
     }
 
-    /* 调试：在 CR3 切换前转储入口点字节 */
-    {
-        uint64_t entry = frame->rip;
-        uint64_t phys = mmu_virt_to_phys(current->pml4, entry);
-        if (phys) {
-            uint8_t *code = (uint8_t *)(uintptr_t)phys;
-            serial_puts("[enter_user] code@");
-            serial_put_hex(entry);
-            serial_puts(":");
-            for (int i = 0; i < 16; i++) {
-                serial_putchar(' ');
-                serial_putchar("0123456789abcdef"[(code[i] >> 4) & 0xF]);
-                serial_putchar("0123456789abcdef"[code[i] & 0xF]);
-            }
-            serial_puts("\n");
-        } else {
-            serial_puts("[enter_user] entry point not mapped!\n");
-        }
-    }
-
-    serial_puts("[enter_user] entry=");
-    serial_put_hex(frame->rip);
-    serial_puts(" stack=");
-    serial_put_hex(frame->rsp);
-    serial_puts(" cs=");
-    serial_put_hex(frame->cs);
-    serial_puts(" ss=");
-    serial_put_hex(frame->ss);
-    serial_puts("\n");
-
-    /* 调试：在 CR3 切换前读取 GS MSR */
-    printf("[enter_user] PRE-CR3: KERNEL_GS_BASE=%llx GS_BASE=%llx\n",
-           (unsigned long long)hal_read_msr(MSR_IA32_KERNEL_GS_BASE),
-           (unsigned long long)hal_read_msr(MSR_IA32_GS_BASE));
-
-    /* Switch to the process's page tables */
-    if (current && current->pml4) {
-        printf("[enter_user] Switching CR3: old=%llx new=%llx\n",
-               (unsigned long long)hal_read_cr3(),
-               (unsigned long long)current->pml4);
-        hal_write_cr3(current->pml4);
-        printf("[enter_user] CR3 after switch=%llx\n",
-               (unsigned long long)hal_read_cr3());
-
-        /* Debug: verify kernel mapping still works after CR3 switch */
-        {
-            uint64_t entry = frame->rip;
-            uint64_t phys = mmu_virt_to_phys(current->pml4, entry);
-            if (phys) {
-                uint8_t *code = (uint8_t *)(uintptr_t)phys;
-                serial_puts("[enter_user] after CR3: code@");
-                serial_put_hex(entry);
-                serial_puts(":");
-                for (int i = 0; i < 16; i++) {
-                    serial_putchar(' ');
-                    serial_putchar("0123456789abcdef"[(code[i] >> 4) & 0xF]);
-                    serial_putchar("0123456789abcdef"[code[i] & 0xF]);
-                }
-                serial_puts("\n");
-            }
-        }
-    }
-
-    /* Set up GS:8 (kernel RSP) for syscall entry point */
+    /* Set up GS:8 (kernel RSP) and GS:16 (process PML4) for syscall entry point */
     {
         uint64_t gs_base_kernel = hal_read_msr(MSR_IA32_KERNEL_GS_BASE);
-        uint64_t gs_base_user = hal_read_msr(MSR_IA32_GS_BASE);
-        printf("[enter_user] GS: KERNEL_GS_BASE=%llx GS_BASE=%llx\n",
-               (unsigned long long)gs_base_kernel, (unsigned long long)gs_base_user);
         if (gs_base_kernel) {
             uint64_t kstack_top = (current && current->kernel_stack)
                 ? (uint64_t)current->kernel_stack + (KERNEL_STACK_PAGES * PAGE_SIZE)
                 : tss.rsp0;
-            *(uint64_t *)(gs_base_kernel + 8) = kstack_top;
-            printf("[enter_user] wrote kstack_top=%llx to gs_area+8 (gs_area=%p, val@%p=%llx)\n",
-                   (unsigned long long)kstack_top,
-                   (void *)gs_base_kernel,
-                   (void *)(gs_base_kernel + 8),
-                   (unsigned long long)*(uint64_t *)(gs_base_kernel + 8));
-        } else {
-            printf("[enter_user] WARNING: KERNEL_GS_BASE is 0!\n");
+            uint64_t *cpu_area = (uint64_t *)(uintptr_t)gs_base_kernel;
+            cpu_area[1] = kstack_top;          /* gs:8 = 内核栈顶 */
+            cpu_area[2] = current->pml4;       /* gs:16 = 进程 PML4 */
         }
     }
 
-    /* Switch to user mode using iretq */
-    printf("[enter_user] iretq frame: rip=%llx cs=%llx rflags=%llx rsp=%llx ss=%llx\n",
-           (unsigned long long)frame->rip,
-           (unsigned long long)frame->cs,
-           (unsigned long long)frame->rflags,
-           (unsigned long long)frame->rsp,
-           (unsigned long long)frame->ss);
+    serial_puts("[enter_user] rip=0x");
+    serial_put_hex(frame->rip);
+    serial_puts(" rsp=0x");
+    serial_put_hex(frame->rsp);
+    serial_puts(" pml4=0x");
+    serial_put_hex(current->pml4);
+    serial_puts("\n");
+
+    /*
+     * 切换到用户态 - CR3 切换在 iretq 之前的内联汇编中完成。
+     *
+     * 关键设计：所有内核操作（write_user_mem, 页表构建等）
+     * 都在内核 CR3 下完成。CR3 切换发生在最后时刻，
+     * 与 iretq 在同一指令序列中，确保内核不会在
+     * 进程页表下执行任何可能破坏数据的操作。
+     *
+     * CR3 值传递方式：将 pml4 存入 frame->rcx，通过
+     * 寄存器恢复加载到 rcx，再写入 CR3。这避免了
+     * 编译器使用被内联汇编覆盖的寄存器来寻址的问题
+     *（之前的 "m"(current->pml4) 约束导致编译器用
+     * rdx 寻址，但 rdx 被寄存器恢复覆盖为 0）。
+     */
+    frame->rcx = current->pml4;
 
     __asm__ volatile (
         "cli\n\t"
-        /* 将帧指针加载到 r8（被调用者保存，不会被覆盖） */
+        /* 将帧指针加载到 r8 */
         "mov %[frame], %%r8\n\t"
+
+        /* 注意：不做 swapgs！内核态运行时 GS_BASE=0，
+         * KERNEL_GS_BASE=per-CPU。iretq 后用户态也保持 GS_BASE=0。
+         * 当用户态执行 syscall 时，syscall_entry 中的 swapgs 会
+         * 正确地将 GS_BASE 换为 per-CPU（KERNEL_GS_BASE 的值）。 */
 
         /* 将数据段设置为用户态（USER_DS | RPL 3 = 0x23） */
         "mov $0x23, %%ax\n\t"
@@ -630,7 +598,9 @@ void process_enter_user(trap_frame_t *frame)
         "mov 136(%%r8), %%rax\n\t"    /* frame->rip */
         "pushq %%rax\n\t"
 
-        /* 从 trap_frame 恢复通用寄存器 */
+        /* 从 trap_frame 恢复通用寄存器。
+         * 注意：rcx 恢复的是 frame->rcx = current->pml4，
+         * 用于后续的 CR3 切换。*/
         "mov 0(%%r8), %%r15\n\t"
         "mov 8(%%r8), %%r14\n\t"
         "mov 16(%%r8), %%r13\n\t"
@@ -638,15 +608,17 @@ void process_enter_user(trap_frame_t *frame)
         "mov 32(%%r8), %%r11\n\t"
         "mov 40(%%r8), %%r10\n\t"
         "mov 48(%%r8), %%r9\n\t"
-        /* 跳过 r8 – 我们仍在使用它 */
         "mov 64(%%r8), %%rdi\n\t"
         "mov 72(%%r8), %%rsi\n\t"
         "mov 80(%%r8), %%rdx\n\t"
-        "mov 88(%%r8), %%rcx\n\t"
+        "mov 88(%%r8), %%rcx\n\t"     /* rcx = frame->rcx = pml4 */
         "mov 96(%%r8), %%rbx\n\t"
         "mov 104(%%r8), %%rbp\n\t"
-        /* 现在加载 rax 和 r8 */
         "mov 112(%%r8), %%rax\n\t"
+
+        /* CR3 切换：rcx 已包含 pml4 值 */
+        "mov %%rcx, %%cr3\n\t"
+
         "mov 56(%%r8), %%r8\n\t"
 
         "iretq\n\t"

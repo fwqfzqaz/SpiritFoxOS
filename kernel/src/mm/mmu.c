@@ -20,6 +20,13 @@ uint64_t *mmu_walk_page(uint64_t pml4_phys, uint64_t virt, int create)
             memset(new_page, 0, PAGE_SIZE);
             tbl[idx] = (uint64_t)(uintptr_t)new_page | PTE_PRESENT | PTE_WRITABLE | PTE_USER;
         }
+
+        /* 在PD级别遇到2MB大页时，不能继续遍历到PT。
+         * 返回PD项指针，调用者需检查PTE_HUGE标志。 */
+        if (level == 2 && (tbl[idx] & PTE_HUGE)) {
+            return &tbl[idx];
+        }
+
         tbl = (uint64_t *)(tbl[idx] & PTE_ADDR_MASK);
     }
     return &tbl[indices[3]];  // 返回指向PTE的指针
@@ -35,7 +42,36 @@ int mmu_map_page(uint64_t pml4_phys, uint64_t virt, uint64_t phys, uint64_t flag
 
 uint64_t mmu_virt_to_phys(uint64_t pml4_phys, uint64_t virt)
 {
-    uint64_t *pte = mmu_walk_page(pml4_phys, virt, 0);
-    if (!pte || !(*pte & PTE_PRESENT)) return 0;
-    return (*pte & PTE_ADDR_MASK) + (virt & (PAGE_SIZE - 1));
+    /* 手动遍历页表以正确处理大页 */
+    uint64_t *tbl = (uint64_t *)(uintptr_t)pml4_phys;
+
+    /* PML4 */
+    int pml4_idx = (int)(virt >> 39) & 0x1FF;
+    if (!(tbl[pml4_idx] & PTE_PRESENT)) return 0;
+    tbl = (uint64_t *)(tbl[pml4_idx] & PTE_ADDR_MASK);
+
+    /* PDPT - 检查1GB大页 */
+    int pdpt_idx = (int)(virt >> 30) & 0x1FF;
+    if (!(tbl[pdpt_idx] & PTE_PRESENT)) return 0;
+    if (tbl[pdpt_idx] & PTE_HUGE) {
+        /* 1GB大页：物理地址在位30及以上 */
+        uint64_t phys_base = tbl[pdpt_idx] & 0x000FFFFFC0000000ULL;
+        return phys_base + (virt & 0x3FFFFFFFULL);
+    }
+    tbl = (uint64_t *)(tbl[pdpt_idx] & PTE_ADDR_MASK);
+
+    /* PD - 检查2MB大页 */
+    int pd_idx = (int)(virt >> 21) & 0x1FF;
+    if (!(tbl[pd_idx] & PTE_PRESENT)) return 0;
+    if (tbl[pd_idx] & PTE_HUGE) {
+        /* 2MB大页：物理地址在位21及以上 */
+        uint64_t phys_base = tbl[pd_idx] & 0x000FFFFFFFE00000ULL;
+        return phys_base + (virt & 0x1FFFFFULL);
+    }
+    tbl = (uint64_t *)(tbl[pd_idx] & PTE_ADDR_MASK);
+
+    /* PT - 4KB页 */
+    int pt_idx = (int)(virt >> 12) & 0x1FF;
+    if (!(tbl[pt_idx] & PTE_PRESENT)) return 0;
+    return (tbl[pt_idx] & PTE_ADDR_MASK) + (virt & (PAGE_SIZE - 1));
 }

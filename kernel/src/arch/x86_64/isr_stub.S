@@ -148,9 +148,11 @@ isr_common:
     mov fs, ax
     mov gs, ax
 
-    ; 传递中断号和错误码作为参数
+    ; 传递中断号、错误码、故障RIP和用户RSP作为参数
     mov rdi, [rsp+128]   ; 中断号
     mov rsi, [rsp+136]   ; 错误码
+    mov rdx, [rsp+144]   ; 故障RIP（iretq帧中的RIP）
+    mov rcx, [rsp+168]   ; 用户RSP（iretq帧中的RSP）
     cld
     call isr_handler
 
@@ -332,6 +334,10 @@ extern syscall_handler_c
 syscall_entry:
     ; syscall 指令将 RIP 保存到 RCX，RFLAGS 保存到 R11
     ; 需要通过 TSS.rsp0 切换到内核栈
+
+    ; 注意：不能在此处修改 rax！SYSCALL 不修改 rax，
+    ; rax 保存着系统调用号，必须在 push rax 之前保持不变。
+
     swapgs                          ; 加载内核 GS 基地址
     mov gs:0, rsp                   ; 保存用户 RSP（使用 GS:0 处的暂存空间）
     mov rsp, gs:8                   ; 从 GS:8 加载内核 RSP
@@ -372,12 +378,26 @@ syscall_entry:
     push r14                        ; 偏移 8
     push r15                        ; 偏移 0
 
-    ; 加载内核数据段
+    ; ---- CR3 切换：切换到内核页表 ----
+    ; 寄存器已保存到栈上，现在可以自由使用 rdx/rcx。
+    ; 当用户进程通过 syscall 进入内核时，CR3 仍然是进程页表。
+    ; 必须切换到内核页表，否则内核的内存操作（如帧缓冲写入）
+    ; 可能通过进程页表中的错误映射破坏用户代码页。
+    mov rdx, cr3                    ; 保存当前 CR3（进程 PML4）
+    mov rcx, gs:24                  ; 加载内核 CR3
+    cmp rdx, rcx                    ; 如果已经在内核页表下则跳过
+    je .no_cr3_switch
+    mov cr3, rcx                    ; 切换到内核页表
+.no_cr3_switch:
+    mov gs:16, rdx                  ; 保存进程 PML4 到 gs:16
+
+    ; 加载内核数据段（不要设置 GS！swapgs 已将 GS 基地址设为内核 per-CPU 区域）
     mov ax, 0x10
     mov ds, ax
     mov es, ax
     mov fs, ax
-    mov gs, ax
+    ; 不设置 GS！swapgs 已经加载了 KERNEL_GS_BASE，
+    ; GS 段寄存器指向 per-CPU 数据区域。
 
     ; 调用 C 处理程序，传入陷阱帧指针
     mov rdi, rsp
@@ -386,6 +406,17 @@ syscall_entry:
 
     ; 返回路径 - 恢复并 iretq
     ; 内核数据段已设置，无需恢复
+
+    ; ---- CR3 切换：切换回进程页表 ----
+    ; 在恢复寄存器之前切换回进程页表。
+    ; 因为此时 CR3 是内核页表，而进程页表中也有相同的低半部分映射，
+    ; 切换回进程页表后，内核代码/栈仍然可访问（直到 iretq）。
+    mov rcx, gs:16                  ; 加载进程 PML4
+    mov rdx, cr3                    ; 当前 CR3
+    cmp rcx, rdx                    ; 如果已经是进程页表则跳过
+    je .no_cr3_restore
+    mov cr3, rcx                    ; 切换回进程页表
+.no_cr3_restore:
 
     ; 按 trap_frame_t 顺序恢复通用寄存器
     pop r15

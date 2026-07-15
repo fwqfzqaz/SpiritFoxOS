@@ -747,43 +747,30 @@ static int cmd_sandbox(int argc, char** argv) {
 /* User-mode launcher thread: loads ELF and jumps to user mode */
 static void user_proc_launcher(void *arg)
 {
-    char *path = (char *)arg;
+    /* 复制路径到本地缓冲区，因为 arg 指向的内存可能在其他线程中被覆盖 */
+    static char local_path[256];
+    size_t i;
+    const char *src = (const char *)arg;
+    for (i = 0; i < sizeof(local_path) - 1 && src[i]; i++)
+        local_path[i] = src[i];
+    local_path[i] = '\0';
+
     process_t *self = process_current();
 
-    printf("[exec] launcher started, PID=%d path='%s'\n", self ? self->pid : -1, path);
-    printf("[exec] pre-elf: self=%p pml4=%llx kstack=%p entry=%llx\n",
-           (void *)self,
-           (unsigned long long)self->pml4,
-           self->kernel_stack,
-           (unsigned long long)self->entry_point);
+    printf("[exec] launcher started, PID=%d path='%s'\n", self ? self->pid : -1, local_path);
 
-    /* Load ELF into this process's address space */
-    if (elf_load_from_vfs(self, path) != 0) {
-        printf("exec: failed to load ELF '%s'\n", path);
-        process_exit(1);
-        return;
-    }
+    /* 使用 process_exec() 正确构建用户栈（argc/argv/envp/auxv），
+     * 然后通过 iretq 跳转到用户态。
+     * process_exec() 处理 ELF 加载、栈构建、frame 设置
+     * 和用户态转换的全部流程。 */
+    const char *argv[] = { local_path, NULL };
+    const char *envp[] = { NULL };
 
-    printf("[exec] post-elf: self=%p pml4=%llx kstack=%p entry=%llx stack_top=%llx\n",
-           (void *)self,
-           (unsigned long long)self->pml4,
-           self->kernel_stack,
-           (unsigned long long)self->entry_point,
-           (unsigned long long)self->stack_top);
+    int ret = process_exec(local_path, argv, envp);
 
-    /* 设置用户态陷阱帧 */
-    process_setup_frame(self, self->entry_point, self->stack_top, 0);
-    printf("[exec] setup_frame done, trap_frame=%p pml4=%llx\n",
-           (void *)self->trap_frame, (unsigned long long)self->pml4);
-
-    /* Clear kernel thread flag – this is now a user process */
-    self->flags &= ~PROC_FLAG_KERNEL;
-
-    printf("[exec] about to call process_enter_user, frame=%p\n",
-           (void *)self->trap_frame);
-
-    /* 通过 iretq 跳转到用户态 */
-    process_enter_user(self->trap_frame);
+    /* process_exec 只在失败时返回 */
+    printf("exec: failed to exec '%s' (ret=%d)\n", local_path, ret);
+    process_exit(1);
 }
 
 static int cmd_exec(int argc, char** argv) {

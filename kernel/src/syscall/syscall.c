@@ -152,13 +152,17 @@ void syscall_handler_c(trap_frame_t *frame)
     uint64_t syscall_num = frame->rax;
     int64_t ret;
 
-    /* 调试：通过串口记录 write/exit/exit_group 系统调用 */
-    if (syscall_num == 1 || syscall_num == 60 || syscall_num == 231) {
+    /* 调试：仅记录前几次系统调用 */
+    static int syscall_debug_count = 0;
+    if (syscall_debug_count < 10) {
         serial_puts("[SYSCALL] num=0x");
         serial_put_hex(syscall_num);
         serial_puts(" rdi=0x");
         serial_put_hex(frame->rdi);
+        serial_puts(" cr3=0x");
+        serial_put_hex(hal_read_cr3());
         serial_puts("\n");
+        syscall_debug_count++;
     }
 
     switch (syscall_num) {
@@ -377,7 +381,15 @@ void syscall_init(void)
     hal_write_msr(MSR_IA32_GS_BASE, 0);
     hal_write_msr(MSR_IA32_KERNEL_GS_BASE, (uint64_t)(uintptr_t)syscall_cpu_area);
 
+    /* 保存内核 CR3 到 per-CPU 区域偏移 24。
+     * syscall 入口点使用 gs:24 来切换到内核页表。 */
+    {
+        uint64_t *cpu_area = (uint64_t *)syscall_cpu_area;
+        cpu_area[3] = hal_read_cr3();   /* offset 24 = 内核 CR3 */
+    }
+
     /* 验证 */
     uint64_t verify = hal_read_msr(MSR_IA32_KERNEL_GS_BASE);
-    printf("[SYSCALL] KERNEL_GS_BASE=%llx\n", (unsigned long long)verify);
+    printf("[SYSCALL] KERNEL_GS_BASE=%llx kernel_cr3=0x%llx\n",
+           (unsigned long long)verify, (unsigned long long)hal_read_cr3());
 }

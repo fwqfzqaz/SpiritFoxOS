@@ -1,7 +1,7 @@
 # SpiritFoxOS - Makefile
 # 灵狐操作系统构建系统
 
-.PHONY: all clean kernel loader image iso run run-iso run-debug logo uefi-bootloader uefi-image run-uefi usb
+.PHONY: all clean kernel loader image iso run run-iso run-debug logo uefi-bootloader uefi-image run-uefi usb test-elf
 
 # =========================================
 # 工具链配置
@@ -339,16 +339,14 @@ build/ovmf_vars.fd:
 build/disk.img:
 	@dd if=/dev/zero of=$@ bs=1M count=16 2>/dev/null
 
-build/fat32.img:
+build/fat32.img: build/test_hello
 	@echo "[FAT32] Creating disk image..."
 	@dd if=/dev/zero of=$@ bs=1M count=512 2>/dev/null
 	@mkfs.fat -F 32 $@ 2>/dev/null
 	@mmd -i $@ ::bin 2>/dev/null
 	@mmd -i $@ ::pkg 2>/dev/null
-	@if [ -f /tmp/test_hello ]; then \
-		mcopy -i $@ /tmp/test_hello ::HELLO 2>/dev/null; \
-		mcopy -i $@ /tmp/test_hello ::bin/test_hello 2>/dev/null; \
-	fi
+	@mcopy -i $@ build/test_hello ::bin/test_hello 2>/dev/null; \
+		mcopy -i $@ build/test_hello ::test_hello 2>/dev/null
 	@if [ -f cs/java-jre.deb ]; then \
 		if mcopy -i $@ cs/java-jre.deb ::pkg/java-jre.deb; then \
 			echo "[FAT32] Added java-jre.deb"; \
@@ -370,6 +368,33 @@ build/fat32.img:
 		fi; \
 	fi
 	@echo "[FAT32] Image created (512MB)"
+
+# =========================================
+# 测试 ELF 用户程序
+# =========================================
+TEST_DIR      = tests
+TEST_BUILD    = build/tests
+
+build/test_hello: tests/test_hello.c tests/test_crt.S tests/test.ld | build
+	@echo "[TEST-ELF] Compiling test_hello..."
+	@$(CC) -ffreestanding -nostdlib -fno-builtin -fno-stack-protector \
+	    -fno-pic -fno-pie -mno-red-zone -mno-mmx -mno-sse -mno-sse2 \
+	    -mcmodel=small -static -O2 \
+	    -c tests/test_hello.c -o build/test_hello.o
+	@$(CC) -ffreestanding -nostdlib -fno-stack-protector \
+	    -fno-pic -fno-pie -mno-red-zone -mno-mmx -mno-sse -mno-sse2 \
+	    -mcmodel=small \
+	    -c tests/test_crt.S -o build/test_crt.o
+	@echo "[TEST-ELF] Linking test_hello..."
+	@$(LD) -T tests/test.ld -nostdlib -static -o $@ \
+	    build/test_crt.o build/test_hello.o
+	@echo "[TEST-ELF] Done: $@"
+	@file $@ || true
+	@readelf -h $@ 2>/dev/null | head -5 || true
+
+test-elf: build/test_hello
+	@echo "[TEST-ELF] Test ELF built: build/test_hello"
+	@echo "[TEST-ELF] Run 'make run' and then type 'exec /mnt/bin/test_hello' in the shell"
 
 # =========================================
 # USB 启动盘制作（实体机用）
