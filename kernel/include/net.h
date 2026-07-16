@@ -143,6 +143,16 @@ typedef struct __attribute__((packed)) {
     uint16_t checksum;
 } udp_header_t;
 
+/* TCP unacknowledged segment (linked list) */
+typedef struct net_tcp_seg {
+    uint32_t    seq;        /* starting sequence number */
+    uint32_t    len;        /* data length */
+    uint8_t    *data;      /* segment data copy */
+    uint64_t    send_time;  /* timestamp when sent (ms) */
+    uint8_t     retries;    /* retransmission count */
+    struct net_tcp_seg *next;
+} net_tcp_seg_t;
+
 /* Socket structure */
 typedef struct net_socket {
     int         fd;             /* File descriptor index */
@@ -162,6 +172,21 @@ typedef struct net_socket {
     uint32_t    seq_num;
     uint32_t    ack_num;
     uint32_t    remote_seq;
+
+    /* TCP reliability / congestion control */
+    uint32_t    cwnd;               /* congestion window */
+    uint32_t    ssthresh;           /* slow start threshold */
+    uint32_t    rto;                /* retransmission timeout in ms */
+    uint32_t    srtt;               /* smoothed RTT */
+    uint32_t    rttvar;             /* RTT variance */
+    uint64_t    retransmit_timer;   /* absolute timestamp for retransmit, 0=inactive */
+    uint32_t    dup_ack_count;      /* duplicate ACK counter for fast retransmit */
+    uint32_t    bytes_in_flight;    /* unacknowledged bytes sent */
+    uint32_t    last_ack_sent;      /* last ack number we sent, for detecting incoming duplicate ACKs */
+    uint8_t     congestion_state;   /* 0=slow_start, 1=congestion_avoidance, 2=fast_recovery */
+    uint64_t    time_wait_expire;   /* absolute timestamp for TIME_WAIT expiry */
+    uint32_t    retransmit_count;   /* number of retransmissions for current segment */
+    net_tcp_seg_t *unacked_list;    /* linked list of unacknowledged segments */
 
     /* Send/receive buffers (circular) */
     uint8_t    *rx_buf;
@@ -188,56 +213,11 @@ typedef struct net_socket {
     int         blocking_pid;
 } net_socket_t;
 
-/* Initialize the network subsystem */
-void net_init(void);
-
-/* Socket API (called from syscalls) */
-int net_socket(int domain, int type, int protocol);
-int net_bind(int fd, const net_sockaddr_t *addr, socklen_t addrlen);
-int net_listen(int fd, int backlog);
-int net_accept(int fd, net_sockaddr_t *addr, socklen_t *addrlen);
-int net_connect(int fd, const net_sockaddr_t *addr, socklen_t addrlen);
-int net_send(int fd, const void *buf, size_t len, int flags);
-int net_recv(int fd, void *buf, size_t len, int flags);
-int net_sendto(int fd, const void *buf, size_t len, int flags,
-               const net_sockaddr_t *dest_addr, socklen_t addrlen);
-int net_recvfrom(int fd, void *buf, size_t len, int flags,
-                 net_sockaddr_t *src_addr, socklen_t *addrlen);
-int net_shutdown(int fd, int how);
-int net_close(int fd);
-int net_setsockopt(int fd, int level, int optname, const void *optval, socklen_t optlen);
-int net_getsockopt(int fd, int level, int optname, void *optval, socklen_t *optlen);
-int net_getsockname(int fd, net_sockaddr_t *addr, socklen_t *addrlen);
-int net_getpeername(int fd, net_sockaddr_t *addr, socklen_t *addrlen);
-
-/* Loopback transmit (injects a packet back to the loopback interface) */
-void net_loopback_tx(const void *data, size_t len);
-
-/* Process an incoming IPv4 packet (called by NIC driver or loopback) */
-void net_rx_ipv4(const void *data, size_t len);
-
-/* Allocate a local port */
-port_t net_alloc_port(void);
-
 /* Network configuration globals */
 extern uint32_t net_local_ip;
 extern uint32_t net_gateway_ip;
 extern uint32_t net_netmask;
 extern uint8_t  net_local_mac[6];
 extern int      net_hw_initialized;
-
-/* 手动配置网络 IP（用于实体机无 DHCP 时的静态配置） */
-void net_configure_ip(uint32_t ip, uint32_t gateway, uint32_t netmask);
-
-/* ARP functions */
-void net_arp_init(void);
-int  net_arp_resolve(uint32_t ip, uint8_t *mac_out);
-void net_arp_rx(const void *data, size_t len);
-
-/* Ethernet send (wraps IP packet in Ethernet frame, handles ARP) */
-void net_send_eth(const void *ip_packet, size_t ip_len, uint32_t dst_ip);
-
-/* ICMP receive handler */
-void net_icmp_rx(const void *data, size_t len, uint32_t src_ip);
 
 #endif /* NET_H */

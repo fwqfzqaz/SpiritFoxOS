@@ -258,10 +258,14 @@ void kfree(void *ptr)
     uint8_t *arena_start = (uint8_t *)((uintptr_t)hdr->arena_pgidx * PAGE_SIZE);
     uint8_t *arena_end = arena_start + arena_size_val;
 
-    /* 从竞技场起始位置遍历块链并合并 */
+    /* 从竞技场起始位置遍历块链并合并。
+     * 注意：合并时需要先将所有涉及的空闲块从 free_list 移除，
+     * 然后只将合并后的大块重新插入，避免链表环。 */
     block_header_t *cur = (block_header_t *)arena_start;
     while ((uint8_t *)cur < arena_end) {
         if (!cur->used) {
+            /* 先从 free_list 移除 cur（它会在合并后重新插入） */
+            free_list_remove(cur);
             /* 尝试与下一个块合并（如果下一个块也是空闲的） */
             block_header_t *nxt = (block_header_t *)((uint8_t *)cur + HEADER_SIZE + cur->size);
             while ((uint8_t *)nxt < arena_end && !nxt->used) {
@@ -270,29 +274,31 @@ void kfree(void *ptr)
                 cur->size += HEADER_SIZE + nxt->size;
                 nxt = (block_header_t *)((uint8_t *)cur + HEADER_SIZE + cur->size);
             }
+            /* 重新插入合并后的 cur */
+            free_list_insert(cur);
         }
-        cur = (block_header_t *)((uint8_t *)cur + HEADER_SIZE + cur->size);
         if (cur->size == 0)
             break;  /* 安全措施：避免在损坏块上无限循环 */
+        cur = (block_header_t *)((uint8_t *)cur + HEADER_SIZE + cur->size);
     }
 
     /* 合并后，hdr可能已被前面的块吸收。
-       重新查找覆盖原始地址的空闲块。 */
+       查找覆盖原始地址的空闲块（它已在 free_list 中）。 */
     cur = (block_header_t *)arena_start;
     while ((uint8_t *)cur < arena_end) {
         if (!cur->used) {
             uint8_t *block_end = (uint8_t *)cur + HEADER_SIZE + cur->size;
             if ((uint8_t *)hdr >= (uint8_t *)cur && (uint8_t *)hdr < block_end) {
-                free_list_insert(cur);
+                /* hdr 已被吸收，cur 已在 free_list 中 */
                 return;
             }
         }
-        cur = (block_header_t *)((uint8_t *)cur + HEADER_SIZE + cur->size);
         if (cur->size == 0)
             break;
+        cur = (block_header_t *)((uint8_t *)cur + HEADER_SIZE + cur->size);
     }
 
-    /* hdr未被吸收（前面没有空闲的相邻块） */
+    /* hdr未被吸收（前面没有空闲的相邻块），插入到 free_list */
     free_list_insert(hdr);
 }
 

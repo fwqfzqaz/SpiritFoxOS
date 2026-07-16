@@ -1,6 +1,7 @@
 #include "syscall_internal.h"
 #include "process.h"
 #include "net.h"
+#include "net_socket.h"
 #include "errno.h"
 
 /* ========================================================================

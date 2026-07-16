@@ -10,6 +10,8 @@
 #include "init.h"
 #include "timer.h"
 #include "autorun.h"
+#include "net.h"
+#include "net_icmp.h"
 
 void kernel_panic(const char* msg)
 {
@@ -60,6 +62,19 @@ void kernel_main(BootInfo* boot_info)
     printf("[SpiritFoxOS] All subsystems initialized.\n");
     printf("[SpiritFoxOS] Linux ABI compat | Registry | Packages | Sandbox\n");
     printf("[SpiritFoxOS] System uptime: %llu ms\n", timer_get_ms());
+
+    /* ICMP ping self-test: ping QEMU gateway to verify Echo Request/Reply.
+     * Must run AFTER interrupts are enabled so ARP/ICMP replies can be received. */
+    if (net_hw_initialized) {
+        printf("[NET] ICMP self-test: pinging 10.0.2.2 ...\n");
+        for (int i = 0; i < 3; i++) {
+            net_icmp_send_echo(net_gateway_ip,
+                               (uint16_t)i, 0x5F05, "SpiritFoxOS", 11);
+            uint64_t deadline = timer_get_ms() + 2000;
+            while (timer_get_ms() < deadline) { hal_io_wait(); }
+        }
+        printf("[NET] ICMP self-test complete\n");
+    }
 
 #ifdef KERNEL_SELFTEST
     extern void test_registry(void);

@@ -1101,6 +1101,100 @@ static int cmd_window(int argc, char** argv) {
     return 0;
 }
 
+/* ---------- Network commands ---------- */
+
+#include "net.h"
+#include "net_icmp.h"
+#include "net_utils.h"
+#include "net_socket.h"
+
+static int cmd_ifconfig(int argc, char** argv) {
+    (void)argc; (void)argv;
+
+    if (net_local_ip == 0 && !net_hw_initialized) {
+        printf("Network not initialized\n");
+        return 1;
+    }
+
+    printf("eth0: ");
+    if (net_hw_initialized) {
+        printf("HWaddr %02x:%02x:%02x:%02x:%02x:%02x\n       ",
+               net_local_mac[0], net_local_mac[1], net_local_mac[2],
+               net_local_mac[3], net_local_mac[4], net_local_mac[5]);
+    }
+
+    if (net_local_ip) {
+        uint32_t hip = ntohl(net_local_ip);
+        uint32_t hg  = ntohl(net_gateway_ip);
+        uint32_t hm  = ntohl(net_netmask);
+        printf("inet %u.%u.%u.%u  netmask %u.%u.%u.%u  gateway %u.%u.%u.%u\n",
+               (hip >> 24) & 0xFF, (hip >> 16) & 0xFF,
+               (hip >> 8) & 0xFF, hip & 0xFF,
+               (hm >> 24) & 0xFF, (hm >> 16) & 0xFF,
+               (hm >> 8) & 0xFF, hm & 0xFF,
+               (hg >> 24) & 0xFF, (hg >> 16) & 0xFF,
+               (hg >> 8) & 0xFF, hg & 0xFF);
+    } else {
+        printf("inet unconfigured\n");
+    }
+
+    printf("lo:   inet 127.0.0.1  netmask 255.0.0.0\n");
+    return 0;
+}
+
+static int cmd_ping(int argc, char** argv) {
+    if (argc < 2) {
+        printf("Usage: ping <ip_address> [count]\n");
+        return 1;
+    }
+
+    /* Parse destination IP (a.b.c.d) */
+    const char *s = argv[1];
+    uint32_t octets[4] = {0};
+    int oi = 0;
+    for (int i = 0; s[i] && oi < 4; i++) {
+        if (s[i] == '.') {
+            oi++;
+        } else if (s[i] >= '0' && s[i] <= '9') {
+            octets[oi] = octets[oi] * 10 + (s[i] - '0');
+        } else {
+            oi = 5; /* invalid */
+            break;
+        }
+    }
+    if (oi != 3 || octets[0] > 255 || octets[1] > 255 ||
+        octets[2] > 255 || octets[3] > 255) {
+        printf("ping: invalid IP address '%s'\n", argv[1]);
+        return 1;
+    }
+
+    uint32_t a = octets[0], b = octets[1], c = octets[2], d = octets[3];
+    uint32_t dst_ip = htonl((a << 24) | (b << 16) | (c << 8) | d);
+    int count = 4;
+    if (argc >= 3) {
+        int n = atoi(argv[2]);
+        if (n > 0 && n <= 20) count = n;
+    }
+
+    printf("PING %u.%u.%u.%u: %d packets\n", a, b, c, d, count);
+
+    for (int i = 0; i < count; i++) {
+        uint16_t id = 0x5F05;  /* SpiritFox ping ID */
+        if (net_icmp_send_echo(dst_ip, (uint16_t)i, id, "SpiritFoxOS", 11) != 0) {
+            printf("ping: failed to send echo request\n");
+            break;
+        }
+
+        /* Wait up to 3 seconds for reply */
+        uint64_t deadline = timer_get_ms() + 3000;
+        while (timer_get_ms() < deadline) {
+            hal_io_wait();
+        }
+    }
+
+    return 0;
+}
+
 /* ---------- Command table ---------- */
 
 typedef struct {
@@ -1150,6 +1244,9 @@ static const ShellCommand builtin_commands[] = {
     { "ps",        cmd_ps,        "List processes" },
     { "exec",      cmd_exec,      "Execute ELF binary" },
     { "fileassoc", cmd_fileassoc, "File associations" },
+    /* Network */
+    { "ifconfig",  cmd_ifconfig,  "Show network configuration" },
+    { "ping",      cmd_ping,      "Send ICMP echo requests" },
 };
 
 #define NUM_BUILTIN (sizeof(builtin_commands) / sizeof(builtin_commands[0]))

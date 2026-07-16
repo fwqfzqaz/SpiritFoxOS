@@ -3,6 +3,8 @@
 #include "apic.h"
 #include "process.h"
 #include "vga.h"
+#include "net_tcp.h"
+#include "net_icmp.h"
 
 static volatile uint64_t timer_ticks = 0;
 
@@ -11,6 +13,15 @@ void timer_handler(void)
 {
     timer_ticks++;
     scheduler_tick();
+
+    /* 每 10ms 调用一次网络定时器（约 100Hz） */
+    static uint64_t net_tick_counter = 0;
+    net_tick_counter++;
+    if (net_tick_counter >= 10) {
+        net_tick_counter = 0;
+        net_tcp_tick();
+        net_icmp_tick();
+    }
 }
 
 void timer_init(void)

@@ -27,6 +27,8 @@
 #include "memory.h"
 #include "apic.h"
 #include "net.h"
+#include "net_ip.h"
+#include "net_arp.h"
 #include "string.h"
 #include "vga.h"
 
@@ -83,11 +85,14 @@
 
 /* ========================================================================
  * TSD（发送状态描述符）位定义
+ * 注意：RTL8139 的 TSD 没有 OWN 位（那是高级网卡的特性）。
+ * 写入 TSD 的 size 字段即触发发送，硬件完成后设置 TOK 位。
+ * Bit 13 是 Large Send (LS) 位，不应随意设置。
  * ======================================================================== */
-#define RTL_TSD_OWN        (1 << 13)  /* OWN：置 1 启动发送，硬件完成后清零 */
-#define RTL_TSD_TOK        (1 << 15)  /* 发送成功 */
-#define RTL_TSD_TUN        (1 << 14)  /* 发送 FIFO 欠载 */
-#define RTL_TSD_TABT       (1 << 18)  /* 发送中止 */
+#define RTL_TSD_LS        (1 << 13)  /* Large Send（不要随意设置） */
+#define RTL_TSD_TUN       (1 << 14)  /* 发送 FIFO 欠载 */
+#define RTL_TSD_TOK       (1 << 15)  /* 发送成功 */
+#define RTL_TSD_TABT      (1 << 18)  /* 发送中止 */
 
 /* ========================================================================
  * 接收配置
@@ -115,6 +120,23 @@
 
 /* 发送描述符数量 */
 #define RTL_TX_DESCRIPTORS 4
+
+/* ========================================================================
+ * DMA 缓存一致性：CLFLUSH 辅助函数
+ *
+ * RTL8139 通过 DMA 直接读写物理内存，绕过 CPU 缓存。
+ * 为确保数据一致性：
+ * - 读取 RX 缓冲区前，刷新 CPU 缓存（使 DMA 写入的数据对 CPU 可见）
+ * - 写入 TX 缓冲区后，刷新 CPU 缓存（使 CPU 写入的数据对 DMA 可见）
+ * ======================================================================== */
+static void clflush_range(const void *addr, size_t len)
+{
+    const uint8_t *p = (const uint8_t *)((uintptr_t)addr & ~(uintptr_t)63);
+    const uint8_t *end = (const uint8_t *)addr + len;
+    for (; p < end; p += 64) {
+        __asm__ volatile("clflush (%0)" :: "r"(p) : "memory");
+    }
+}
 
 /* ========================================================================
  * 驱动状态
@@ -274,6 +296,10 @@ void rtl8139_init(void)
     /* 步骤 12：清除所有待处理中断 */
     rtl_outw(RTL_REG_ISR, 0xFFFF);
 
+    /* 步骤 12.5：显式重置 CAPR 到 0xFFF0，确保初始读取位置正确。
+     * 虽然复位后 CAPR 应该是 0xFFF0，但某些模拟器可能不一致。 */
+    rtl_outw(RTL_REG_CAPR, 0xFFF0);
+
     /* 步骤 13：使能中断：RX_OK | TX_OK | RX_ERR | TX_ERR | RX_OVERFLOW */
     rtl_outw(RTL_REG_IMR, RTL_INT_RX_OK | RTL_INT_TX_OK |
                           RTL_INT_RX_ERR | RTL_INT_TX_ERR |
@@ -308,22 +334,24 @@ void rtl8139_send(const void *data, size_t len)
     if (len > RTL_TX_BUF_SIZE)
         len = RTL_TX_BUF_SIZE;
 
-    /* 查找空闲的发送描述符（硬件发送完成后清除 OWN 位） */
+    /* 等待当前描述符完成上一次发送（检查 TOK 位）
+     * RTL8139 写入 TSD 的 size 即触发发送，完成后硬件设置 TOK。 */
     int timeout = 1000000;
     uint32_t tsd;
     do {
         tsd = rtl_inl(RTL_REG_TSD0 + tx_current * 4);
-        if (!(tsd & RTL_TSD_OWN))
+        /* 如果描述符空闲（size=0 或 TOK 已设置），可以使用 */
+        if ((tsd & 0x1FFF) == 0 || (tsd & RTL_TSD_TOK))
             break;
         hal_io_wait();
         timeout--;
     } while (timeout > 0);
 
     if (timeout == 0) {
-        /* 所有描述符忙，尝试推进 */
+        /* 尝试推进到下一个描述符 */
         tx_current = (tx_current + 1) % RTL_TX_DESCRIPTORS;
         tsd = rtl_inl(RTL_REG_TSD0 + tx_current * 4);
-        if (tsd & RTL_TSD_OWN) {
+        if ((tsd & 0x1FFF) != 0 && !(tsd & RTL_TSD_TOK)) {
             printf("[RTL8139] TX timeout - all descriptors busy\n");
             return;
         }
@@ -331,13 +359,15 @@ void rtl8139_send(const void *data, size_t len)
 
     /* 将包数据复制到发送缓冲区 */
     memcpy(tx_buffers[tx_current], data, len);
+    /* 刷新 CPU 缓存，确保 DMA 能读取到最新数据 */
+    clflush_range(tx_buffers[tx_current], len);
 
     /* 写入发送起始地址 */
     rtl_outl(RTL_REG_TSAD0 + tx_current * 4,
              (uint32_t)(uintptr_t)tx_buffers[tx_current]);
 
-    /* 写入发送状态描述符：大小 | OWN 位以触发发送 */
-    rtl_outl(RTL_REG_TSD0 + tx_current * 4, (uint32_t)len | RTL_TSD_OWN);
+    /* 写入 TSD 触发发送：只需写入 size，硬件自动开始传输 */
+    rtl_outl(RTL_REG_TSD0 + tx_current * 4, (uint32_t)len);
 
     /* 推进到下一个描述符 */
     tx_current = (tx_current + 1) % RTL_TX_DESCRIPTORS;
@@ -358,25 +388,54 @@ void rtl8139_irq_handler(void)
 
     /* 处理接收：处理环形缓冲区中所有可用的包 */
     if (status & (RTL_INT_RX_OK | RTL_INT_RX_ERR | RTL_INT_RX_OVERFLOW)) {
-        while (!(rtl_inb(RTL_REG_CMD) & RTL_CMD_BUFE)) {
+        int rx_budget = 32;  /* 每次 IRQ 最多处理 32 个包，防止死循环 */
+        while (rx_budget-- > 0 && !(rtl_inb(RTL_REG_CMD) & RTL_CMD_BUFE)) {
             /* CAPR 存储的是（当前读取位置 - 0x10）。
              * 复位后 CAPR = 0xFFF0，因此初始读取偏移 = 0xFFF0 + 16 = 0x10000 = 0 mod 8K。 */
             uint16_t capr = rtl_inw(RTL_REG_CAPR);
             uint32_t read_offset = (uint32_t)(capr + 16) % RTL_RX_BUF_SIZE;
 
+            /* 额外检查：确保 CBR 指示有足够的数据可读。
+             * BUFE 位可能滞后于 CAPR 更新，导致误判。 */
+            uint16_t cbr = rtl_inw(RTL_REG_CBR);
+            uint32_t avail = (cbr - read_offset + RTL_RX_BUF_SIZE) % RTL_RX_BUF_SIZE;
+            if (avail < 4) break;  /* 连包头都不够，缓冲区实际为空 */
+
+            /* 刷新 CPU 缓存，确保读取到 DMA 写入的最新数据 */
+            clflush_range(rx_buffer + read_offset, avail < 2048 ? avail : 2048);
+
             /* 从环形缓冲区读取 4 字节包头。
-             * 头格式（32 位，小端序）：
-             *   位 0-12：  接收帧长度（含 4 字节头）
-             *   位 14：    ROK - 接收成功标志
-             *   位 15：    RER - 接收错误标志 */
+             * 头格式（32 位，小端序）— 参考 RTL8139 数据手册 / Linux 8139too：
+             *   位 0：     ROK - 接收成功
+             *   位 1：     RER - 接收错误
+             *   位 2：     MAR - 多播地址
+             *   位 3：     PAM - 物理地址匹配
+             *   位 4：     BAR - 广播地址
+             *   位 5-15：  保留
+             *   位 16-30： 接收帧长度（含 4 字节头）
+             *   位 31：    RWT - 接收看门狗超时 */
             uint32_t header = *(uint32_t *)(rx_buffer + read_offset);
-            uint16_t pkt_len = header & 0x1FFF;       /* 位 0-12 */
-            uint16_t rok     = (header >> 14) & 1;     /* 位 14 */
-            uint16_t rer     = (header >> 15) & 1;     /* 位 15 */
+            uint16_t pkt_len = (header >> 16) & 0x7FFF;  /* 位 16-30 */
+            uint16_t rok     = header & 1;                 /* 位 0 */
+            uint16_t rer     = (header >> 1) & 1;          /* 位 1 */
 
             /* 合理性检查 */
-            if (pkt_len == 0 || pkt_len > RTL_RX_BUF_SIZE) {
+            if (pkt_len < 4 || pkt_len > RTL_RX_BUF_SIZE) {
+                /* 跳过此包并重置 CAPR 到 CBR 以重新同步 */
+                uint16_t cbr2 = rtl_inw(RTL_REG_CBR);
+                uint16_t sync_capr = (cbr2 - 16) & 0x3FFF;
+                rtl_outw(RTL_REG_CAPR, sync_capr);
                 break;
+            }
+
+            /* 检查是否有足够的数据（pkt_len 字节）可读 */
+            {
+                uint16_t cbr_now = rtl_inw(RTL_REG_CBR);
+                uint32_t avail_now = (cbr_now - read_offset + RTL_RX_BUF_SIZE) % RTL_RX_BUF_SIZE;
+                if (avail_now < pkt_len) {
+                    /* 数据尚未完全到达，等待下次中断 */
+                    break;
+                }
             }
 
             if (rok && !rer) {
@@ -418,11 +477,11 @@ void rtl8139_irq_handler(void)
             }
 
             /* 推进读取指针。
-             * new_offset = (read_offset + pkt_len + 4 + 3) & ~3
-             * CAPR = new_offset - 16，并设置确认位 0x2000。 */
-            uint32_t new_offset = (read_offset + pkt_len + 4 + 3) & ~3;
-            uint16_t new_capr = (uint16_t)(new_offset - 16);
-            rtl_outw(RTL_REG_CAPR, new_capr | 0x2000);
+             * pkt_len 已包含 4 字节头，所以下一包从 read_offset + pkt_len 开始，
+             * 再按 4 字节对齐。CAPR = new_offset - 16。 */
+            uint32_t new_offset = (read_offset + pkt_len + 3) & ~3;
+            uint16_t new_capr = (uint16_t)((new_offset - 16) & 0x3FFF);
+            rtl_outw(RTL_REG_CAPR, new_capr);
         }
     }
 
