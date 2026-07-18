@@ -85,16 +85,28 @@ void memory_init(BootInfo* info, uintptr_t kernel_end)
      * 对于UEFI，可以使用内存映射找到合适的区域。
      * 对于旧版启动，使用固定位置。 */
     if (info->boot_type == BOOT_TYPE_UEFI) {
-        /* 在内存映射中搜索足够大的空闲区域来存放位图 */
+        /* 在内存映射中搜索足够大的空闲区域来存放位图
+         * 关键：必须跳过内核占用的区域，否则位图会覆盖内核代码
+         * UEFI 内存映射将内核所在区域标记为 type=7 (LoaderCode→可用)，
+         * 但内核实际仍在运行，不能覆写。因此搜索起点必须是 kernel_end。 */
         int found = 0;
         for (uint64_t i = 0; i < map_entries && !found; i++) {
             MemoryMapEntry* desc = (MemoryMapEntry*)(
                 (uint64_t)info->memory_map + i * info->memory_map_descriptor_size
             );
             if (desc->type == 7) {  /* EfiConventionalMemory */
-                if (desc->number_of_pages * PAGE_SIZE >= bitmap_size &&
-                    desc->physical_start >= 0x100000) {  /* 1MB以上 */
-                    page_bitmap = (uint8_t *)(uintptr_t)desc->physical_start;
+                uint64_t region_start = desc->physical_start;
+                uint64_t region_size  = desc->number_of_pages * PAGE_SIZE;
+                /* 跳过内核占用的区域：位图必须放在内核之后 */
+                if (region_start < kernel_end) {
+                    uint64_t region_end = region_start + region_size;
+                    if (region_end <= kernel_end) continue; /* 整个区域被内核占用 */
+                    /* 区域部分与内核重叠，调整起点到内核之后 */
+                    region_start = kernel_end;
+                    region_size = region_end - region_start;
+                }
+                if (region_size >= bitmap_size) {
+                    page_bitmap = (uint8_t *)(uintptr_t)region_start;
                     found = 1;
                 }
             }
@@ -155,8 +167,21 @@ void memory_init(BootInfo* info, uintptr_t kernel_end)
         bitmap_set(i);
     }
 
-    /* 保留内核栈区域：8MB-16MB */
-    for (uint64_t i = 0x800000 / PAGE_SIZE; i < 0x1000000 / PAGE_SIZE && i < max_pages; i++) {
+    /* 保留内核栈区域。
+     *
+     * 内核启动栈顶在 0x800000，向下增长。经过初始化和函数调用，
+     * RSP 可能下降到 0x7ff000 附近。如果不保留 0x800000 以下的
+     * 栈使用区域，页分配器可能将这些页面分配给其他用途（如用户
+     * 进程的 PML4 或内核栈），导致启动栈内容被覆盖。
+     *
+     * 这曾导致 PID0 的 arch_switch_to 栈帧被覆盖（ret=0），
+     * 从 PID1 切回 PID0 时 triple fault。
+     *
+     * 保留范围：0x700000 (7MB) ~ 0x1000000 (16MB)
+     *   - 0x800000 以下：启动栈向下增长的空间
+     *   - 0x800000 以上：中断/系统调用使用的内核栈空间
+     */
+    for (uint64_t i = 0x700000 / PAGE_SIZE; i < 0x1000000 / PAGE_SIZE && i < max_pages; i++) {
         bitmap_set(i);
     }
 
@@ -273,4 +298,9 @@ uint64_t pmm_used_pages(void)
         }
     }
     return count;
+}
+
+uint64_t pmm_max_pages(void)
+{
+    return max_pages;
 }

@@ -205,22 +205,31 @@ void scheduler_schedule(void)
         tss.rsp0 = (uint64_t)new_p->kernel_stack +
                     (KERNEL_STACK_PAGES * PAGE_SIZE);
     } else {
-        /* PID 0 使用启动栈；近似 rsp0 */
-        uint64_t rsp_approx;
-        __asm__ volatile ("mov %%rsp, %0" : "=r"(rsp_approx));
-        tss.rsp0 = rsp_approx + 512;
+        /* PID 0 使用启动栈 (0x800000)。
+         * 之前的近似 "rsp_approx + 512" 在从其他进程切换时
+         * 会给出错误的值（因为 RSP 在旧进程的栈上）。
+         * 使用固定的启动栈顶地址。 */
+        tss.rsp0 = 0x800000;
+    }
+
+    /* Sanity check: refuse to switch to a process with kernel_rsp == 0
+     * (would load RSP=0 and immediately triple-fault). */
+    if (new_p->kernel_rsp == 0) {
+        serial_puts("[SCHED] PANIC: PID");
+        serial_put_dec((uint64_t)new_p->pid);
+        serial_puts(" kernel_rsp=0, cannot switch!\n");
+        /* Revert state changes and stay on the old process */
+        if (old->state == PROC_READY)
+            old->state = PROC_RUNNING;
+        new_p->state = (next == 0) ? PROC_RUNNING : PROC_READY;
+        need_reschedule = 0;
+        return;
     }
 
     /* 上下文切换前的调试输出 */
-    printf("[SCHED] PID%d -> PID%d krsp=%lx stack[0]=%lx stack[1]=%lx stack[2]=%lx stack[3]=%lx\n",
-           old->pid, new_p->pid,
-           (unsigned long)new_p->kernel_rsp,
-           (unsigned long)((uint64_t *)new_p->kernel_rsp)[0],
-           (unsigned long)((uint64_t *)new_p->kernel_rsp)[1],
-           (unsigned long)((uint64_t *)new_p->kernel_rsp)[2],
-           (unsigned long)((uint64_t *)new_p->kernel_rsp)[3]);
+    printf("[SCHED] PID%d -> PID%d krsp=%lx\n", old->pid, new_p->pid,
+           (unsigned long)new_p->kernel_rsp);
 
-    /* 上下文切换 */
     current = new_p;
     switch_to(&old->kernel_rsp, new_p->kernel_rsp);
 

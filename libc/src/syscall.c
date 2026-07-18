@@ -1,93 +1,27 @@
 /* SpiritFoxOS libc - Syscall wrappers
  * Implements POSIX syscall wrappers using the Linux-compatible
  * syscall ABI provided by the SpiritFoxOS kernel.
+ *
+ * All SYS_* macros come from internal.h (single source of truth).
  */
 
-#include "arch/x86_64/syscall.h"
-#include <sys/types.h>
-#include <stddef.h>
-#include <stdarg.h>
-#include <errno.h>
+#include "internal.h"
+#include <fcntl.h>
 #include <mman.h>
 #include <time.h>
+#include <sys/stat.h>
+#include <stdarg.h>
 
-/* Syscall numbers (Linux x86_64 ABI) */
-#define SYS_read       0
-#define SYS_write      1
-#define SYS_open       2
-#define SYS_close      3
-#define SYS_stat       4
-#define SYS_fstat      5
-#define SYS_lstat      6
-#define SYS_poll       7
-#define SYS_lseek      8
-#define SYS_mmap       9
-#define SYS_mprotect   10
-#define SYS_munmap     11
-#define SYS_brk        12
-#define SYS_rt_sigaction  13
-#define SYS_rt_sigprocmask 14
-#define SYS_ioctl      16
-#define SYS_pread64    17
-#define SYS_pwrite64   18
-#define SYS_access     21
-#define SYS_pipe       22
-#define SYS_select     23
-#define SYS_sched_yield 24
-#define SYS_dup        32
-#define SYS_dup2       33
-#define SYS_nanosleep  35
-#define SYS_getpid     39
-#define SYS_socket     41
-#define SYS_connect    42
-#define SYS_accept     43
-#define SYS_sendto     44
-#define SYS_recvfrom   45
-#define SYS_clone      56
-#define SYS_fork       57
-#define SYS_execve     59
-#define SYS_exit       60
-#define SYS_wait4      61
-#define SYS_kill       62
-#define SYS_uname      63
-#define SYS_fcntl      72
-#define SYS_fsync      74
-#define SYS_getcwd     79
-#define SYS_chdir      80
-#define SYS_rename     82
-#define SYS_mkdir      83
-#define SYS_rmdir      84
-#define SYS_creat      85
-#define SYS_unlink     87
-#define SYS_readlink   89
-#define SYS_chmod      90
-#define SYS_chown      92
-#define SYS_gettimeofday 96
-#define SYS_getuid     102
-#define SYS_getgid     104
-#define SYS_setuid     105
-#define SYS_setgid     106
-#define SYS_geteuid    107
-#define SYS_getegid    108
-#define SYS_getppid    110
-#define SYS_sigaltstack 131
-#define SYS_arch_prctl 158
-#define SYS_set_tid_address 218
-#define SYS_exit_group 231
-#define SYS_futex      202
-#define SYS_clock_gettime 228
-#define SYS_getrandom  318
-
-/* Errno handling */
-static int sfk_errno = 0;
+/* ========================================================================
+ * errno — global variable, non-static for internal.h
+ * ======================================================================== */
+int sfk_errno = 0;
 int *__errno_location(void) { return &sfk_errno; }
 
-#define SET_ERRNO(ret) do { \
-    if ((ret) < 0) { sfk_errno = -(int)(ret); ret = -1; } \
-    else { sfk_errno = 0; } \
-} while(0)
+/* ========================================================================
+ * File I/O
+ * ======================================================================== */
 
-/* File I/O */
 ssize_t read(int fd, void *buf, size_t count)
 {
     int64_t ret = sfk_syscall3(SYS_read, fd, (int64_t)buf, count);
@@ -163,7 +97,46 @@ int fcntl(int fd, int cmd, ...)
     return (int)ret;
 }
 
-/* Directory */
+int ioctl(int fd, unsigned long request, ...)
+{
+    va_list ap;
+    va_start(ap, request);
+    int64_t arg = va_arg(ap, int64_t);
+    va_end(ap);
+    int64_t ret = sfk_syscall3(SYS_ioctl, fd, (int64_t)request, arg);
+    SET_ERRNO(ret);
+    return (int)ret;
+}
+
+/* ========================================================================
+ * File status (struct stat defined in sys/stat.h)
+ * ======================================================================== */
+
+int stat(const char *pathname, struct stat *statbuf)
+{
+    int64_t ret = sfk_syscall2(SYS_stat, (int64_t)pathname, (int64_t)statbuf);
+    SET_ERRNO(ret);
+    return (int)ret;
+}
+
+int fstat(int fd, struct stat *statbuf)
+{
+    int64_t ret = sfk_syscall2(SYS_fstat, fd, (int64_t)statbuf);
+    SET_ERRNO(ret);
+    return (int)ret;
+}
+
+int lstat(const char *pathname, struct stat *statbuf)
+{
+    int64_t ret = sfk_syscall2(SYS_lstat, (int64_t)pathname, (int64_t)statbuf);
+    SET_ERRNO(ret);
+    return (int)ret;
+}
+
+/* ========================================================================
+ * Directory operations
+ * ======================================================================== */
+
 int mkdir(const char *path, mode_t mode)
 {
     int64_t ret = sfk_syscall2(SYS_mkdir, (int64_t)path, mode);
@@ -213,7 +186,43 @@ int chmod(const char *path, mode_t mode)
     return (int)ret;
 }
 
-/* Process */
+int fchmod(int fd, mode_t mode)
+{
+    int64_t ret = sfk_syscall2(SYS_fchmod, fd, mode);
+    SET_ERRNO(ret);
+    return (int)ret;
+}
+
+int chown(const char *path, uid_t owner, gid_t group)
+{
+    int64_t ret = sfk_syscall3(SYS_chown, (int64_t)path, owner, group);
+    SET_ERRNO(ret);
+    return (int)ret;
+}
+
+mode_t umask(mode_t mask)
+{
+    return (mode_t)sfk_syscall1(SYS_umask, mask);
+}
+
+int access(const char *pathname, int mode)
+{
+    int64_t ret = sfk_syscall2(SYS_access, (int64_t)pathname, mode);
+    SET_ERRNO(ret);
+    return (int)ret;
+}
+
+ssize_t getdents64(int fd, void *dirp, size_t count)
+{
+    int64_t ret = sfk_syscall3(SYS_getdents64, fd, (int64_t)dirp, count);
+    SET_ERRNO(ret);
+    return (ssize_t)ret;
+}
+
+/* ========================================================================
+ * Process management
+ * ======================================================================== */
+
 pid_t getpid(void)
 {
     return (pid_t)sfk_syscall0(SYS_getpid);
@@ -224,9 +233,9 @@ pid_t getppid(void)
     return (pid_t)sfk_syscall0(SYS_getppid);
 }
 
-uid_t getuid(void) { return (uid_t)sfk_syscall0(SYS_getuid); }
+uid_t getuid(void)  { return (uid_t)sfk_syscall0(SYS_getuid); }
 uid_t geteuid(void) { return (uid_t)sfk_syscall0(SYS_geteuid); }
-gid_t getgid(void) { return (gid_t)sfk_syscall0(SYS_getgid); }
+gid_t getgid(void)  { return (gid_t)sfk_syscall0(SYS_getgid); }
 gid_t getegid(void) { return (gid_t)sfk_syscall0(SYS_getegid); }
 
 int setuid(uid_t uid)
@@ -261,17 +270,16 @@ void _exit(int status)
     __builtin_unreachable();
 }
 
-void exit(int status)
-{
-    sfk_syscall1(SYS_exit_group, status);
-    __builtin_unreachable();
-}
-
 pid_t wait4(pid_t pid, int *status, int options, void *rusage)
 {
     int64_t ret = sfk_syscall4(SYS_wait4, pid, (int64_t)status, options, (int64_t)rusage);
     SET_ERRNO(ret);
     return (pid_t)ret;
+}
+
+pid_t waitpid(pid_t pid, int *status, int options)
+{
+    return wait4(pid, status, options, NULL);
 }
 
 int kill(pid_t pid, int sig)
@@ -288,7 +296,10 @@ int sched_yield(void)
     return (int)ret;
 }
 
-/* Memory */
+/* ========================================================================
+ * Memory management
+ * ======================================================================== */
+
 void *mmap(void *addr, size_t length, int prot, int flags, int fd, off_t offset)
 {
     int64_t ret = sfk_syscall6(SYS_mmap, (int64_t)addr, length, prot, flags, fd, offset);
@@ -313,7 +324,10 @@ int mprotect(void *addr, size_t len, int prot)
     return (int)ret;
 }
 
-/* Time */
+/* ========================================================================
+ * Time
+ * ======================================================================== */
+
 int clock_gettime(int clk_id, struct timespec *tp)
 {
     int64_t ret = sfk_syscall2(SYS_clock_gettime, clk_id, (int64_t)tp);
@@ -335,7 +349,18 @@ int nanosleep(const struct timespec *req, struct timespec *rem)
     return (int)ret;
 }
 
-/* Signal */
+time_t time(time_t *tloc)
+{
+    int64_t ret = sfk_syscall1(SYS_time, tloc ? (int64_t)tloc : 0);
+    if (ret < 0) { sfk_errno = -(int)ret; return -1; }
+    if (tloc) *tloc = (time_t)ret;
+    return (time_t)ret;
+}
+
+/* ========================================================================
+ * Signal
+ * ======================================================================== */
+
 int rt_sigaction(int sig, const void *act, void *oact, size_t sigsetsize)
 {
     int64_t ret = sfk_syscall4(SYS_rt_sigaction, sig, (int64_t)act, (int64_t)oact, sigsetsize);
@@ -343,7 +368,10 @@ int rt_sigaction(int sig, const void *act, void *oact, size_t sigsetsize)
     return (int)ret;
 }
 
-/* Misc */
+/* ========================================================================
+ * Miscellaneous
+ * ======================================================================== */
+
 int uname(void *buf)
 {
     int64_t ret = sfk_syscall1(SYS_uname, (int64_t)buf);
@@ -356,4 +384,12 @@ ssize_t getrandom(void *buf, size_t buflen, unsigned int flags)
     int64_t ret = sfk_syscall3(SYS_getrandom, (int64_t)buf, buflen, flags);
     SET_ERRNO(ret);
     return (ssize_t)ret;
+}
+
+int isatty(int fd)
+{
+    /* Simple implementation: try ioctl TIOCGETD.
+     * Kernel ioctl is not yet implemented, so always return 0. */
+    (void)fd;
+    return 0;
 }

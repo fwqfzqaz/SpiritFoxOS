@@ -462,6 +462,13 @@ int process_exec(const char *path, const char *const argv[],
     /* ---- 7. Build trap frame on kernel stack ---- */
     process_setup_frame(current, current->entry_point, sp, 0);
 
+    /* ---- 7.5 Clear kernel flag – this is now a user process ---- */
+    /* process_create_kthread() sets PROC_FLAG_KERNEL, but after exec
+     * the process runs in user mode.  Keeping the flag set causes
+     * isr_handler() to treat user-mode CPU faults as kernel panics
+     * instead of killing the offending user process. */
+    current->flags &= ~PROC_FLAG_KERNEL;
+
     /* Update TSS rsp0 for future interrupts from user mode */
     if (current->kernel_stack) {
         tss.rsp0 = (uint64_t)current->kernel_stack +

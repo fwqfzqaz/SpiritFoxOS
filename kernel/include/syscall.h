@@ -236,6 +236,28 @@ typedef struct {
 } linux_sigaction_t;
 
 /* ========================================================================
+ * Linux-compatible dirent64 structure (for getdents64 syscall)
+ * ======================================================================== */
+
+/* d_type values */
+#define DT_UNKNOWN  0
+#define DT_FIFO     1
+#define DT_CHR      2
+#define DT_DIR      4
+#define DT_BLK      6
+#define DT_REG      8
+#define DT_LNK     10
+#define DT_SOCK    12
+
+typedef struct {
+    uint64_t d_ino;           /* Inode number */
+    int64_t  d_off;           /* Offset to next dirent */
+    uint16_t d_reclen;        /* Length of this linux_dirent64_t */
+    uint8_t  d_type;          /* File type (DT_*) */
+    char     d_name[];        /* Filename (null-terminated) */
+} linux_dirent64_t;
+
+/* ========================================================================
  * SFK-specific syscalls (600-699)
  * ======================================================================== */
 

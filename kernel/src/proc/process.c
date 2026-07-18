@@ -67,7 +67,6 @@ static int alloc_pid(void)
 /* 从跳板调用，(entry, arg) 在 rdi, rsi 中 */
 __attribute__((used)) void kthread_entry(void (*entry)(void *), void *arg)
 {
-    printf("[kthread_entry] entry=%p arg=%p\n", (void *)entry, arg);
     entry(arg);
     process_exit(0);
     __builtin_unreachable();
@@ -128,9 +127,12 @@ void process_init(void)
     p->child   = NULL;
     p->sibling = NULL;
 
-    /* Saved context – kernel_rsp will be set on first context switch out */
+    /* Saved context – capture current RSP so the first context switch
+     * to PID0 doesn't load RSP=0 and triple-fault.  When PID0 is
+     * later switched OUT via arch_switch_to, the real RSP will be
+     * saved, overwriting this initial value. */
     p->trap_frame  = NULL;
-    p->kernel_rsp  = 0;
+    __asm__ volatile ("mov %%rsp, %0" : "=r"(p->kernel_rsp));
 
     current = p;
     tss.rsp0 = 0;
@@ -220,21 +222,9 @@ process_t *process_create_kthread(void (*entry)(void *), void *arg)
     p->kernel_rsp = (uint64_t)sp;
     p->trap_frame = NULL;
 
-    printf("[kthread_create] PID=%d stack=%p stack_top=%lx krsp=%lx entry=%p arg=%p\n",
-           p->pid, stack, (unsigned long)stack_top, (unsigned long)p->kernel_rsp,
+    printf("[kthread_create] PID=%d stack=%p krsp=%lx entry=%p arg=%p\n",
+           p->pid, stack, (unsigned long)p->kernel_rsp,
            (void *)entry, arg);
-    printf("[kthread_create] stack contents: r15=%lx r14=%lx r13=%lx r12=%lx rbx=%lx rbp=%lx ret=%lx entry=%lx arg=%lx\n",
-           (unsigned long)sp[0], (unsigned long)sp[1], (unsigned long)sp[2],
-           (unsigned long)sp[3], (unsigned long)sp[4], (unsigned long)sp[5],
-           (unsigned long)sp[6], (unsigned long)sp[7], (unsigned long)sp[8]);
-
-    /* 验证：从 kernel_rsp 进行 volatile 回读 */
-    {
-        volatile uint64_t *vp = (volatile uint64_t *)p->kernel_rsp;
-        printf("[kthread_create] verify: v[0]=%lx v[6]=%lx v[7]=%lx v[8]=%lx\n",
-               (unsigned long)vp[0], (unsigned long)vp[6],
-               (unsigned long)vp[7], (unsigned long)vp[8]);
-    }
 
     return p;
 }

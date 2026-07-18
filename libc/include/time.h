@@ -22,8 +22,10 @@ struct timeval {
     suseconds_t tv_usec;
 };
 
+/* Syscall-backed functions */
+time_t time(time_t *tloc);
 int clock_gettime(int clk_id, struct timespec *tp);
 int gettimeofday(struct timeval *tv, void *tz);
 int nanosleep(const struct timespec *req, struct timespec *rem);
 
-#endif
+#endif /* _TIME_H */

@@ -9,6 +9,7 @@
 #include "memory.h"
 #include "string.h"
 #include "pci.h"
+#include "serial.h"
 
 /* ---------- Bochs VBE DISPI 接口 ---------- */
 #define VBE_DISPI_IOPORT_INDEX  0x1CE
@@ -669,6 +670,9 @@ static void fb_term_scroll(void)
 
 void fb_term_putchar(char c)
 {
+    /* 始终输出到串口用于QEMU日志和串口终端 */
+    serial_putchar(c);
+
     if (!fb_term_active || !fb_initialized) return;
 
     if (c == '\n') {

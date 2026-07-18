@@ -53,3 +53,17 @@ void serial_put_dec(uint64_t val)
         serial_putchar(buf[i]);
     }
 }
+
+/* Check if a character is available from COM1 */
+int serial_has_char(void)
+{
+    return (hal_inb(COM1 + 5) & 0x01) != 0;
+}
+
+/* Read a character from COM1 (blocking) */
+char serial_get_char(void)
+{
+    while (!(hal_inb(COM1 + 5) & 0x01))
+        __asm__ volatile ("hlt");
+    return (char)hal_inb(COM1);
+}

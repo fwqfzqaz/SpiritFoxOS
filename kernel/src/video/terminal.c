@@ -1,5 +1,6 @@
 #include "terminal.h"
 #include "keyboard.h"
+#include "serial.h"
 #include "vga.h"
 #include "fb.h"
 #include "string.h"
@@ -421,10 +422,21 @@ void terminal_input(char c)
 
 int terminal_readline(char *buf, int maxlen)
 {
-    /* 等待完整行 */
+    /* 等待完整行 — 同时接受键盘和串口输入 */
     while (!term_line_ready) {
-        char c = keyboard_get_char();
-        terminal_input(c);
+        /* 优先检查串口输入（用于 QEMU serial stdio 测试） */
+        if (serial_has_char()) {
+            char c = serial_get_char();
+            /* 将 \r 转为 \n 以兼容终端输入 */
+            if (c == '\r') c = '\n';
+            terminal_input(c);
+        } else if (keyboard_has_char()) {
+            char c = keyboard_get_char();
+            terminal_input(c);
+        } else {
+            /* 无输入时让出 CPU */
+            __asm__ volatile ("hlt");
+        }
     }
 
     /* 将行复制到调用者的缓冲区 */

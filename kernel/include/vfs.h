@@ -129,6 +129,7 @@ struct vfs_file {
     uint32_t        refcount;      /* Reference count */
     vfs_dentry_t   *dentry;        /* Associated dentry */
     vfs_pipe_t     *pipe;          /* Pipe data (for VFS_TYPE_PIPE) */
+    uint32_t        dir_index;     /* Directory read position (for getdents64) */
 };
 
 /* ========================================================================

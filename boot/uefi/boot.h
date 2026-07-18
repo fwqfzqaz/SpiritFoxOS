@@ -95,21 +95,29 @@ typedef struct {
     uint8_t  Data4[8];
 } EFI_GUID;
 
-/* GOP 像素格式 */
-typedef enum {
-    PixelRedGreenBlueReserved8BitPerColor,
-    PixelBlueGreenRedReserved8BitPerColor,
-    PixelBitMask,
-    PixelBltOnly,
-    PixelFormatMax
-} EFI_GRAPHICS_PIXEL_FORMAT;
+/* GOP 像素格式 (UINT32, not enum - UEFI spec) */
+typedef uint32_t EFI_GRAPHICS_PIXEL_FORMAT;
+#define PixelRedGreenBlueReserved8BitPerColor 0
+#define PixelBlueGreenRedReserved8BitPerColor 1
+#define PixelBitMask  2
+#define PixelBltOnly  3
+#define PixelFormatMax 4
 
-/* GOP Mode Info */
+/* GOP 像素位掩码 (仅 PixelFormat == PixelBitMask 时有效) */
+typedef struct {
+    uint32_t RedMask;
+    uint32_t GreenMask;
+    uint32_t BlueMask;
+    uint32_t ReservedMask;
+} EFI_PIXEL_BITMASK;
+
+/* GOP Mode Info - 精确匹配 UEFI 规范布局 */
 typedef struct {
     uint32_t Version;
     uint32_t HorizontalResolution;
     uint32_t VerticalResolution;
     EFI_GRAPHICS_PIXEL_FORMAT PixelFormat;
+    EFI_PIXEL_BITMASK PixelInformation;   /* 仅 PixelBitMask 时有效，占 16 字节 */
     uint32_t PixelsPerScanLine;
 } EFI_GRAPHICS_OUTPUT_MODE_INFORMATION;
 
@@ -236,6 +244,9 @@ typedef EFI_STATUS (__attribute__((ms_abi)) *EFI_HANDLE_PROTOCOL)(
     EFI_HANDLE Handle, EFI_GUID *Protocol, void **Interface);
 typedef EFI_STATUS (__attribute__((ms_abi)) *EFI_LOCATE_PROTOCOL)(
     EFI_GUID *Protocol, void *Registration, void **Interface);
+typedef EFI_STATUS (__attribute__((ms_abi)) *EFI_LOCATE_HANDLE_BUFFER)(
+    int SearchType, EFI_GUID *Protocol, void *SearchKey,
+    UINTN *NoHandles, EFI_HANDLE **Buffer);
 typedef EFI_STATUS (__attribute__((ms_abi)) *EFI_EXIT_BOOT_SERVICES)(
     EFI_HANDLE ImageHandle, UINTN MapKey);
 typedef void (__attribute__((ms_abi)) *EFI_COPY_MEM)(void *Destination, const void *Source, UINTN Length);
@@ -303,7 +314,7 @@ typedef struct {
     void *OpenProtocolInformation;             /* 0x128 */
 
     void *ProtocolsPerHandle;                  /* 0x130 */
-    void *LocateHandleBuffer;                  /* 0x138 */
+    EFI_LOCATE_HANDLE_BUFFER LocateHandleBuffer; /* 0x138 */
 
     EFI_LOCATE_PROTOCOL  LocateProtocol;       /* 0x140 */
 

@@ -1,7 +1,7 @@
 # SpiritFoxOS - Makefile
 # 灵狐操作系统构建系统
 
-.PHONY: all clean kernel loader image iso run run-iso run-debug logo uefi-bootloader uefi-image run-uefi usb test-elf
+.PHONY: all clean kernel loader image iso dual-iso run run-iso run-debug logo uefi-bootloader uefi-image run-uefi run-uefi-iso usb test-elf
 
 # =========================================
 # 工具链配置
@@ -111,6 +111,19 @@ $(KERNEL_BUILD)/kernel.bin: $(KERNEL_BUILD)/kernel.elf
 kernel: logo $(KERNEL_BUILD)/kernel.bin
 
 # =========================================
+# libc 构建
+# =========================================
+LIBC_DIR       = libc
+LIBC_BUILD     = build/libc
+
+libc:
+	@echo "[LIBC] Building libc..."
+	@$(MAKE) -C $(LIBC_DIR) CROSS=$(CROSS)
+
+libc-clean:
+	@$(MAKE) -C $(LIBC_DIR) clean
+
+# =========================================
 # AP Trampoline (raw binary, not linked into kernel)
 # =========================================
 $(KERNEL_BUILD)/ap_trampoline.bin: $(KERNEL_SRC)/arch/x86_64/ap_trampoline.S
@@ -186,7 +199,7 @@ $(UEFI_BUILD)/BOOTX64.EFI: $(UEFI_BUILD)/bootloader.elf
 uefi-bootloader: $(UEFI_BUILD)/BOOTX64.EFI
 
 # =========================================
-# GRUB ISO 镜像
+# GRUB ISO 镜像 (BIOS only)
 # =========================================
 ISO_FILE = build/spiritfox.iso
 
@@ -222,6 +235,47 @@ iso: kernel loader
 	@echo "========================================="
 
 # =========================================
+# 双启动 ISO 镜像 (BIOS + UEFI)
+# =========================================
+DUAL_ISO_FILE = build/spiritfox-dual.iso
+
+dual-iso: kernel loader uefi-bootloader
+	@echo "[DUAL-ISO] Building BIOS+UEFI dual-boot ISO..."
+	@rm -rf $(ISO_DIR)
+	@mkdir -p $(ISO_DIR)/boot/grub
+	@mkdir -p $(ISO_DIR)/EFI/Boot
+	@mkdir -p $(ISO_DIR)/EFI/SpiritFoxOS
+	@cp $(LOADER_BUILD)/loader.elf $(ISO_DIR)/boot/loader.elf
+	@cp $(KERNEL_BUILD)/kernel.bin $(ISO_DIR)/boot/kernel.bin
+	@cp $(KERNEL_BUILD)/kernel.elf $(ISO_DIR)/EFI/SpiritFoxOS/kernel.elf
+	@cp $(UEFI_BUILD)/BOOTX64.EFI $(ISO_DIR)/EFI/Boot/BOOTX64.EFI
+	@echo 'serial --speed=115200 --unit=0 --word=8 --parity=no --stop=1' > $(ISO_DIR)/boot/grub/grub.cfg
+	@echo 'terminal_input serial console' >> $(ISO_DIR)/boot/grub/grub.cfg
+	@echo 'terminal_output serial console' >> $(ISO_DIR)/boot/grub/grub.cfg
+	@echo 'insmod all_video' >> $(ISO_DIR)/boot/grub/grub.cfg
+	@echo 'insmod gfxterm' >> $(ISO_DIR)/boot/grub/grub.cfg
+	@echo 'set timeout=5' >> $(ISO_DIR)/boot/grub/grub.cfg
+	@echo 'set default=0' >> $(ISO_DIR)/boot/grub/grub.cfg
+	@echo '' >> $(ISO_DIR)/boot/grub/grub.cfg
+	@echo 'menuentry "SpiritFoxOS (1024x768x32)" {' >> $(ISO_DIR)/boot/grub/grub.cfg
+	@echo '  echo "Loading SpiritFoxOS..."' >> $(ISO_DIR)/boot/grub/grub.cfg
+	@echo '  set gfxpayload=1024x768x32' >> $(ISO_DIR)/boot/grub/grub.cfg
+	@echo '  multiboot2 /boot/loader.elf' >> $(ISO_DIR)/boot/grub/grub.cfg
+	@echo '  module2 /boot/kernel.bin' >> $(ISO_DIR)/boot/grub/grub.cfg
+	@echo '}' >> $(ISO_DIR)/boot/grub/grub.cfg
+	@echo '' >> $(ISO_DIR)/boot/grub/grub.cfg
+	@echo 'menuentry "SpiritFoxOS (Text Mode)" {' >> $(ISO_DIR)/boot/grub/grub.cfg
+	@echo '  echo "Loading SpiritFoxOS (text mode)..."' >> $(ISO_DIR)/boot/grub/grub.cfg
+	@echo '  multiboot2 /boot/loader.elf' >> $(ISO_DIR)/boot/grub/grub.cfg
+	@echo '  module2 /boot/kernel.bin' >> $(ISO_DIR)/boot/grub/grub.cfg
+	@echo '}' >> $(ISO_DIR)/boot/grub/grub.cfg
+	@grub-mkrescue -o $(DUAL_ISO_FILE) $(ISO_DIR) 2>/dev/null
+	@echo "========================================="
+	@echo "  SpiritFoxOS Dual-boot ISO created: $(DUAL_ISO_FILE)"
+	@echo "  Supports both BIOS and UEFI boot"
+	@echo "========================================="
+
+# =========================================
 # UEFI disk image
 # =========================================
 $(IMAGE_DIR):
@@ -252,11 +306,11 @@ uefi-image: kernel uefi-bootloader
 		mmd -i build/esp.img ::EFI ::EFI/Boot ::EFI/SpiritFoxOS ; \
 		mcopy -i build/esp.img $(EFI_DIR)/BOOTX64.EFI ::EFI/Boot/BOOTX64.EFI ; \
 		mcopy -i build/esp.img $(OS_DIR)/kernel.elf ::EFI/SpiritFoxOS/kernel.elf ; \
-		echo "FS0:\\EFI\\Boot\\BOOTX64.EFI" > build/startup.nsh ; \
-		printf '\n' >> build/startup.nsh ; \
+		echo "[UEFI-IMG] Creating startup.nsh for OVMF auto-boot..." ; \
+		echo 'FS0:\EFI\Boot\BOOTX64.EFI' > build/startup.nsh ; \
 		mcopy -i build/esp.img build/startup.nsh ::startup.nsh ; \
 		rm -f build/startup.nsh ; \
-		echo "[UEFI-IMG] Writing ESP to disk image at offset $$ESP_OFFSET..."; \
+		echo "[UEFI-IMG] Writing ESP to disk image at offset $$ESP_OFFSET..." ; \
 		dd if=build/esp.img of=$(IMAGE_FILE) bs=512 seek=$$ESP_OFFSET conv=notrunc 2>/dev/null; \
 		rm -f build/esp.img; \
 	else \
@@ -312,7 +366,7 @@ run-debug: iso
 # =========================================
 # QEMU UEFI run
 # =========================================
-run-uefi: uefi-image build/ovmf_vars.fd
+run-uefi: uefi-image build/ovmf_vars.fd build/disk.img build/fat32.img
 	@if [ ! -f $(OVMF_CODE) ]; then \
 		echo "ERROR: OVMF firmware not found at $(OVMF_CODE)"; \
 		echo "Install it: sudo apt install ovmf"; \
@@ -323,12 +377,39 @@ run-uefi: uefi-image build/ovmf_vars.fd
 	    -drive if=pflash,format=raw,file=build/ovmf_vars.fd \
 	    -drive if=ide,format=raw,file=$(IMAGE_FILE) \
 	    -m 2G \
-	    -vga std \
 	    -serial stdio \
 	    -netdev user,id=net0,hostfwd=tcp::25566-:25565 \
 	    -device rtl8139,netdev=net0 \
 	    -no-reboot -no-shutdown \
-	    -boot c
+	    -boot c \
+	    -device ahci,id=ahci0 \
+	    -drive id=fat32disk,file=build/fat32.img,if=none,format=raw \
+	    -device ide-hd,drive=fat32disk,bus=ahci0.0 \
+	    -drive id=disk0,file=build/disk.img,if=none,format=raw \
+	    -device ide-hd,drive=disk0,bus=ahci0.1
+
+# 双启动 ISO 的 UEFI 运行（从光盘引导 UEFI）
+run-uefi-iso: dual-iso build/ovmf_vars.fd build/disk.img build/fat32.img
+	@if [ ! -f $(OVMF_CODE) ]; then \
+		echo "ERROR: OVMF firmware not found at $(OVMF_CODE)"; \
+		echo "Install it: sudo apt install ovmf"; \
+		exit 1; \
+	fi
+	qemu-system-x86_64 \
+	    -drive if=pflash,format=raw,readonly=on,file=$(OVMF_CODE) \
+	    -drive if=pflash,format=raw,file=build/ovmf_vars.fd \
+	    -cdrom $(DUAL_ISO_FILE) \
+	    -m 2G \
+	    -serial stdio \
+	    -netdev user,id=net0,hostfwd=tcp::25566-:25565 \
+	    -device rtl8139,netdev=net0 \
+	    -no-reboot \
+	    -boot d \
+	    -device ahci,id=ahci0 \
+	    -drive id=fat32disk,file=build/fat32.img,if=none,format=raw \
+	    -device ide-hd,drive=fat32disk,bus=ahci0.0 \
+	    -drive id=disk0,file=build/disk.img,if=none,format=raw \
+	    -device ide-hd,drive=disk0,bus=ahci0.1
 
 build/ovmf_vars.fd:
 	@cp $(OVMF_VARS) $@ 2>/dev/null || dd if=/dev/zero of=$@ bs=1 count=0 seek=262143 2>/dev/null
@@ -428,4 +509,5 @@ clean:
 	@rm -rf build/
 	@rm -f $(LOGO_HEADER)
 	@rm -f build/ovmf_vars.fd
+	@$(MAKE) -C $(LIBC_DIR) clean 2>/dev/null || true
 	@echo "Done."

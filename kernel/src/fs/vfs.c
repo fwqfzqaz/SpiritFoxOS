@@ -430,7 +430,8 @@ int vfs_unmount(const char *target)
 int vfs_alloc_fd(void)
 {
     vfs_file_t **fds = vfs_get_fd_table();
-    for (int i = 0; i < VFS_MAX_FD; i++) {
+    /* 跳过 fd 0-2（预留给 stdin/stdout/stderr） */
+    for (int i = 3; i < VFS_MAX_FD; i++) {
         if (fds[i] == NULL)
             return i;
     }
@@ -459,12 +460,16 @@ int vfs_pipe(int fd[2])
         free_page(pipe);
         return -2;
     }
+    /* 立即预留 read_fd 槽位，防止第二次 vfs_alloc_fd 返回相同 fd */
+    vfs_get_fd_table()[read_fd] = (vfs_file_t*)1;  /* 占位符 */
+
     int write_fd = vfs_alloc_fd();
     if (write_fd < 0) {
         vfs_get_fd_table()[read_fd] = NULL;
         free_page(pipe);
         return -3;
     }
+    vfs_get_fd_table()[write_fd] = (vfs_file_t*)1;  /* 占位符 */
 
     /* Create read end inode */
     vfs_inode_t *read_inode = (vfs_inode_t *)alloc_page();

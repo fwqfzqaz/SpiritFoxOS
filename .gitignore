@@ -6,7 +6,7 @@ build/
 # Generated header (from logo.png)
 kernel/include/logo_data.h
 
-# Binary packages
+# Binary packages (large, non-source)
 cs/*.deb
 cs/*.jar
 
@@ -38,3 +38,7 @@ auto_commit.sh
 # OS
 .DS_Store
 Thumbs.db
+
+# Python cache
+__pycache__/
+*.pyc

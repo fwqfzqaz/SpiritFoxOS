@@ -257,17 +257,31 @@ def patch_pe(pe_path, reloc_data):
         # Need to add .reloc section
         print("No .reloc section found, adding one...")
 
-        # Calculate new section position
-        last_sec_offset = section_start + (num_sections - 1) * 40
-        last_vsize = struct.unpack_from('<I', pe_data, last_sec_offset + 8)[0]
-        last_vaddr = struct.unpack_from('<I', pe_data, last_sec_offset + 12)[0]
-        last_raw_size = struct.unpack_from('<I', pe_data, last_sec_offset + 16)[0]
-        last_raw_ptr = struct.unpack_from('<I', pe_data, last_sec_offset + 20)[0]
+        # Calculate new section position.
+        # Bug fix: iterate over ALL sections to find the actual end of
+        # file content and the highest virtual address. We cannot just use
+        # the last section because .bss has RawPtr=0/RawSize=0 (no file
+        # content), which would cause new_raw_ptr=0 and overwrite the PE
+        # header.
+        max_raw_end = 0   # max(RawPtr + RawSize) across sections with data
+        max_vaddr_end = 0  # max(VAddr + VSize) across all sections
+        for i in range(num_sections):
+            sec_offset = section_start + i * 40
+            s_vsize = struct.unpack_from('<I', pe_data, sec_offset + 8)[0]
+            s_vaddr = struct.unpack_from('<I', pe_data, sec_offset + 12)[0]
+            s_raw_size = struct.unpack_from('<I', pe_data, sec_offset + 16)[0]
+            s_raw_ptr = struct.unpack_from('<I', pe_data, sec_offset + 20)[0]
+            if s_raw_size > 0:
+                max_raw_end = max(max_raw_end, s_raw_ptr + s_raw_size)
+            max_vaddr_end = max(max_vaddr_end, s_vaddr + s_vsize)
 
-        new_vaddr = (last_vaddr + last_vsize + 0xFFF) & ~0xFFF
-        new_raw_ptr = (last_raw_ptr + last_raw_size + 0x1FF) & ~0x1FF
+        new_vaddr = (max_vaddr_end + 0xFFF) & ~0xFFF
+        # Bug fix: Python's ~0x1FF = -512 (arbitrary precision), so
+        # (val & ~0x1FF) does NOT work as a 0x200 alignment mask.
+        # Use integer division instead: ((val + 0x1FF) // 0x200) * 0x200
+        new_raw_ptr = ((max_raw_end + 0x1FF) // 0x200) * 0x200
         new_vsize = len(reloc_data)
-        new_raw_size = (len(reloc_data) + 0x1FF) & ~0x1FF
+        new_raw_size = ((len(reloc_data) + 0x1FF) // 0x200) * 0x200
 
         # Pad PE data to accommodate new section
         needed_size = new_raw_ptr + new_raw_size

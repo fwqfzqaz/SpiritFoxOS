@@ -304,9 +304,80 @@ int64_t sys_getdents(trap_frame_t *frame)
     return 0;
 }
 
+/* Map VFS type to Linux d_type */
+static uint8_t vfs_type_to_dtype(uint32_t vfs_type)
+{
+    switch (vfs_type) {
+    case VFS_TYPE_FILE:    return DT_REG;
+    case VFS_TYPE_DIR:     return DT_DIR;
+    case VFS_TYPE_CHARDEV: return DT_CHR;
+    case VFS_TYPE_BLKDEV:  return DT_BLK;
+    case VFS_TYPE_SYMLINK: return DT_LNK;
+    case VFS_TYPE_FIFO:    return DT_FIFO;
+    case VFS_TYPE_PIPE:    return DT_FIFO;
+    default:               return DT_UNKNOWN;
+    }
+}
+
 int64_t sys_getdents64(trap_frame_t *frame)
 {
-    return sys_getdents(frame);
+    int fd = (int)frame->rdi;
+    void *dirp = (void *)frame->rsi;
+    unsigned int count = (unsigned int)frame->rdx;
+
+    /* Validate fd */
+    vfs_file_t **fds = vfs_get_fd_table();
+    if (fd < 0 || fd >= VFS_MAX_FD || !fds[fd])
+        return -EBADF;
+
+    vfs_file_t *file = fds[fd];
+    if (!file->inode || file->inode->type != VFS_TYPE_DIR)
+        return -ENOTDIR;
+
+    /* linux_dirent64_t fixed header size: d_ino(8) + d_off(8) + d_reclen(2) + d_type(1) = 19 bytes
+     * but we use offsetof to be precise */
+    #define DIRENT64_HDR_SIZE  19  /* offsetof(linux_dirent64_t, d_name) */
+
+    uint8_t *buf = (uint8_t *)dirp;
+    unsigned int total = 0;
+    uint32_t idx = file->dir_index;
+
+    while (1) {
+        char name[VFS_MAX_NAME];
+        vfs_inode_t stat;
+        int ret = vfs_readdir(fd, idx, name, VFS_MAX_NAME, &stat);
+        if (ret <= 0)
+            break;  /* No more entries */
+
+        /* Calculate entry length: header + name + NUL, aligned to 8 */
+        int name_len = 0;
+        while (name[name_len]) name_len++;
+        unsigned int reclen = DIRENT64_HDR_SIZE + name_len + 1;
+        reclen = (reclen + 7) & ~7;  /* Align to 8 bytes */
+
+        /* Check if this entry fits in the buffer */
+        if (total + reclen > count)
+            break;  /* Buffer full */
+
+        /* Fill linux_dirent64_t */
+        linux_dirent64_t *de = (linux_dirent64_t *)(buf + total);
+        de->d_ino    = stat.ino;
+        de->d_off    = idx + 1;   /* Offset to next entry */
+        de->d_reclen = (uint16_t)reclen;
+        de->d_type   = vfs_type_to_dtype(stat.type);
+
+        /* Copy filename including NUL terminator */
+        for (int i = 0; i <= name_len; i++)
+            de->d_name[i] = name[i];
+
+        total += reclen;
+        idx++;
+    }
+
+    /* Update directory read position */
+    file->dir_index = idx;
+
+    return (int64_t)total;
 }
 
 int64_t sys_rename(trap_frame_t *frame)

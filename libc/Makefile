@@ -1,36 +1,34 @@
-# SpiritFoxOS musl-based libc port
+# SpiritFoxOS libc
 CROSS   ?= x86_64-linux-gnu-
 CC      = $(CROSS)gcc
 AR      = $(CROSS)ar
 RANLIB  = $(CROSS)ranlib
 
-# musl source directory (clone or extract here)
-MUSL_SRCDIR ?= musl-1.2.5
-
 CFLAGS  = -Os -ffreestanding -nostdlib -fno-builtin \
           -fno-stack-protector -fno-pic -fno-pie \
           -mno-red-zone -mno-mmx -mno-sse -mno-sse2 \
-          -D_SPIRITFOXOS_ -D_GNU_SOURCE \
-          -I./arch/x86_64 -I./include \
-          -I$(MUSL_SRCDIR)/arch/x86_64 \
-          -I$(MUSL_SRCDIR)/include \
-          -I$(MUSL_SRCDIR)/src/include \
-          -I$(MUSL_SRCDIR)/src/internal
+          -D_SPIRITFOXOS_ \
+          -I./arch/x86_64 -I./include -I./src
 
 OBJS = \
-	syscall.o \
-	start.o \
-	stdio.o \
-	stdlib.o \
-	string.o \
-	unistd.o \
-	fcntl.o \
-	signal.o \
-	dirent.o \
-	time.o \
-	malloc.o
+	src/syscall.o \
+	src/start.o \
+	src/stdio.o \
+	src/stdlib.o \
+	src/string.o \
+	src/ctype.o \
+	src/unistd.o \
+	src/dirent.o \
+	src/fcntl.o \
+	src/signal.o \
+	src/time.o \
+	src/malloc.o
 
 all: libc.a crt1.o crti.o crtn.o
+
+src/%.o: src/%.c
+	@echo "[CC-LIBC] $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
 
 %.o: %.c
 	@echo "[CC-LIBC] $<"
@@ -46,6 +44,6 @@ libc.a: $(OBJS)
 	@$(RANLIB) $@
 
 clean:
-	@rm -f *.o libc.a
+	@rm -f src/*.o *.o libc.a
 
 .PHONY: all clean

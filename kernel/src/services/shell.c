@@ -160,7 +160,6 @@ static int cmd_cat(int argc, char** argv) {
     while ((n = vfs_read(fd, buf, sizeof(buf))) > 0) {
         shell_write(buf, n);
     }
-
     if (!use_stdin)
         vfs_close(fd);
     return 0;
@@ -277,12 +276,16 @@ static int cmd_vfstest(int argc, char** argv) {
         }
     }
 
-    /* 测试 2：mkdir /tmp */
-    printf("[Test 2] mkdir /tmp ... ");
+    /* 测试 2：mkdir /vfstest_tmp (use unique name to avoid conflict with existing /tmp) */
+    printf("[Test 2] mkdir /vfstest_tmp ... ");
     {
-        int ret = vfs_mkdir("/tmp", VFS_S_IRUSR | VFS_S_IWUSR | VFS_S_IXUSR);
+        int ret = vfs_mkdir("/vfstest_tmp", VFS_S_IRUSR | VFS_S_IWUSR | VFS_S_IXUSR);
         if (ret == 0) {
             printf("OK\n");
+            passed++;
+        } else if (ret == -3) {
+            /* Already exists - acceptable */
+            printf("OK (already exists)\n");
             passed++;
         } else {
             printf("FAILED (ret=%d)\n", ret);
@@ -374,11 +377,11 @@ static int cmd_vfstest(int argc, char** argv) {
         }
     }
 
-    /* 测试 7：cd /tmp */
-    printf("[Test 7] cd /tmp ... ");
+    /* 测试 7：cd /vfstest_tmp */
+    printf("[Test 7] cd /vfstest_tmp ... ");
     {
-        int ret = vfs_chdir("/tmp");
-        if (ret == 0 && strcmp(vfs_get_cwd(), "/tmp") == 0) {
+        int ret = vfs_chdir("/vfstest_tmp");
+        if (ret == 0 && strcmp(vfs_get_cwd(), "/vfstest_tmp") == 0) {
             printf("OK (cwd=%s)\n", vfs_get_cwd());
             passed++;
         } else {
@@ -799,32 +802,37 @@ static int cmd_exec(int argc, char** argv) {
 
     printf("exec: launched '%s' as PID %d (state=%d)\n", path, proc->pid, proc->state);
 
-    /* 调试：创建后立即验证栈内容 */
-    {
-        volatile uint64_t *vp = (volatile uint64_t *)proc->kernel_rsp;
-        printf("[exec] pre-sched: krsp=%lx v[0]=%lx v[6]=%lx v[7]=%lx v[8]=%lx\n",
-               (unsigned long)proc->kernel_rsp,
-               (unsigned long)vp[0], (unsigned long)vp[6],
-               (unsigned long)vp[7], (unsigned long)vp[8]);
-    }
-
-    /* Wait for the process to finish - yield CPU to scheduler.
-     * We set need_reschedule so the next timer tick will switch
-     * to the new process.  Then we hlt to wait. */
+    /* Wait for the process to finish.
+     *
+     * Set ourselves (PID0/shell) to PROC_BLOCKED so that:
+     *   1) The scheduler picks PID1 on the next schedule
+     *   2) process_exit() wakes us by setting state → PROC_READY
+     *
+     * Then yield the CPU.  When we're woken, PID1 will be ZOMBIE.
+     */
+    process_t *self = process_current();
+    self->state = PROC_BLOCKED;
     need_reschedule = 1;
-    uint64_t wait_start = timer_get_ms();
-    while (proc->state != PROC_ZOMBIE && proc->state != PROC_UNUSED) {
-        hal_enable_interrupts();
-        __asm__ volatile ("hlt");
-        if (timer_get_ms() - wait_start > 30000) {
-            printf("exec: timeout waiting for PID %d (state=%d)\n", proc->pid, proc->state);
-            break;
-        }
-    }
+    scheduler_schedule();
+
+    /* ---- Woken up by process_exit() ---- */
+    /* PID1 set our state to PROC_READY; the scheduler switched back
+     * to us.  Re-set to RUNNING since we are now actively executing. */
+    self = process_current();
+    self->state = PROC_RUNNING;
 
     if (proc->state == PROC_ZOMBIE) {
         printf("exec: PID %d exited with code %d\n", proc->pid, proc->exit_code);
+        /* Properly reap the zombie: free kernel stack, mark slot unused */
+        if (proc->kernel_stack) {
+            free_page(proc->kernel_stack);
+            free_page((void *)((uint64_t)proc->kernel_stack + PAGE_SIZE));
+        }
         proc->state = PROC_UNUSED;
+    } else if (proc->state == PROC_UNUSED) {
+        printf("exec: PID %d already reaped\n", proc->pid);
+    } else {
+        printf("exec: PID %d in unexpected state %d\n", proc->pid, proc->state);
     }
 
     return 0;
@@ -988,10 +996,16 @@ static int cmd_meminfo(int argc, char** argv) {
     (void)argc; (void)argv;
     uint64_t total = pmm_total_pages();
     uint64_t used  = pmm_used_pages();
+    /* total_pages 只计数 type=7 可用页面，但 pmm_used_pages() 统计
+     * 整个位图中的已用页（含保留区）。实际可分配空闲页 = total - (used 中属于 type=7 区域的部分)。
+     * 简化：free = total - (used - reserved)，其中 reserved = max_pages - total。
+     * 即 free = total - used + (max_pages - total) = max_pages - used */
+    uint64_t free_pages = pmm_max_pages();
+    if (free_pages > used) free_pages -= used; else free_pages = 0;
     printf("Memory Information:\n");
     printf("  Total usable pages : %u\n", (unsigned int)total);
     printf("  Used pages         : %u\n", (unsigned int)used);
-    printf("  Free pages         : %u\n", (unsigned int)(total - used));
+    printf("  Free pages         : %u\n", (unsigned int)free_pages);
     printf("  Total memory       : %u KB\n", (unsigned int)(total * 4));
     printf("  Used memory        : %u KB\n", (unsigned int)(used * 4));
     return 0;
@@ -1704,6 +1718,7 @@ void shell_run(void) {
                     /* 从上一个管道读取 */
                     saved_stdin = shell_stdin_fd;
                     shell_stdin_fd = prev_pipe_read_fd;
+                    /* stdin from previous pipe stage */
                 } else if (stdin_file) {
                     redir_in_fd = vfs_open(stdin_file, VFS_O_RDONLY, 0);
                     if (redir_in_fd >= 0) {
@@ -1721,6 +1736,7 @@ void shell_run(void) {
                     }
                     saved_stdout = shell_stdout_fd;
                     shell_stdout_fd = pipe_fd[1]; /* write end */
+                    /* stdout to pipe for next stage */
                 } else if (stdout_file) {
                     uint32_t flags = VFS_O_WRONLY | VFS_O_CREAT;
                     if (append_mode)

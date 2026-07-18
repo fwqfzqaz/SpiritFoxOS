@@ -1,7 +1,7 @@
 /*
  * Linker script for UEFI bootloader
  * Produces a minimal ELF that will be converted to PE32+.
- * No dynamic sections needed - fully static.
+ * Keep .rela sections for gen_reloc.py to generate PE relocations.
  */
 OUTPUT_FORMAT(elf64-x86-64)
 ENTRY(_start)
@@ -33,6 +33,15 @@ SECTIONS
         *(COMMON)
     }
 
+    /* Keep relocation sections so gen_reloc.py can extract them */
+    .rela.dyn : {
+        *(.rela.init)
+        *(.rela.text .rela.text.*)
+        *(.rela.rodata .rela.rodata.*)
+        *(.rela.data .rela.data.*)
+        *(.rela.sdata .rela.sdata.*)
+    }
+
     /DISCARD/ : {
         *(.comment)
         *(.note.*)
@@ -40,8 +49,6 @@ SECTIONS
         *(.dynamic)
         *(.dynsym)
         *(.dynstr)
-        *(.rela.*)
-        *(.rel.*)
         *(.hash)
         *(.gnu.hash)
         *(.plt*)

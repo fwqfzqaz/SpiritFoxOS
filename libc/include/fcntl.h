@@ -1,6 +1,10 @@
 #ifndef _FCNTL_H
 #define _FCNTL_H
 
+#include <sys/types.h>
+#include <stdarg.h>
+
+/* Open flags */
 #define O_RDONLY    0
 #define O_WRONLY    1
 #define O_RDWR      2
@@ -13,10 +17,18 @@
 #define O_DIRECTORY 0x10000
 #define O_CLOEXEC 0x80000
 
+/* Seek whence */
 #define SEEK_SET 0
 #define SEEK_CUR 1
 #define SEEK_END 2
 
+/* openat dirfd */
 #define AT_FDCWD -100
 
-#endif
+/* Function declarations */
+int open(const char *path, int flags, ...);
+int creat(const char *path, mode_t mode);
+int openat(int dirfd, const char *path, int flags, ...);
+int fcntl(int fd, int cmd, ...);
+
+#endif /* _FCNTL_H */

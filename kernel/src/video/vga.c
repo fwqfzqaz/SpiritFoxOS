@@ -94,14 +94,15 @@ void vga_init(BootInfo* info)
 
 void vga_putchar(char c)
 {
-    /* 始终输出到串口用于QEMU日志 */
-    serial_putchar(c);
-
-    /* 如果帧缓冲终端激活，则渲染到帧缓冲而非VGA文本缓冲 */
+    /* 如果帧缓冲终端激活，则渲染到帧缓冲而非VGA文本缓冲。
+     * fb_term_putchar 会同时输出到串口，避免重复调用 serial_putchar。 */
     if (fb_term_is_active()) {
         fb_term_putchar(c);
         return;
     }
+
+    /* 非帧缓冲模式：同时输出到串口和VGA文本缓冲 */
+    serial_putchar(c);
 
     if (c == '\n') {
         cursor_x = 0;
@@ -194,7 +195,7 @@ void terminal_clear(void)
 
 /* ---- 增强版printf实现 ---- */
 
-static void print_unsigned_padded(uint64_t val, int base, int uppercase, int width, int zero_pad)
+static void print_unsigned_padded(uint64_t val, int base, int uppercase, int width, int zero_pad, int left_align)
 {
     static const char digits_lower[] = "0123456789abcdef";
     static const char digits_upper[] = "0123456789ABCDEF";
@@ -212,27 +213,37 @@ static void print_unsigned_padded(uint64_t val, int base, int uppercase, int wid
         }
     }
 
-    /* 填充到指定宽度 */
     int num_digits = i;
-    while (num_digits < width) {
-        vga_putchar(pad_char);
-        num_digits++;
-    }
 
-    /* 逆序输出数字 */
-    while (--i >= 0) {
-        vga_putchar(buf[i]);
+    if (left_align) {
+        /* 左对齐：先输出数字，再补空格 */
+        while (--i >= 0) {
+            vga_putchar(buf[i]);
+        }
+        while (num_digits < width) {
+            vga_putchar(' ');
+            num_digits++;
+        }
+    } else {
+        /* 右对齐：先补位，再输出数字 */
+        while (num_digits < width) {
+            vga_putchar(pad_char);
+            num_digits++;
+        }
+        while (--i >= 0) {
+            vga_putchar(buf[i]);
+        }
     }
 }
 
-static void print_signed_padded(int64_t val, int width, int zero_pad)
+static void print_signed_padded(int64_t val, int width, int zero_pad, int left_align)
 {
     if (val < 0) {
         vga_putchar('-');
         val = -val;
         if (width > 0) width--;
     }
-    print_unsigned_padded((uint64_t)val, 10, 0, width, zero_pad);
+    print_unsigned_padded((uint64_t)val, 10, 0, width, zero_pad, left_align);
 }
 
 int printf(const char* fmt, ...)
@@ -248,6 +259,11 @@ int printf(const char* fmt, ...)
 
             /* 解析标志 */
             int zero_pad = 0;
+            int left_align = 0;
+            if (*fmt == '-') {
+                left_align = 1;
+                fmt++;
+            }
             if (*fmt == '0') {
                 zero_pad = 1;
                 fmt++;
@@ -274,20 +290,38 @@ int printf(const char* fmt, ...)
             case 's': {
                 const char* s = va_arg(args, const char*);
                 if (!s) s = "(null)";
-                while (*s) {
-                    vga_putchar(*s);
-                    s++;
-                    count++;
+                int slen = 0;
+                while (s[slen]) slen++;
+                if (left_align) {
+                    /* 左对齐：先输出字符串，再补空格 */
+                    for (int i = 0; i < slen; i++) {
+                        vga_putchar(s[i]);
+                        count++;
+                    }
+                    for (int i = slen; i < width; i++) {
+                        vga_putchar(' ');
+                        count++;
+                    }
+                } else {
+                    /* 右对齐：先补空格，再输出字符串 */
+                    for (int i = slen; i < width; i++) {
+                        vga_putchar(' ');
+                        count++;
+                    }
+                    for (int i = 0; i < slen; i++) {
+                        vga_putchar(s[i]);
+                        count++;
+                    }
                 }
                 break;
             }
             case 'd': {
                 if (long_long) {
                     long long val = va_arg(args, long long);
-                    print_signed_padded(val, width, zero_pad);
+                    print_signed_padded(val, width, zero_pad, left_align);
                 } else {
                     int val = va_arg(args, int);
-                    print_signed_padded(val, width, zero_pad);
+                    print_signed_padded(val, width, zero_pad, left_align);
                 }
                 count++;
                 break;
@@ -295,10 +329,10 @@ int printf(const char* fmt, ...)
             case 'u': {
                 if (long_long) {
                     unsigned long long val = va_arg(args, unsigned long long);
-                    print_unsigned_padded(val, 10, 0, width, zero_pad);
+                    print_unsigned_padded(val, 10, 0, width, zero_pad, left_align);
                 } else {
                     unsigned int val = va_arg(args, unsigned int);
-                    print_unsigned_padded((uint64_t)val, 10, 0, width, zero_pad);
+                    print_unsigned_padded((uint64_t)val, 10, 0, width, zero_pad, left_align);
                 }
                 count++;
                 break;
@@ -306,10 +340,10 @@ int printf(const char* fmt, ...)
             case 'x': {
                 if (long_long) {
                     unsigned long long val = va_arg(args, unsigned long long);
-                    print_unsigned_padded(val, 16, 0, width, zero_pad);
+                    print_unsigned_padded(val, 16, 0, width, zero_pad, left_align);
                 } else {
                     unsigned int val = va_arg(args, unsigned int);
-                    print_unsigned_padded((uint64_t)val, 16, 0, width, zero_pad);
+                    print_unsigned_padded((uint64_t)val, 16, 0, width, zero_pad, left_align);
                 }
                 count++;
                 break;
@@ -317,10 +351,10 @@ int printf(const char* fmt, ...)
             case 'X': {
                 if (long_long) {
                     unsigned long long val = va_arg(args, unsigned long long);
-                    print_unsigned_padded(val, 16, 1, width, zero_pad);
+                    print_unsigned_padded(val, 16, 1, width, zero_pad, left_align);
                 } else {
                     unsigned int val = va_arg(args, unsigned int);
-                    print_unsigned_padded((uint64_t)val, 16, 1, width, zero_pad);
+                    print_unsigned_padded((uint64_t)val, 16, 1, width, zero_pad, left_align);
                 }
                 count++;
                 break;
@@ -329,7 +363,7 @@ int printf(const char* fmt, ...)
                 uintptr_t val = (uintptr_t)va_arg(args, void*);
                 vga_putchar('0');
                 vga_putchar('x');
-                print_unsigned_padded((uint64_t)val, 16, 1, sizeof(uintptr_t) * 2, 1);
+                print_unsigned_padded((uint64_t)val, 16, 1, sizeof(uintptr_t) * 2, 1, 0);
                 count++;
                 break;
             }

@@ -15,5 +15,6 @@ void* alloc_huge_page(void);
 void free_huge_page(void* addr);
 uint64_t pmm_total_pages(void);
 uint64_t pmm_used_pages(void);
+uint64_t pmm_max_pages(void);
 
 #endif

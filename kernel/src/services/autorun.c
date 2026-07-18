@@ -143,8 +143,7 @@ int autorun_create_default(const char *path)
 
     const char *default_content =
         "# SpiritFoxOS Autorun Configuration\n"
-        "#\n"
-        "exec /mnt/bin/test_hello\n";
+        "#\n";
 
     vfs_write(fd, default_content, strlen(default_content));
     vfs_close(fd);
