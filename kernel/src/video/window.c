@@ -2247,7 +2247,7 @@ static void show_splash(void)
         fill_rounded_rect(dot_x, dot_y, 8, 8, 4, COLOR_ACCENT);
     }
 
-    fb_swap_buffer();
+    fb_flip();
     timer_sleep_ms(3000);
 }
 
@@ -2730,7 +2730,7 @@ void window_enter(void)
         if (start_menu_open) draw_start_menu();
         if (ctx_menu_open) draw_ctx_menu();
         draw_mouse_cursor(mouse_x, mouse_y);
-        fb_swap_buffer();
+        fb_flip();
         timer_sleep_ms(16);
     }
 

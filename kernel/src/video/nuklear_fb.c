@@ -260,7 +260,7 @@ void nk_fb_render(struct nk_context *ctx, struct nk_color bg)
         nk_fb_render_command(cmd);
     }
 
-    fb_swap_buffer();
+    fb_flip();
     nk_clear(ctx);
 }
 

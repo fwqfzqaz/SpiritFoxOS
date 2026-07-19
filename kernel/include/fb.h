@@ -48,8 +48,17 @@ void fb_draw_line(int x0, int y0, int x1, int y1, fb_color_t color);
 void fb_clear(fb_color_t color);
 
 /* Double buffering */
-void fb_swap_buffer(void);
+void fb_flip(void);
 void fb_flush_rect(int x, int y, int w, int h);
+
+/* Dirty region tracking (for efficient partial updates in GUI mode) */
+#define FB_MAX_DIRTY_RECTS  16
+void fb_mark_dirty(int x, int y, int w, int h);
+void fb_flip_dirty(void);
+void fb_clear_dirty(void);
+
+/* Legacy alias */
+#define fb_swap_buffer  fb_flip
 
 /* Bitmapped font rendering (8x16 built-in) */
 void fb_draw_char(int x, int y, char c, fb_color_t fg, fb_color_t bg);

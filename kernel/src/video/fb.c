@@ -480,10 +480,27 @@ void fb_fill_rect(int x, int y, int w, int h, fb_color_t color)
     uint32_t *target = fb_back ? fb_back : fb_front;
     int stride = fb_pitch / 4;
 
+    /* 构造 64 位双像素值用于批量写入 */
+    uint64_t color64 = ((uint64_t)color << 32) | color;
+
     for (int row = y; row < y + h; row++) {
         uint32_t *line = target + row * stride + x;
-        for (int col = 0; col < w; col++) {
-            *line++ = color;
+        int remaining = w;
+
+        /* 64 位批量写入：每次写 2 个像素 */
+        if (w >= 2) {
+            uint64_t *line64 = (uint64_t *)line;
+            int qwords = w / 2;
+            for (int i = 0; i < qwords; i++) {
+                line64[i] = color64;
+            }
+            remaining = w % 2;
+            line += qwords * 2;
+        }
+
+        /* 处理剩余奇数个像素 */
+        for (int i = 0; i < remaining; i++) {
+            line[i] = color;
         }
     }
 }
@@ -528,7 +545,7 @@ void fb_clear(fb_color_t color)
     fb_fill_rect(0, 0, fb_width, fb_height, color);
 }
 
-void fb_swap_buffer(void)
+void fb_flip(void)
 {
     if (!fb_initialized) return;
     if (!fb_back) return;
@@ -542,8 +559,30 @@ void fb_swap_buffer(void)
             break;
     }
 
-    /* 将后缓冲区复制到前缓冲区（硬件显示源）。 */
-    memcpy(fb_front, fb_back, fb_size);
+    /* 将后缓冲区复制到前缓冲区（硬件显示源）。
+     * 使用 rep movsq 64 位宽拷贝，相比 memcpy 减少 50% 循环次数。
+     * fb_size 为 pitch * height，通常 4 字节对齐，再取 8 字节对齐部分。 */
+    {
+        const uint64_t *src = (const uint64_t *)fb_back;
+        uint64_t *dst = (uint64_t *)fb_front;
+        size_t qwords = fb_size / 8;
+        size_t leftover_bytes = fb_size % 8;
+
+        __asm__ volatile (
+            "rep movsq\n\t"
+            : "+S"(src), "+D"(dst), "+c"(qwords)
+            :
+            : "memory"
+        );
+
+        /* 处理尾部不足 8 字节的部分 */
+        if (leftover_bytes) {
+            const uint8_t *s8 = (const uint8_t *)src;
+            uint8_t *d8 = (uint8_t *)dst;
+            for (size_t i = 0; i < leftover_bytes; i++)
+                d8[i] = s8[i];
+        }
+    }
 }
 
 /* 仅将矩形区域从后缓冲区刷新到前缓冲区。
@@ -563,6 +602,141 @@ void fb_flush_rect(int x, int y, int w, int h)
                fb_back  + row * stride + x,
                w * sizeof(uint32_t));
     }
+}
+
+/* ---------- 脏区域追踪 ---------- */
+
+typedef struct {
+    int x, y, w, h;
+    int valid;
+} dirty_rect_t;
+
+static dirty_rect_t fb_dirty_rects[FB_MAX_DIRTY_RECTS];
+static int fb_dirty_count;
+
+void fb_mark_dirty(int x, int y, int w, int h)
+{
+    if (!fb_initialized || !fb_back) return;
+    if (w <= 0 || h <= 0) return;
+
+    /* 裁剪到屏幕范围 */
+    if (x < 0) { w += x; x = 0; }
+    if (y < 0) { h += y; y = 0; }
+    if (x + w > (int)fb_width)  w = fb_width - x;
+    if (y + h > (int)fb_height) h = fb_height - y;
+    if (w <= 0 || h <= 0) return;
+
+    /* 尝试与现有脏矩形合并（若重叠或相邻） */
+    for (int i = 0; i < fb_dirty_count; i++) {
+        dirty_rect_t *r = &fb_dirty_rects[i];
+        if (!r->valid) continue;
+
+        /* 计算包围盒：如果合并后面积增量不超过原面积 50%，则合并 */
+        int nx = r->x < x ? r->x : x;
+        int ny = r->y < y ? r->y : y;
+        int nx2 = (r->x + r->w) > (x + w) ? (r->x + r->w) : (x + w);
+        int ny2 = (r->y + r->h) > (y + h) ? (r->y + r->h) : (y + h);
+        int nw = nx2 - nx;
+        int nh = ny2 - ny;
+        int merged_area = nw * nh;
+        int orig_area = r->w * r->h + w * h;
+
+        if (merged_area <= orig_area * 3 / 2) {
+            /* 合并：用包围盒替代 */
+            r->x = nx;
+            r->y = ny;
+            r->w = nw;
+            r->h = nh;
+            return;
+        }
+    }
+
+    /* 无法合并，添加新条目 */
+    if (fb_dirty_count < FB_MAX_DIRTY_RECTS) {
+        dirty_rect_t *r = &fb_dirty_rects[fb_dirty_count];
+        r->x = x;
+        r->y = y;
+        r->w = w;
+        r->h = h;
+        r->valid = 1;
+        fb_dirty_count++;
+    } else {
+        /* 脏矩形已满，合并所有为一个全屏矩形 */
+        fb_dirty_rects[0].x = 0;
+        fb_dirty_rects[0].y = 0;
+        fb_dirty_rects[0].w = fb_width;
+        fb_dirty_rects[0].h = fb_height;
+        fb_dirty_rects[0].valid = 1;
+        fb_dirty_count = 1;
+    }
+}
+
+void fb_clear_dirty(void)
+{
+    fb_dirty_count = 0;
+    for (int i = 0; i < FB_MAX_DIRTY_RECTS; i++)
+        fb_dirty_rects[i].valid = 0;
+}
+
+/* 仅将脏区域从后缓冲区同步到前缓冲区。
+ * 若无脏区域记录，则回退为全帧 fb_flip()。 */
+void fb_flip_dirty(void)
+{
+    if (!fb_initialized) return;
+    if (!fb_back) return;
+
+    if (fb_dirty_count == 0) {
+        /* 无脏区域：回退为全帧拷贝 */
+        fb_flip();
+        return;
+    }
+
+    /* VSync 等待 */
+    int vsync_retries = 1000;
+    while (vsync_retries-- > 0) {
+        if (hal_inb(0x3DA) & 0x08)
+            break;
+    }
+
+    int stride = fb_pitch / 4;
+
+    for (int i = 0; i < fb_dirty_count; i++) {
+        dirty_rect_t *r = &fb_dirty_rects[i];
+        if (!r->valid) continue;
+
+        /* 裁剪到屏幕范围 */
+        int rx = r->x, ry = r->y, rw = r->w, rh = r->h;
+        if (rx < 0) { rw += rx; rx = 0; }
+        if (ry < 0) { rh += ry; ry = 0; }
+        if (rx + rw > (int)fb_width)  rw = fb_width - rx;
+        if (ry + rh > (int)fb_height) rh = fb_height - ry;
+        if (rw <= 0 || rh <= 0) continue;
+
+        /* 逐行拷贝脏区域，使用 rep movsq 优化 */
+        for (int row = ry; row < ry + rh; row++) {
+            const uint64_t *src = (const uint64_t *)(fb_back + row * stride + rx);
+            uint64_t *dst = (uint64_t *)(fb_front + row * stride + rx);
+            size_t row_bytes = (size_t)rw * sizeof(uint32_t);
+            size_t qwords = row_bytes / 8;
+            size_t leftover = row_bytes % 8;
+
+            __asm__ volatile (
+                "rep movsq\n\t"
+                : "+S"(src), "+D"(dst), "+c"(qwords)
+                :
+                : "memory"
+            );
+
+            if (leftover) {
+                const uint8_t *s8 = (const uint8_t *)src;
+                uint8_t *d8 = (uint8_t *)dst;
+                for (size_t j = 0; j < leftover; j++)
+                    d8[j] = s8[j];
+            }
+        }
+    }
+
+    fb_clear_dirty();
 }
 
 void fb_draw_char(int x, int y, char c, fb_color_t fg, fb_color_t bg)
@@ -629,7 +803,7 @@ void fb_term_init(void)
     fb_term_bg = 0x000A0A0A;  /* 近黑色 */
     fb_term_active = 1;
     fb_clear(fb_term_bg);
-    fb_swap_buffer();
+    fb_flip();
 }
 
 int fb_term_is_active(void)
