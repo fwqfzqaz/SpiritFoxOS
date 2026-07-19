@@ -1,5 +1,6 @@
 #include "kmalloc.h"
 #include "memory.h"
+#include "smp.h"
 #include "string.h"
 #include "serial.h"
 
@@ -48,6 +49,9 @@ static block_header_t *next_block(block_header_t *hdr, size_t arena_size)
 static block_header_t *free_list;   /* 通过空闲块的载荷区域链接的单链表 */
 static size_t total_used;           /* 用户当前分配的字节数 */
 static size_t total_heap;           /* 堆竞技区总字节数 */
+
+/* kmalloc 自旋锁（多核安全） */
+static spinlock_t kmalloc_lock;
 
 /* ---- 空闲链表辅助函数 ---- */
 
@@ -127,6 +131,7 @@ void kmalloc_init(void)
     free_list = NULL;
     total_used = 0;
     total_heap = 0;
+    spinlock_init(&kmalloc_lock);
 }
 
 void *kmalloc(size_t size)
@@ -138,6 +143,8 @@ void *kmalloc(size_t size)
     size = align_up(size);
     if (size < MIN_ALLOC)
         size = MIN_ALLOC;
+
+    spinlock_acquire(&kmalloc_lock);
 
     /* 在空闲链表中搜索合适的块（首次适配） */
     block_header_t **pp = &free_list;
@@ -160,6 +167,7 @@ void *kmalloc(size_t size)
 
             hdr->used = 1;
             total_used += hdr->size;
+            spinlock_release(&kmalloc_lock);
             return header_to_payload(hdr);
         }
         pp = next_free_ptr(hdr);
@@ -185,11 +193,13 @@ void *kmalloc(size_t size)
             }
             hdr->used = 1;
             total_used += hdr->size;
+            spinlock_release(&kmalloc_lock);
             return header_to_payload(hdr);
         }
         pp2 = next_free_ptr(hdr);
     }
 
+    spinlock_release(&kmalloc_lock);
     return NULL;  /* 分配失败 */
 }
 
@@ -241,10 +251,13 @@ void kfree(void *ptr)
     if (!ptr)
         return;
 
+    spinlock_acquire(&kmalloc_lock);
+
     block_header_t *hdr = payload_to_header(ptr);
 
     if (hdr->used != 1) {
         serial_puts("[kmalloc] double free or corruption!\n");
+        spinlock_release(&kmalloc_lock);
         return;
     }
 
@@ -290,6 +303,7 @@ void kfree(void *ptr)
             uint8_t *block_end = (uint8_t *)cur + HEADER_SIZE + cur->size;
             if ((uint8_t *)hdr >= (uint8_t *)cur && (uint8_t *)hdr < block_end) {
                 /* hdr 已被吸收，cur 已在 free_list 中 */
+                spinlock_release(&kmalloc_lock);
                 return;
             }
         }
@@ -300,6 +314,7 @@ void kfree(void *ptr)
 
     /* hdr未被吸收（前面没有空闲的相邻块），插入到 free_list */
     free_list_insert(hdr);
+    spinlock_release(&kmalloc_lock);
 }
 
 size_t kmalloc_used(void)

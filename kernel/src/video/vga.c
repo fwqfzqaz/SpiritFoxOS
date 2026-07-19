@@ -1,6 +1,7 @@
 #include "vga.h"
 #include "hal.h"
 #include "fb.h"
+#include "smp.h"
 #include <stdarg.h>
 
 /* 串口（COM1）用于QEMU调试输出 */
@@ -45,6 +46,12 @@ static int cursor_x;
 static int cursor_y;
 static uint8_t text_attr;
 
+/* VGA 输出自旋锁（多核安全）
+ * 保护 cursor_x/y 和 VGA 缓冲区的一致性。
+ * 使用 irqsave 风格的票据锁，中断处理程序中也能安全使用。 */
+static spinlock_t vga_lock;
+static int vga_lock_initialized = 0;
+
 static void update_cursor(void)
 {
     uint16_t pos = cursor_y * VGA_COLS + cursor_x;
@@ -79,6 +86,9 @@ void vga_init(BootInfo* info)
     cursor_x = 0;
     cursor_y = 0;
 
+    spinlock_init(&vga_lock);
+    vga_lock_initialized = 1;
+
     vga_clear();
     serial_init();
 
@@ -94,9 +104,17 @@ void vga_init(BootInfo* info)
 
 void vga_putchar(char c)
 {
+    /* 多核安全：在修改光标位置和VGA缓冲区前加锁 */
+    int locked = 0;
+    if (vga_lock_initialized) {
+        spinlock_acquire(&vga_lock);
+        locked = 1;
+    }
+
     /* 如果帧缓冲终端激活，则渲染到帧缓冲而非VGA文本缓冲。
      * fb_term_putchar 会同时输出到串口，避免重复调用 serial_putchar。 */
     if (fb_term_is_active()) {
+        if (locked) spinlock_release(&vga_lock);
         fb_term_putchar(c);
         return;
     }
@@ -134,6 +152,8 @@ void vga_putchar(char c)
     }
 
     update_cursor();
+
+    if (locked) spinlock_release(&vga_lock);
 }
 
 void vga_print(const char* str)

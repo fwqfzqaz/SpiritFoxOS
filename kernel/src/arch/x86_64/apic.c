@@ -325,3 +325,60 @@ void apic_init(void)
 
     printf("[APIC] Initialized: PIC disabled, IOAPIC routing active\n");
 }
+
+/* ========================================================================
+ * LAPIC 定时器初始化
+ *
+ * 使用 PIT 作为参考校准 LAPIC 定时器频率。
+ * 设置为周期模式，以 freq_hz 频率产生中断。
+ * ======================================================================== */
+
+#define LAPIC_TIMER_CALIBRATION_MS  10
+#define LAPIC_TIMER_DCR_VALUE       0x0B    /* 分频系数 1/16 */
+
+/* PIT 等待指定毫秒数（使用端口 0x80 延时） */
+static void pit_delay_ms(unsigned int ms)
+{
+    for (unsigned int i = 0; i < ms * 1000; i++) {
+        hal_outb(0x80, 0);  /* 端口 0x80 延时约 1us */
+    }
+}
+
+void lapic_timer_init(uint8_t vector, uint32_t freq_hz)
+{
+    if (!apic_available)
+        return;
+
+    /* 设置 LAPIC 定时器为单次模式，用于校准 */
+    lapic_write(LAPIC_LVT_TIMER, vector | LAPIC_TIMER_ONE_SHOT);
+    lapic_write(LAPIC_TIMER_DCR, LAPIC_TIMER_DCR_VALUE);
+
+    /* 设置初始计数值为最大，开始倒计时 */
+    lapic_write(LAPIC_TIMER_ICR, 0xFFFFFFFF);
+
+    /* 等待校准时间 */
+    pit_delay_ms(LAPIC_TIMER_CALIBRATION_MS);
+
+    /* 读取剩余计数 */
+    uint32_t remaining = lapic_read(LAPIC_TIMER_CCR);
+    uint32_t elapsed = 0xFFFFFFFF - remaining;
+
+    /* 计算每毫秒的计数 */
+    uint32_t counts_per_ms = elapsed / LAPIC_TIMER_CALIBRATION_MS;
+
+    /* 计算目标频率对应的初始计数值 */
+    uint32_t initial_count = counts_per_ms * (1000 / freq_hz);
+
+    /* 保存到 cpu_local */
+    if (initial_count > 0) {
+        /* 设置周期模式 */
+        lapic_write(LAPIC_LVT_TIMER, vector | LAPIC_TIMER_PERIODIC);
+        lapic_write(LAPIC_TIMER_DCR, LAPIC_TIMER_DCR_VALUE);
+        lapic_write(LAPIC_TIMER_ICR, initial_count);
+
+        printf("[APIC] LAPIC timer initialized: vector=%u, freq=%uHz, count=%u, cpms=%u\n",
+               vector, freq_hz, initial_count, counts_per_ms);
+    } else {
+        printf("[APIC] WARNING: LAPIC timer calibration failed (count=0)\n");
+    }
+}

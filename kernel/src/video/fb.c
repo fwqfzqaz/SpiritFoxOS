@@ -8,6 +8,7 @@
 #include "hal.h"
 #include "memory.h"
 #include "string.h"
+#include "smp.h"
 #include "pci.h"
 #include "serial.h"
 
@@ -609,6 +610,10 @@ static fb_color_t fb_term_fg;
 static fb_color_t fb_term_bg;
 static int fb_term_active;   /* 帧缓冲终端模式是否激活 */
 
+/* 帧缓冲终端输出锁（多核安全） */
+static spinlock_t fb_term_lock;
+static int fb_term_lock_initialized = 0;
+
 void fb_term_init(void)
 {
     if (!fb_initialized) return;
@@ -616,6 +621,10 @@ void fb_term_init(void)
     fb_term_rows = fb_height / FB_TERM_CHAR_H;
     fb_term_cx = 0;
     fb_term_cy = 0;
+
+    spinlock_init(&fb_term_lock);
+    fb_term_lock_initialized = 1;
+
     fb_term_fg = FB_COLOR_LIGHT_GRAY;
     fb_term_bg = 0x000A0A0A;  /* 近黑色 */
     fb_term_active = 1;
@@ -670,10 +679,20 @@ static void fb_term_scroll(void)
 
 void fb_term_putchar(char c)
 {
+    /* 多核安全：保护帧缓冲终端光标和渲染 */
+    int locked = 0;
+    if (fb_term_lock_initialized) {
+        spinlock_acquire(&fb_term_lock);
+        locked = 1;
+    }
+
     /* 始终输出到串口用于QEMU日志和串口终端 */
     serial_putchar(c);
 
-    if (!fb_term_active || !fb_initialized) return;
+    if (!fb_term_active || !fb_initialized) {
+        if (locked) spinlock_release(&fb_term_lock);
+        return;
+    }
 
     if (c == '\n') {
         fb_term_cx = 0;
@@ -712,6 +731,8 @@ void fb_term_putchar(char c)
         fb_term_scroll();
         fb_term_cy = fb_term_rows - 1;
     }
+
+    if (locked) spinlock_release(&fb_term_lock);
 }
 
 void fb_term_get_cursor(int *cx, int *cy)

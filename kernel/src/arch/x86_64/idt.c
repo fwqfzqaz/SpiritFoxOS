@@ -10,6 +10,7 @@
 #include "memory.h"
 #include "string.h"
 #include "serial.h"
+#include "smp.h"
 
 typedef struct {
     uint16_t offset_low;
@@ -49,6 +50,10 @@ extern void irq6(void);  extern void irq7(void);  extern void irq8(void);
 extern void irq9(void);  extern void irq10(void); extern void irq11(void);
 extern void irq12(void); extern void irq13(void); extern void irq14(void);
 extern void irq15(void);
+
+/* IPI 存根（向量 48-49） */
+extern void irq16(void);  /* APIC_VECTOR_RESCHEDULE */
+extern void irq17(void);  /* APIC_VECTOR_TLB_SHOOTDOWN */
 
 /* 伪中断存根（向量 255） */
 extern void irq_spurious(void);
@@ -162,6 +167,16 @@ void irq_handler(uint64_t int_num, uint64_t error_code)
     case 43:  /* RTL8139 网卡（通过 IOAPIC 的 IRQ11） */
         rtl8139_irq_handler();
         break;
+    case 48:  /* 重调度 IPI (APIC_VECTOR_RESCHEDULE) */
+        this_cpu()->need_reschedule = 1;
+        break;
+    case 49:  /* TLB 刷新 IPI (APIC_VECTOR_TLB_SHOOTDOWN) */
+        __asm__ volatile (
+            "mov %%cr3, %%rax\n\t"
+            "mov %%rax, %%cr3\n\t"
+            ::: "rax", "memory"
+        );
+        break;
     default:
         /* 其他 IRQ - 当前无处理程序 */
         break;
@@ -204,6 +219,13 @@ void idt_set_gate(uint8_t num, uint64_t handler, uint16_t selector, uint8_t type
 static void idt_flush(uint64_t idt_ptr_addr)
 {
     __asm__ volatile ("lidt (%0)" : : "r"(idt_ptr_addr));
+}
+
+/* 重新加载 IDT（AP 启动时必须调用，因为 AP 的 IDTR
+ * 仍指向实模式的 IVT，不加载内核 IDT 会导致中断时三重故障） */
+void idt_reload(void)
+{
+    idt_flush((uint64_t)&idt_ptr);
 }
 
 void idt_init(void)
@@ -290,6 +312,10 @@ void idt_init(void)
     idt_set_gate(45, (uint64_t)irq13, 0x08, IDT_TYPE_INTERRUPT);
     idt_set_gate(46, (uint64_t)irq14, 0x08, IDT_TYPE_INTERRUPT);
     idt_set_gate(47, (uint64_t)irq15, 0x08, IDT_TYPE_INTERRUPT);
+
+    /* IPI 处理程序（向量 48-49） */
+    idt_set_gate(48, (uint64_t)irq16, 0x08, IDT_TYPE_INTERRUPT);
+    idt_set_gate(49, (uint64_t)irq17, 0x08, IDT_TYPE_INTERRUPT);
 
     /* 伪中断处理程序（向量 255） */
     idt_set_gate(255, (uint64_t)irq_spurious, 0x08, IDT_TYPE_INTERRUPT);

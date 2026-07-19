@@ -14,6 +14,8 @@
 #define APIC_VECTOR_MOUSE      44
 #define APIC_VECTOR_ATA_PRI    46
 #define APIC_VECTOR_ATA_SEC    47
+#define APIC_VECTOR_RESCHEDULE    48    /* 重调度 IPI */
+#define APIC_VECTOR_TLB_SHOOTDOWN 49   /* TLB 刷新 IPI */
 #define APIC_VECTOR_SPURIOUS   255
 
 /* LAPIC register offsets */
@@ -73,5 +75,8 @@ void apic_enable_irq(uint8_t isa_irq, uint8_t vector);
 void apic_disable_irq(uint8_t isa_irq);
 uint32_t apic_get_lapic_id(void);
 uintptr_t apic_get_lapic_base(void);
+
+/* Initialize LAPIC timer for the current CPU */
+void lapic_timer_init(uint8_t vector, uint32_t freq_hz);
 
 #endif /* APIC_H */

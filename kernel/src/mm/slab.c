@@ -2,6 +2,7 @@
 #include "memory.h"
 #include "string.h"
 #include "serial.h"
+#include "smp.h"
 
 /* ---- 缓存大小：从16到2048的2的幂 ---- */
 static const uint32_t cache_sizes[SLAB_NUM_CACHES] = {
@@ -10,6 +11,11 @@ static const uint32_t cache_sizes[SLAB_NUM_CACHES] = {
 
 /* 全局缓存数组 */
 static slab_cache_t caches[SLAB_NUM_CACHES];
+
+/* Slab 分配器自旋锁（多核安全）
+ * 保护所有缓存的 partial/full/free 链表和位图操作。
+ * 锁序：pmm_lock → mmu_lock → proc_table_lock → runqueue_lock → kmalloc_lock → slab_lock */
+static spinlock_t slab_lock;
 
 /* ---- 位图辅助函数 ---- */
 
@@ -173,6 +179,7 @@ static int slab_cache_index(size_t size)
 
 void slab_init(void)
 {
+    spinlock_init(&slab_lock);
     for (int i = 0; i < SLAB_NUM_CACHES; i++) {
         caches[i].obj_size     = cache_sizes[i];
         caches[i].partial      = NULL;
@@ -197,6 +204,7 @@ void *slab_alloc(size_t size)
         return p;
     }
 
+    spinlock_acquire(&slab_lock);
     slab_cache_t *cache = &caches[idx];
 
     /* 1. 首先尝试partial slab */
@@ -217,6 +225,7 @@ void *slab_alloc(size_t size)
                     list_prepend(&cache->full, slab);
                 }
 
+                spinlock_release(&slab_lock);
                 return slab_obj_addr(slab, i);
             }
         }
@@ -233,16 +242,22 @@ void *slab_alloc(size_t size)
         bitmap_clear(bm, 0);
         slab->obj_free--;
         cache->total_allocs++;
+        spinlock_release(&slab_lock);
         return slab_obj_addr(slab, 0);
     }
 
-    /* 3. 创建新的slab */
+    /* 3. 创建新的slab（注意：slab_create 调用 alloc_page，
+     *     该函数使用 pmm_lock，锁序 slab_lock → pmm_lock 不符合
+     *     全局锁序。临时释放 slab_lock 以避免死锁。 */
+    spinlock_release(&slab_lock);
+
     slab_t *slab = slab_create(cache);
     if (!slab) {
         serial_puts("[slab] failed to create new slab\n");
         return NULL;
     }
 
+    spinlock_acquire(&slab_lock);
     list_prepend(&cache->partial, slab);
 
     /* 分配第一个对象 */
@@ -250,6 +265,7 @@ void *slab_alloc(size_t size)
     bitmap_clear(bm, 0);
     slab->obj_free--;
     cache->total_allocs++;
+    spinlock_release(&slab_lock);
     return slab_obj_addr(slab, 0);
 }
 
@@ -257,6 +273,8 @@ void slab_free(void *ptr)
 {
     if (!ptr)
         return;
+
+    spinlock_acquire(&slab_lock);
 
     /* 在所有缓存中搜索拥有此指针的slab */
     for (int i = 0; i < SLAB_NUM_CACHES; i++) {
@@ -273,11 +291,13 @@ void slab_free(void *ptr)
         uintptr_t offset = (uintptr_t)ptr - base;
         if (offset % slab->obj_size != 0) {
             serial_puts("[slab] unaligned pointer in slab_free\n");
+            spinlock_release(&slab_lock);
             return;
         }
         uint32_t obj_idx = (uint32_t)(offset / slab->obj_size);
         if (obj_idx >= slab->obj_count) {
             serial_puts("[slab] pointer out of range in slab_free\n");
+            spinlock_release(&slab_lock);
             return;
         }
 
@@ -288,6 +308,7 @@ void slab_free(void *ptr)
             slab->obj_free++;
             cache->total_frees++;
             serial_puts("[slab] warning: possible double free\n");
+            spinlock_release(&slab_lock);
             return;
         }
 
@@ -306,8 +327,11 @@ void slab_free(void *ptr)
             list_remove(&cache->full, slab);
 
             if (cache->free) {
-                /* 已有备用空闲slab——释放此slab */
+                /* 已有备用空闲slab——释放此slab（free_page 使用 pmm_lock，
+                 * 临时释放 slab_lock 以避免违反锁序） */
+                spinlock_release(&slab_lock);
                 free_page(slab->page);
+                return;
             } else {
                 /* 保留为备用 */
                 list_prepend(&cache->free, slab);
@@ -319,8 +343,11 @@ void slab_free(void *ptr)
         }
         /* 否则：已在partial链表中，保持不变 */
 
+        spinlock_release(&slab_lock);
         return;
     }
+
+    spinlock_release(&slab_lock);
 
     /* 如果执行到这里，说明指针不属于任何slab缓存。
      * 可能是通过alloc_pages()分配的大块内存。

@@ -98,6 +98,12 @@ IRQ_STUB 14, 46    ; 主 ATA
 IRQ_STUB 15, 47    ; 从 ATA
 
 ; ========================================
+; IPI 中断存根（向量 48-49）
+; ========================================
+IRQ_STUB 16, 48    ; 重调度 IPI (APIC_VECTOR_RESCHEDULE)
+IRQ_STUB 17, 49    ; TLB 刷新 IPI (APIC_VECTOR_TLB_SHOOTDOWN)
+
+; ========================================
 ; 伪中断存根（向量 255）
 ; ========================================
 global irq_spurious
@@ -141,12 +147,11 @@ isr_common:
     mov ax, ds
     push rax
 
-    ; 加载内核数据段
+    ; 加载内核数据段（不设置 GS，GS 基地址由 MSR 管理，per-CPU 数据依赖它）
     mov ax, 0x10
     mov ds, ax
     mov es, ax
     mov fs, ax
-    mov gs, ax
 
     ; 传递中断号、错误码、故障RIP和用户RSP作为参数
     mov rdi, [rsp+128]   ; 中断号
@@ -156,12 +161,11 @@ isr_common:
     cld
     call isr_handler
 
-    ; 恢复数据段
+    ; 恢复数据段（不恢复 GS，保持 per-CPU GS 基地址）
     pop rax
     mov ds, ax
     mov es, ax
     mov fs, ax
-    mov gs, ax
 
     ; 恢复通用寄存器
     pop r15
@@ -209,12 +213,11 @@ irq_common:
     mov ax, ds
     push rax
 
-    ; 加载内核数据段
+    ; 加载内核数据段（不设置 GS，GS 基地址由 MSR 管理，per-CPU 数据依赖它）
     mov ax, 0x10
     mov ds, ax
     mov es, ax
     mov fs, ax
-    mov gs, ax
 
     ; 传递中断号和错误码作为参数
     mov rdi, [rsp+128]   ; 中断号
@@ -222,12 +225,11 @@ irq_common:
     cld
     call irq_handler
 
-    ; 恢复数据段
+    ; 恢复数据段（不恢复 GS，保持 per-CPU GS 基地址）
     pop rax
     mov ds, ax
     mov es, ax
     mov fs, ax
-    mov gs, ax
 
     ; 恢复通用寄存器
     pop r15
@@ -275,12 +277,11 @@ spurious_common:
     mov ax, ds
     push rax
 
-    ; 加载内核数据段
+    ; 加载内核数据段（不设置 GS，GS 基地址由 MSR 管理，per-CPU 数据依赖它）
     mov ax, 0x10
     mov ds, ax
     mov es, ax
     mov fs, ax
-    mov gs, ax
 
     ; 传递中断号和错误码作为参数
     mov rdi, [rsp+128]   ; 中断号
@@ -288,12 +289,11 @@ spurious_common:
     cld
     call spurious_handler
 
-    ; 恢复数据段
+    ; 恢复数据段（不恢复 GS，保持 per-CPU GS 基地址）
     pop rax
     mov ds, ax
     mov es, ax
     mov fs, ax
-    mov gs, ax
 
     ; 恢复通用寄存器
     pop r15

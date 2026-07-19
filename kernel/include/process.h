@@ -3,6 +3,7 @@
 
 #include <stdint.h>
 #include <stddef.h>
+#include "smp.h"
 /* Forward declarations from vfs.h - avoid heavy include */
 typedef struct vfs_file vfs_file_t;
 #define VFS_MAX_PATH 256
@@ -89,6 +90,8 @@ typedef struct process {
     int             priority;      /* Scheduling priority */
     uint64_t        sleep_until;   /* Wake time for blocked processes */
     uint64_t        cpu_time;      /* Total CPU time consumed (ms) */
+    int             cpu_id;        /* 当前运行的 CPU index，-1 = 未运行 */
+    struct process *next_in_queue; /* 运行队列链接指针 */
 
     /* Memory */
     uint64_t        pml4;          /* Physical address of PML4 */
@@ -156,6 +159,9 @@ int process_wait(int pid, int *status, int options);
 /* Get current process */
 process_t *process_current(void);
 
+/* Process table lock (multi-core safe) */
+extern spinlock_t proc_table_lock;
+
 /* Get process by PID */
 process_t *process_get(int pid);
 
@@ -187,9 +193,6 @@ void scheduler_schedule(void);
 
 /* Check and clear the need_reschedule flag */
 int need_reschedule_check(void);
-
-/* External access to need_reschedule flag for explicit yielding */
-extern int need_reschedule;
 
 /* Start the scheduler (never returns) */
 void scheduler_start(void) __attribute__((noreturn));

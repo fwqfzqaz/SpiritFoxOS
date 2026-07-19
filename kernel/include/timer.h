@@ -15,6 +15,7 @@
 
 void timer_init(void);
 void timer_handler(void);
+void timer_disable_pit(void);
 uint64_t timer_get_ticks(void);
 uint64_t timer_get_ms(void);
 void timer_sleep_ms(uint64_t ms);

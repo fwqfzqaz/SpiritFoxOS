@@ -1,6 +1,7 @@
 #include "memory.h"
 #include "serial.h"
 #include "hal.h"
+#include "smp.h"
 #include "vga.h"
 
 /* 最大可寻址物理内存：64 GB（16384个2MB页 = 4GB，
@@ -14,6 +15,9 @@ static uint64_t bitmap_size = 0;       /* 位图大小（字节） */
 static uint64_t max_pages = 0;         /* 基于实际内存的最大页数 */
 static uint64_t total_pages = 0;
 static uint64_t first_usable_page = 0;
+
+/* PMM 物理页分配器自旋锁（多核安全） */
+static spinlock_t pmm_lock;
 
 /* 大页（2MB）跟踪 - 用于内核分配 */
 #define HPAGE_SIZE      (2 * 1024 * 1024)   /* 2 MB */
@@ -199,16 +203,22 @@ void memory_init(BootInfo* info, uintptr_t kernel_end)
                (unsigned long long)(info->total_memory / (1024 * 1024)),
                (unsigned long long)total_pages);
     }
+
+    /* 初始化 PMM 自旋锁 */
+    spinlock_init(&pmm_lock);
 }
 
 void* alloc_page(void)
 {
+    spinlock_acquire(&pmm_lock);
     for (uint64_t i = first_usable_page; i < max_pages; i++) {
         if (!bitmap_test(i)) {
             bitmap_set(i);
+            spinlock_release(&pmm_lock);
             return (void*)(i * PAGE_SIZE);
         }
     }
+    spinlock_release(&pmm_lock);
     return (void*)0;
 }
 
@@ -217,6 +227,7 @@ void* alloc_pages(size_t count)
     if (count == 0) return (void*)0;
     if (count == 1) return alloc_page();
 
+    spinlock_acquire(&pmm_lock);
     for (uint64_t i = first_usable_page; i + count <= max_pages; i++) {
         int ok = 1;
         for (size_t j = 0; j < count; j++) {
@@ -231,22 +242,27 @@ void* alloc_pages(size_t count)
         for (size_t j = 0; j < count; j++) {
             bitmap_set(i + j);
         }
+        spinlock_release(&pmm_lock);
         return (void*)(i * PAGE_SIZE);
     }
+    spinlock_release(&pmm_lock);
     return (void*)0;
 }
 
 void free_page(void* addr)
 {
     uint64_t page_idx = (uint64_t)addr / PAGE_SIZE;
+    spinlock_acquire(&pmm_lock);
     if (page_idx < max_pages && bitmap_test(page_idx)) {
         bitmap_clear(page_idx);
     }
+    spinlock_release(&pmm_lock);
 }
 
 /* 分配2MB大页（512个连续4KB页，2MB对齐） */
 void* alloc_huge_page(void)
 {
+    spinlock_acquire(&pmm_lock);
     /* 查找从2MB对齐地址开始的512个连续空闲页 */
     for (uint64_t i = first_usable_page; i + PAGES_PER_HPAGE <= max_pages; i++) {
         /* 检查对齐：页索引必须是512的倍数 */
@@ -269,8 +285,10 @@ void* alloc_huge_page(void)
         for (size_t j = 0; j < PAGES_PER_HPAGE; j++) {
             bitmap_set(i + j);
         }
+        spinlock_release(&pmm_lock);
         return (void*)(i * PAGE_SIZE);
     }
+    spinlock_release(&pmm_lock);
     return (void*)0;
 }
 
@@ -278,10 +296,12 @@ void free_huge_page(void* addr)
 {
     uint64_t page_idx = (uint64_t)addr / PAGE_SIZE;
     if ((page_idx % PAGES_PER_HPAGE) != 0) return;  /* 非大页对齐 */
+    spinlock_acquire(&pmm_lock);
     for (size_t j = 0; j < PAGES_PER_HPAGE; j++) {
         if (page_idx + j < max_pages)
             bitmap_clear(page_idx + j);
     }
+    spinlock_release(&pmm_lock);
 }
 
 uint64_t pmm_total_pages(void)

@@ -12,6 +12,7 @@
 #include "memory.h"
 #include "kmalloc.h"
 #include "timer.h"
+#include "smp.h"
 #include "string.h"
 #include "vfs.h"
 #include "elf64.h"
@@ -38,6 +39,11 @@ process_t proc_table[MAX_PROCS];
 process_t *current = NULL;
 int need_reschedule = 0;
 
+/* 进程表自旋锁（多核安全）
+ * 保护 proc_table 的分配/释放和进程树操作。
+ * 锁序：pmm_lock → mmu_lock → proc_table_lock → runqueue_lock → kmalloc_lock */
+spinlock_t proc_table_lock;
+
 /* ========================================================================
  * 上下文切换原语 - 位于 isr_stub.S
  * ======================================================================== */
@@ -53,10 +59,16 @@ extern void kthread_trampoline_asm(void);
 
 static int alloc_pid(void)
 {
+    spinlock_acquire(&proc_table_lock);
     for (int i = 0; i < MAX_PROCS; i++) {
-        if (proc_table[i].state == PROC_UNUSED)
+        if (proc_table[i].state == PROC_UNUSED) {
+            /* 标记为正在分配，防止其他核重复分配 */
+            proc_table[i].state = PROC_READY;
+            spinlock_release(&proc_table_lock);
             return i;
+        }
     }
+    spinlock_release(&proc_table_lock);
     return -1;
 }
 
@@ -79,10 +91,15 @@ __attribute__((used)) void kthread_entry(void (*entry)(void *), void *arg)
 void process_init(void)
 {
     memset(proc_table, 0, sizeof(proc_table));
+    spinlock_init(&proc_table_lock);
 
-    /* 初始化 TSS */
+    /* 初始化 TSS（BSP 的 cpu_gdts[0].tss 已由 gdt_init() 初始化，
+     * 这里同步全局 tss 向后兼容变量） */
     memset(&tss, 0, sizeof(tss));
     tss.iomap_base = sizeof(tss_t);
+    /* 同步到 Per-CPU TSS */
+    memset(&cpu_gdts[0].tss, 0, sizeof(tss_t));
+    cpu_gdts[0].tss.iomap_base = sizeof(tss_t);
 
     /* Createeateeateethe idleekernel process idleDkernel process idle–kernel process idle/kernel process */
     process_t *p = &proc_table[0];
@@ -96,6 +113,8 @@ void process_init(void)
     p->exit_code = 0;
     p->sleep_until = 0;
     p->cpu_time  = 0;
+    p->cpu_id    = 0;    /* PID0 运行在 BSP（CPU 0） */
+    p->next_in_queue = NULL;
 
     /* 内存 – 共享内核页表 */
     p->pml4         = hal_read_cr3();
@@ -135,7 +154,15 @@ void process_init(void)
     __asm__ volatile ("mov %%rsp, %0" : "=r"(p->kernel_rsp));
 
     current = p;
-    tss.rsp0 = 0;
+
+    /* 设置 BSP 的 Per-CPU current_process */
+    {
+        cpu_local_t *cpu = this_cpu();
+        if (cpu)
+            cpu->current_process = p;
+    }
+
+    gdt_set_tss_rsp0(0, 0);
 }
 
 /* ========================================================================
@@ -435,13 +462,14 @@ void process_exit(int code)
     /* Stack is freed by the parent in process_wait(), not here,
      * because we're still running on it. */
 
+    /* 将子进程重新挂载到 PID 0（需要锁保护进程树操作） */
+    spinlock_acquire(&proc_table_lock);
     current->state = PROC_ZOMBIE;
 
     /* Wake up parent if it's waiting */
     if (current->parent && current->parent->state == PROC_BLOCKED)
         current->parent->state = PROC_READY;
 
-    /* 将子进程重新挂载到 PID 0 */
     process_t *ch = current->child;
     while (ch) {
         ch->ppid = 0;
@@ -458,8 +486,9 @@ void process_exit(int code)
         ch->sibling = NULL;
         ch = next_ch;
     }
+    spinlock_release(&proc_table_lock);
 
-    need_reschedule = 1;
+    this_cpu()->need_reschedule = 1;
     scheduler_schedule();
 
     /* 不应到达此处 - 调度器会切换到另一个进程 */
@@ -492,6 +521,15 @@ static int reap_zombie(process_t *child, process_t *prev, int *status)
     return child_pid;
 }
 
+/* reap_zombie 的加锁版本 */
+static int reap_zombie_locked(process_t *child, process_t *prev, int *status)
+{
+    spinlock_acquire(&proc_table_lock);
+    int ret = reap_zombie(child, prev, status);
+    spinlock_release(&proc_table_lock);
+    return ret;
+}
+
 int process_wait(int pid, int *status, int options)
 {
     (void)options;
@@ -506,7 +544,7 @@ int process_wait(int pid, int *status, int options)
     while (child) {
         if ((pid == -1 || child->pid == pid) &&
             child->state == PROC_ZOMBIE) {
-            return reap_zombie(child, prev, status);
+            return reap_zombie_locked(child, prev, status);
         }
         prev = child;
         child = child->sibling;
@@ -528,7 +566,7 @@ int process_wait(int pid, int *status, int options)
     prev  = NULL;
     while (child) {
         if (child->state == PROC_ZOMBIE)
-            return reap_zombie(child, prev, status);
+            return reap_zombie_locked(child, prev, status);
         prev = child;
         child = child->sibling;
     }
@@ -545,15 +583,19 @@ int process_kill(int pid, int sig)
     if (sig < 1 || sig >= MAX_SIGNAL)
         return -1;
 
+    spinlock_acquire(&proc_table_lock);
     process_t *target = process_get(pid);
-    if (!target)
+    if (!target) {
+        spinlock_release(&proc_table_lock);
         return -1;
+    }
 
     target->pending_signals |= (1ULL << (sig - 1));
 
     if (target->state == PROC_BLOCKED)
         target->state = PROC_READY;
 
+    spinlock_release(&proc_table_lock);
     return 0;
 }
 

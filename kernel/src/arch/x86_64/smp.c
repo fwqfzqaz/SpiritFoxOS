@@ -1,10 +1,20 @@
 #include "smp.h"
 #include "apic.h"
 #include "acpi.h"
+#include "gdt.h"
 #include "hal.h"
+#include "idt.h"
 #include "kmalloc.h"
+#include "memory.h"
+#include "process.h"
 #include "string.h"
+#include "timer.h"
 #include "vga.h"
+
+/* 内核栈页数（与 process.h 中 KERNEL_STACK_PAGES 一致） */
+#ifndef KERNEL_STACK_PAGES
+#define KERNEL_STACK_PAGES 2
+#endif
 
 /* ========================================================================
  * AP 引导代码的外部声明（在 ap_trampoline.S 中定义）
@@ -27,44 +37,26 @@
  * 目前直接作为静态数组嵌入。
  * 引导代码从 16 位实模式切换到 64 位长模式。 */
 static const uint8_t ap_trampoline_code[] = {
-    /* ap_pml4:   dd 0 */       0x00, 0x00, 0x00, 0x00,
-    /* ap_entry:  dq 0 */       0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    /* ap_gdt_ptr: dw 0 */      0x00, 0x00,
-    /*            dq 0 */       0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    /* cli */                   0xFA,
-    /* xor ax, ax */            0x31, 0xC0,
-    /* mov ds, ax */            0x8E, 0xD8,
-    /* mov es, ax */            0x8E, 0xC0,
-    /* in al, 0x92 */           0xE4, 0x92,
-    /* or al, 2 */              0x0C, 0x02,
-    /* out 0x92, al */          0xE6, 0x92,
-    /* mov eax, [0x8000] */     0xA1, 0x00, 0x80, 0x00, 0x00,
-    /* mov cr3, eax */          0x0F, 0x22, 0xD8,
-    /* mov eax, cr4 */          0x0F, 0x20, 0xE0,
-    /* or eax, 0x20 */          0x0D, 0x20, 0x00, 0x00, 0x00,
-    /* mov cr4, eax */          0x0F, 0x22, 0xE0,
-    /* mov ecx, 0xC0000080 */   0xB9, 0x80, 0x00, 0x00, 0xC0,
-    /* rdmsr */                 0x0F, 0x32,
-    /* or eax, 0x100 */         0x0D, 0x00, 0x01, 0x00, 0x00,
-    /* wrmsr */                 0x0F, 0x30,
-    /* lgdt [0x800C] */         0x0F, 0x01, 0x15, 0x0C, 0x80, 0x00, 0x00,
-    /* mov eax, cr0 */          0x0F, 0x20, 0xC0,
-    /* or eax, 0x80000000 */    0x0D, 0x00, 0x00, 0x00, 0x80,
-    /* mov cr0, eax */          0x0F, 0x22, 0xC0,
-    /* jmp 0x08:ap_long_mode（远跳转） */
-    0xEA, 0x36, 0x80, 0x00, 0x00, 0x08, 0x00,
-    /* --- 64 位模式 --- */
-    /* mov ds, ax */            0x8E, 0xD8,
-    /* mov es, ax */            0x8E, 0xC0,
-    /* mov fs, ax */            0x8E, 0xE0,
-    /* mov gs, ax */            0x8E, 0xE8,
-    /* mov ss, ax */            0x8E, 0xD0,
-    /* mov rsp, 0x90000 */      0x48, 0xC7, 0xC4, 0x00, 0x00, 0x09, 0x00,
-    /* mov rax, [0x8004] */     0x48, 0xA1, 0x04, 0x80, 0x00, 0x00,
-    /* call rax */              0xFF, 0xD0,
-    /* cli */                   0xFA,
-    /* hlt */                   0xF4,
-    /* jmp .-2 */               0xEB, 0xFD,
+    /* 由 NASM 从 ap_trampoline.S 汇编生成：
+     *   nasm -f bin ap_trampoline.S -o ap_trampoline.bin
+     *   xxd -i ap_trampoline.bin
+     *
+     * 可修补数据偏移量（与 ap_trampoline.S 匹配）：
+     *   0x00-0x03: PML4 物理地址（4 字节）
+     *   0x04-0x0B: C 入口点地址（8 字节）
+     *   0x0C-0x0D: GDT 界限（2 字节）
+     *   0x0E-0x15: GDT 基地址（8 字节） */
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xfa, 0x31,
+    0xc0, 0x8e, 0xd8, 0x8e, 0xc0, 0xe4, 0x92, 0x0c, 0x02, 0xe6, 0x92, 0x66,
+    0xa1, 0x00, 0x80, 0x0f, 0x22, 0xd8, 0x0f, 0x20, 0xe0, 0x66, 0x83, 0xc8,
+    0x20, 0x0f, 0x22, 0xe0, 0x66, 0xb9, 0x80, 0x00, 0x00, 0xc0, 0x0f, 0x32,
+    0x66, 0x0d, 0x00, 0x01, 0x00, 0x00, 0x0f, 0x30, 0x0f, 0x01, 0x16, 0x0c,
+    0x80, 0x0f, 0x20, 0xc0, 0x66, 0x0d, 0x01, 0x00, 0x00, 0x80, 0x0f, 0x22,
+    0xc0, 0xea, 0x5a, 0x80, 0x08, 0x00, 0x66, 0xb8, 0x10, 0x00, 0x8e, 0xd8,
+    0x8e, 0xc0, 0x8e, 0xe0, 0x8e, 0xe8, 0x8e, 0xd0, 0xbc, 0x00, 0x00, 0x09,
+    0x00, 0x48, 0x8b, 0x04, 0x25, 0x04, 0x80, 0x00, 0x00, 0xff, 0xd0, 0xfa,
+    0xf4, 0xeb, 0xfc
 };
 
 static const size_t ap_trampoline_size = sizeof(ap_trampoline_code);
@@ -73,7 +65,7 @@ static const size_t ap_trampoline_size = sizeof(ap_trampoline_code);
  * 全局状态
  * ======================================================================== */
 static cpu_info_t  cpu_infos[SMP_MAX_CPUS];
-static cpu_local_t cpu_locals[SMP_MAX_CPUS];
+cpu_local_t cpu_locals[SMP_MAX_CPUS];
 static int         cpu_count = 0;
 
 /* LAPIC MMIO 基地址（从 apic_get_lapic_base 缓存） */
@@ -108,6 +100,7 @@ void spinlock_init(spinlock_t *lock)
 {
     lock->ticket = 0;
     lock->serving = 0;
+    lock->saved_flags = 0;
 }
 
 void spinlock_acquire(spinlock_t *lock)
@@ -125,13 +118,9 @@ void spinlock_acquire(spinlock_t *lock)
     }
 
     /* 持有锁期间中断被禁用。
-     * 标志保存在局部变量中，释放时恢复。 */
-    /* 保存标志到锁中以便释放时恢复 */
+     * 保存标志到锁中以便释放时正确恢复。 */
     __asm__ volatile ("" : : : "memory");  /* 编译器屏障 */
-    /* 我们通过简单的方法实现每 CPU 标志存储：
-     * 由于我们禁用中断且在自旋期间保持禁用，
-     * 释放时只需重新启用中断。这是安全的，因为
-     * spinlock_release 必须由获取锁的同一 CPU 调用。 */
+    lock->saved_flags = flags;
 }
 
 void spinlock_release(spinlock_t *lock)
@@ -139,8 +128,8 @@ void spinlock_release(spinlock_t *lock)
     /* 推进服务计数器 */
     __atomic_add_fetch(&lock->serving, 1, __ATOMIC_RELEASE);
 
-    /* 重新启用中断（在获取时被禁用） */
-    hal_enable_interrupts();
+    /* 恢复获取锁时保存的中断标志（而非无条件启用中断） */
+    hal_restore_interrupts(lock->saved_flags);
 }
 
 /* ========================================================================
@@ -239,15 +228,22 @@ static void smp_enumerate_cpus(void)
 }
 
 /* ========================================================================
- * 延时循环（近似毫秒）
+ * 延时循环（基于 PIT 定时器的毫秒延时）
  * ======================================================================== */
+
+static inline uint64_t rdtsc(void)
+{
+    uint32_t lo, hi;
+    __asm__ volatile("rdtsc" : "=a"(lo), "=d"(hi));
+    return ((uint64_t)hi << 32) | lo;
+}
 
 static void delay_ms(unsigned int ms)
 {
-    /* 使用 hal_halt_no_cli 配合简单循环的粗略延时。
-     * 每次迭代在现代 CPU 速度下带 io_wait 大约 ~1us。 */
-    for (unsigned int i = 0; i < ms * 1000; i++) {
-        hal_outb(0x80, 0); /* 通过端口 0x80 延时约 1us */
+    /* 简单忙等待：在 QEMU 中端口 0x80 写入约 1us。
+     * 不精确但足够用于 AP 启动延时。 */
+    for (unsigned int i = 0; i < ms * 2000; i++) {
+        hal_outb(0x80, 0);
     }
 }
 
@@ -255,47 +251,8 @@ static void delay_ms(unsigned int ms)
  * AP 启动序列
  * ======================================================================== */
 
-static void smp_start_aps(void)
+static void start_aps(void)
 {
-    uint32_t bsp_apic_id = apic_get_lapic_id();
-
-    printf("[SMP] BSP APIC ID: %u\n", bsp_apic_id);
-
-    /* 初始化所有 CPU 的 cpu_locals */
-    for (int i = 0; i < cpu_count; i++) {
-        cpu_locals[i].cpu_id = cpu_infos[i].apic_id;
-        cpu_locals[i].index = (uint32_t)i;
-        cpu_locals[i].online = 0;
-        cpu_locals[i].bsp = (cpu_infos[i].apic_id == bsp_apic_id) ? 1 : 0;
-        cpu_locals[i].current_process = NULL;
-        cpu_locals[i].kernel_rsp = 0;
-
-        /* 为 AP 分配内核栈（BSP 已有） */
-        if (!cpu_locals[i].bsp) {
-            void *stack = kmalloc(PROC_KERNEL_STACK);
-            if (!stack) {
-                printf("[SMP] ERROR: Failed to allocate stack for AP %u\n",
-                       cpu_infos[i].apic_id);
-                continue;
-            }
-            memset(stack, 0, PROC_KERNEL_STACK);
-            /* 栈向下增长：指向已分配区域的顶部 */
-            cpu_locals[i].kernel_stack = stack;
-        } else {
-            cpu_locals[i].kernel_stack = NULL; /* BSP 使用现有栈 */
-        }
-    }
-
-    /* 标记 BSP 为在线 */
-    for (int i = 0; i < cpu_count; i++) {
-        if (cpu_locals[i].bsp) {
-            cpu_locals[i].online = 1;
-            /* 设置 BSP 的 GS 基地址 */
-            hal_write_msr(MSR_IA32_GS_BASE, (uint64_t)&cpu_locals[i]);
-            break;
-        }
-    }
-
     /* 将 AP 引导代码复制到 0x8000（恒等映射区域） */
     hal_ensure_mapped(AP_TRAMPOLINE_ADDR, ap_trampoline_size);
     memcpy((void *)AP_TRAMPOLINE_ADDR, ap_trampoline_code, ap_trampoline_size);
@@ -331,8 +288,8 @@ static void smp_start_aps(void)
         lapic_write(LAPIC_ICR_LOW, LAPIC_ICR_DELIVERY_INIT | LAPIC_ICR_LEVEL_ASSERT);
         lapic_wait_icr();
 
-        /* 步骤 2：等待 10ms */
-        delay_ms(10);
+        /* 步骤 2：等待 10ms（QEMU 中减少为 1ms 以加速启动） */
+        delay_ms(1);
 
         /* 步骤 3：发送 SIPI（启动 IPI），向量为 0x08（页面 0x8000 / 4096） */
         lapic_wait_icr();
@@ -350,10 +307,9 @@ static void smp_start_aps(void)
         lapic_wait_icr();
 
         /* 步骤 6：等待 AP 上线（带超时） */
-        int timeout = 5000; /* 约 5 秒 */
+        int timeout = 10000000; /* 约 1 秒（忙等待） */
         while (!cpu_locals[i].online && timeout > 0) {
-            hal_halt_no_cli();
-            delay_ms(1);
+            __asm__ volatile ("pause");
             timeout--;
         }
 
@@ -423,6 +379,35 @@ void ap_entry_c(void)
     /* 接受所有中断 */
     lapic_write(LAPIC_TPR, 0);
 
+    /* 为本 AP 分配 Per-CPU syscall 暂存区。
+     * 每个核心需要独立暂存区，因为 syscall 入口通过 swapgs + gs: 访问。
+     * 布局与 BSP 相同：gs:0=用户RSP, gs:8=内核RSP, gs:16=PML4, gs:24=内核CR3 */
+    local->syscall_cpu_area = alloc_page();
+    if (local->syscall_cpu_area) {
+        memset(local->syscall_cpu_area, 0, PAGE_SIZE);
+        uint64_t *cpu_area = (uint64_t *)local->syscall_cpu_area;
+        cpu_area[3] = hal_read_cr3();   /* 偏移 24 = 内核 CR3 */
+        hal_write_msr(MSR_IA32_KERNEL_GS_BASE, (uint64_t)(uintptr_t)local->syscall_cpu_area);
+        printf("[SMP] AP %u syscall_cpu_area at %p\n", my_apic_id, local->syscall_cpu_area);
+    } else {
+        printf("[SMP] WARNING: AP %u failed to allocate syscall_cpu_area\n", my_apic_id);
+    }
+
+    /* 初始化本 AP 的 GDT 和 TSS */
+    gdt_init_cpu(local->index);
+    gdt_load_cpu(local->index);
+
+    /* 加载内核 IDT（AP 的 IDTR 仍指向实模式 IVT，
+     * 不重新加载会导致中断时三重故障！） */
+    idt_reload();
+
+    /* 设置 cpu_local 中的 TSS 指针和选择子 */
+    local->tss = &cpu_gdts[local->index].tss;
+    local->tss_selector = GDT_TSS_SEL;
+
+    /* 初始化本 AP 的 LAPIC 定时器 */
+    lapic_timer_init(APIC_VECTOR_TIMER, TIMER_HZ);
+
     /* 标记自身为在线 */
     __atomic_store_n(&local->online, 1, __ATOMIC_RELEASE);
 
@@ -441,22 +426,97 @@ void ap_entry_c(void)
 
 void smp_init(void)
 {
+    smp_enumerate_cpus_only();
+    smp_start_aps();
+}
+
+/* 仅枚举 CPU（可在 process_init 之前调用） */
+void smp_enumerate_cpus_only(void)
+{
     /* 缓存 LAPIC 基地址用于 ICR 访问 */
     lapic_base = apic_get_lapic_base();
-    if (lapic_base == 0) {
-        printf("[SMP] ERROR: LAPIC base not available\n");
-        return;
-    }
 
     printf("[SMP] Initializing SMP subsystem...\n");
 
-    /* 步骤 1：从 MADT 枚举 CPU */
+    /* 从 MADT 枚举 CPU */
     smp_enumerate_cpus();
 
-    /* 步骤 2：启动 AP（仅当 CPU 数量大于 1 时） */
-    if (cpu_count > 1) {
-        smp_start_aps();
+    /* 初始化 BSP 的 cpu_locals 并设置 GS 基地址。
+     * 这必须在 process_init() 和 syscall_init() 之前完成，
+     * 因为它们使用 this_cpu() 访问 Per-CPU 数据。 */
+    uint32_t bsp_apic_id = apic_get_lapic_id();
+    memset(&cpu_locals[0], 0, sizeof(cpu_local_t));
+    cpu_locals[0].cpu_id = bsp_apic_id;
+    cpu_locals[0].index = 0;
+    cpu_locals[0].online = 1;
+    cpu_locals[0].bsp = 1;
+    cpu_locals[0].current_process = NULL;
+    cpu_locals[0].need_reschedule = 0;
+    spinlock_init(&cpu_locals[0].runqueue_lock);
+
+    /* 设置 BSP 的 GS 基地址 */
+    hal_write_msr(MSR_IA32_GS_BASE, (uint64_t)&cpu_locals[0]);
+    printf("[SMP] BSP GS base set to %p\n", (void *)&cpu_locals[0]);
+
+    printf("[SMP] Enumeration complete: %d CPU(s) found\n", cpu_count);
+}
+
+/* 启动 AP（必须在 process_init 之后调用） */
+void smp_start_aps(void)
+{
+    if (lapic_base == 0) {
+        printf("[SMP] ERROR: LAPIC base not available, cannot start APs\n");
+        return;
     }
+
+    /* 初始化 AP 的 cpu_locals（BSP 已在 smp_enumerate_cpus_only() 中初始化） */
+    uint32_t bsp_apic_id = apic_get_lapic_id();
+
+    for (int i = 0; i < cpu_count; i++) {
+        /* 跳过 BSP——已在 smp_enumerate_cpus_only() 中初始化 */
+        if (cpu_infos[i].apic_id == bsp_apic_id) {
+            /* 更新 BSP 的 TSS 指针（此时 GDT 已初始化） */
+            cpu_locals[i].tss = &cpu_gdts[0].tss;
+            cpu_locals[i].tss_selector = GDT_TSS_SEL;
+            continue;
+        }
+
+        cpu_locals[i].cpu_id = cpu_infos[i].apic_id;
+        cpu_locals[i].index = (uint32_t)i;
+        cpu_locals[i].online = 0;
+        cpu_locals[i].bsp = 0;
+        cpu_locals[i].current_process = NULL;
+        cpu_locals[i].kernel_rsp = 0;
+        cpu_locals[i].need_reschedule = 0;
+        cpu_locals[i].tss = NULL;
+        cpu_locals[i].syscall_cpu_area = NULL;
+        cpu_locals[i].lapic_timer_count = 0;
+        cpu_locals[i].runqueue_head = NULL;
+        cpu_locals[i].runqueue_tail = NULL;
+        cpu_locals[i].runqueue_count = 0;
+        spinlock_init(&cpu_locals[i].runqueue_lock);
+
+        /* 为 AP 分配内核栈 */
+        void *stack = alloc_pages(KERNEL_STACK_PAGES);
+        if (!stack) {
+            printf("[SMP] ERROR: Failed to allocate stack for AP %u\n",
+                   cpu_infos[i].apic_id);
+            continue;
+        }
+        memset(stack, 0, KERNEL_STACK_PAGES * PAGE_SIZE);
+        cpu_locals[i].kernel_stack = stack;
+    }
+
+    /* 启动 AP */
+    if (cpu_count > 1) {
+        start_aps();
+    }
+
+    /* 为 BSP 初始化 LAPIC 定时器（取代 PIT 周期中断） */
+    lapic_timer_init(APIC_VECTOR_TIMER, TIMER_HZ);
+
+    /* LAPIC 定时器接管后，禁用 PIT 周期中断避免双重中断 */
+    timer_disable_pit();
 
     printf("[SMP] Initialization complete: %d CPU(s) online\n", cpu_count);
 }
@@ -481,4 +541,19 @@ cpu_local_t *smp_get_current_cpu(void)
 {
     uint64_t gs_base = hal_read_msr(MSR_IA32_GS_BASE);
     return (cpu_local_t *)gs_base;
+}
+
+/* ========================================================================
+ * TLB 刷新（多核安全）
+ * ======================================================================== */
+
+void smp_flush_tlb_all(void)
+{
+    /* 先刷新本地 TLB */
+    hal_flush_tlb();
+
+    /* 如果有多核在线，向其他 CPU 广播 TLB 刷新 IPI */
+    if (cpu_count > 1) {
+        smp_broadcast_ipi(APIC_VECTOR_TLB_SHOOTDOWN);
+    }
 }

@@ -6,6 +6,7 @@
 #include "gdt.h"
 #include "idt.h"
 #include "memory.h"
+#include "mmu.h"
 #include "vga.h"
 #include "keyboard.h"
 #include "mouse.h"
@@ -81,6 +82,9 @@ void init_core(BootInfo *boot_info)
         memory_init(boot_info, kernel_end);
     }
 
+    serial_puts("[SpiritFoxOS] mmu_init...\n");
+    mmu_init();
+
     /* UEFI sets CR0.WP (Write Protect) which prevents kernel writes
      * to read-only pages. We need to clear it so hal_ensure_mapped
      * can modify UEFI's page tables. */
@@ -111,8 +115,8 @@ void init_hardware(void)
     apic_init();
     printf("[APIC] Initialized\n");
 
-    serial_puts("[SpiritFoxOS] smp_init...\n");
-    smp_init();
+    serial_puts("[SpiritFoxOS] smp_enumerate_cpus_only...\n");
+    smp_enumerate_cpus_only();
 
     serial_puts("[SpiritFoxOS] timer_init...\n");
     timer_init();
@@ -225,6 +229,9 @@ void init_services(void)
 
     serial_puts("[SpiritFoxOS] syscall_init...\n");
     syscall_init();
+
+    serial_puts("[SpiritFoxOS] smp_start_aps...\n");
+    smp_start_aps();
 
     serial_puts("[SpiritFoxOS] registry_init...\n");
     registry_init();

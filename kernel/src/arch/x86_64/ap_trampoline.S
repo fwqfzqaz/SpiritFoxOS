@@ -50,9 +50,9 @@ _start:
     ; 加载 GDT
     lgdt [ap_gdt_ptr]
 
-    ; 启用分页
+    ; 启用保护模式 + 分页（同时设置 PE 和 PG）
     mov eax, cr0
-    or eax, (1 << 31)
+    or eax, (1 << 31) | (1 << 0)
     mov cr0, eax
 
     ; 远跳转到 64 位代码

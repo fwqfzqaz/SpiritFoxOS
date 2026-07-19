@@ -1,8 +1,9 @@
 /*
  * SpiritFoxOS 调度器
  *
- * 带上下文切换的轮转进程调度器。
+ * 带上下文切换的 Per-CPU 运行队列调度器。
  * 从 process.c 中提取以实现模块化。
+ * 多核改造：每个 CPU 独立运行队列，通过 this_cpu() 访问。
  */
 
 #include "process.h"
@@ -10,14 +11,16 @@
 #include "hal.h"
 #include "memory.h"
 #include "timer.h"
+#include "smp.h"
 #include "string.h"
 #include "serial.h"
 #include "vga.h"
 
-/* Processctable esdefinedain ble - defid in process.c */
+/* Process table defined in process.c */
 extern process_t proc_table[];
+
+/* 过渡期：保留全局 current 变量用于 process.c 等文件的直接访问 */
 extern process_t *current;
-extern int need_reschedule;
 
 /* Context switch primitive - defined in isr_stub.S */
 extern void arch_switch_to(uint64_t *old_rsp_ptr, uint64_t new_rsp);
@@ -35,19 +38,6 @@ extern void kthread_trampoline_asm(void);
 #define KERNEL_STACK_PAGES 2       /* 2 页 = 8KB 内核栈 */
 
 /* ========================================================================
- * PID 分配
- * ======================================================================== */
-
-static int alloc_pid(void)
-{
-    for (int i = 0; i < MAX_PROCS; i++) {
-        if (proc_table[i].state == PROC_UNUSED)
-            return i;
-    }
-    return -1;
-}
-
-/* ========================================================================
  * Process lookup
  * ======================================================================== */
 
@@ -62,6 +52,10 @@ process_t *process_get(int pid)
 
 process_t *process_current(void)
 {
+    cpu_local_t *cpu = this_cpu();
+    if (cpu && cpu->current_process)
+        return cpu->current_process;
+    /* 回退到全局变量（过渡期） */
     return current;
 }
 
@@ -71,11 +65,50 @@ process_t *process_current(void)
 
 int need_reschedule_check(void)
 {
-    if (need_reschedule) {
-        need_reschedule = 0;
+    cpu_local_t *cpu = this_cpu();
+    if (cpu->need_reschedule) {
+        cpu->need_reschedule = 0;
         return 1;
     }
     return 0;
+}
+
+/* ========================================================================
+ * Per-CPU 运行队列操作
+ * ======================================================================== */
+
+/* 入队：加锁操作本 CPU 运行队列 */
+static void enqueue_process(process_t *proc)
+{
+    cpu_local_t *cpu = this_cpu();
+    spinlock_acquire(&cpu->runqueue_lock);
+    proc->state = PROC_READY;
+    proc->next_in_queue = NULL;
+    if (cpu->runqueue_tail) {
+        cpu->runqueue_tail->next_in_queue = proc;
+    } else {
+        cpu->runqueue_head = proc;
+    }
+    cpu->runqueue_tail = proc;
+    cpu->runqueue_count++;
+    spinlock_release(&cpu->runqueue_lock);
+}
+
+/* 出队：加锁操作本 CPU 运行队列 */
+static process_t *dequeue_process(void)
+{
+    cpu_local_t *cpu = this_cpu();
+    spinlock_acquire(&cpu->runqueue_lock);
+    process_t *proc = cpu->runqueue_head;
+    if (proc) {
+        cpu->runqueue_head = proc->next_in_queue;
+        if (!cpu->runqueue_head)
+            cpu->runqueue_tail = NULL;
+        cpu->runqueue_count--;
+        proc->next_in_queue = NULL;
+    }
+    spinlock_release(&cpu->runqueue_lock);
+    return proc;
 }
 
 /* ========================================================================
@@ -84,9 +117,10 @@ int need_reschedule_check(void)
 
 void process_yield(void)
 {
-    if (current)
-        current->state = PROC_READY;
-    need_reschedule = 1;
+    process_t *cur = process_current();
+    if (cur)
+        cur->state = PROC_READY;
+    this_cpu()->need_reschedule = 1;
     scheduler_schedule();
 }
 
@@ -96,10 +130,11 @@ void process_yield(void)
 
 void process_sleep(uint64_t ms)
 {
-    if (!current)
+    process_t *cur = process_current();
+    if (!cur)
         return;
-    current->sleep_until = timer_get_ms() + ms;
-    current->state = PROC_BLOCKED;
+    cur->sleep_until = timer_get_ms() + ms;
+    cur->state = PROC_BLOCKED;
     scheduler_schedule();
 }
 
@@ -109,83 +144,107 @@ void process_sleep(uint64_t ms)
 
 void scheduler_tick(void)
 {
-    if (!current)
-        return;
+    cpu_local_t *cpu = this_cpu();
+    if (!cpu) return;
+    process_t *cur = cpu->current_process;
+    if (!cur) return;
 
-    current->cpu_time++;
-    current->priority--;
+    cur->cpu_time++;
+    cur->priority--;
 
     /* 唤醒时间已到的休眠进程 */
     uint64_t now = timer_get_ms();
+    spinlock_acquire(&proc_table_lock);
     for (int i = 0; i < MAX_PROCS; i++) {
         if (proc_table[i].state == PROC_BLOCKED &&
             proc_table[i].sleep_until > 0 &&
             proc_table[i].sleep_until <= now) {
             proc_table[i].state = PROC_READY;
             proc_table[i].sleep_until = 0;
+            /* 将唤醒的进程加入当前 CPU 队列 */
+            enqueue_process(&proc_table[i]);
         }
     }
+    spinlock_release(&proc_table_lock);
 
-    if (current->priority <= 0)
-        need_reschedule = 1;
+    if (cur->priority <= 0)
+        cpu->need_reschedule = 1;
 }
 
 /* ========================================================================
- * 调度器 - 轮转上下文切换
+ * 调度器 - Per-CPU 运行队列调度
  * ======================================================================== */
 
 __attribute__((noinline))
 void scheduler_schedule(void)
 {
-    if (!current)
+    cpu_local_t *cpu = this_cpu();
+    process_t *old = cpu->current_process;
+    if (!old)
         return;
 
-    /* Round-robin: find the next READY process after current */
-    int start = current->pid;
-    int next = -1;
+    process_t *new_p = dequeue_process();
 
-    for (int i = 1; i <= MAX_PROCS; i++) {
-        int idx = (start + i) % MAX_PROCS;
-        if (proc_table[idx].state == PROC_READY) {
-            next = idx;
-            break;
-        }
-    }
+    if (!new_p) {
+        /* 本 CPU 队列为空，尝试从其他 CPU 窃取进程 */
+        for (int i = 0; i < smp_get_cpu_count(); i++) {
+            if (i == (int)cpu->index)
+                continue;
+            cpu_local_t *other = &cpu_locals[i];
+            if (!other->online || other->runqueue_count <= 0)
+                continue;
 
-    /* 没有其他 READY 进程 */
-    if (next < 0) {
-        if (current->state == PROC_RUNNING ||
-            current->state == PROC_READY) {
-            current->state = PROC_RUNNING;
-            current->priority = DEFAULT_TIMESLICE;
-            return;
-        }
-        /* 当前进程不可运行 – 查找任意进程 */
-        for (int i = 0; i < MAX_PROCS; i++) {
-            if (proc_table[i].state == PROC_READY) {
-                next = i;
+            spinlock_acquire(&other->runqueue_lock);
+            process_t *stolen = other->runqueue_head;
+            if (stolen) {
+                other->runqueue_head = stolen->next_in_queue;
+                if (!other->runqueue_head)
+                    other->runqueue_tail = NULL;
+                other->runqueue_count--;
+                stolen->next_in_queue = NULL;
+            }
+            spinlock_release(&other->runqueue_lock);
+
+            if (stolen) {
+                new_p = stolen;
+                printf("[SCHED] CPU%d stole PID%d from CPU%d\n",
+                       cpu->index, new_p->pid, i);
                 break;
             }
         }
-        if (next < 0) {
-            /* Fall back to idle process */
-            if (proc_table[0].state != PROC_UNUSED) {
-                next = 0;
-                proc_table[0].state = PROC_READY;
-            } else {
-                hal_halt();
-            }
-        }
     }
 
-    process_t *old   = current;
-    process_t *new_p = &proc_table[next];
+    if (!new_p) {
+        /* 仍然没有找到——回退到全局 proc_table 扫描
+         * （兼容未入队进程，如 PID0 idle） */
+        int next = -1;
+        spinlock_acquire(&proc_table_lock);
+        for (int i = 1; i <= MAX_PROCS; i++) {
+            int idx = (old->pid + i) % MAX_PROCS;
+            if (proc_table[idx].state == PROC_READY) {
+                next = idx;
+                break;
+            }
+        }
+        spinlock_release(&proc_table_lock);
+
+        if (next < 0) {
+            /* 没有其他 READY 进程，保持当前进程运行 */
+            if (old->state == PROC_RUNNING || old->state == PROC_READY) {
+                old->state = PROC_RUNNING;
+                old->priority = DEFAULT_TIMESLICE;
+            }
+            cpu->need_reschedule = 0;
+            return;
+        }
+        new_p = &proc_table[next];
+    }
 
     /* 同一进程 – 无需切换 */
     if (old == new_p) {
         old->state = PROC_RUNNING;
         old->priority = DEFAULT_TIMESLICE;
-        need_reschedule = 0;
+        cpu->need_reschedule = 0;
         return;
     }
 
@@ -194,7 +253,8 @@ void scheduler_schedule(void)
 
     new_p->state = PROC_RUNNING;
     new_p->priority = DEFAULT_TIMESLICE;
-    need_reschedule = 0;
+    new_p->cpu_id = (int)cpu->index;
+    cpu->need_reschedule = 0;
 
     /* Switch page tables if different */
     if (old->pml4 != new_p->pml4)
@@ -202,27 +262,29 @@ void scheduler_schedule(void)
 
     /* 更新 TSS rsp0 用于中断特权级转换 */
     if (new_p->kernel_stack) {
-        tss.rsp0 = (uint64_t)new_p->kernel_stack +
-                    (KERNEL_STACK_PAGES * PAGE_SIZE);
+        gdt_set_tss_rsp0(cpu->index,
+            (uint64_t)new_p->kernel_stack + (KERNEL_STACK_PAGES * PAGE_SIZE));
     } else {
-        /* PID 0 使用启动栈 (0x800000)。
-         * 之前的近似 "rsp_approx + 512" 在从其他进程切换时
-         * 会给出错误的值（因为 RSP 在旧进程的栈上）。
-         * 使用固定的启动栈顶地址。 */
-        tss.rsp0 = 0x800000;
+        gdt_set_tss_rsp0(cpu->index, 0x800000);
     }
 
-    /* Sanity check: refuse to switch to a process with kernel_rsp == 0
-     * (would load RSP=0 and immediately triple-fault). */
+    /* 更新 syscall 暂存区的 gs:8（内核栈顶） */
+    if (cpu->syscall_cpu_area) {
+        uint64_t *area = (uint64_t *)cpu->syscall_cpu_area;
+        area[1] = (new_p->kernel_stack)
+            ? (uint64_t)new_p->kernel_stack + (KERNEL_STACK_PAGES * PAGE_SIZE)
+            : 0x800000;
+    }
+
+    /* Sanity check: refuse to switch to a process with kernel_rsp == 0 */
     if (new_p->kernel_rsp == 0) {
         serial_puts("[SCHED] PANIC: PID");
         serial_put_dec((uint64_t)new_p->pid);
         serial_puts(" kernel_rsp=0, cannot switch!\n");
-        /* Revert state changes and stay on the old process */
         if (old->state == PROC_READY)
             old->state = PROC_RUNNING;
-        new_p->state = (next == 0) ? PROC_RUNNING : PROC_READY;
-        need_reschedule = 0;
+        new_p->state = PROC_READY;
+        cpu->need_reschedule = 0;
         return;
     }
 
@@ -230,7 +292,9 @@ void scheduler_schedule(void)
     printf("[SCHED] PID%d -> PID%d krsp=%lx\n", old->pid, new_p->pid,
            (unsigned long)new_p->kernel_rsp);
 
+    /* 同步全局 current（过渡期兼容） */
     current = new_p;
+    cpu->current_process = new_p;
     switch_to(&old->kernel_rsp, new_p->kernel_rsp);
 
     /* 当本进程被重新调度时，执行到达此处。 */

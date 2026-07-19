@@ -1,6 +1,14 @@
 #include <mmu.h>
 #include <memory.h>
+#include <smp.h>
 #include <string.h>
+
+/* 页表操作自旋锁（多核安全）
+ * 保护 mmu_walk_page (create=1) 和 mmu_map_page 中对共享页表的修改。
+ * 注意：mmu_walk_page(create=1) 会调用 alloc_page()，
+ * 实际锁序为 mmu_lock → pmm_lock。这不会死锁，因为
+ * pmm_lock 的持有者不会反过来获取 mmu_lock。 */
+static spinlock_t mmu_lock;
 
 uint64_t *mmu_walk_page(uint64_t pml4_phys, uint64_t virt, int create)
 {
@@ -34,9 +42,14 @@ uint64_t *mmu_walk_page(uint64_t pml4_phys, uint64_t virt, int create)
 
 int mmu_map_page(uint64_t pml4_phys, uint64_t virt, uint64_t phys, uint64_t flags)
 {
+    spinlock_acquire(&mmu_lock);
     uint64_t *pte = mmu_walk_page(pml4_phys, virt, 1);
-    if (!pte) return -1;
+    if (!pte) {
+        spinlock_release(&mmu_lock);
+        return -1;
+    }
     *pte = phys | flags | PTE_PRESENT;
+    spinlock_release(&mmu_lock);
     return 0;
 }
 
@@ -74,4 +87,9 @@ uint64_t mmu_virt_to_phys(uint64_t pml4_phys, uint64_t virt)
     int pt_idx = (int)(virt >> 12) & 0x1FF;
     if (!(tbl[pt_idx] & PTE_PRESENT)) return 0;
     return (tbl[pt_idx] & PTE_ADDR_MASK) + (virt & (PAGE_SIZE - 1));
+}
+
+void mmu_init(void)
+{
+    spinlock_init(&mmu_lock);
 }

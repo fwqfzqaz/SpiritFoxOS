@@ -48,6 +48,17 @@ uint64_t timer_get_ms(void)
     return timer_ticks;  /* 在 TIMER_HZ=1000 时，1 滴答 = 1 毫秒 */
 }
 
+/* 禁用 PIT 通道 0 的周期中断（在 LAPIC 定时器接管后调用） */
+void timer_disable_pit(void)
+{
+    /* 设置 PIT 通道 0 为模式 0（单次/中断在终端计数），
+     * 计数值设为 0 → 不再产生周期中断 */
+    hal_outb(PIT_COMMAND, 0x30);  /* 通道 0, 模式 0, 16 位 */
+    hal_outb(PIT_CHANNEL_0, 0x00);
+    hal_io_wait();
+    hal_outb(PIT_CHANNEL_0, 0x00);
+}
+
 void timer_sleep_ms(uint64_t ms)
 {
     uint64_t target = timer_ticks + ms;

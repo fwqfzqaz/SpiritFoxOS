@@ -24,9 +24,40 @@ typedef struct {
     uint16_t iomap_base;
 } __attribute__((packed)) tss_t;
 
+/* ========================================================================
+ * Per-CPU GDT 结构
+ * ======================================================================== */
+
+typedef struct {
+    uint8_t  entries[GDT_ENTRIES * 8];  /* GDT 条目（原始字节） */
+    tss_t    tss;                       /* 本 CPU 的 TSS */
+    uint16_t limit;                     /* GDTR 界限 */
+    uint64_t base;                      /* GDTR 基地址 */
+} cpu_gdt_t;
+
+/* 全局 GDT 数组（索引 = CPU logical index） */
+extern cpu_gdt_t cpu_gdts[];
+
+/* 保留全局 tss 变量用于向后兼容（指向 cpu_gdts[0].tss） */
 extern tss_t tss;
 
+/* ========================================================================
+ * GDT API
+ * ======================================================================== */
+
+/* BSP 初始化（内部调用 gdt_init_cpu(0)） */
 void gdt_init(void);
-void gdt_set_tss(uint64_t rsp0);
+
+/* 初始化指定 CPU 的 GDT 条目和 TSS */
+void gdt_init_cpu(int cpu_index);
+
+/* 加载指定 CPU 的 GDT 并装载 TR */
+void gdt_load_cpu(int cpu_index);
+
+/* 设置指定 CPU TSS 的 rsp0 并更新 GDT 描述符 */
+void gdt_set_tss_rsp0(int cpu_index, uint64_t rsp0);
+
+/* 向后兼容宏 */
+#define gdt_set_tss(rsp0) gdt_set_tss_rsp0(0, rsp0)
 
 #endif

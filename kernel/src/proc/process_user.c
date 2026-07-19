@@ -11,6 +11,7 @@
 #include "hal.h"
 #include "memory.h"
 #include "kmalloc.h"
+#include "smp.h"
 #include "string.h"
 #include "vfs.h"
 #include "elf64.h"
@@ -471,8 +472,8 @@ int process_exec(const char *path, const char *const argv[],
 
     /* Update TSS rsp0 for future interrupts from user mode */
     if (current->kernel_stack) {
-        tss.rsp0 = (uint64_t)current->kernel_stack +
-                    (KERNEL_STACK_PAGES * PAGE_SIZE);
+        gdt_set_tss_rsp0(this_cpu()->index,
+            (uint64_t)current->kernel_stack + (KERNEL_STACK_PAGES * PAGE_SIZE));
     }
 
     /* ---- 8. 跳转到用户态 – 不返回 ---- */
@@ -535,18 +536,18 @@ void process_enter_user(trap_frame_t *frame)
 
     /* 设置 TSS rsp0 以便中断时可以返回内核态 */
     if (current && current->kernel_stack) {
-        tss.rsp0 = (uint64_t)current->kernel_stack +
-                    (KERNEL_STACK_PAGES * PAGE_SIZE);
+        gdt_set_tss_rsp0(this_cpu()->index,
+            (uint64_t)current->kernel_stack + (KERNEL_STACK_PAGES * PAGE_SIZE));
     }
 
     /* Set up GS:8 (kernel RSP) and GS:16 (process PML4) for syscall entry point */
     {
-        uint64_t gs_base_kernel = hal_read_msr(MSR_IA32_KERNEL_GS_BASE);
-        if (gs_base_kernel) {
+        void *cpu_area_ptr = this_cpu()->syscall_cpu_area;
+        if (cpu_area_ptr) {
             uint64_t kstack_top = (current && current->kernel_stack)
                 ? (uint64_t)current->kernel_stack + (KERNEL_STACK_PAGES * PAGE_SIZE)
-                : tss.rsp0;
-            uint64_t *cpu_area = (uint64_t *)(uintptr_t)gs_base_kernel;
+                : cpu_gdts[this_cpu()->index].tss.rsp0;
+            uint64_t *cpu_area = (uint64_t *)cpu_area_ptr;
             cpu_area[1] = kstack_top;          /* gs:8 = 内核栈顶 */
             cpu_area[2] = current->pml4;       /* gs:16 = 进程 PML4 */
         }

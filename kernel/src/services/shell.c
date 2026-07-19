@@ -15,6 +15,7 @@
 #include "process.h"
 #include "elf64.h"
 #include "autorun.h"
+#include "smp.h"
 
 /* ---------- 屏幕辅助函数 ---------- */
 static void shell_clear_screen(void) {
@@ -812,7 +813,7 @@ static int cmd_exec(int argc, char** argv) {
      */
     process_t *self = process_current();
     self->state = PROC_BLOCKED;
-    need_reschedule = 1;
+    this_cpu()->need_reschedule = 1;
     scheduler_schedule();
 
     /* ---- Woken up by process_exit() ---- */

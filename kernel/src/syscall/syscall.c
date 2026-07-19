@@ -2,8 +2,10 @@
 #include "process.h"
 #include "memory.h"
 #include "hal.h"
+#include "smp.h"
 #include "string.h"
 #include "serial.h"
+#include "vga.h"
 #include "errno.h"
 
 /* ========================================================================
@@ -361,30 +363,34 @@ uint64_t syscall_handler(trap_frame_t *frame)
 
 void syscall_init(void)
 {
-    /* 为系统调用入口分配每CPU的暂存空间。
-     * 必须在 memory_init() 之后执行，以便 alloc_page() 可用。
-     * 系统调用入口点使用 swapgs + gs:0/gs:8 来访问
-     * user_rsp 和 kernel_rsp：
-     *   偏移 0：保存的用户态 RSP（由系统调用入口写入）
-     *   偏移 8：内核态 RSP（进入用户态之前写入） */
-    static void *syscall_cpu_area = NULL;
-    if (!syscall_cpu_area) {
-        syscall_cpu_area = alloc_page();
-        if (syscall_cpu_area) {
-            memset(syscall_cpu_area, 0, PAGE_SIZE);
-            printf("[SYSCALL] Per-CPU area at %p\n", syscall_cpu_area);
+    /* 为 BSP 分配 Per-CPU syscall 暂存区。
+     * 每个核心需要独立暂存区，因为 syscall 入口通过 swapgs + gs: 访问。
+     * 布局：
+     *   gs:0  = 保存的用户态 RSP（由系统调用入口写入）
+     *   gs:8  = 内核态 RSP（进入用户态之前写入）
+     *   gs:16 = 进程 PML4
+     *   gs:24 = 内核 CR3 */
+    cpu_local_t *cpu = this_cpu();
+    if (!cpu->syscall_cpu_area) {
+        cpu->syscall_cpu_area = alloc_page();
+        if (cpu->syscall_cpu_area) {
+            memset(cpu->syscall_cpu_area, 0, PAGE_SIZE);
+            printf("[SYSCALL] BSP per-CPU area at %p\n", cpu->syscall_cpu_area);
         } else {
             printf("[SYSCALL] ERROR: failed to allocate per-CPU area!\n");
             return;
         }
     }
-    hal_write_msr(MSR_IA32_GS_BASE, 0);
-    hal_write_msr(MSR_IA32_KERNEL_GS_BASE, (uint64_t)(uintptr_t)syscall_cpu_area);
+    /* 设置 KERNEL_GS_BASE 为 syscall 暂存区。
+     * GS_BASE 保持指向 cpu_locals（this_cpu() 依赖它），
+     * KERNEL_GS_BASE 指向 syscall_cpu_area。
+     * swapgs 会交换两者，使得 syscall 入口点通过 GS: 访问 syscall_cpu_area。 */
+    hal_write_msr(MSR_IA32_KERNEL_GS_BASE, (uint64_t)(uintptr_t)cpu->syscall_cpu_area);
 
     /* 保存内核 CR3 到 per-CPU 区域偏移 24。
      * syscall 入口点使用 gs:24 来切换到内核页表。 */
     {
-        uint64_t *cpu_area = (uint64_t *)syscall_cpu_area;
+        uint64_t *cpu_area = (uint64_t *)cpu->syscall_cpu_area;
         cpu_area[3] = hal_read_cr3();   /* offset 24 = 内核 CR3 */
     }
 
