@@ -18,6 +18,12 @@
 #define MAX_CLIENTS   16
 #define MAX_INPUT_DEV 8
 
+/* 服务器端装饰常量 */
+#define SF_TITLE_BAR_HEIGHT  28
+#define SF_BORDER_WIDTH      2
+#define SF_CLOSE_BUTTON_SIZE 20
+#define SF_CLOSE_BUTTON_PAD  4
+
 /* 前向声明 */
 typedef struct sf_compositor sf_compositor_t;
 typedef struct sf_surface    sf_surface_t;
@@ -91,6 +97,30 @@ struct sf_surface {
     struct wl_resource *xdg_toplevel;
     char title[256];
 
+    /* 窗口管理状态 */
+    int is_maximized;
+    int is_fullscreen;
+    int is_minimized;
+
+    /* 交互状态 */
+    int dragging;          /* 正在拖动窗口 */
+    int resizing;          /* 正在缩放窗口 */
+    uint32_t resize_edges; /* 缩放边 */
+    int32_t drag_offset_x; /* 拖动偏移 */
+    int32_t drag_offset_y;
+    int32_t resize_start_w; /* 缩放开始时窗口尺寸 */
+    int32_t resize_start_h;
+    int32_t resize_start_x;
+    int32_t resize_start_y;
+    int32_t resize_start_ptr_x;
+    int32_t resize_start_ptr_y;
+
+    /* 保存最大化前的窗口位置 */
+    int32_t saved_x;
+    int32_t saved_y;
+    int32_t saved_width;
+    int32_t saved_height;
+
     /* 帧回调 */
     struct wl_list frame_callbacks;
 
@@ -114,6 +144,12 @@ struct sf_seat {
     sf_surface_t *pointer_focus;
     int32_t pointer_x;
     int32_t pointer_y;
+
+    /* 光标 */
+    struct wl_resource *cursor_surface;
+    int32_t cursor_hotspot_x;
+    int32_t cursor_hotspot_y;
+    int cursor_visible;
 
     /* evdev 设备 */
     int keyboard_fd;
@@ -155,6 +191,7 @@ struct sf_compositor {
 
     /* 运行状态 */
     int running;
+    int need_composite;  /* 需要重新合成 */
 };
 
 /* ========================================================================

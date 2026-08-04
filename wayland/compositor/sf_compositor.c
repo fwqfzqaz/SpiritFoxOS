@@ -104,6 +104,67 @@ static int  sf_dumb_fb_create(sf_output_t *output, sf_dumb_fb_t *fb,
 static void sf_dumb_fb_destroy(sf_output_t *output, sf_dumb_fb_t *fb);
 static int  sf_drm_event_handler(int fd, uint32_t mask, void *data);
 
+/* 判断表面是否有服务器端装饰 */
+static int sf_surface_has_decoration(sf_surface_t *s)
+{
+	return s->xdg_toplevel && !s->is_maximized && !s->is_fullscreen;
+}
+
+/* 获取装饰帧的总宽高 */
+static int32_t sf_decorated_width(sf_surface_t *s)
+{
+	if (sf_surface_has_decoration(s))
+		return s->width + 2 * SF_BORDER_WIDTH;
+	return s->width;
+}
+static int32_t sf_decorated_height(sf_surface_t *s)
+{
+	if (sf_surface_has_decoration(s))
+		return s->height + SF_TITLE_BAR_HEIGHT + 2 * SF_BORDER_WIDTH;
+	return s->height;
+}
+
+/* 客户端内容在帧缓冲中的目标位置 */
+static int32_t sf_content_x(sf_surface_t *s)
+{
+	if (sf_surface_has_decoration(s))
+		return s->x + SF_BORDER_WIDTH;
+	return s->x;
+}
+static int32_t sf_content_y(sf_surface_t *s)
+{
+	if (sf_surface_has_decoration(s))
+		return s->y + SF_TITLE_BAR_HEIGHT + SF_BORDER_WIDTH;
+	return s->y;
+}
+
+/* 装饰区域命中测试 - 返回 0=不在装饰区, 1=标题栏, 2=关闭按钮, 3=边框 */
+static int sf_decoration_hit_test(sf_surface_t *s, int32_t px, int32_t py)
+{
+	if (!sf_surface_has_decoration(s))
+		return 0;
+	int32_t fx = s->x, fy = s->y;
+	int32_t fw = sf_decorated_width(s);
+	int32_t fh = sf_decorated_height(s);
+	if (px < fx || px >= fx + fw || py < fy || py >= fy + fh)
+		return 0;
+	/* 关闭按钮 */
+	int32_t btn_x = fx + fw - SF_CLOSE_BUTTON_PAD - SF_CLOSE_BUTTON_SIZE;
+	int32_t btn_y = fy + (SF_TITLE_BAR_HEIGHT - SF_CLOSE_BUTTON_SIZE) / 2;
+	if (px >= btn_x && px < btn_x + SF_CLOSE_BUTTON_SIZE &&
+	    py >= btn_y && py < btn_y + SF_CLOSE_BUTTON_SIZE)
+		return 2;
+	/* 标题栏 */
+	if (py < fy + SF_TITLE_BAR_HEIGHT)
+		return 1;
+	/* 客户端内容区 */
+	int32_t cx = sf_content_x(s), cy = sf_content_y(s);
+	if (px >= cx && px < cx + s->width && py >= cy && py < cy + s->height)
+		return 0;
+	/* 边框 */
+	return 3;
+}
+
 static uint32_t sf_time_ms(void)
 {
 	struct timespec ts;
@@ -269,10 +330,12 @@ void sf_surface_commit(sf_surface_t *surface)
 			surface->width         = buf->width;
 			surface->height        = buf->height;
 			surface->mapped        = 1;
-			/* 首次映射时居中放置 */
+			/* 首次映射时居中放置，考虑装饰帧 */
 			if (!was_mapped) {
-				surface->x = (comp->output.width - buf->width) / 2;
-				surface->y = (comp->output.height - buf->height) / 2;
+				int32_t dw = sf_decorated_width(surface);
+				int32_t dh = sf_decorated_height(surface);
+				surface->x = (comp->output.width - dw) / 2;
+				surface->y = (comp->output.height - dh) / 2;
 				if (surface->x < 0) surface->x = 0;
 				if (surface->y < 0) surface->y = 0;
 				/* 新映射的表面获得键盘焦点 */
