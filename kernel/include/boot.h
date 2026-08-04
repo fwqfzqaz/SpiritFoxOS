@@ -42,6 +42,10 @@ typedef struct BootInfo {
 
     /* Total usable memory in bytes */
     uint64_t    total_memory;
+
+    /* initrd (FAT32 镜像) - 由 GRUB module2 加载，0=无 */
+    uint64_t    initrd_addr;
+    uint64_t    initrd_size;
 } BootInfo;
 
 #endif /* KERNEL_BOOT_H */

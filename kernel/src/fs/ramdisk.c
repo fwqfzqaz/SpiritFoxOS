@@ -144,3 +144,40 @@ void *ramdisk_get_data(uint8_t dev_id)
     ramdisk_priv_t *priv = (ramdisk_priv_t *)dev->driver_data;
     return priv->data;
 }
+
+int ramdisk_create_from_buffer(void *data, uint64_t size_bytes)
+{
+    /* 查找空闲的 ramdisk 槽位 */
+    int slot = -1;
+    for (int i = 0; i < RAMDISK_MAX_DISKS; i++) {
+        if (ramdisks[i].data == NULL) {
+            slot = i;
+            break;
+        }
+    }
+    if (slot < 0)
+        return -1;
+
+    uint64_t sectors = size_bytes / BLKDEV_SECTOR_SIZE;
+
+    ramdisks[slot].data = (uint8_t *)data;
+    ramdisks[slot].sectors = sectors;
+
+    /* 注册为块设备 */
+    char name[16];
+    name[0] = 'i'; name[1] = 'n'; name[2] = 'i'; name[3] = 't'; name[4] = 'r'; name[5] = 'd'; name[6] = '\0';
+
+    int dev_id = blkdev_register(BLKDEV_TYPE_RAMDISK, sectors,
+                                 BLKDEV_SECTOR_SIZE, name,
+                                 &ramdisk_ops, &ramdisks[slot]);
+    if (dev_id < 0) {
+        ramdisks[slot].data = NULL;
+        ramdisks[slot].sectors = 0;
+        return -1;
+    }
+
+    printf("[RAMDISK] initrd: %llu sectors (%llu KB) at 0x%llx\n",
+           sectors, sectors * BLKDEV_SECTOR_SIZE / 1024, (uint64_t)(uintptr_t)data);
+
+    return dev_id;
+}

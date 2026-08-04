@@ -16,6 +16,26 @@ int net_setsockopt(int fd, int level, int optname, const void *optval, socklen_t
 int net_getsockopt(int fd, int level, int optname, void *optval, socklen_t *optlen);
 int net_getsockname(int fd, net_sockaddr_t *addr, socklen_t *addrlen);
 int net_getpeername(int fd, net_sockaddr_t *addr, socklen_t *addrlen);
+
+/* sendmsg/recvmsg structures and API */
+struct iovec {
+    void  *iov_base;    /* Starting address */
+    size_t iov_len;     /* Number of bytes */
+};
+
+struct msghdr {
+    void         *msg_name;       /* optional address */
+    socklen_t     msg_namelen;    /* size of address */
+    struct iovec *msg_iov;        /* scatter/gather array */
+    size_t        msg_iovlen;     /* # elements in msg_iov */
+    void         *msg_control;    /* ancillary data */
+    size_t        msg_controllen; /* ancillary data buffer len */
+    int           msg_flags;      /* flags on received message */
+};
+
+int net_sendmsg(int fd, const struct msghdr *msg, int flags);
+int net_recvmsg(int fd, struct msghdr *msg, int flags);
+
 port_t net_alloc_port(void);
 void net_configure_ip(uint32_t ip, uint32_t gateway, uint32_t netmask);
 

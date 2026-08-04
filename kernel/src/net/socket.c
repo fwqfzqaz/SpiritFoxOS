@@ -10,6 +10,7 @@
 #include "net_udp.h"
 #include "net_eth.h"
 #include "net_utils.h"
+#include "net_unix.h"
 #include "net.h"
 #include "kmalloc.h"
 #include "string.h"
@@ -324,6 +325,9 @@ void net_init(void)
 
 int net_socket(int domain, int type, int protocol)
 {
+    if (domain == AF_UNIX)
+        return unix_socket(type, protocol);
+
     if (domain != AF_INET)
         return -EAFNOSUPPORT;
 
@@ -404,6 +408,10 @@ int net_bind(int fd, const net_sockaddr_t *addr, socklen_t addrlen)
     if (!addr)
         return -EINVAL;
 
+    /* AF_UNIX dispatch */
+    if (s->domain == AF_UNIX)
+        return unix_bind(fd, (const sockaddr_un_t *)addr, addrlen);
+
     if (addr->sin_family != AF_INET)
         return -EAFNOSUPPORT;
 
@@ -431,6 +439,10 @@ int net_listen(int fd, int backlog)
     if (!s)
         return -EBADF;
 
+    /* AF_UNIX dispatch */
+    if (s->domain == AF_UNIX)
+        return unix_listen(fd, backlog);
+
     if (s->type != SOCK_STREAM)
         return -EOPNOTSUPP;
 
@@ -454,6 +466,10 @@ int net_accept(int fd, net_sockaddr_t *addr, socklen_t *addrlen)
     net_socket_t *s = net_get_socket(fd);
     if (!s)
         return -EBADF;
+
+    /* AF_UNIX dispatch */
+    if (s->domain == AF_UNIX)
+        return unix_accept(fd, (sockaddr_un_t *)addr, addrlen);
 
     if (s->type != SOCK_STREAM)
         return -EOPNOTSUPP;
@@ -501,6 +517,10 @@ int net_connect(int fd, const net_sockaddr_t *addr, socklen_t addrlen)
     if (!s)
         return -EBADF;
 
+    /* AF_UNIX dispatch */
+    if (s->domain == AF_UNIX)
+        return unix_connect(fd, (const sockaddr_un_t *)addr, addrlen);
+
     if (s->type != SOCK_STREAM)
         return -EOPNOTSUPP;
 
@@ -545,6 +565,10 @@ int net_send(int fd, const void *buf, size_t len, int flags)
     net_socket_t *s = net_get_socket(fd);
     if (!s)
         return -EBADF;
+
+    /* AF_UNIX dispatch */
+    if (s->domain == AF_UNIX)
+        return unix_send(fd, buf, len, flags);
 
     if (s->type != SOCK_STREAM)
         return -EOPNOTSUPP;
@@ -600,6 +624,10 @@ int net_recv(int fd, void *buf, size_t len, int flags)
     net_socket_t *s = net_get_socket(fd);
     if (!s)
         return -EBADF;
+
+    /* AF_UNIX dispatch */
+    if (s->domain == AF_UNIX)
+        return unix_recv(fd, buf, len, flags);
 
     if (s->type != SOCK_STREAM)
         return -EOPNOTSUPP;
@@ -723,6 +751,10 @@ int net_close(int fd)
     if (!s)
         return -EBADF;
 
+    /* AF_UNIX dispatch */
+    if (s->domain == AF_UNIX)
+        return unix_close(fd);
+
     if (s->type == SOCK_STREAM) {
         if (s->state == TCP_ESTABLISHED) {
             net_tcp_send_packet(s, TCP_FLAG_FIN | TCP_FLAG_ACK, NULL, 0);
@@ -820,4 +852,57 @@ int net_getpeername(int fd, net_sockaddr_t *addr, socklen_t *addrlen)
     *addrlen = sizeof(net_sockaddr_t);
 
     return 0;
+}
+
+/* ========================================================================
+ * sendmsg / recvmsg - scatter-gather I/O
+ * ======================================================================== */
+
+int net_sendmsg(int fd, const struct msghdr *msg, int flags)
+{
+    if (!msg)
+        return -EINVAL;
+
+    /* Skip address and control for now */
+    size_t total = 0;
+    for (size_t i = 0; i < msg->msg_iovlen; i++) {
+        struct iovec *iov = &msg->msg_iov[i];
+        if (!iov || iov->iov_len == 0)
+            continue;
+        int ret = net_send(fd, iov->iov_base, iov->iov_len, flags);
+        if (ret < 0) {
+            if (total > 0)
+                return (int)total;
+            return ret;
+        }
+        total += (size_t)ret;
+        if ((size_t)ret < iov->iov_len)
+            break;  /* partial write */
+    }
+
+    return (int)total;
+}
+
+int net_recvmsg(int fd, struct msghdr *msg, int flags)
+{
+    if (!msg)
+        return -EINVAL;
+
+    size_t total = 0;
+    for (size_t i = 0; i < msg->msg_iovlen; i++) {
+        struct iovec *iov = &msg->msg_iov[i];
+        if (!iov || iov->iov_len == 0)
+            continue;
+        int ret = net_recv(fd, iov->iov_base, iov->iov_len, flags);
+        if (ret < 0) {
+            if (total > 0)
+                return (int)total;
+            return ret;
+        }
+        total += (size_t)ret;
+        if ((size_t)ret < iov->iov_len)
+            break;  /* partial read or no more data */
+    }
+
+    return (int)total;
 }

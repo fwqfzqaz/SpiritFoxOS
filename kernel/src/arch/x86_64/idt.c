@@ -124,22 +124,104 @@ void isr_handler(uint64_t int_num, uint64_t error_code, uint64_t fault_rip, uint
             serial_put_dec((uint64_t)cur->pid);
             serial_puts(" pml4=0x");
             serial_put_hex(cur->pml4);
+
+            /* 输出 FS_BASE 和 GS_BASE MSR 用于 TLS 调试 */
+            uint64_t fs_base, gs_base;
+            __asm__ volatile ("rdmsr" : "=a"(fs_base) : "c"(0xC0000100U));
+            __asm__ volatile ("rdmsr" : "=a"(gs_base) : "c"(0xC0000101U));
+            serial_puts(" FS_BASE=0x");
+            serial_put_hex(fs_base);
+            serial_puts(" GS_BASE=0x");
+            serial_put_hex(gs_base);
+
+            /* 输出 CR3 验证地址空间 */
+            uint64_t cr3_val;
+            __asm__ volatile ("mov %%cr3, %0" : "=r"(cr3_val));
+            serial_puts(" CR3=0x");
+            serial_put_hex(cr3_val);
+
+            /* 遍历页表验证CR2地址的映射 */
+            if (cr2_val) {
+                uint64_t *tbl = (uint64_t *)(cr3_val & ~0xFFFULL);
+                int pml4_idx = (int)(cr2_val >> 39) & 0x1FF;
+                serial_puts("\n[PFLT] PML4[");
+                serial_put_dec((uint64_t)pml4_idx);
+                serial_puts("]=0x");
+                serial_put_hex(tbl[pml4_idx]);
+                if (tbl[pml4_idx] & 1) {
+                    tbl = (uint64_t *)(tbl[pml4_idx] & ~0xFFFULL);
+                    int pdpt_idx = (int)(cr2_val >> 30) & 0x1FF;
+                    serial_puts(" PDPT[");
+                    serial_put_dec((uint64_t)pdpt_idx);
+                    serial_puts("]=0x");
+                    serial_put_hex(tbl[pdpt_idx]);
+                    if (tbl[pdpt_idx] & 1) {
+                        tbl = (uint64_t *)(tbl[pdpt_idx] & ~0xFFFULL);
+                        int pd_idx = (int)(cr2_val >> 21) & 0x1FF;
+                        serial_puts(" PD[");
+                        serial_put_dec((uint64_t)pd_idx);
+                        serial_puts("]=0x");
+                        serial_put_hex(tbl[pd_idx]);
+                        if ((tbl[pd_idx] & 1) && !(tbl[pd_idx] & 0x80)) {
+                            tbl = (uint64_t *)(tbl[pd_idx] & ~0xFFFULL);
+                            int pt_idx = (int)(cr2_val >> 12) & 0x1FF;
+                            serial_puts(" PT[");
+                            serial_put_dec((uint64_t)pt_idx);
+                            serial_puts("]=0x");
+                            serial_put_hex(tbl[pt_idx]);
+                        }
+                    }
+                }
+            }
         }
     }
 
     /* 对于缺页异常，打印 CR2（缺页地址） - 已在上方处理 */
 
+    /* 转储 RIP 附近的指令字节用于调试 */
+    {
+        int is_user = (error_code >> 2) & 1;
+        if (fault_rip > 0x100000 && is_user) {
+            uint8_t *rip_bytes = (uint8_t *)(fault_rip - 4);
+            serial_puts("\n[RIP-4..+8]:");
+            for (int i = 0; i < 16; i++) {
+                serial_puts(" ");
+                serial_put_hex((uint64_t)rip_bytes[i] & 0xFF);
+            }
+        }
+    }
+
     serial_puts("\nSystem Halted.\n");
 
-    /* 如果当前进程是用户进程，则终止它而不是停机 */
+    /* 如果当前进程是用户进程且异常发生在用户态，则终止它 */
     process_t *cur = process_current();
     if (cur && !(cur->flags & PROC_FLAG_KERNEL) && cur->pid > 0) {
-        serial_puts("Killing user process PID=");
+        /* 使用 error code 的 U/S 位 (bit 2) 判断：1=用户态，0=内核态 */
+        int from_user = (error_code >> 2) & 1;
+        /* 对于非页错误（无 error code），检查 CS 的 RPL */
+        if (int_num != 14) {
+            uint64_t fault_cs = 0;
+            __asm__ volatile ("mov 32(%%rbp), %0" : "=r"(fault_cs));
+            from_user = (fault_cs & 3) == 3;
+        }
+
+        if (from_user) {
+            serial_puts("Killing user process PID=");
+            serial_put_dec((uint64_t)cur->pid);
+            serial_puts(" (user-mode fault)\n");
+            process_exit(128 + (int)int_num);
+            __builtin_unreachable();
+        }
+        /* 内核态页面错误 - 可能是内核 bug，不停机而是标记进程为 ZOMBIE */
+        serial_puts("Kernel-mode fault in user process PID=");
         serial_put_dec((uint64_t)cur->pid);
-        serial_puts("\n");
+        serial_puts(" - marking ZOMBIE\n");
+        spinlock_acquire(&proc_table_lock);
         cur->state = PROC_ZOMBIE;
         cur->exit_code = 128 + (int)int_num;
-        /* 不停机 - 让调度器继续运行 */
+        if (cur->parent && cur->parent->state == PROC_BLOCKED)
+            cur->parent->state = PROC_READY;
+        spinlock_release(&proc_table_lock);
         hal_enable_interrupts();
         for (;;) { __asm__ volatile ("hlt"); }
     }

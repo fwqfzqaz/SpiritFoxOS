@@ -379,19 +379,14 @@ void ap_entry_c(void)
     /* 接受所有中断 */
     lapic_write(LAPIC_TPR, 0);
 
-    /* 为本 AP 分配 Per-CPU syscall 暂存区。
-     * 每个核心需要独立暂存区，因为 syscall 入口通过 swapgs + gs: 访问。
-     * 布局与 BSP 相同：gs:0=用户RSP, gs:8=内核RSP, gs:16=PML4, gs:24=内核CR3 */
-    local->syscall_cpu_area = alloc_page();
-    if (local->syscall_cpu_area) {
-        memset(local->syscall_cpu_area, 0, PAGE_SIZE);
-        uint64_t *cpu_area = (uint64_t *)local->syscall_cpu_area;
-        cpu_area[3] = hal_read_cr3();   /* 偏移 24 = 内核 CR3 */
-        hal_write_msr(MSR_IA32_KERNEL_GS_BASE, (uint64_t)(uintptr_t)local->syscall_cpu_area);
-        printf("[SMP] AP %u syscall_cpu_area at %p\n", my_apic_id, local->syscall_cpu_area);
-    } else {
-        printf("[SMP] WARNING: AP %u failed to allocate syscall_cpu_area\n", my_apic_id);
-    }
+    /* 初始化 cpu_locals 中的 syscall 暂存字段。
+     * 暂存区现在直接位于 cpu_local_t 起始处（gs:偏移访问），
+     * 不再使用独立的 syscall_cpu_area 分配。 */
+    local->kernel_rsp_top = (uint64_t)local->kernel_stack + PROC_KERNEL_STACK;
+    local->kernel_cr3 = hal_read_cr3();
+    /* 设置 KERNEL_GS_BASE = 0（不再指向 syscall_cpu_area）。
+     * swapgs 从用户态进入内核时会将 cpu_locals 加载进 GS_BASE。 */
+    hal_write_msr(MSR_IA32_KERNEL_GS_BASE, 0);
 
     /* 初始化本 AP 的 GDT 和 TSS */
     gdt_init_cpu(local->index);
@@ -456,7 +451,11 @@ void smp_enumerate_cpus_only(void)
 
     /* 设置 BSP 的 GS 基地址 */
     hal_write_msr(MSR_IA32_GS_BASE, (uint64_t)&cpu_locals[0]);
+    hal_write_msr(MSR_IA32_KERNEL_GS_BASE, 0);  /* swapgs 从用户态进入内核时将 cpu_locals 加载进 GS_BASE */
     printf("[SMP] BSP GS base set to %p\n", (void *)&cpu_locals[0]);
+
+    /* 初始化 syscall 暂存字段中的内核 CR3 */
+    cpu_locals[0].kernel_cr3 = hal_read_cr3();
 
     printf("[SMP] Enumeration complete: %d CPU(s) found\n", cpu_count);
 }
@@ -489,7 +488,6 @@ void smp_start_aps(void)
         cpu_locals[i].kernel_rsp = 0;
         cpu_locals[i].need_reschedule = 0;
         cpu_locals[i].tss = NULL;
-        cpu_locals[i].syscall_cpu_area = NULL;
         cpu_locals[i].lapic_timer_count = 0;
         cpu_locals[i].runqueue_head = NULL;
         cpu_locals[i].runqueue_tail = NULL;

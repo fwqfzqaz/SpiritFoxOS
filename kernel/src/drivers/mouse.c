@@ -14,6 +14,8 @@
 #include "mouse.h"
 #include "hal.h"
 #include "vga.h"
+#include "input.h"
+#include "string.h"
 
 /* ---- 8042 键盘控制器端口 ---- */
 #define KBC_CMD    0x64
@@ -30,6 +32,9 @@ static int      mouse_y;
 static uint8_t  mouse_buttons;
 
 static volatile int mouse_event_pending;
+
+/* evdev 输入设备 */
+static input_dev_t *mouse_dev = NULL;
 
 /* ---- 3 字节包重组 ---- */
 static uint8_t  pkt_buf[3];
@@ -225,6 +230,17 @@ void mouse_handler(void)
     if (pkt_buf[0] & 0x20) dy -= 256;  /* Y 为负 */
     dy = -dy;   /* PS/2 Y 轴方向反转（上 = 负值） */
 
+    /* ---- evdev 事件上报（使用 *2 速度放大前的 dx/dy） ---- */
+    if (mouse_dev) {
+        input_report_key(mouse_dev, BTN_LEFT,   pkt_buf[0] & 0x01);
+        input_report_key(mouse_dev, BTN_RIGHT,  (pkt_buf[0] >> 1) & 0x01);
+        input_report_key(mouse_dev, BTN_MIDDLE, (pkt_buf[0] >> 2) & 0x01);
+        input_report_rel(mouse_dev, REL_X, dx);
+        input_report_rel(mouse_dev, REL_Y, dy);
+        input_sync(mouse_dev);
+    }
+    /* ---- evdev 事件上报结束 ---- */
+
     /* 速度倍数，用于舒适的光标移动 */
     dx *= 2;
     dy *= 2;
@@ -263,4 +279,41 @@ void mouse_get_delta(int *dx, int *dy, uint8_t *buttons)
     if (dy) *dy = mouse_y;
     if (buttons) *buttons = mouse_buttons;
     mouse_event_pending = 0;
+}
+
+/* ========================================================================
+ * evdev 输入设备初始化
+ * ======================================================================== */
+
+void mouse_input_init(void)
+{
+    mouse_dev = input_allocate_device();
+    if (!mouse_dev) {
+        printf("[MOUSE] failed to allocate input device\n");
+        return;
+    }
+
+    strncpy(mouse_dev->name, "SpiritFoxOS Mouse", sizeof(mouse_dev->name) - 1);
+    strncpy(mouse_dev->phys, "isa0060/serio1/input0", sizeof(mouse_dev->phys) - 1);
+    mouse_dev->id.bustype = BUS_I8042;
+    mouse_dev->id.vendor  = 2;
+    mouse_dev->id.product = 2;
+    mouse_dev->id.version = 1;
+
+    /* 按键能力 */
+    input_set_capability(mouse_dev, EV_KEY, BTN_LEFT);
+    input_set_capability(mouse_dev, EV_KEY, BTN_RIGHT);
+    input_set_capability(mouse_dev, EV_KEY, BTN_MIDDLE);
+
+    /* 相对轴能力 */
+    input_set_capability(mouse_dev, EV_REL, REL_X);
+    input_set_capability(mouse_dev, EV_REL, REL_Y);
+    input_set_capability(mouse_dev, EV_REL, REL_WHEEL);
+
+    input_register_device(mouse_dev);
+}
+
+input_dev_t *mouse_get_input_dev(void)
+{
+    return mouse_dev;
 }

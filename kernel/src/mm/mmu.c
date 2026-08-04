@@ -40,6 +40,39 @@ uint64_t *mmu_walk_page(uint64_t pml4_phys, uint64_t virt, int create)
     return &tbl[indices[3]];  // 返回指向PTE的指针
 }
 
+/* 拆分2MB大页为512个4KB页。
+ * pd_entry: 指向PD项的指针（包含2MB大页映射）
+ * 返回: 0成功, -1失败 */
+static int split_huge_page(uint64_t *pd_entry)
+{
+    uint64_t huge_entry = *pd_entry;
+    uint64_t phys_base = huge_entry & 0x000FFFFFFFE00000ULL;
+    uint64_t orig_flags = huge_entry & ~(uint64_t)(PTE_ADDR_MASK | PTE_HUGE);
+
+    /* 分配新的PT页 */
+    void *new_pt = alloc_page();
+    if (!new_pt)
+        return -1;
+    memset(new_pt, 0, PAGE_SIZE);
+
+    /* 填充PT：512个4KB页覆盖原2MB范围。
+     * 必须添加 PTE_USER 以确保用户模式可以访问这些页面，
+     * 因为进程的地址空间需要用户模式访问权限。 */
+    uint64_t *pt = (uint64_t *)new_pt;
+    for (int i = 0; i < 512; i++) {
+        pt[i] = (phys_base + (uint64_t)i * PAGE_SIZE) |
+                (orig_flags & ~PTE_HUGE) | PTE_PRESENT | PTE_USER;
+    }
+
+    /* 替换PD项：从2MB大页变为PT指针。
+     * 必须添加 PTE_USER 和 PTE_WRITABLE 以确保CPU在
+     * 页表遍历时允许用户模式访问此PD项下的所有页面。 */
+    *pd_entry = (uint64_t)(uintptr_t)new_pt |
+                (orig_flags & ~PTE_HUGE) | PTE_PRESENT | PTE_USER | PTE_WRITABLE;
+
+    return 0;
+}
+
 int mmu_map_page(uint64_t pml4_phys, uint64_t virt, uint64_t phys, uint64_t flags)
 {
     spinlock_acquire(&mmu_lock);
@@ -48,7 +81,41 @@ int mmu_map_page(uint64_t pml4_phys, uint64_t virt, uint64_t phys, uint64_t flag
         spinlock_release(&mmu_lock);
         return -1;
     }
+
+    /* 检查是否遇到了2MB大页 - 需要拆分 */
+    if (*pte & PTE_HUGE) {
+        if (split_huge_page(pte) < 0) {
+            spinlock_release(&mmu_lock);
+            return -1;
+        }
+        /* 大页已拆分，刷新该2MB范围的TLB */
+        uint64_t virt_base = virt & ~(uint64_t)(2 * 1024 * 1024 - 1);
+        for (uint64_t v = virt_base; v < virt_base + (2 * 1024 * 1024); v += PAGE_SIZE) {
+            __asm__ volatile("invlpg (%0)" :: "r"(v) : "memory");
+        }
+        /* 重新遍历获取正确的PTE */
+        pte = mmu_walk_page(pml4_phys, virt, 0);
+        if (!pte) {
+            spinlock_release(&mmu_lock);
+            return -1;
+        }
+    }
+
     *pte = phys | flags | PTE_PRESENT;
+
+    /* 调试：验证PTE值 (已禁用 — 减少串口输出噪音) */
+#if 0
+    if (virt >= 0x10000000ULL && virt < 0x20000000ULL) {
+        extern void serial_puts(const char *);
+        extern void serial_put_hex(uint64_t);
+        serial_puts("[mmu_map_page] virt=0x");
+        serial_put_hex(virt);
+        serial_puts(" pte_val=0x");
+        serial_put_hex(*pte);
+        serial_puts("\n");
+    }
+#endif
+
     spinlock_release(&mmu_lock);
     return 0;
 }

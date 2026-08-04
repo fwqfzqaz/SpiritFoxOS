@@ -63,4 +63,8 @@ uint32_t terminal_get_flags(void);
 /* Set line discipline flags */
 void terminal_set_flags(uint32_t flags);
 
+/* Set/get terminal foreground and background colors */
+void terminal_set_color(uint32_t fg, uint32_t bg);
+void terminal_get_color(uint32_t *fg, uint32_t *bg);
+
 #endif /* TERMINAL_H */

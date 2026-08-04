@@ -130,6 +130,7 @@ struct vfs_file {
     vfs_dentry_t   *dentry;        /* Associated dentry */
     vfs_pipe_t     *pipe;          /* Pipe data (for VFS_TYPE_PIPE) */
     uint32_t        dir_index;     /* Directory read position (for getdents64) */
+    uint32_t        fcntl_flags;   /* fcntl 状态标志 (FD_CLOEXEC 等) */
 };
 
 /* ========================================================================

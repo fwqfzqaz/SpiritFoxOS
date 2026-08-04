@@ -1,6 +1,7 @@
 #include "syscall_internal.h"
 #include "process.h"
 #include "vfs.h"
+#include "chardev.h"
 #include "memory.h"
 #include "hal.h"
 #include "vga.h"
@@ -60,9 +61,9 @@ int64_t sys_write(trap_frame_t *frame)
             while (!(hal_inb(0x3FD) & 0x20))
                 ;
             hal_outb(0x3F8, (uint8_t)p[i]);
-            /* 同时写入 VGA 终端 */
-            terminal_putchar(p[i]);
         }
+        /* 注意：暂时跳过 terminal_putchar() 以避免帧缓冲区写入
+         * 导致用户代码页损坏。仅写入串口。 */
         return (int64_t)count;
     }
 
@@ -404,10 +405,78 @@ int64_t sys_chown(trap_frame_t *frame)
     return 0;
 }
 
+/* Linux fcntl 命令号 */
+#define F_DUPFD          0
+#define F_GETFD          1
+#define F_SETFD          2
+#define F_GETFL          3
+#define F_SETFL          4
+#define F_GETLK          5
+#define F_SETLK          6
+#define F_SETLKW         7
+#define F_DUPFD_CLOEXEC  0x406  /* 1030 */
+
+#define FD_CLOEXEC  1
+
+/* Linux O_* 标志 (与 VFS_O_* 对齐) */
+#define LINUX_O_ACCMODE   0x03
+#define LINUX_O_NONBLOCK  0x800
+#define LINUX_O_APPEND    0x400
+#define LINUX_O_ASYNC     0x2000
+#define LINUX_O_DIRECT    0x4000
+
 int64_t sys_fcntl(trap_frame_t *frame)
 {
-    (void)frame;
-    return 0;  /* 桩函数 */
+    int fd  = (int)frame->rdi;
+    int cmd = (int)frame->rsi;
+    uint64_t arg = frame->rdx;
+
+    vfs_file_t **fds = vfs_get_fd_table();
+    if (fd < 0 || fd >= VFS_MAX_FD || !fds[fd])
+        return -EBADF;
+
+    vfs_file_t *file = fds[fd];
+
+    switch (cmd) {
+    case F_DUPFD:
+    case F_DUPFD_CLOEXEC: {
+        /* 复制 fd 到 >= arg 的最低可用 fd */
+        int newfd = (int)arg;
+        if (newfd < 0) return -EINVAL;
+        while (newfd < VFS_MAX_FD) {
+            if (!fds[newfd]) {
+                fds[newfd] = file;
+                file->refcount++;
+                if (cmd == F_DUPFD_CLOEXEC)
+                    fds[newfd]->fcntl_flags |= FD_CLOEXEC;
+                return newfd;
+            }
+            newfd++;
+        }
+        return -EMFILE;
+    }
+    case F_GETFD:
+        return (int)(file->fcntl_flags & FD_CLOEXEC);
+    case F_SETFD:
+        file->fcntl_flags = (uint32_t)(arg & FD_CLOEXEC);
+        return 0;
+    case F_GETFL:
+        return (int)file->flags;
+    case F_SETFL: {
+        /* 只允许修改 O_NONBLOCK, O_APPEND, O_ASYNC 等标志，
+         * 不允许修改 O_ACCMODE */
+        uint32_t changeable = LINUX_O_NONBLOCK | LINUX_O_APPEND | LINUX_O_ASYNC;
+        file->flags = (file->flags & ~changeable) | ((uint32_t)arg & changeable);
+        return 0;
+    }
+    case F_GETLK:
+    case F_SETLK:
+    case F_SETLKW:
+        /* 文件锁暂不支持 */
+        return 0;
+    default:
+        return -EINVAL;
+    }
 }
 
 int64_t sys_flock(trap_frame_t *frame)
@@ -454,4 +523,101 @@ int64_t sys_dup3(trap_frame_t *frame)
     int flags = (int)frame->rdx;
     (void)flags;
     return vfs_dup2(oldfd, newfd);
+}
+
+int64_t sys_ioctl(trap_frame_t *frame)
+{
+    int fd = (int)frame->rdi;
+    uint64_t cmd = (uint64_t)frame->rsi;
+    uint64_t arg = (uint64_t)frame->rdx;
+
+    vfs_file_t **fds = vfs_get_fd_table();
+    if (fd < 0 || fd >= VFS_MAX_FD || !fds[fd])
+        return -EBADF;
+
+    vfs_file_t *file = fds[fd];
+    if (!file->inode)
+        return -EBADF;
+
+    /* Dispatch to character device ioctl handler */
+    if (file->inode->type == VFS_TYPE_CHARDEV) {
+        return chardev_ioctl(file, cmd, arg);
+    }
+
+    return -ENOTTY;
+}
+
+/* ========================================================================
+ * scatter/gather I/O syscalls
+ * ======================================================================== */
+
+/* Linux iovec 结构（用户空间） */
+typedef struct {
+    void  *iov_base;    /* 起始地址 */
+    size_t iov_len;     /* 字节数 */
+} iovec_t;
+
+int64_t sys_readv(trap_frame_t *frame)
+{
+    int      fd     = (int)frame->rdi;
+    iovec_t *iov    = (iovec_t *)frame->rsi;
+    int      iovcnt = (int)frame->rdx;
+
+    if (iovcnt <= 0)
+        return -EINVAL;
+
+    int64_t total = 0;
+    for (int i = 0; i < iovcnt; i++) {
+        if (iov[i].iov_len == 0)
+            continue;
+        int64_t n = vfs_read(fd, iov[i].iov_base, iov[i].iov_len);
+        if (n < 0)
+            return total > 0 ? total : n;
+        total += n;
+        if ((size_t)n < iov[i].iov_len)
+            break;  /* 不足一个 iov，停止 */
+    }
+    return total;
+}
+
+int64_t sys_writev(trap_frame_t *frame)
+{
+    int      fd     = (int)frame->rdi;
+    iovec_t *iov    = (iovec_t *)frame->rsi;
+    int      iovcnt = (int)frame->rdx;
+
+    if (iovcnt <= 0)
+        return -EINVAL;
+
+    /* fd 1/2 直接写入串口（与 sys_write 保持一致）。
+     * 暂时跳过 terminal_putchar() 以避免帧缓冲区写入
+     * 导致用户代码页损坏。仅写入串口。 */
+    if (fd == 1 || fd == 2) {
+        int64_t total = 0;
+        for (int i = 0; i < iovcnt; i++) {
+            if (iov[i].iov_len == 0)
+                continue;
+            const char *p = (const char *)iov[i].iov_base;
+            for (size_t j = 0; j < iov[i].iov_len; j++) {
+                while (!(hal_inb(0x3FD) & 0x20))
+                    ;
+                hal_outb(0x3F8, (uint8_t)p[j]);
+            }
+            total += (int64_t)iov[i].iov_len;
+        }
+        return total;
+    }
+
+    int64_t total = 0;
+    for (int i = 0; i < iovcnt; i++) {
+        if (iov[i].iov_len == 0)
+            continue;
+        int64_t n = vfs_write(fd, iov[i].iov_base, iov[i].iov_len);
+        if (n < 0)
+            return total > 0 ? total : n;
+        total += n;
+        if ((size_t)n < iov[i].iov_len)
+            break;
+    }
+    return total;
 }

@@ -9,5 +9,7 @@ void init_storage(void);
 void init_filesystem(void);
 void init_services(void);
 void init_fs_hierarchy(void);
+void init_input(void);
+void init_drm(void);
 
 #endif /* INIT_H */

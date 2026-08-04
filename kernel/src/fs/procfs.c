@@ -21,7 +21,7 @@
 
 #define MAX_PROCS_INTERNAL 256
 #define PROCFS_BUF_SIZE    1024
-#define SPIRITFOX_VERSION  "SpiritFoxOS 0.1.0 (x86_64)"
+#define SPIRITFOX_VERSION  "SpiritFoxOS Alpha 0.1 (x86_64)"
 
 /* ========================================================================
  * 简单的整数转字符串辅助函数（内核中没有 snprintf）
@@ -393,7 +393,7 @@ void procfs_init(void)
     {
         int fd = vfs_open("/proc/version", VFS_O_CREAT | VFS_O_WRONLY, VFS_S_IRUSR);
         if (fd >= 0) {
-            vfs_write(fd, "SpiritFoxOS 0.4.0\n", 19);
+            vfs_write(fd, "SpiritFoxOS Alpha 0.1\n", 22);
             vfs_close(fd);
         }
     }

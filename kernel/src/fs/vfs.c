@@ -1,5 +1,6 @@
 #include "vfs.h"
 #include "memfs.h"
+#include "chardev.h"
 #include "string.h"
 #include "memory.h"
 #include "vga.h"
@@ -685,6 +686,11 @@ int vfs_open(const char *path, uint32_t flags, uint32_t mode)
     if (flags & VFS_O_APPEND)
         file->offset = dentry->inode->size;
 
+    /* If this is a character device, call its open handler */
+    if (file->inode->type == VFS_TYPE_CHARDEV) {
+        chardev_open(file);
+    }
+
     vfs_get_fd_table()[fd] = file;
     return fd;
 }
@@ -722,6 +728,10 @@ int vfs_close(int fd)
         }
     } else if (file->refcount <= 0) {
         /* Regular file - no longer referenced */
+        /* If this is a character device, call its close handler */
+        if (file->inode && file->inode->type == VFS_TYPE_CHARDEV) {
+            chardev_close(file);
+        }
     }
 
     vfs_get_fd_table()[fd] = NULL;
@@ -744,6 +754,11 @@ int vfs_read(int fd, void *buf, size_t count)
     /* Handle pipe read */
     if (file->inode->type == VFS_TYPE_PIPE && file->pipe) {
         return pipe_read(file, buf, count);
+    }
+
+    /* Handle character device read */
+    if (file->inode->type == VFS_TYPE_CHARDEV) {
+        return chardev_read(file, buf, count);
     }
 
     /* Use inode's read operation if available */
@@ -777,6 +792,11 @@ int vfs_write(int fd, const void *buf, size_t count)
     /* Handle pipe write */
     if (file->inode->type == VFS_TYPE_PIPE && file->pipe) {
         return pipe_write(file, buf, count);
+    }
+
+    /* Handle character device write */
+    if (file->inode->type == VFS_TYPE_CHARDEV) {
+        return chardev_write(file, buf, count);
     }
 
     /* Use inode's write operation if available */

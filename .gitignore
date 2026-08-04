@@ -42,3 +42,19 @@ Thumbs.db
 # Python cache
 __pycache__/
 *.pyc
+
+# musl libc build and install artifacts (rebuild via build/musl)
+sysroot/usr/lib/libc.a
+sysroot/usr/lib/libc.so
+sysroot/usr/lib/lib*.a
+sysroot/usr/lib/crt*.o
+sysroot/usr/lib/Scrt1.o
+sysroot/usr/lib/rcrt1.o
+sysroot/usr/lib/musl-gcc.specs
+sysroot/usr/bin/musl-gcc
+sysroot/lib/ld-musl-x86_64.so.1
+
+# Wayland build artifacts
+sysroot/usr/lib/libwayland-*.a
+sysroot/usr/include/wayland/
+wayland/generated/

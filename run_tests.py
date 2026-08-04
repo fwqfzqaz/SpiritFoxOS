@@ -35,7 +35,7 @@ TESTS = [
     ("V24", "列出/proc", "ls /proc", []),
     ("S01", "help命令", "help", ["Available commands", "ls", "cd", "cat"]),
     ("S02", "echo命令", "echo test output", ["test output"]),
-    ("S03", "version命令", "version", ["v0.4.0"]),
+    ("S03", "version命令", "version", ["Alpha 0.1"]),
     ("S04", "about命令", "about", ["SpiritFoxOS"]),
     ("S05", "uptime命令", "uptime", ["Uptime"]),
     ("S06", "meminfo命令", "meminfo", ["Total", "Used", "Free"]),

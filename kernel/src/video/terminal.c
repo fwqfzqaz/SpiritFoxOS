@@ -478,3 +478,26 @@ void terminal_set_flags(uint32_t flags)
 {
     term_flags = flags;
 }
+
+void terminal_set_color(uint32_t fg, uint32_t bg)
+{
+    if (fb_term_is_active()) {
+        fb_term_set_color((fb_color_t)fg, (fb_color_t)bg);
+    } else {
+        vga_set_color(fg, bg);
+    }
+}
+
+void terminal_get_color(uint32_t *fg, uint32_t *bg)
+{
+    if (fb_term_is_active()) {
+        fb_color_t f, b;
+        fb_term_get_color(&f, &b);
+        if (fg) *fg = (uint32_t)f;
+        if (bg) *bg = (uint32_t)b;
+    } else {
+        /* VGA doesn't expose get_color; return defaults */
+        if (fg) *fg = 0x0F;
+        if (bg) *bg = 0x00;
+    }
+}

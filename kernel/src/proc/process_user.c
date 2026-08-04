@@ -82,6 +82,10 @@ int process_exec(const char *path, const char *const argv[],
     if (!current || !path)
         return -1;
 
+    serial_puts("[process_exec] path='");
+    serial_puts(path);
+    serial_puts("'\n");
+
     /* ---- 1. 将路径复制到内核缓冲区 ---- */
     char kpath[VFS_MAX_PATH];
     {
@@ -540,17 +544,13 @@ void process_enter_user(trap_frame_t *frame)
             (uint64_t)current->kernel_stack + (KERNEL_STACK_PAGES * PAGE_SIZE));
     }
 
-    /* Set up GS:8 (kernel RSP) and GS:16 (process PML4) for syscall entry point */
+    /* 直接设置 cpu_locals 中的 syscall 暂存字段 */
     {
-        void *cpu_area_ptr = this_cpu()->syscall_cpu_area;
-        if (cpu_area_ptr) {
-            uint64_t kstack_top = (current && current->kernel_stack)
-                ? (uint64_t)current->kernel_stack + (KERNEL_STACK_PAGES * PAGE_SIZE)
-                : cpu_gdts[this_cpu()->index].tss.rsp0;
-            uint64_t *cpu_area = (uint64_t *)cpu_area_ptr;
-            cpu_area[1] = kstack_top;          /* gs:8 = 内核栈顶 */
-            cpu_area[2] = current->pml4;       /* gs:16 = 进程 PML4 */
-        }
+        cpu_local_t *cpu = this_cpu();
+        cpu->kernel_rsp_top = (current && current->kernel_stack)
+            ? (uint64_t)current->kernel_stack + (KERNEL_STACK_PAGES * PAGE_SIZE)
+            : cpu_gdts[cpu->index].tss.rsp0;
+        cpu->process_pml4 = current->pml4;
     }
 
     serial_puts("[enter_user] rip=0x");
@@ -582,10 +582,11 @@ void process_enter_user(trap_frame_t *frame)
         /* 将帧指针加载到 r8 */
         "mov %[frame], %%r8\n\t"
 
-        /* 注意：不做 swapgs！内核态运行时 GS_BASE=0，
-         * KERNEL_GS_BASE=per-CPU。iretq 后用户态也保持 GS_BASE=0。
-         * 当用户态执行 syscall 时，syscall_entry 中的 swapgs 会
-         * 正确地将 GS_BASE 换为 per-CPU（KERNEL_GS_BASE 的值）。 */
+        /* swapgs: 交换 GS_BASE(cpu_locals) 和 KERNEL_GS_BASE(0)
+         * 使得用户态 GS_BASE=0，KERNEL_GS_BASE=cpu_locals。
+         * 当从用户态通过中断/syscall进入内核时，swapgs 会恢复
+         * GS_BASE=cpu_locals，使 this_cpu() 正常工作。 */
+        "swapgs\n\t"
 
         /* 将数据段设置为用户态（USER_DS | RPL 3 = 0x23） */
         "mov $0x23, %%ax\n\t"

@@ -143,6 +143,8 @@ struct BootInfo64 {
     uint64_t acpi_rsdp;         /* 暂为 0，由内核扫描 */
     uint64_t efi_runtime_services; /* 传统引导下为 0 */
     uint64_t total_memory;
+    uint64_t initrd_addr;       /* initrd (FAT32 镜像) 物理地址，0=无 */
+    uint64_t initrd_size;       /* initrd 字节大小 */
 };
 
 #define BOOTINFO_ADDR 0x9000
@@ -287,6 +289,7 @@ void _start_c(uint32_t magic, struct mb2_info *mbi)
 
     /* ---- 解析 multiboot2 标签 ---- */
     uint32_t kernel_start = 0, kernel_size = 0;
+    uint32_t initrd_start = 0, initrd_size = 0;
     uint64_t fb_addr = 0;
     uint32_t fb_width = 0, fb_height = 0, fb_pitch = 0, fb_bpp = 0;
     int fb_found = 0;
@@ -317,6 +320,15 @@ void _start_c(uint32_t magic, struct mb2_info *mbi)
                     serial_put_hex(kernel_start);
                     serial_puts(" size=");
                     serial_put_hex(kernel_size);
+                    serial_puts("\n");
+                } else if (initrd_start == 0) {
+                    /* 第二个模块 = initrd (FAT32 镜像) */
+                    initrd_start = mod->mod_start;
+                    initrd_size = mod->mod_end - mod->mod_start;
+                    serial_puts("[LOADER] initrd: start=");
+                    serial_put_hex(initrd_start);
+                    serial_puts(" size=");
+                    serial_put_hex(initrd_size);
                     serial_puts("\n");
                 }
                 break;
@@ -466,6 +478,38 @@ void _start_c(uint32_t magic, struct mb2_info *mbi)
         }
     }
 
+    /* ---- 将 initrd 复制到安全地址 ---- */
+    /* GRUB 将 initrd 放在内核模块之后，但内核的 BSS 段会延伸到
+     * 模块加载地址范围，导致内核初始化时 BSS 被清零覆盖 initrd 数据。
+     * 将 initrd 复制到 16MB (0x1000000) 处，远离内核空间。
+     * 使用 rep movsd 快速复制（4字节/次），比逐字节快约4倍。 */
+    #define INITRD_DEST_ADDR 0x1000000
+    if (initrd_start && initrd_size) {
+        serial_puts("[LOADER] Copying initrd to 0x");
+        serial_put_hex(INITRD_DEST_ADDR);
+        serial_puts("...\n");
+        uint32_t src_addr = initrd_start;
+        uint32_t dst_addr = INITRD_DEST_ADDR;
+        uint32_t dword_count = initrd_size / 4;
+        __asm__ volatile (
+            "cld\n\t"
+            "rep movsd\n\t"
+            : "+S"(src_addr), "+D"(dst_addr), "+c"(dword_count)
+            :
+            : "memory"
+        );
+        /* 复制剩余字节 */
+        uint32_t remaining = initrd_size & 3;
+        if (remaining) {
+            uint8_t *src8 = (uint8_t *)src_addr;
+            uint8_t *dst8 = (uint8_t *)dst_addr;
+            for (uint32_t i = 0; i < remaining; i++)
+                dst8[i] = src8[i];
+        }
+        initrd_start = INITRD_DEST_ADDR;
+        serial_puts("[LOADER] initrd copy done\n");
+    }
+
     /* ---- 设置恒等映射页表 (PAE) ---- */
     for (int i = 0; i < 512; i++) {
         p4_table[i] = 0;
@@ -576,6 +620,15 @@ void _start_c(uint32_t magic, struct mb2_info *mbi)
 
     bi->acpi_rsdp = acpi_rsdp;
     bi->efi_runtime_services = 0;     /* 传统引导不可用 */
+    bi->initrd_addr = (uint64_t)initrd_start;
+    bi->initrd_size = (uint64_t)initrd_size;
+    if (initrd_start) {
+        serial_puts("[LOADER] initrd at 0x");
+        serial_put_hex(initrd_start);
+        serial_puts(" size=");
+        serial_put_hex(initrd_size);
+        serial_puts(" bytes\n");
+    }
 
     /* ---- 启用长模式 ---- */
     serial_puts("[LOADER] Calling enable_long_mode...\n");

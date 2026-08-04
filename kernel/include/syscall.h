@@ -92,6 +92,8 @@
 #define SYS_sigaltstack     131
 
 /* Memory */
+#define SYS_mremap      25
+#define SYS_msync       26
 #define SYS_mincore     27
 #define SYS_madvise     28
 #define SYS_shmget      29

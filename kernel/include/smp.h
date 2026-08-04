@@ -35,6 +35,13 @@ void spinlock_release(spinlock_t *lock);
  * Per-CPU data
  * ======================================================================== */
 typedef struct cpu_local {
+    /* ---- Syscall 暂存区（gs:偏移 访问，必须位于结构体起始处） ---- */
+    uint64_t    user_rsp_save;    /* offset 0:  gs:0  用户态 RSP 保存 */
+    uint64_t    kernel_rsp_top;   /* offset 8:  gs:8  内核栈顶 */
+    uint64_t    process_pml4;     /* offset 16: gs:16 进程 PML4 */
+    uint64_t    kernel_cr3;       /* offset 24: gs:24 内核 CR3 */
+
+    /* ---- Per-CPU 标识 ---- */
     uint32_t    cpu_id;           /* APIC ID */
     uint32_t    index;            /* Logical CPU index (0..cpu_count-1) */
     int         online;           /* Is this CPU online? */
@@ -47,7 +54,6 @@ typedef struct cpu_local {
     int         need_reschedule;  /* Per-CPU 重调度标志 */
     void       *tss;              /* 本 CPU 的 TSS 指针 (tss_t*) */
     uint16_t    tss_selector;     /* TSS GDT 选择子 */
-    void       *syscall_cpu_area; /* Per-CPU syscall 暂存区 */
     uint32_t    lapic_timer_count;/* LAPIC 定时器初始计数值 */
 
     /* Per-CPU 运行队列 */

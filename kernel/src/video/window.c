@@ -277,7 +277,7 @@ static void term_execute(const char *cmd)
     char nbuf[32];
 
     if (strcmp(argv[0], "help") == 0) {
-        term_print("SpiritFoxOS Terminal v0.5\n");
+        term_print("SpiritFoxOS Terminal Alpha 0.1\n");
         term_print("General:\n");
         term_print("  help         - Show this help\n");
         term_print("  clear        - Clear terminal\n");
@@ -294,9 +294,9 @@ static void term_execute(const char *cmd)
     } else if (strcmp(argv[0], "clear") == 0) {
         term_clear();
     } else if (strcmp(argv[0], "version") == 0) {
-        term_print("SpiritFoxOS v0.5.0 - Modern GUI\n");
+        term_print("SpiritFoxOS Alpha 0.1 - Modern GUI\n");
     } else if (strcmp(argv[0], "about") == 0) {
-        term_print("SpiritFoxOS v0.5.0\n");
+        term_print("SpiritFoxOS Alpha 0.1\n");
         term_print("A hobby x86_64 operating system\n");
         term_print("Modern Multi-Window GUI\n");
         term_print("32-bit double-buffered framebuffer\n");
@@ -1288,7 +1288,7 @@ static void draw_start_menu(void)
 
         draw_fox_face(mx + 14, my + 10, 28);
         fb_draw_string(mx + 50, my + 10, "SpiritFoxOS", COLOR_TEXT_BRIGHT, COLOR_SURFACE);
-        fb_draw_string(mx + 50, my + 26, "v0.5.0", COLOR_TEXT_DIM, COLOR_SURFACE);
+        fb_draw_string(mx + 50, my + 26, "Alpha 0.1", COLOR_TEXT_DIM, COLOR_SURFACE);
     }
 
     /* ---- Search bar ---- */
@@ -1782,7 +1782,7 @@ static void draw_about_window(WinSlot *ws)
     /* Gradient text effect for title */
     fb_draw_string(cx - 11 * 8 / 2, ty, "SpiritFoxOS", COLOR_ACCENT, COLOR_WIN_BODY);
     ty += 22;
-    fb_draw_string(cx - 8 * 8 / 2, ty, "v0.5.0", COLOR_TEXT_DIM, COLOR_WIN_BODY);
+    fb_draw_string(cx - 10 * 8 / 2, ty, "Alpha 0.1", COLOR_TEXT_DIM, COLOR_WIN_BODY);
     ty += 24;
 
     /* Separator */
@@ -2273,7 +2273,7 @@ void window_enter(void)
     show_splash();
 
     term_clear();
-    term_print("SpiritFoxOS Terminal v0.5\n");
+    term_print("SpiritFoxOS Terminal Alpha 0.1\n");
     term_print("Type 'help' for commands.\n\n");
     term_input[0] = '\0';
     term_input_len = 0;
@@ -2423,7 +2423,7 @@ void window_enter(void)
                 start_menu_hover = -1;
                 ctx_menu_open = 0;
                 term_clear();
-                term_print("SpiritFoxOS Terminal v0.5\n");
+                term_print("SpiritFoxOS Terminal Alpha 0.1\n");
                 term_print("Type 'help' for commands.\n\n");
                 term_input[0] = '\0';
                 term_input_len = 0;

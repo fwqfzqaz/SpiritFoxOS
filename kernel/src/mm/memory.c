@@ -197,6 +197,15 @@ void memory_init(BootInfo* info, uintptr_t kernel_end)
             bitmap_set(bitmap_start_page + i);
     }
 
+    /* 保留 initrd (FAT32 镜像) 占用的空间，防止被页分配器覆盖 */
+    if (info->initrd_addr != 0 && info->initrd_size != 0) {
+        uint64_t initrd_start_page = info->initrd_addr / PAGE_SIZE;
+        uint64_t initrd_end_page = (info->initrd_addr + info->initrd_size + PAGE_SIZE - 1) / PAGE_SIZE;
+        for (uint64_t i = initrd_start_page; i < initrd_end_page && i < max_pages; i++) {
+            bitmap_set(i);
+        }
+    }
+
     if (info) {
         printf("[PMM] Boot type: %s, Total memory: %llu MB, Pages: %llu\n",
                info->boot_type == BOOT_TYPE_UEFI ? "UEFI" : "Legacy",

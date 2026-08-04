@@ -1,6 +1,6 @@
 # SpiritFoxOS 测试计划
 
-**版本**: v0.4.0  
+**版本**: Alpha 0.1  
 **日期**: 2026-07-18  
 **测试环境**: QEMU x86_64, 1GB RAM, AHCI + RTL8139  
 **最终结果**: ✅ **自动化测试 43/43 通过，通过率 100%**
@@ -80,7 +80,7 @@
 |------|--------|----------|----------|--------|------|
 | S01 | help 命令 | `help` | 显示 "Available commands" 含 ls, cd, cat | P0 | ✅ PASS |
 | S02 | echo 命令 | `echo test output` | 显示 "test output" | P0 | ✅ PASS |
-| S03 | version 命令 | `version` | 显示 "SpiritFoxOS v0.4.0" | P0 | ✅ PASS |
+| S03 | version 命令 | `version` | 显示 "SpiritFoxOS Alpha 0.1" | P0 | ✅ PASS |
 | S04 | about 命令 | `about` | 显示 "SpiritFoxOS" 系统信息 | P1 | ✅ PASS |
 | S05 | uptime 命令 | `uptime` | 显示 "Uptime: xxx seconds" | P0 | ✅ PASS |
 | S06 | meminfo 命令 | `meminfo` | 显示 Total/Used/Free 页信息 | P0 | ✅ PASS |

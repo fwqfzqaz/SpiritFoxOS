@@ -116,15 +116,13 @@ irq_spurious:
 ; ISR 公共处理程序
 ; ========================================
 isr_common:
-    ; 调试：向 COM1 输出 'E' 以确认异常到达
-    mov dx, 0x3F9
-    in al, dx
-    test al, 0x20
-    jz .skip_exc_debug
-    mov dx, 0x3F8
-    mov al, 'E'
-    out dx, al
-.skip_exc_debug:
+    ; 如果来自用户态（CPL=3），执行 swapgs 加载内核 GS 基地址
+    ; 此时栈上: [int_num] [error_code] [RIP] [CS] ...
+    ; CS 在 rsp+24，使用 test 避免破坏任何寄存器
+    test byte [rsp+24], 3
+    jz .isr_no_swapgs
+    swapgs
+.isr_no_swapgs:
 
     ; 保存所有通用寄存器
     push rax
@@ -147,11 +145,11 @@ isr_common:
     mov ax, ds
     push rax
 
-    ; 加载内核数据段（不设置 GS，GS 基地址由 MSR 管理，per-CPU 数据依赖它）
+    ; 加载内核数据段（不设置 FS/GS，FS 基地址由 MSR 管理用于用户 TLS，
+    ; GS 基地址由 MSR 管理用于 per-CPU 数据，修改 FS 选择器会重置 FS_BASE MSR）
     mov ax, 0x10
     mov ds, ax
     mov es, ax
-    mov fs, ax
 
     ; 传递中断号、错误码、故障RIP和用户RSP作为参数
     mov rdi, [rsp+128]   ; 中断号
@@ -161,11 +159,11 @@ isr_common:
     cld
     call isr_handler
 
-    ; 恢复数据段（不恢复 GS，保持 per-CPU GS 基地址）
+    ; 恢复数据段（不恢复 FS/GS，FS_BASE MSR 由 arch_prctl 管理，
+    ; 不应被 mov fs 指令重置；GS 由 swapgs 管理）
     pop rax
     mov ds, ax
     mov es, ax
-    mov fs, ax
 
     ; 恢复通用寄存器
     pop r15
@@ -186,12 +184,26 @@ isr_common:
 
     ; 移除中断号和错误码
     add rsp, 16
+
+    ; 如果返回用户态（CPL=3），执行 swapgs 恢复用户 GS 基地址
+    ; 此时栈上: [RIP] [CS] [RFLAGS] [RSP] [SS]
+    ; CS 在 rsp+8
+    test byte [rsp+8], 3
+    jz .isr_no_swapgs_back
+    swapgs
+.isr_no_swapgs_back:
     iretq
 
 ; ========================================
 ; IRQ 公共处理程序
 ; ========================================
 irq_common:
+    ; 如果来自用户态（CPL=3），执行 swapgs 加载内核 GS 基地址
+    test byte [rsp+24], 3
+    jz .irq_no_swapgs
+    swapgs
+.irq_no_swapgs:
+
     ; 保存所有通用寄存器
     push rax
     push rbx
@@ -213,11 +225,11 @@ irq_common:
     mov ax, ds
     push rax
 
-    ; 加载内核数据段（不设置 GS，GS 基地址由 MSR 管理，per-CPU 数据依赖它）
+    ; 加载内核数据段（不设置 FS/GS，FS_BASE MSR 由 arch_prctl 管理，
+    ; GS 基地址由 MSR 管理用于 per-CPU 数据，修改 FS 选择器会重置 FS_BASE MSR）
     mov ax, 0x10
     mov ds, ax
     mov es, ax
-    mov fs, ax
 
     ; 传递中断号和错误码作为参数
     mov rdi, [rsp+128]   ; 中断号
@@ -225,11 +237,11 @@ irq_common:
     cld
     call irq_handler
 
-    ; 恢复数据段（不恢复 GS，保持 per-CPU GS 基地址）
+    ; 恢复数据段（不恢复 FS/GS，FS_BASE MSR 由 arch_prctl 管理，
+    ; 不应被 mov fs 指令重置；GS 由 swapgs 管理）
     pop rax
     mov ds, ax
     mov es, ax
-    mov fs, ax
 
     ; 恢复通用寄存器
     pop r15
@@ -250,6 +262,12 @@ irq_common:
 
     ; 移除中断号和错误码
     add rsp, 16
+
+    ; 如果返回用户态（CPL=3），执行 swapgs 恢复用户 GS 基地址
+    test byte [rsp+8], 3
+    jz .irq_no_swapgs_back
+    swapgs
+.irq_no_swapgs_back:
     iretq
 
 ; ========================================
@@ -277,11 +295,11 @@ spurious_common:
     mov ax, ds
     push rax
 
-    ; 加载内核数据段（不设置 GS，GS 基地址由 MSR 管理，per-CPU 数据依赖它）
+    ; 加载内核数据段（不设置 FS/GS，FS_BASE MSR 由 arch_prctl 管理，
+    ; GS 基地址由 MSR 管理用于 per-CPU 数据，修改 FS 选择器会重置 FS_BASE MSR）
     mov ax, 0x10
     mov ds, ax
     mov es, ax
-    mov fs, ax
 
     ; 传递中断号和错误码作为参数
     mov rdi, [rsp+128]   ; 中断号
@@ -289,11 +307,11 @@ spurious_common:
     cld
     call spurious_handler
 
-    ; 恢复数据段（不恢复 GS，保持 per-CPU GS 基地址）
+    ; 恢复数据段（不恢复 FS/GS，FS_BASE MSR 由 arch_prctl 管理，
+    ; 不应被 mov fs 指令重置；GS 由 swapgs 管理）
     pop rax
     mov ds, ax
     mov es, ax
-    mov fs, ax
 
     ; 恢复通用寄存器
     pop r15
@@ -378,26 +396,20 @@ syscall_entry:
     push r14                        ; 偏移 8
     push r15                        ; 偏移 0
 
-    ; ---- CR3 切换：切换到内核页表 ----
-    ; 寄存器已保存到栈上，现在可以自由使用 rdx/rcx。
-    ; 当用户进程通过 syscall 进入内核时，CR3 仍然是进程页表。
-    ; 必须切换到内核页表，否则内核的内存操作（如帧缓冲写入）
-    ; 可能通过进程页表中的错误映射破坏用户代码页。
-    mov rdx, cr3                    ; 保存当前 CR3（进程 PML4）
-    mov rcx, gs:24                  ; 加载内核 CR3
-    cmp rdx, rcx                    ; 如果已经在内核页表下则跳过
-    je .no_cr3_switch
-    mov cr3, rcx                    ; 切换到内核页表
-.no_cr3_switch:
-    mov gs:16, rdx                  ; 保存进程 PML4 到 gs:16
+    ; ---- CR3 处理：进程页表已包含完整内核映射，无需切换 ----
+    ; create_user_pml4() 复制了全部 512 个 PML4 项（含低半部分恒等映射
+    ; 和高半部分内核映射），因此进程页表下内核可安全执行所有操作。
+    ; 保留 gs:16 的进程 PML4 记录，供 scheduler 等代码使用。
+    mov rdx, cr3
+    mov gs:16, rdx
 
-    ; 加载内核数据段（不要设置 GS！swapgs 已将 GS 基地址设为内核 per-CPU 区域）
+    ; 加载内核数据段（不要设置 FS/GS！swapgs 已将 GS 基地址设为内核 per-CPU 区域，
+    ; FS 基地址由用户进程通过 arch_prctl 设置，修改 FS 选择器会重置 FS_BASE MSR）
     mov ax, 0x10
     mov ds, ax
     mov es, ax
-    mov fs, ax
-    ; 不设置 GS！swapgs 已经加载了 KERNEL_GS_BASE，
-    ; GS 段寄存器指向 per-CPU 数据区域。
+    ; 不设置 FS/GS！swapgs 已经加载了 KERNEL_GS_BASE，
+    ; FS_BASE MSR 由用户进程管理，不能被覆盖。
 
     ; 调用 C 处理程序，传入陷阱帧指针
     mov rdi, rsp
@@ -405,18 +417,7 @@ syscall_entry:
     call syscall_handler_c
 
     ; 返回路径 - 恢复并 iretq
-    ; 内核数据段已设置，无需恢复
-
-    ; ---- CR3 切换：切换回进程页表 ----
-    ; 在恢复寄存器之前切换回进程页表。
-    ; 因为此时 CR3 是内核页表，而进程页表中也有相同的低半部分映射，
-    ; 切换回进程页表后，内核代码/栈仍然可访问（直到 iretq）。
-    mov rcx, gs:16                  ; 加载进程 PML4
-    mov rdx, cr3                    ; 当前 CR3
-    cmp rcx, rdx                    ; 如果已经是进程页表则跳过
-    je .no_cr3_restore
-    mov cr3, rcx                    ; 切换回进程页表
-.no_cr3_restore:
+    ; 无需切换 CR3：syscall 处理期间未切换页表
 
     ; 按 trap_frame_t 顺序恢复通用寄存器
     pop r15

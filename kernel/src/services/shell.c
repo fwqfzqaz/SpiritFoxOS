@@ -10,12 +10,15 @@
 #include "apic.h"
 #include "blkdev.h"
 #include "terminal.h"
+#include "fb.h"
 #include "vfs.h"
 #include "window.h"
 #include "process.h"
 #include "elf64.h"
 #include "autorun.h"
 #include "smp.h"
+#include "kmalloc.h"
+#include "serial.h"
 
 /* ---------- 屏幕辅助函数 ---------- */
 static void shell_clear_screen(void) {
@@ -751,8 +754,8 @@ static int cmd_sandbox(int argc, char** argv) {
 /* User-mode launcher thread: loads ELF and jumps to user mode */
 static void user_proc_launcher(void *arg)
 {
-    /* 复制路径到本地缓冲区，因为 arg 指向的内存可能在其他线程中被覆盖 */
-    static char local_path[256];
+    /* 复制路径到栈局部缓冲区（每个 kthread 有独立内核栈，安全） */
+    char local_path[256];
     size_t i;
     const char *src = (const char *)arg;
     for (i = 0; i < sizeof(local_path) - 1 && src[i]; i++)
@@ -761,6 +764,27 @@ static void user_proc_launcher(void *arg)
 
     process_t *self = process_current();
 
+    /* 继承父进程的 stdin/stdout/stderr (fd 0/1/2)
+     * process_create_kthread 创建的进程 fd_table 为空，
+     * 用户进程需要这些 fd 才能进行 I/O 操作 */
+    if (self) {
+        process_t *parent = self->parent;
+        if (parent) {
+            for (int fd = 0; fd < 3; fd++) {
+                if (parent->fd_table[fd] && !self->fd_table[fd]) {
+                    self->fd_table[fd] = parent->fd_table[fd];
+                    self->fd_table[fd]->refcount++;
+                }
+            }
+        }
+    }
+
+    serial_puts("[launcher] PID=");
+    serial_put_dec(self ? (uint64_t)self->pid : 999);
+    serial_puts(" path='");
+    serial_puts(local_path);
+    serial_puts("'\n");
+
     printf("[exec] launcher started, PID=%d path='%s'\n", self ? self->pid : -1, local_path);
 
     /* 使用 process_exec() 正确构建用户栈（argc/argv/envp/auxv），
@@ -768,7 +792,7 @@ static void user_proc_launcher(void *arg)
      * process_exec() 处理 ELF 加载、栈构建、frame 设置
      * 和用户态转换的全部流程。 */
     const char *argv[] = { local_path, NULL };
-    const char *envp[] = { NULL };
+    const char *envp[] = { "XDG_RUNTIME_DIR=/run/user/0", NULL };
 
     int ret = process_exec(local_path, argv, envp);
 
@@ -794,48 +818,106 @@ static int cmd_exec(int argc, char** argv) {
     vfs_close(fd);
 
     /* 创建一个将转换到用户态的内核线程 */
+    serial_puts("[cmd_exec] creating kthread for '");
+    serial_puts(path);
+    serial_puts("'\n");
     printf("[exec] creating kthread for '%s'...\n", path);
     process_t *proc = process_create_kthread(user_proc_launcher, (void *)path);
     if (!proc) {
+        serial_puts("[cmd_exec] kthread creation FAILED\n");
         printf("exec: failed to create process\n");
         return -1;
     }
 
-    printf("exec: launched '%s' as PID %d (state=%d)\n", path, proc->pid, proc->state);
+    serial_puts("[cmd_exec] kthread PID=");
+    serial_put_dec((uint64_t)proc->pid);
+    serial_puts(" created, waiting...\n");
+    printf("exec: launched '%s' as PID %d\n", path, proc->pid);
 
-    /* Wait for the process to finish.
-     *
-     * Set ourselves (PID0/shell) to PROC_BLOCKED so that:
-     *   1) The scheduler picks PID1 on the next schedule
-     *   2) process_exit() wakes us by setting state → PROC_READY
-     *
-     * Then yield the CPU.  When we're woken, PID1 will be ZOMBIE.
-     */
-    process_t *self = process_current();
-    self->state = PROC_BLOCKED;
-    this_cpu()->need_reschedule = 1;
-    scheduler_schedule();
-
-    /* ---- Woken up by process_exit() ---- */
-    /* PID1 set our state to PROC_READY; the scheduler switched back
-     * to us.  Re-set to RUNNING since we are now actively executing. */
-    self = process_current();
-    self->state = PROC_RUNNING;
-
-    if (proc->state == PROC_ZOMBIE) {
-        printf("exec: PID %d exited with code %d\n", proc->pid, proc->exit_code);
-        /* Properly reap the zombie: free kernel stack, mark slot unused */
-        if (proc->kernel_stack) {
-            free_page(proc->kernel_stack);
-            free_page((void *)((uint64_t)proc->kernel_stack + PAGE_SIZE));
-        }
-        proc->state = PROC_UNUSED;
-    } else if (proc->state == PROC_UNUSED) {
-        printf("exec: PID %d already reaped\n", proc->pid);
+    /* 使用 process_wait 等待子进程退出 */
+    int status = 0;
+    serial_puts("[cmd_exec] calling process_wait...\n");
+    int waited = process_wait(proc->pid, &status, 0);
+    serial_puts("[cmd_exec] process_wait returned ");
+    serial_put_dec((int64_t)waited);
+    serial_puts("\n");
+    if (waited == proc->pid) {
+        printf("exec: PID %d exited (code %d)\n", proc->pid, status);
     } else {
-        printf("exec: PID %d in unexpected state %d\n", proc->pid, proc->state);
+        printf("exec: wait failed for PID %d (ret=%d)\n", proc->pid, waited);
     }
 
+    return 0;
+}
+
+/* 延时等待（秒） */
+static int cmd_sleep(int argc, char** argv) {
+    if (argc < 2) {
+        printf("Usage: sleep <seconds>\n");
+        return -1;
+    }
+    int seconds = 0;
+    const char *s = argv[1];
+    while (*s >= '0' && *s <= '9') {
+        seconds = seconds * 10 + (*s - '0');
+        s++;
+    }
+    if (seconds <= 0 || seconds > 60) {
+        printf("sleep: invalid duration (1-60)\n");
+        return -1;
+    }
+    timer_sleep_ms(seconds * 1000);
+    return 0;
+}
+
+/* 后台执行：启动用户程序但不阻塞 shell */
+static int cmd_bgexec(int argc, char** argv) {
+    if (argc < 2) {
+        printf("Usage: bgexec <elf-path> [args...]\n");
+        return -1;
+    }
+
+    const char *path = argv[1];
+
+    /* 检查文件是否存在 */
+    int fd = vfs_open(path, VFS_O_RDONLY, 0);
+    if (fd < 0) {
+        printf("bgexec: cannot open '%s' (err=%d)\n", path, fd);
+        return -1;
+    }
+    vfs_close(fd);
+
+    /* 动态分配路径缓冲区，支持多个后台进程 */
+    char *path_buf = kmalloc(256);
+    if (!path_buf) {
+        printf("bgexec: out of memory\n");
+        return -1;
+    }
+    size_t j;
+    for (j = 0; j < 255 && path[j]; j++)
+        path_buf[j] = path[j];
+    path_buf[j] = '\0';
+
+    printf("[bgexec] launching '%s' in background...\n", path_buf);
+
+    /* 关中断防止在 kthread 创建过程中调度器切换到未初始化完成的进程 */
+    uint64_t rflags;
+    __asm__ volatile("pushfq; pop %0; cli" : "=r"(rflags));
+
+    process_t *proc = process_create_kthread(user_proc_launcher, path_buf);
+    if (!proc) {
+        __asm__ volatile("push %0; popfq" :: "r"(rflags));
+        printf("bgexec: failed to create process\n");
+        kfree(path_buf);
+        return -1;
+    }
+
+    printf("bgexec: launched '%s' as PID %d (background)\n", path_buf, proc->pid);
+
+    /* 恢复中断 */
+    __asm__ volatile("push %0; popfq" :: "r"(rflags));
+
+    /* 不阻塞 shell —— 让进程在后台运行 */
     return 0;
 }
 
@@ -977,7 +1059,7 @@ static int cmd_echo(int argc, char** argv) {
 
 static int cmd_version(int argc, char** argv) {
     (void)argc; (void)argv;
-    printf("SpiritFoxOS v0.4.0\n");
+    printf("SpiritFoxOS Alpha 0.1\n");
     return 0;
 }
 
@@ -1258,6 +1340,8 @@ static const ShellCommand builtin_commands[] = {
     { "sandbox",   cmd_sandbox,   "Sandbox status" },
     { "ps",        cmd_ps,        "List processes" },
     { "exec",      cmd_exec,      "Execute ELF binary" },
+    { "bgexec",    cmd_bgexec,    "Execute ELF binary in background" },
+    { "sleep",     cmd_sleep,     "Sleep for N seconds" },
     { "fileassoc", cmd_fileassoc, "File associations" },
     /* Network */
     { "ifconfig",  cmd_ifconfig,  "Show network configuration" },
@@ -1481,6 +1565,9 @@ static int shell_parse_line(char* line, char** argv, int max_args) {
     int argc = 0;
     char* token = strtok(line, " \t");
     while (token != (void*)0 && argc < max_args) {
+        /* '#' starts an inline comment, ignore rest of line */
+        if (token[0] == '#')
+            break;
         argv[argc++] = token;
         token = strtok((void*)0, " \t");
     }
@@ -1526,12 +1613,14 @@ void shell_init(void) {
 
     vga_clear();
     printf("========================================\n");
-    printf("  SpiritFoxOS v0.4.0\n");
+    printf("  SpiritFoxOS Alpha 0.1\n");
     printf("  Modular Command Line Interface\n");
     printf("  VFS | memfs | devfs | AHCI | Ramdisk\n");
     printf("  Pipes | Redirection | History | Tab\n");
     printf("  Type 'help' for available commands.\n");
     printf("========================================\n");
+
+    /* 自动运行由 autorun.cfg 控制，不再在此处硬编码测试 */
 }
 
 /* ---------- 管道和重定向执行 ---------- */
@@ -1602,7 +1691,37 @@ void shell_run(void) {
     char line[SHELL_MAX_LINE];
     char* argv[SHELL_MAX_ARGS];
 
+    /* 自动回收僵尸子进程（bgexec 产生的后台进程） */
+    {
+        process_t *self = process_current();
+        if (self) {
+            /* 非阻塞地回收所有僵尸子进程 */
+            while (1) {
+                int status = 0;
+                int pid = process_wait(-1, &status, 1); /* WNOHANG = 1 */
+                if (pid <= 0)
+                    break;
+                printf("[auto-reap] PID %d exited (code %d)\n", pid, status);
+            }
+        }
+    }
+
     while (1) {
+        /* 在每次命令循环开始时回收僵尸子进程 */
+        {
+            process_t *self = process_current();
+            if (self) {
+                while (1) {
+                    int status = 0;
+                    int pid = process_wait(-1, &status, 1);
+                    if (pid <= 0)
+                        break;
+                    printf("[auto-reap] PID %d exited (code %d)\n", pid, status);
+                }
+            }
+        }
+
+
         /* 在提示符中显示当前工作目录 */
         const char *cwd_path = vfs_get_cwd();
         printf("%s> ", cwd_path);
@@ -1617,6 +1736,22 @@ void shell_run(void) {
         /* Skip empty lines */
         if (line[0] == '\0')
             continue;
+
+        /* Comment lines (# ...): display in green, then skip */
+        if (line[0] == '#') {
+            uint32_t saved_fg, saved_bg;
+            terminal_get_color(&saved_fg, &saved_bg);
+            if (fb_term_is_active()) {
+                /* FB mode: 32-bit color (bright green) */
+                terminal_set_color(0x0000FF00, saved_bg);
+            } else {
+                /* VGA mode: 4-bit color index (0x0A = light green) */
+                terminal_set_color(0x0A, 0x00);
+            }
+            printf("  %s\n", line);
+            terminal_set_color(saved_fg, saved_bg);
+            continue;
+        }
 
         /* First, split by '|' to find pipeline stages.
          * We need to do this before tokenizing by spaces. */

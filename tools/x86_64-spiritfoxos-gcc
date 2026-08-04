@@ -1,0 +1,5 @@
+#!/bin/sh
+# SpiritFoxOS musl-gcc 交叉编译包装器
+# 使用 musl libc 和 SpiritFoxOS sysroot 进行编译
+SYSROOT="/media/fwqfzqaz/王峥/SpiritFoxOS/sysroot"
+exec gcc "$@" -specs "${SYSROOT}/usr/lib/musl-gcc.specs"

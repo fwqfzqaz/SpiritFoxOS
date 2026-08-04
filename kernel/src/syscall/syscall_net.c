@@ -3,6 +3,7 @@
 #include "net.h"
 #include "net_socket.h"
 #include "errno.h"
+#include "serial.h"
 
 /* ========================================================================
  * 网络系统调用
@@ -13,7 +14,15 @@ int64_t sys_socket(trap_frame_t *frame)
     int domain   = (int)frame->rdi;
     int type     = (int)frame->rsi;
     int protocol = (int)frame->rdx;
-    return net_socket(domain, type, protocol);
+    int64_t ret = net_socket(domain, type, protocol);
+    serial_puts("[sys_socket] domain=");
+    serial_put_dec((uint64_t)domain);
+    serial_puts(" type=");
+    serial_put_dec((uint64_t)type);
+    serial_puts(" -> fd=");
+    serial_put_dec((uint64_t)(int32_t)ret);
+    serial_puts("\n");
+    return ret;
 }
 
 int64_t sys_connect(trap_frame_t *frame)
@@ -37,7 +46,17 @@ int64_t sys_bind(trap_frame_t *frame)
     int fd = (int)frame->rdi;
     const net_sockaddr_t *addr = (const net_sockaddr_t *)frame->rsi;
     socklen_t addrlen = (socklen_t)frame->rdx;
-    return net_bind(fd, addr, addrlen);
+    serial_puts("[sys_bind] fd=");
+    serial_put_dec((uint64_t)fd);
+    serial_puts(" addr=0x");
+    serial_put_hex((uint64_t)addr);
+    serial_puts(" addrlen=");
+    serial_put_dec((uint64_t)addrlen);
+    int64_t ret = net_bind(fd, addr, addrlen);
+    serial_puts(" -> ret=");
+    serial_put_dec((uint64_t)(int32_t)ret);
+    serial_puts("\n");
+    return ret;
 }
 
 int64_t sys_listen(trap_frame_t *frame)
@@ -120,4 +139,20 @@ int64_t sys_getsockopt(trap_frame_t *frame)
     void *optval = (void *)frame->r10;
     socklen_t *optlen = (socklen_t *)frame->r8;
     return net_getsockopt(fd, level, optname, optval, optlen);
+}
+
+int64_t sys_sendmsg(trap_frame_t *frame)
+{
+    int fd = (int)frame->rdi;
+    const struct msghdr *msg = (const struct msghdr *)frame->rsi;
+    int flags = (int)frame->rdx;
+    return net_sendmsg(fd, msg, flags);
+}
+
+int64_t sys_recvmsg(trap_frame_t *frame)
+{
+    int fd = (int)frame->rdi;
+    struct msghdr *msg = (struct msghdr *)frame->rsi;
+    int flags = (int)frame->rdx;
+    return net_recvmsg(fd, msg, flags);
 }

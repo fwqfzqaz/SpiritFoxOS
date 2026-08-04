@@ -15,4 +15,7 @@ void devfs_add_blkdev(uint8_t dev_id, const char *name);
 /* Called when a block device is unregistered - removes /dev entry */
 void devfs_remove_blkdev(uint8_t dev_id);
 
+/* Get the root dentry of devfs (for chardev node creation) */
+vfs_dentry_t *devfs_get_root(void);
+
 #endif /* DEVFS_H */

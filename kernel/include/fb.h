@@ -67,9 +67,12 @@ void fb_draw_string(int x, int y, const char *s, fb_color_t fg, fb_color_t bg);
 /* Framebuffer text terminal mode */
 void fb_term_init(void);
 int  fb_term_is_active(void);
+void fb_term_disable_render(void);   /* 禁止写入帧缓冲区（仅输出到串口） */
 void fb_term_putchar(char c);
 void fb_term_get_cursor(int *cx, int *cy);
 void fb_term_set_cursor(int cx, int cy);
 void fb_term_backspace(void);
+void fb_term_set_color(fb_color_t fg, fb_color_t bg);
+void fb_term_get_color(fb_color_t *fg, fb_color_t *bg);
 
 #endif /* FB_H */

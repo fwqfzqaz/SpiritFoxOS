@@ -143,7 +143,9 @@ int autorun_create_default(const char *path)
 
     const char *default_content =
         "# SpiritFoxOS Autorun Configuration\n"
-        "#\n";
+        "#\n"
+        "# 自动启动 Wayland 合成器\n"
+        "bgexec /mnt/bin/sf_compositor\n";
 
     vfs_write(fd, default_content, strlen(default_content));
     vfs_close(fd);

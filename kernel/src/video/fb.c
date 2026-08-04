@@ -423,6 +423,13 @@ void fb_init(BootInfo *info)
 
         if (bb_phys) {
             fb_back = (uint32_t *)bb_phys;
+            serial_puts("[FB] back buffer at phys 0x");
+            serial_put_hex(bb_phys);
+            serial_puts(" size=0x");
+            serial_put_hex(fb_size);
+            serial_puts(" pages=");
+            serial_put_dec((uint64_t)bb_pages);
+            serial_puts("\n");
             if (bb_phys < 0x100000000ULL) {
                 hal_ensure_mapped(bb_phys, fb_size);
             } else {
@@ -431,6 +438,7 @@ void fb_init(BootInfo *info)
             memset(fb_back, 0, fb_size);
         } else {
             fb_back = NULL;
+            serial_puts("[FB] WARNING: no back buffer (double buffering disabled)\n");
         }
     }
 
@@ -811,6 +819,15 @@ int fb_term_is_active(void)
     return fb_term_active;
 }
 
+/* 禁止帧缓冲区终端写入帧缓冲区。
+ * 当 DRM/Wayland 合成器接管显示后调用，
+ * 避免 printf 写入 fb_back 破坏用户进程的代码页。
+ * fb_term_putchar 仍会输出到串口。 */
+void fb_term_disable_render(void)
+{
+    fb_term_active = 0;
+}
+
 static void fb_term_scroll(void)
 {
     if (!fb_back) {
@@ -941,4 +958,16 @@ void fb_term_backspace(void)
                       fb_term_cy * FB_TERM_CHAR_H,
                       FB_TERM_CHAR_W, FB_TERM_CHAR_H);
     }
+}
+
+void fb_term_set_color(fb_color_t fg, fb_color_t bg)
+{
+    fb_term_fg = fg;
+    fb_term_bg = bg;
+}
+
+void fb_term_get_color(fb_color_t *fg, fb_color_t *bg)
+{
+    if (fg) *fg = fb_term_fg;
+    if (bg) *bg = fb_term_bg;
 }

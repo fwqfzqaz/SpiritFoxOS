@@ -180,8 +180,10 @@ void scheduler_schedule(void)
 {
     cpu_local_t *cpu = this_cpu();
     process_t *old = cpu->current_process;
-    if (!old)
+    if (!old) {
+        serial_puts("[sched] BUG: old=NULL\n");
         return;
+    }
 
     process_t *new_p = dequeue_process();
 
@@ -229,24 +231,51 @@ void scheduler_schedule(void)
         spinlock_release(&proc_table_lock);
 
         if (next < 0) {
-            /* 没有其他 READY 进程，保持当前进程运行 */
-            if (old->state == PROC_RUNNING || old->state == PROC_READY) {
-                old->state = PROC_RUNNING;
-                old->priority = DEFAULT_TIMESLICE;
+            /* 没有其他 READY 进程。
+             * 如果当前进程是 ZOMBIE（正在退出），不能让它继续运行。
+             * 强制唤醒父进程来回收僵尸进程。 */
+            if (old->state == PROC_ZOMBIE && old->parent) {
+                old->parent->state = PROC_READY;
+                enqueue_process(old->parent);
+                new_p = old->parent;
+            } else {
+                /* 保持当前进程运行 */
+                if (old->state == PROC_RUNNING || old->state == PROC_READY) {
+                    old->state = PROC_RUNNING;
+                    old->priority = DEFAULT_TIMESLICE;
+                }
+                cpu->need_reschedule = 0;
+                return;
             }
-            cpu->need_reschedule = 0;
-            return;
+        } else {
+            new_p = &proc_table[next];
         }
-        new_p = &proc_table[next];
     }
 
     /* 同一进程 – 无需切换 */
     if (old == new_p) {
+        /* ZOMBIE 进程绝不能继续运行 */
+        if (old->state == PROC_ZOMBIE) {
+            serial_puts("[sched] BUG: old==new_p for ZOMBIE PID=");
+            serial_put_dec((uint64_t)old->pid);
+            serial_puts(", forcing switch to parent\n");
+            if (old->parent) {
+                old->parent->state = PROC_RUNNING;
+                new_p = old->parent;
+                /* fall through to context switch */
+                goto do_switch;
+            }
+            /* 没有父进程 - 无限循环 */
+            serial_puts("[sched] ZOMBIE has no parent, halting\n");
+            for (;;) { __asm__ volatile("cli; hlt"); }
+        }
         old->state = PROC_RUNNING;
         old->priority = DEFAULT_TIMESLICE;
         cpu->need_reschedule = 0;
         return;
     }
+
+do_switch:
 
     if (old->state == PROC_RUNNING)
         old->state = PROC_READY;
@@ -268,29 +297,29 @@ void scheduler_schedule(void)
         gdt_set_tss_rsp0(cpu->index, 0x800000);
     }
 
-    /* 更新 syscall 暂存区的 gs:8（内核栈顶） */
-    if (cpu->syscall_cpu_area) {
-        uint64_t *area = (uint64_t *)cpu->syscall_cpu_area;
-        area[1] = (new_p->kernel_stack)
-            ? (uint64_t)new_p->kernel_stack + (KERNEL_STACK_PAGES * PAGE_SIZE)
-            : 0x800000;
-    }
+    /* 更新 Per-CPU syscall 暂存字段 */
+    cpu->kernel_rsp_top = (new_p->kernel_stack)
+        ? (uint64_t)new_p->kernel_stack + (KERNEL_STACK_PAGES * PAGE_SIZE)
+        : 0x800000;
+    cpu->process_pml4 = new_p->pml4;
 
-    /* Sanity check: refuse to switch to a process with kernel_rsp == 0 */
+    /* Sanity check: 对于 ZOMBIE 进程，这些检查失败也不能返回 */
     if (new_p->kernel_rsp == 0) {
         serial_puts("[SCHED] PANIC: PID");
         serial_put_dec((uint64_t)new_p->pid);
-        serial_puts(" kernel_rsp=0, cannot switch!\n");
-        if (old->state == PROC_READY)
-            old->state = PROC_RUNNING;
-        new_p->state = PROC_READY;
-        cpu->need_reschedule = 0;
-        return;
+        serial_puts(" kernel_rsp=0!\n");
+        /* 尝试切换到父进程 */
+        if (old->state == PROC_ZOMBIE && old->parent && old->parent->kernel_rsp) {
+            new_p = old->parent;
+            new_p->state = PROC_RUNNING;
+            serial_puts("[SCHED] Fallback to parent PID=");
+            serial_put_dec((uint64_t)new_p->pid);
+            serial_puts("\n");
+            goto do_switch;
+        }
+        serial_puts("[SCHED] HALT: no valid target\n");
+        for (;;) { __asm__ volatile("cli; hlt"); }
     }
-
-    /* 上下文切换前的调试输出 */
-    printf("[SCHED] PID%d -> PID%d krsp=%lx\n", old->pid, new_p->pid,
-           (unsigned long)new_p->kernel_rsp);
 
     /* 同步全局 current（过渡期兼容） */
     current = new_p;

@@ -2,6 +2,7 @@
 #include "process.h"
 #include "memory.h"
 #include "hal.h"
+#include "gdt.h"
 #include "smp.h"
 #include "string.h"
 #include "serial.h"
@@ -154,17 +155,23 @@ void syscall_handler_c(trap_frame_t *frame)
     uint64_t syscall_num = frame->rax;
     int64_t ret;
 
-    /* 调试：仅记录前几次系统调用 */
-    static int syscall_debug_count = 0;
-    if (syscall_debug_count < 10) {
-        serial_puts("[SYSCALL] num=0x");
-        serial_put_hex(syscall_num);
-        serial_puts(" rdi=0x");
+    /* 调试：记录来自用户进程（PID > 0）的前 300 次系统调用 */
+    static int user_syscall_debug_count = 0;
+    process_t *cur_proc = process_current();
+    if (cur_proc && cur_proc->pid > 0 && user_syscall_debug_count < 300) {
+        serial_puts("[USYSCALL] PID=");
+        serial_put_dec((uint64_t)cur_proc->pid);
+        serial_puts(" num=");
+        serial_put_dec(syscall_num);
+        serial_puts("(");
+        const char *name = syscall_name(syscall_num);
+        serial_puts(name);
+        serial_puts(") rdi=0x");
         serial_put_hex(frame->rdi);
-        serial_puts(" cr3=0x");
-        serial_put_hex(hal_read_cr3());
+        serial_puts(" rsi=0x");
+        serial_put_hex(frame->rsi);
         serial_puts("\n");
-        syscall_debug_count++;
+        user_syscall_debug_count++;
     }
 
     switch (syscall_num) {
@@ -191,6 +198,8 @@ void syscall_handler_c(trap_frame_t *frame)
     case SYS_readlinkat:    ret = sys_readlinkat(frame);    break;
     case SYS_pread64:       ret = sys_pread64(frame);       break;
     case SYS_pwrite64:      ret = sys_pwrite64(frame);      break;
+    case SYS_readv:         ret = sys_readv(frame);         break;
+    case SYS_writev:        ret = sys_writev(frame);        break;
     case SYS_getdents:      ret = sys_getdents(frame);      break;
     case SYS_getdents64:    ret = sys_getdents64(frame);    break;
     case SYS_rename:        ret = sys_rename(frame);        break;
@@ -209,6 +218,7 @@ void syscall_handler_c(trap_frame_t *frame)
     case SYS_brk:           ret = sys_brk(frame);           break;
     case SYS_mprotect:      ret = sys_mprotect(frame);      break;
     case SYS_munmap:        ret = sys_munmap(frame);        break;
+    case SYS_mremap:        ret = sys_mremap(frame);        break;
     case SYS_madvise:       ret = sys_madvise(frame);       break;
     case SYS_mlock:         ret = sys_mlock(frame);         break;
     case SYS_munlock:       ret = sys_munlock(frame);       break;
@@ -289,6 +299,8 @@ void syscall_handler_c(trap_frame_t *frame)
     case SYS_listen:        ret = sys_listen(frame);        break;
     case SYS_sendto:        ret = sys_sendto(frame);        break;
     case SYS_recvfrom:      ret = sys_recvfrom(frame);      break;
+    case SYS_sendmsg:       ret = sys_sendmsg(frame);       break;
+    case SYS_recvmsg:       ret = sys_recvmsg(frame);       break;
     case SYS_shutdown:      ret = sys_shutdown(frame);       break;
     case SYS_getsockname:   ret = sys_getsockname(frame);   break;
     case SYS_getpeername:   ret = sys_getpeername(frame);   break;
@@ -330,8 +342,8 @@ void syscall_handler_c(trap_frame_t *frame)
     case SYS_reg_write:     ret = sys_reg_write(frame);     break;
     case SYS_reg_list:      ret = sys_reg_list(frame);      break;
 
-    /* ioctl - 未实现 */
-    case SYS_ioctl:         ret = -ENOTTY;                  break;
+    /* ioctl - 字符设备控制 */
+    case SYS_ioctl:         ret = sys_ioctl(frame);         break;
 
     /* ppoll 桩函数 */
     case SYS_ppoll:         ret = 0;                        break;
@@ -363,39 +375,19 @@ uint64_t syscall_handler(trap_frame_t *frame)
 
 void syscall_init(void)
 {
-    /* 为 BSP 分配 Per-CPU syscall 暂存区。
-     * 每个核心需要独立暂存区，因为 syscall 入口通过 swapgs + gs: 访问。
+    /* 初始化 cpu_locals 中的 syscall 暂存字段。
+     * 暂存区现在直接位于 cpu_local_t 起始处（gs:偏移访问），
+     * 不再使用独立的 syscall_cpu_area 分配。
      * 布局：
      *   gs:0  = 保存的用户态 RSP（由系统调用入口写入）
      *   gs:8  = 内核态 RSP（进入用户态之前写入）
      *   gs:16 = 进程 PML4
      *   gs:24 = 内核 CR3 */
     cpu_local_t *cpu = this_cpu();
-    if (!cpu->syscall_cpu_area) {
-        cpu->syscall_cpu_area = alloc_page();
-        if (cpu->syscall_cpu_area) {
-            memset(cpu->syscall_cpu_area, 0, PAGE_SIZE);
-            printf("[SYSCALL] BSP per-CPU area at %p\n", cpu->syscall_cpu_area);
-        } else {
-            printf("[SYSCALL] ERROR: failed to allocate per-CPU area!\n");
-            return;
-        }
-    }
-    /* 设置 KERNEL_GS_BASE 为 syscall 暂存区。
-     * GS_BASE 保持指向 cpu_locals（this_cpu() 依赖它），
-     * KERNEL_GS_BASE 指向 syscall_cpu_area。
-     * swapgs 会交换两者，使得 syscall 入口点通过 GS: 访问 syscall_cpu_area。 */
-    hal_write_msr(MSR_IA32_KERNEL_GS_BASE, (uint64_t)(uintptr_t)cpu->syscall_cpu_area);
-
-    /* 保存内核 CR3 到 per-CPU 区域偏移 24。
-     * syscall 入口点使用 gs:24 来切换到内核页表。 */
-    {
-        uint64_t *cpu_area = (uint64_t *)cpu->syscall_cpu_area;
-        cpu_area[3] = hal_read_cr3();   /* offset 24 = 内核 CR3 */
-    }
-
-    /* 验证 */
-    uint64_t verify = hal_read_msr(MSR_IA32_KERNEL_GS_BASE);
-    printf("[SYSCALL] KERNEL_GS_BASE=%llx kernel_cr3=0x%llx\n",
-           (unsigned long long)verify, (unsigned long long)hal_read_cr3());
+    /* 初始化 cpu_locals 中的 syscall 暂存字段 */
+    cpu->kernel_rsp_top = cpu_gdts[0].tss.rsp0;  /* gs:8 = 内核栈顶 */
+    cpu->kernel_cr3 = hal_read_cr3();              /* gs:24 = 内核 CR3 */
+    /* 不要将 KERNEL_GS_BASE 设为 syscall_cpu_area。
+     * 保持 KERNEL_GS_BASE = 0，这样从用户态 swapgs 进入内核时
+     * 会将 GS_BASE 加载为 cpu_locals（kernel 态值）。 */
 }

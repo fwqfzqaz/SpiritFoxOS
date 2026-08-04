@@ -18,6 +18,8 @@ typedef uint32_t socklen_t;
 #define IP_PROTO_UDP    17
 
 /* Address families */
+#define AF_UNIX         1
+#define AF_LOCAL        AF_UNIX
 #define AF_INET         2
 
 /* Socket types */
@@ -48,6 +50,7 @@ typedef uint32_t socklen_t;
 
 /* Socket flags */
 #define SOCKF_NONBLOCK  0x01
+#define SOCKF_CLOEXEC   0x02
 
 /* Maximum values */
 #define NET_MAX_SOCKETS    256
@@ -99,6 +102,14 @@ typedef struct {
     ipv4_addr_t sin_addr;      /* Network byte order */
     char        sin_zero[8];
 } net_sockaddr_t;
+
+/* Unix domain socket address */
+#define UNIX_PATH_MAX   108
+
+typedef struct {
+    uint16_t sun_family;    /* AF_UNIX */
+    char     sun_path[UNIX_PATH_MAX];
+} sockaddr_un_t;
 
 /* IPv4 header */
 typedef struct __attribute__((packed)) {
@@ -211,6 +222,10 @@ typedef struct net_socket {
 
     /* Process blocking on this socket */
     int         blocking_pid;
+
+    /* AF_UNIX fields */
+    char                unix_path[UNIX_PATH_MAX];  /* bound path */
+    struct net_socket   *unix_peer;                /* connected peer */
 } net_socket_t;
 
 /* Network configuration globals */

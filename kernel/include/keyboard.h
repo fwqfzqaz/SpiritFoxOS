@@ -22,4 +22,9 @@ void keyboard_handler(void);
 char keyboard_get_char(void);
 int  keyboard_has_char(void);
 
+/* evdev 输入子系统接口（前向声明 input_dev，避免引入 input.h） */
+struct input_dev;
+void keyboard_input_init(void);
+struct input_dev *keyboard_get_input_dev(void);
+
 #endif

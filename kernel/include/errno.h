@@ -27,11 +27,16 @@
 #define ENOSPC      28
 #define ESPIPE      29
 #define EROFS       30
+#define EPIPE       32
 #define ENOSYS      38
 #define ENAMETOOLONG 63
 #define ENOTSOCK    88
+#define EPROTONOSUPPORT 93
+#define ESOCKTNOSUPPORT 94
 #define EOPNOTSUPP  95
 #define EAFNOSUPPORT 97
+#define EADDRINUSE  98
+#define ENOTCONN    107
 #define ECONNREFUSED 111
 
 #endif /* ERRNO_H */

@@ -1,7 +1,7 @@
 # SpiritFoxOS - Makefile
 # 灵狐操作系统构建系统
 
-.PHONY: all clean kernel loader image iso dual-iso run run-iso run-debug logo uefi-bootloader uefi-image run-uefi run-uefi-iso usb test-elf
+.PHONY: all clean kernel loader image iso dual-iso run run-iso run-debug logo uefi-bootloader uefi-image run-uefi run-uefi-iso usb test-elf musl-static musl-dynamic musl-test musl-deploy wayland-protocol wayland-libs wayland-compositor wayland-client wayland-all wayland-deploy
 
 # =========================================
 # 工具链配置
@@ -203,18 +203,19 @@ uefi-bootloader: $(UEFI_BUILD)/BOOTX64.EFI
 # =========================================
 ISO_FILE = build/spiritfox.iso
 
-iso: kernel loader
+iso: kernel loader build/fat32.img
 	@echo "[ISO] Building GRUB bootable ISO..."
 	@rm -rf $(ISO_DIR)
 	@mkdir -p $(ISO_DIR)/boot/grub
 	@cp $(LOADER_BUILD)/loader.elf $(ISO_DIR)/boot/loader.elf
 	@cp $(KERNEL_BUILD)/kernel.bin $(ISO_DIR)/boot/kernel.bin
+	@cp build/fat32.img $(ISO_DIR)/boot/initrd.img
 	@echo 'serial --speed=115200 --unit=0 --word=8 --parity=no --stop=1' > $(ISO_DIR)/boot/grub/grub.cfg
 	@echo 'terminal_input serial console' >> $(ISO_DIR)/boot/grub/grub.cfg
 	@echo 'terminal_output serial console' >> $(ISO_DIR)/boot/grub/grub.cfg
 	@echo 'insmod all_video' >> $(ISO_DIR)/boot/grub/grub.cfg
 	@echo 'insmod gfxterm' >> $(ISO_DIR)/boot/grub/grub.cfg
-	@echo 'set timeout=5' >> $(ISO_DIR)/boot/grub/grub.cfg
+	@echo 'set timeout=1' >> $(ISO_DIR)/boot/grub/grub.cfg
 	@echo 'set default=0' >> $(ISO_DIR)/boot/grub/grub.cfg
 	@echo '' >> $(ISO_DIR)/boot/grub/grub.cfg
 	@echo 'menuentry "SpiritFoxOS (1024x768x32)" {' >> $(ISO_DIR)/boot/grub/grub.cfg
@@ -222,12 +223,14 @@ iso: kernel loader
 	@echo '  set gfxpayload=1024x768x32' >> $(ISO_DIR)/boot/grub/grub.cfg
 	@echo '  multiboot2 /boot/loader.elf' >> $(ISO_DIR)/boot/grub/grub.cfg
 	@echo '  module2 /boot/kernel.bin' >> $(ISO_DIR)/boot/grub/grub.cfg
+	@echo '  module2 /boot/initrd.img' >> $(ISO_DIR)/boot/grub/grub.cfg
 	@echo '}' >> $(ISO_DIR)/boot/grub/grub.cfg
 	@echo '' >> $(ISO_DIR)/boot/grub/grub.cfg
 	@echo 'menuentry "SpiritFoxOS (Text Mode)" {' >> $(ISO_DIR)/boot/grub/grub.cfg
 	@echo '  echo "Loading SpiritFoxOS (text mode)..."' >> $(ISO_DIR)/boot/grub/grub.cfg
 	@echo '  multiboot2 /boot/loader.elf' >> $(ISO_DIR)/boot/grub/grub.cfg
 	@echo '  module2 /boot/kernel.bin' >> $(ISO_DIR)/boot/grub/grub.cfg
+	@echo '  module2 /boot/initrd.img' >> $(ISO_DIR)/boot/grub/grub.cfg
 	@echo '}' >> $(ISO_DIR)/boot/grub/grub.cfg
 	@grub-mkrescue -o $(ISO_FILE) $(ISO_DIR) 2>/dev/null
 	@echo "========================================="
@@ -345,14 +348,21 @@ run-iso: iso build/disk.img build/fat32.img
 
 run: run-iso
 
-run-log: iso
+run-log: iso build/disk.img build/fat32.img
 	qemu-system-x86_64 \
 	    -cdrom $(ISO_FILE) \
+	    -boot d \
 	    -m 256M \
 	    -serial file:build/serial.log \
 	    -display none \
 	    -net none \
 	    -no-reboot \
+	    -vga std \
+	    -device ahci,id=ahci0 \
+	    -drive id=fat32disk,file=build/fat32.img,if=none,format=raw \
+	    -device ide-hd,drive=fat32disk,bus=ahci0.0 \
+	    -drive id=disk0,file=build/disk.img,if=none,format=raw \
+	    -device ide-hd,drive=disk0,bus=ahci0.1 \
 	    -d cpu_reset 2>build/qemu_debug.log
 
 run-debug: iso
@@ -420,14 +430,21 @@ build/ovmf_vars.fd:
 build/disk.img:
 	@dd if=/dev/zero of=$@ bs=1M count=16 2>/dev/null
 
-build/fat32.img: build/test_hello
+build/fat32.img: build/test_hello build/test_musl_hello build/test_musl_dyn build/sf_compositor build/sf_test_client
 	@echo "[FAT32] Creating disk image..."
-	@dd if=/dev/zero of=$@ bs=1M count=512 2>/dev/null
-	@mkfs.fat -F 32 $@ 2>/dev/null
+	@dd if=/dev/zero of=$@ bs=1M count=64 2>/dev/null
+	@mkfs.fat -F 32 $@
 	@mmd -i $@ ::bin 2>/dev/null
 	@mmd -i $@ ::pkg 2>/dev/null
+	@mmd -i $@ ::lib 2>/dev/null
 	@mcopy -i $@ build/test_hello ::bin/test_hello 2>/dev/null; \
 		mcopy -i $@ build/test_hello ::test_hello 2>/dev/null
+	@mcopy -i $@ build/test_musl_hello ::bin/test_musl_hello 2>/dev/null || true
+	@mcopy -i $@ build/test_musl_dyn ::bin/test_musl_dyn 2>/dev/null || true
+	@mcopy -i $@ build/sf_compositor ::bin/sf_compositor 2>/dev/null || true
+	@mcopy -i $@ build/sf_test_client ::bin/sf_test_client 2>/dev/null || true
+	@mcopy -i $@ $(SYSROOT)/lib/ld-musl-x86_64.so.1 ::lib/ld-musl-x86_64.so.1 2>/dev/null || true
+	@mcopy -i $@ $(SYSROOT)/usr/lib/libc.so ::lib/libc.so 2>/dev/null || true
 	@if [ -f cs/java-jre.deb ]; then \
 		if mcopy -i $@ cs/java-jre.deb ::pkg/java-jre.deb; then \
 			echo "[FAT32] Added java-jre.deb"; \
@@ -476,6 +493,114 @@ build/test_hello: tests/test_hello.c tests/test_crt.S tests/test.ld | build
 test-elf: build/test_hello
 	@echo "[TEST-ELF] Test ELF built: build/test_hello"
 	@echo "[TEST-ELF] Run 'make run' and then type 'exec /mnt/bin/test_hello' in the shell"
+
+# =========================================
+# musl libc 用户程序
+# =========================================
+MUSL_CC   = tools/x86_64-spiritfoxos-gcc
+SYSROOT   = $(CURDIR)/sysroot
+
+musl-static: build/test_musl_hello
+	@echo "[MUSL] Static test binary: build/test_musl_hello"
+
+musl-dynamic: build/test_musl_dyn
+	@echo "[MUSL] Dynamic test binary: build/test_musl_dyn"
+
+musl-test: musl-static musl-dynamic
+	@echo "[MUSL] All musl test binaries built"
+	@file build/test_musl_hello
+	@file build/test_musl_dyn
+
+build/test_musl_hello: tests/test_musl_hello.c | build
+	@echo "[MUSL-CC] $< (static)"
+	@$(MUSL_CC) -static -O2 -o $@ $<
+
+build/test_musl_dyn: tests/test_musl_hello.c | build
+	@echo "[MUSL-CC] $< (dynamic)"
+	@$(MUSL_CC) -O2 -o $@ $<
+
+# 将 musl 测试程序和动态链接器部署到 FAT32 磁盘镜像
+musl-deploy: musl-test build/fat32.img
+	@echo "[MUSL] Deploying to FAT32 image..."
+	@mcopy -i build/fat32.img build/test_musl_hello ::bin/test_musl_hello 2>/dev/null || true
+	@mcopy -i build/fat32.img build/test_musl_dyn ::bin/test_musl_dyn 2>/dev/null || true
+	@mmd -i build/fat32.img ::lib 2>/dev/null || true
+	@mcopy -i build/fat32.img $(SYSROOT)/lib/ld-musl-x86_64.so.1 ::lib/ld-musl-x86_64.so.1 2>/dev/null || true
+	@mcopy -i build/fat32.img $(SYSROOT)/usr/lib/libc.so ::lib/libc.so 2>/dev/null || true
+	@echo "[MUSL] Deployed. Run 'exec /mnt/bin/test_musl_hello' in shell"
+
+# =========================================
+# Wayland 协议与 Compositor
+# =========================================
+WL_CC       = tools/x86_64-spiritfoxos-gcc
+WL_CFLAGS   = -O2 -Wall -Iwayland/compositor -Iwayland/generated \
+              -I$(SYSROOT)/usr/include -I$(SYSROOT)/usr/include/wayland
+WL_LDFLAGS  = -static -L$(SYSROOT)/usr/lib
+WL_SCANNER  = build/wayland/wayland-scanner
+WL_PROTOCOL = wayland/protocol
+
+# wayland 协议绑定（已预生成，检查存在性）
+wayland-protocol:
+	@if [ -f wayland/generated/wayland-client-protocol.h ] && \
+	    [ -f wayland/generated/wayland-server-protocol.h ] && \
+	    [ -f wayland/generated/xdg-shell-client-protocol.h ] && \
+	    [ -f wayland/generated/xdg-shell-server-protocol.h ]; then \
+		echo "[WL] Protocol headers already generated"; \
+	else \
+		echo "[WL] ERROR: Protocol headers not found. Run wayland-scanner first."; \
+		exit 1; \
+	fi
+
+# libwayland 静态库（预构建，已存在于 sysroot）
+wayland-libs:
+	@if [ -f $(SYSROOT)/usr/lib/libwayland-server.a ] && \
+	    [ -f $(SYSROOT)/usr/lib/libwayland-client.a ]; then \
+		echo "[WL] libwayland libraries already in sysroot"; \
+	else \
+		echo "[WL] ERROR: libwayland libraries not found in sysroot"; \
+		exit 1; \
+	fi
+
+# Wayland Compositor
+wayland-compositor: build/sf_compositor
+	@echo "[WL] Compositor: build/sf_compositor"
+
+build/sf_compositor: build/compositor_main.o build/sf_compositor.o
+	@echo "[WL-LD] $@"
+	@$(WL_CC) $(WL_LDFLAGS) -o $@ build/compositor_main.o build/sf_compositor.o \
+	    -lwayland-server -lffi
+
+build/compositor_main.o: wayland/compositor/main.c
+	@echo "[WL-CC] $<"
+	@$(WL_CC) $(WL_CFLAGS) -c $< -o $@
+
+build/sf_compositor.o: wayland/compositor/sf_compositor.c
+	@echo "[WL-CC] $<"
+	@$(WL_CC) $(WL_CFLAGS) -c $< -o $@
+
+# Wayland 测试客户端
+wayland-client: build/sf_test_client
+	@echo "[WL] Test client: build/sf_test_client"
+
+build/sf_test_client: build/sf_test_client.o
+	@echo "[WL-LD] $@"
+	@$(WL_CC) $(WL_LDFLAGS) -o $@ build/sf_test_client.o -lwayland-client -lffi
+
+build/sf_test_client.o: wayland/client/sf_test_client.c
+	@echo "[WL-CC] $<"
+	@$(WL_CC) $(WL_CFLAGS) -c $< -o $@
+
+# 编译所有 Wayland 组件
+wayland-all: wayland-protocol wayland-libs wayland-compositor wayland-client
+	@echo "[WL] All Wayland components built"
+	@ls -lh build/sf_compositor build/sf_test_client
+
+# 部署 Wayland 到 FAT32 磁盘镜像
+wayland-deploy: wayland-all build/fat32.img
+	@echo "[WL] Deploying to FAT32 image..."
+	@mcopy -i build/fat32.img build/sf_compositor ::bin/sf_compositor 2>/dev/null || true
+	@mcopy -i build/fat32.img build/sf_test_client ::bin/sf_test_client 2>/dev/null || true
+	@echo "[WL] Deployed. Run 'exec /mnt/bin/sf_compositor' in shell"
 
 # =========================================
 # USB 启动盘制作（实体机用）

@@ -55,6 +55,8 @@ void kernel_main(BootInfo* boot_info)
     init_filesystem();
     init_services();
     init_fs_hierarchy();
+    init_input();
+    init_drm();
 
     serial_puts("[SpiritFoxOS] Enabling interrupts...\n");
     hal_enable_interrupts();

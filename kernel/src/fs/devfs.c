@@ -247,3 +247,8 @@ void devfs_init(void)
 {
     vfs_register_fs(&devfs_fs);
 }
+
+vfs_dentry_t *devfs_get_root(void)
+{
+    return devfs_root_dentry;
+}
