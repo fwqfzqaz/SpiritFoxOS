@@ -87,9 +87,25 @@ void isr_handler(uint64_t int_num, uint64_t error_code, uint64_t fault_rip, uint
         /* 写操作缺页且页存在：(error_code & 0x3) == 0x3 */
         if ((error_code & 0x3) == 0x3) {
             if (process_cow_page_fault(cr2) == 0) {
-                /* COW 处理成功 - 重试引起缺页的指令 */
+                /* COW 处理成功 - 直接返回。
+                 * 注意：不在 COW 处理后执行 sti！
+                 * 页面错误入口时 CPU 自动清除 IF（关中断），
+                 * 如果在 isr_handler 返回到 isr_common 恢复
+                 * 寄存器的过程中 sti 启用中断，时钟中断可能
+                 * 导致调度器切换进程，而此时内核栈上还有
+                 * page fault 的栈帧，切换后再切回时栈帧
+                 * 状态不一致，导致系统崩溃/冻结。
+                 * 中断会在 iretq 返回用户态时自动恢复。 */
                 return;
             }
+            /* COW 处理失败 - 打印详细信息后继续到异常处理 */
+            serial_puts("[COW] FAILED for addr=0x");
+            serial_put_hex(cr2);
+            serial_puts(" error_code=0x");
+            serial_put_hex(error_code);
+            serial_puts(" PID=");
+            { process_t *c = process_current(); if (c) serial_put_dec((uint64_t)c->pid); }
+            serial_puts("\n");
         }
     }
 
@@ -189,6 +205,38 @@ void isr_handler(uint64_t int_num, uint64_t error_code, uint64_t fault_rip, uint
                 serial_put_hex((uint64_t)rip_bytes[i] & 0xFF);
             }
         }
+    }
+
+    /* 对于 GP fault (int 13)，从栈帧转储关键寄存器 */
+    if (int_num == 13) {
+        /* 栈帧布局（从 isr_common）:
+         * rsp+0:   rax   rsp+8: rbx   rsp+16: rcx  rsp+24: rdx
+         * rsp+32:  rsi   rsp+40: rdi  rsp+48: rbp  rsp+56: r8
+         * rsp+64:  r9    rsp+72: r10  rsp+80: r11  rsp+88: r12
+         * rsp+96:  r13   rsp+104:r14  rsp+112:r15  rsp+120:ds
+         * rsp+128: int#  rsp+136:err  rsp+144:rip  rsp+152:cs
+         * rsp+160:rflags rsp+168:rsp  rsp+176:ss
+         */
+        uint64_t *regs = (uint64_t *)((uint64_t)__builtin_frame_address(0) + 16);
+        serial_puts("\n[GPF] RAX=0x"); serial_put_hex(regs[0]);
+        serial_puts(" RBX=0x"); serial_put_hex(regs[1]);
+        serial_puts(" RCX=0x"); serial_put_hex(regs[2]);
+        serial_puts(" RDX=0x"); serial_put_hex(regs[3]);
+        serial_puts("\n[GPF] RSI=0x"); serial_put_hex(regs[4]);
+        serial_puts(" RDI=0x"); serial_put_hex(regs[5]);
+        serial_puts(" RBP=0x"); serial_put_hex(regs[6]);
+        serial_puts(" R8=0x"); serial_put_hex(regs[7]);
+        serial_puts("\n[GPF] R9=0x"); serial_put_hex(regs[8]);
+        serial_puts(" R10=0x"); serial_put_hex(regs[9]);
+        serial_puts(" R11=0x"); serial_put_hex(regs[10]);
+        serial_puts(" R12=0x"); serial_put_hex(regs[11]);
+        serial_puts("\n[GPF] R13=0x"); serial_put_hex(regs[12]);
+        serial_puts(" R14=0x"); serial_put_hex(regs[13]);
+        serial_puts(" R15=0x"); serial_put_hex(regs[14]);
+        serial_puts("\n[GPF] RIP=0x"); serial_put_hex(regs[18]);
+        serial_puts(" CS=0x"); serial_put_hex(regs[19]);
+        serial_puts("\n[GPF] RFLAGS=0x"); serial_put_hex(regs[20]);
+        serial_puts(" RSP=0x"); serial_put_hex(regs[21]);
     }
 
     serial_puts("\nSystem Halted.\n");

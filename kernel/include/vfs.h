@@ -3,6 +3,7 @@
 
 #include <stdint.h>
 #include <stddef.h>
+#include "smp.h"
 
 /* ========================================================================
  * VFS type definitions
@@ -17,6 +18,12 @@
 #define VFS_TYPE_SYMLINK   5
 #define VFS_TYPE_FIFO      6
 #define VFS_TYPE_PIPE      7
+#define VFS_TYPE_SHM       8
+#define VFS_TYPE_EPOLL     9
+#define VFS_TYPE_EVENTFD  10
+#define VFS_TYPE_SIGNALFD 11
+#define VFS_TYPE_TIMERFD  12
+#define VFS_TYPE_SOCKET   13
 
 /* Open flags */
 #define VFS_O_RDONLY    0x00
@@ -64,12 +71,24 @@ typedef struct {
     int      write_closed;/* Write end closed flag */
 } vfs_pipe_t;
 
+/* Shared memory (memfd) data structure */
+#define SHM_MAX_PAGES   65536   /* Max 256MB per memfd */
+typedef struct {
+    void       *pages[SHM_MAX_PAGES];  /* Physical page pointers (NULL = unmapped) */
+    uint64_t    page_count;             /* Number of allocated pages */
+    uint64_t    size;                   /* Logical size (may not be page-aligned) */
+    char        name[32];               /* memfd name */
+    int         seal_flags;             /* Seals (for memfd_create) */
+    spinlock_t  lock;                   /* Per-SHM lock */
+} vfs_shm_t;
+
 /* Forward declarations */
 typedef struct vfs_inode vfs_inode_t;
 typedef struct vfs_dentry vfs_dentry_t;
 typedef struct vfs_file vfs_file_t;
 typedef struct vfs_superblock vfs_superblock_t;
 typedef struct vfs_filesystem vfs_filesystem_t;
+typedef struct net_socket net_socket_t;
 
 /* ========================================================================
  * Inode - describes a file's metadata
@@ -129,6 +148,8 @@ struct vfs_file {
     uint32_t        refcount;      /* Reference count */
     vfs_dentry_t   *dentry;        /* Associated dentry */
     vfs_pipe_t     *pipe;          /* Pipe data (for VFS_TYPE_PIPE) */
+    vfs_shm_t      *shm;           /* SHM data (for VFS_TYPE_SHM) */
+    net_socket_t   *socket;        /* Socket data (for VFS_TYPE_SOCKET) */
     uint32_t        dir_index;     /* Directory read position (for getdents64) */
     uint32_t        fcntl_flags;   /* fcntl 状态标志 (FD_CLOEXEC 等) */
 };
@@ -247,5 +268,17 @@ int vfs_symlink(const char *target, const char *linkpath);
 
 /* Read the target of a symbolic link */
 int vfs_readlink(const char *path, char *buf, size_t bufsiz);
+
+/* Create a shared memory file (memfd_create) */
+int vfs_shm_create(const char *name, uint32_t flags);
+
+/* Truncate a file */
+int vfs_ftruncate(int fd, int64_t length);
+
+/* Register a net_socket in VFS fd table, returns VFS fd or negative error */
+int vfs_register_socket(net_socket_t *sock);
+
+/* Get net_socket_t pointer from VFS fd, or NULL */
+net_socket_t *vfs_get_socket(int fd);
 
 #endif /* VFS_H */

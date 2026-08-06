@@ -30,15 +30,31 @@ int64_t sys_connect(trap_frame_t *frame)
     int fd = (int)frame->rdi;
     const net_sockaddr_t *addr = (const net_sockaddr_t *)frame->rsi;
     socklen_t addrlen = (socklen_t)frame->rdx;
-    return net_connect(fd, addr, addrlen);
+    serial_puts("[sys_connect] fd=");
+    serial_put_dec((uint64_t)fd);
+    serial_puts(" addr=0x");
+    serial_put_hex((uint64_t)addr);
+    serial_puts("\n");
+    int64_t ret = net_connect(fd, addr, addrlen);
+    serial_puts("[sys_connect] -> ret=");
+    serial_put_dec((uint64_t)(int32_t)ret);
+    serial_puts("\n");
+    return ret;
 }
 
 int64_t sys_accept(trap_frame_t *frame)
 {
     int fd = (int)frame->rdi;
     net_sockaddr_t *addr = (net_sockaddr_t *)frame->rsi;
-    socklen_t *addrlen = (socklen_t *)frame->rdx;
-    return net_accept(fd, addr, addrlen);
+    socklen_t *addrlen = (socklen_t)frame->rdx;
+    serial_puts("[sys_accept] fd=");
+    serial_put_dec((uint64_t)fd);
+    serial_puts("\n");
+    int64_t ret = net_accept(fd, addr, addrlen);
+    serial_puts("[sys_accept] -> ret=");
+    serial_put_dec((uint64_t)(int32_t)ret);
+    serial_puts("\n");
+    return ret;
 }
 
 int64_t sys_bind(trap_frame_t *frame)
@@ -146,7 +162,13 @@ int64_t sys_sendmsg(trap_frame_t *frame)
     int fd = (int)frame->rdi;
     const struct msghdr *msg = (const struct msghdr *)frame->rsi;
     int flags = (int)frame->rdx;
-    return net_sendmsg(fd, msg, flags);
+    int64_t ret = net_sendmsg(fd, msg, flags);
+    serial_puts("[sendmsg] fd=");
+    serial_put_dec((uint64_t)fd);
+    serial_puts(" ret=");
+    serial_put_dec((uint64_t)(unsigned long)ret);
+    serial_puts("\n");
+    return ret;
 }
 
 int64_t sys_recvmsg(trap_frame_t *frame)

@@ -110,11 +110,20 @@ void spinlock_acquire(spinlock_t *lock)
     /* 原子获取并递增票据号 */
     uint32_t my_ticket = __atomic_fetch_add(&lock->ticket, 1, __ATOMIC_ACQUIRE);
 
-    /* 自旋直到轮到自己的票据号 */
+    /* 自旋直到轮到自己的票据号。
+     * 注意：自旋期间不恢复中断！
+     * 如果在自旋等待时临时恢复中断（原实现），定时器中断
+     * 可能在此期间触发，而中断处理程序（如 scheduler_tick）
+     * 可能尝试获取同一把锁，导致同 CPU 自死锁：
+     *   - 被中断的上下文已取 ticket 但尚未获取锁
+     *   - 中断处理程序取了更大的 ticket 并等待
+     *   - 被中断的上下文无法继续（被中断挂起）
+     *   - 中断处理程序的 ticket 永远不会被服务 → 死锁
+     * 正确做法：自旋期间保持中断禁用，虽然增加了中断延迟，
+     * 但对于 per-CPU 锁（通常无竞争）和短暂持有的全局锁，
+     * 延迟可以接受。 */
     while (__atomic_load_n(&lock->serving, __ATOMIC_ACQUIRE) != my_ticket) {
-        hal_restore_interrupts(flags);
         __asm__ volatile ("pause");
-        flags = hal_save_interrupts();
     }
 
     /* 持有锁期间中断被禁用。
@@ -395,6 +404,21 @@ void ap_entry_c(void)
     /* 加载内核 IDT（AP 的 IDTR 仍指向实模式 IVT，
      * 不重新加载会导致中断时三重故障！） */
     idt_reload();
+
+    /* 配置 syscall 相关 MSR（与 BSP 的 idt_init() 一致）。
+     * AP 不会调用 idt_init()，只调用 idt_reload()，
+     * 因此必须在这里手动配置 STAR/LSTAR/FMASK/EFER。
+     * 如果不配置，用户进程在 AP 上执行 syscall 时
+     * 不会自动清除 IF，导致中断在锁操作期间触发，
+     * 可能引发自旋锁死锁。 */
+    {
+        extern void syscall_entry(void);
+        uint64_t efer = hal_read_msr(MSR_IA32_EFER);
+        hal_write_msr(MSR_IA32_EFER, efer | 1);  /* SCE 位 */
+        hal_write_msr(MSR_IA32_STAR, ((uint64_t)0x1B << 48) | ((uint64_t)0x08 << 32));
+        hal_write_msr(MSR_IA32_LSTAR, (uint64_t)syscall_entry);
+        hal_write_msr(MSR_IA32_FMASK, 0x200);  /* syscall 时清除 IF */
+    }
 
     /* 设置 cpu_local 中的 TSS 指针和选择子 */
     local->tss = &cpu_gdts[local->index].tss;

@@ -8,6 +8,8 @@
 #include "string.h"
 #include "terminal.h"
 #include "errno.h"
+#include "net.h"
+#include "serial.h"
 
 /* 将 vfs_inode_t 转换为 linux_stat_t */
 static void inode_to_stat(const vfs_inode_t *inode, linux_stat_t *stat)
@@ -67,7 +69,21 @@ int64_t sys_write(trap_frame_t *frame)
         return (int64_t)count;
     }
 
-    return vfs_write(fd, buf, count);
+    int64_t ret = vfs_write(fd, buf, count);
+    {
+        static int wcount = 0;
+        wcount++;
+        if (wcount <= 100) {
+            serial_puts("[write] fd=");
+            serial_put_dec((uint64_t)fd);
+            serial_puts(" count=");
+            serial_put_dec((uint64_t)count);
+            serial_puts(" ret=");
+            serial_put_dec((uint64_t)(int64_t)ret);
+            serial_puts("\n");
+        }
+    }
+    return ret;
 }
 
 int64_t sys_open(trap_frame_t *frame)
@@ -460,13 +476,27 @@ int64_t sys_fcntl(trap_frame_t *frame)
     case F_SETFD:
         file->fcntl_flags = (uint32_t)(arg & FD_CLOEXEC);
         return 0;
-    case F_GETFL:
-        return (int)file->flags;
+    case F_GETFL: {
+        int fl = (int)file->flags;
+        serial_puts("[fcntl] F_GETFL fd=");
+        serial_put_dec((uint64_t)fd);
+        serial_puts(" flags=0x");
+        serial_put_hex((uint64_t)fl);
+        serial_puts("\n");
+        return fl;
+    }
     case F_SETFL: {
         /* 只允许修改 O_NONBLOCK, O_APPEND, O_ASYNC 等标志，
          * 不允许修改 O_ACCMODE */
         uint32_t changeable = LINUX_O_NONBLOCK | LINUX_O_APPEND | LINUX_O_ASYNC;
         file->flags = (file->flags & ~changeable) | ((uint32_t)arg & changeable);
+        /* Propagate O_NONBLOCK to socket flags if this is a socket */
+        if (file->inode && file->inode->type == VFS_TYPE_SOCKET && file->socket) {
+            if ((uint32_t)arg & LINUX_O_NONBLOCK)
+                file->socket->flags |= 0x800;  /* SOCKF_NONBLOCK */
+            else
+                file->socket->flags &= ~0x800;
+        }
         return 0;
     }
     case F_GETLK:
@@ -613,11 +643,59 @@ int64_t sys_writev(trap_frame_t *frame)
         if (iov[i].iov_len == 0)
             continue;
         int64_t n = vfs_write(fd, iov[i].iov_base, iov[i].iov_len);
-        if (n < 0)
+        if (n < 0) {
+            serial_puts("[writev] fd=");
+            serial_put_dec((uint64_t)fd);
+            serial_puts(" ret=");
+            serial_put_dec((uint64_t)(int64_t)n);
+            serial_puts("\n");
             return total > 0 ? total : n;
+        }
         total += n;
         if ((size_t)n < iov[i].iov_len)
             break;
     }
+    {
+        static int wvcount = 0;
+        wvcount++;
+        if (wvcount <= 100 && fd != 1 && fd != 2) {
+            serial_puts("[writev] fd=");
+            serial_put_dec((uint64_t)fd);
+            serial_puts(" total=");
+            serial_put_dec((uint64_t)(int64_t)total);
+            serial_puts("\n");
+        }
+    }
     return total;
+}
+
+/* ========================================================================
+ * memfd_create / ftruncate syscalls
+ * ======================================================================== */
+
+int64_t sys_memfd_create(trap_frame_t *frame)
+{
+    const char *name = (const char *)frame->rdi;
+    uint32_t flags = (uint32_t)frame->rsi;
+    /* Copy name from userspace (simple) */
+    char kname[32];
+    if (!name) {
+        kname[0] = '\0';
+    } else {
+        /* Simple copy - in a real OS we'd use copy_from_user */
+        int i;
+        for (i = 0; i < 31; i++) {
+            kname[i] = name[i];
+            if (kname[i] == '\0') break;
+        }
+        kname[31] = '\0';
+    }
+    return vfs_shm_create(kname, flags);
+}
+
+int64_t sys_ftruncate(trap_frame_t *frame)
+{
+    int fd = (int)frame->rdi;
+    int64_t length = (int64_t)frame->rsi;
+    return vfs_ftruncate(fd, length);
 }

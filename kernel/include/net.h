@@ -52,6 +52,12 @@ typedef uint32_t socklen_t;
 #define SOCKF_NONBLOCK  0x01
 #define SOCKF_CLOEXEC   0x02
 
+/* recvmsg/sendmsg flags */
+#define MSG_OOB        0x01
+#define MSG_PEEK       0x02
+#define MSG_DONTWAIT   0x40
+#define MSG_NOSIGNAL   0x4000
+
 /* Maximum values */
 #define NET_MAX_SOCKETS    256
 #define NET_MAX_CONNECTIONS 64
@@ -154,6 +160,9 @@ typedef struct __attribute__((packed)) {
     uint16_t checksum;
 } udp_header_t;
 
+/* Forward declaration: VFS file (full definition in vfs.h) */
+struct vfs_file;
+
 /* TCP unacknowledged segment (linked list) */
 typedef struct net_tcp_seg {
     uint32_t    seq;        /* starting sequence number */
@@ -226,6 +235,18 @@ typedef struct net_socket {
     /* AF_UNIX fields */
     char                unix_path[UNIX_PATH_MAX];  /* bound path */
     struct net_socket   *unix_peer;                /* connected peer */
+    int                 peer_pid;                  /* SO_PEERCRED: peer process ID */
+    int                 peer_uid;                  /* SO_PEERCRED: peer user ID */
+    int                 peer_gid;                  /* SO_PEERCRED: peer group ID */
+
+    /* SCM_RIGHTS: pending fds received but not yet consumed by recvmsg.
+     * pending_files holds duplicated vfs_file pointers (refcount already
+     * bumped at send time) so the passed fds survive across processes.
+     * pending_fds is filled with the receiver-materialized fd numbers at
+     * recv time and copied to the caller. */
+    int             pending_fds[8];     /* fds received via SCM_RIGHTS */
+    int             pending_fd_count;   /* number of pending fds */
+    struct vfs_file *pending_files[8];  /* duplicated file objects awaiting receipt */
 } net_socket_t;
 
 /* Network configuration globals */

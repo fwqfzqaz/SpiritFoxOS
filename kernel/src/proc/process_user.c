@@ -116,6 +116,9 @@ int process_exec(const char *path, const char *const argv[],
     {
         int fd = vfs_open(kpath, VFS_O_RDONLY, 0);
         if (fd < 0) {
+            serial_puts("[exec] vfs_open FAILED fd=");
+            serial_put_dec((int64_t)fd);
+            serial_puts("\n");
             current->pml4       = old_pml4;
             current->entry_point = old_entry;
             current->stack_top  = old_stack_top;
@@ -126,6 +129,9 @@ int process_exec(const char *path, const char *const argv[],
 
         int64_t file_size = vfs_seek(fd, 0, VFS_SEEK_END);
         if (file_size <= 0) {
+            serial_puts("[exec] vfs_seek FAILED size=");
+            serial_put_dec(file_size);
+            serial_puts("\n");
             vfs_close(fd);
             current->pml4       = old_pml4;
             current->entry_point = old_entry;
@@ -136,8 +142,13 @@ int process_exec(const char *path, const char *const argv[],
         }
         vfs_seek(fd, 0, VFS_SEEK_SET);
 
+        serial_puts("[exec] file_size=");
+        serial_put_dec(file_size);
+        serial_puts("\n");
+
         void *buf = kmalloc((size_t)file_size);
         if (!buf) {
+            serial_puts("[exec] kmalloc FAILED\n");
             vfs_close(fd);
             current->pml4       = old_pml4;
             current->entry_point = old_entry;
@@ -151,6 +162,11 @@ int process_exec(const char *path, const char *const argv[],
         vfs_close(fd);
 
         if (bytes_read != (int)file_size) {
+            serial_puts("[exec] vfs_read mismatch: read=");
+            serial_put_dec((int64_t)bytes_read);
+            serial_puts(" expected=");
+            serial_put_dec(file_size);
+            serial_puts("\n");
             kfree(buf);
             current->pml4       = old_pml4;
             current->entry_point = old_entry;
@@ -214,6 +230,9 @@ int process_exec(const char *path, const char *const argv[],
         serial_puts("\n");
 
         if (load_ret < 0) {
+            serial_puts("[exec] elf_load_with_base FAILED ret=");
+            serial_put_dec((int64_t)load_ret);
+            serial_puts("\n");
             kfree(buf);
             current->pml4       = old_pml4;
             current->entry_point = old_entry;
@@ -278,7 +297,23 @@ int process_exec(const char *path, const char *const argv[],
      * CR3 切换在 process_enter_user() 的 iretq 之前完成，
      * 以避免内核在进程页表下运行时数据被意外破坏。 */
 
-    /* ---- 5. Reset signal state (POSIX: caught signals → default on exec) ---- */
+    /* ---- 5. Close file descriptors with FD_CLOEXEC (POSIX exec semantics) ---- */
+    #ifndef FD_CLOEXEC
+    #define FD_CLOEXEC 1
+    #endif
+    for (int i = 0; i < VFS_MAX_FD; i++) {
+        if (current->fd_table[i] && (current->fd_table[i]->fcntl_flags & FD_CLOEXEC)) {
+            vfs_file_t *f = current->fd_table[i];
+            f->refcount--;
+            if (f->refcount <= 0) {
+                /* Last reference — free the vfs_file */
+                kfree(f);
+            }
+            current->fd_table[i] = NULL;
+        }
+    }
+
+    /* ---- 5b. Reset signal state (POSIX: caught signals → default on exec) ---- */
     current->pending_signals = 0;
     memset(current->signal_handlers, 0, sizeof(current->signal_handlers));
     memset(current->signal_flags, 0, sizeof(current->signal_flags));
@@ -467,6 +502,17 @@ int process_exec(const char *path, const char *const argv[],
     /* ---- 7. Build trap frame on kernel stack ---- */
     process_setup_frame(current, current->entry_point, sp, 0);
 
+    /* ---- 7.1 vfork: 唤醒被阻塞的父进程 ----
+     * 如果当前进程是通过 vfork 创建的，父进程在 process_clone
+     * 中被阻塞。execve 成功后，子进程有了独立的地址空间，
+     * 可以安全地唤醒父进程继续运行。 */
+    if (current->parent && current->parent->state == PROC_BLOCKED) {
+        serial_puts("[exec] vfork: waking parent PID=");
+        serial_put_dec((uint64_t)current->parent->pid);
+        serial_puts("\n");
+        process_wake(current->parent);
+    }
+
     /* ---- 7.5 Clear kernel flag – this is now a user process ---- */
     /* process_create_kthread() sets PROC_FLAG_KERNEL, but after exec
      * the process runs in user mode.  Keeping the flag set causes
@@ -577,6 +623,14 @@ void process_enter_user(trap_frame_t *frame)
      */
     frame->rcx = current->pml4;
 
+    /*
+     * FS_BASE 恢复：加载 FS 选择器 (0x23) 可能会清除 FS_BASE MSR
+     * （取决于 CPU 微架构实现，QEMU TCG 即如此）。
+     * 因此在设置选择器后，必须通过 wrmsr 显式恢复 FS_BASE。
+     * FS_BASE MSR 编号 = 0xC0000100，通过 r9 传递值。
+     */
+    uint64_t fs_base_val = current->fs_base;
+
     __asm__ volatile (
         "cli\n\t"
         /* 将帧指针加载到 r8 */
@@ -594,6 +648,14 @@ void process_enter_user(trap_frame_t *frame)
         "mov %%ax, %%es\n\t"
         "mov %%ax, %%fs\n\t"
         "mov %%ax, %%gs\n\t"
+
+        /* 恢复 FS_BASE MSR (0xC0000100)
+         * wrmsr 使用 EDX:EAX = 64 位值，ECX = MSR 编号 */
+        "movl $0xC0000100, %%ecx\n\t"   /* MSR_IA32_FS_BASE */
+        "movq %[fsb], %%rax\n\t"        /* 完整 64 位值 */
+        "movq %%rax, %%rdx\n\t"
+        "shrq $32, %%rdx\n\t"           /* rdx = 高 32 位 */
+        "wrmsr\n\t"
 
         /* 压入 iretq 帧：ss, rsp, rflags, cs, rip */
         "mov 168(%%r8), %%rax\n\t"    /* frame->ss */
@@ -632,8 +694,8 @@ void process_enter_user(trap_frame_t *frame)
 
         "iretq\n\t"
         :
-        : [frame] "r"(frame)
-        : "memory"
+        : [frame] "r"(frame), [fsb] "r"(fs_base_val)
+        : "memory", "rax", "rcx", "rdx"
     );
 
     __builtin_unreachable();

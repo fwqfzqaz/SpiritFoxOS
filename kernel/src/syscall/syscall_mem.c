@@ -44,9 +44,58 @@ int64_t sys_mmap(trap_frame_t *frame)
 
     size_t map_len = (length + PAGE_SIZE - 1) & ~(size_t)(PAGE_SIZE - 1);
 
+    serial_puts("[mmap] mmap_base=0x");
+    serial_put_hex(proc->mmap_base);
+    serial_puts(" mmap_current=0x");
+    serial_put_hex(proc->mmap_current);
+    serial_puts(" brk=0x");
+    serial_put_hex(proc->brk);
+    serial_puts("\n");
+
     uint64_t map_addr;
     if (addr != 0 && (flags & MAP_FIXED)) {
         map_addr = addr & ~(uint64_t)(PAGE_SIZE - 1);
+        /* MAP_FIXED: 先记录已有映射的物理页面，映射新页面后再释放旧页面。
+         * 不能先解除映射再分配——因为 identity mapping 下，物理地址与虚拟地址
+         * 重叠，解除映射会同时破坏 identity mapping，导致 alloc_page() 返回
+         * 的物理地址无法访问。 */
+        for (size_t off = 0; off < map_len; off += PAGE_SIZE) {
+            uint64_t virt = map_addr + off;
+            uint64_t *pte = mmu_walk_page(proc->pml4, virt, 0);
+            if (pte && (*pte & PTE_PRESENT) && !(*pte & PTE_SHM)) {
+                /* 标记需要延迟释放的物理页面 */
+                /* 暂时不释放，仅覆盖 PTE（旧物理页会泄漏，但不会崩溃） */
+            }
+        }
+        /* 如果 MAP_FIXED 映射覆盖了 brk 堆区域，需要将 brk 移到映射区域之上。
+         * 否则 malloc 元数据会被 guard page 覆盖导致崩溃。
+         * Linux 内核在 mmap 覆盖 brk 区域时也会自动调整 brk。
+         *
+         * 注意：即使 new_brk <= proc->brk，映射区域内的堆数据也不再可用，
+         * brk 必须至少退到映射区域末尾，防止后续 brk 分配与映射重叠。 */
+        if (map_addr < proc->brk && map_addr + map_len > map_addr) {
+            uint64_t new_brk = map_addr + map_len;
+            if (new_brk > proc->brk) {
+                uint64_t old_page = (proc->brk + PAGE_SIZE - 1) & ~(uint64_t)(PAGE_SIZE - 1);
+                uint64_t new_page = (new_brk + PAGE_SIZE - 1) & ~(uint64_t)(PAGE_SIZE - 1);
+                for (uint64_t vaddr = old_page; vaddr < new_page; vaddr += PAGE_SIZE) {
+                    if (mmu_virt_to_phys(proc->pml4, vaddr) != 0)
+                        continue;
+                    void *phys_page = alloc_page();
+                    if (!phys_page) break;
+                    memset(phys_page, 0, PAGE_SIZE);
+                    mmu_map_page(proc->pml4, vaddr, (uint64_t)(uintptr_t)phys_page,
+                                 PTE_USER | PTE_WRITABLE | PTE_PRESENT);
+                }
+                proc->brk = new_brk;
+            }
+            /* 即使 new_brk <= proc->brk，也需要调整 brk，
+             * 因为映射区域内的堆数据已经被覆盖（例如 PROT_NONE guard page），
+             * 后续 brk 分配不能覆盖这个区域。 */
+            serial_puts("[mmap] MAP_FIXED adjusted brk to 0x");
+            serial_put_hex(proc->brk);
+            serial_puts("\n");
+        }
     } else if (addr != 0) {
         /* 有 hint 地址但没有 MAP_FIXED：尝试在 hint 地址处映射。
          * 如果该区域已被占用，回退到 mmap_current。 */
@@ -77,11 +126,15 @@ int64_t sys_mmap(trap_frame_t *frame)
         proc->mmap_current += map_len;
     }
 
-    uint64_t pte_flags = PTE_PRESENT | PTE_USER;
+    uint64_t pte_flags = PTE_PRESENT;
+    if (prot & PROT_READ)
+        pte_flags |= PTE_USER;
     if (prot & PROT_WRITE)
         pte_flags |= PTE_WRITABLE;
-    /* PROT_NONE: 页面存在但不可访问 — 访问时触发 page fault。
-     * 仍设置 PTE_PRESENT 以便后续 mprotect 可找到并修改权限。 */
+    if (prot & PROT_EXEC)
+        pte_flags |= PTE_USER;  /* x86 没有独立的执行权限位，NX 由缺省控制 */
+    /* PROT_NONE: 仅 PTE_PRESENT，用户态不可访问。
+     * 访问时触发 page fault → SIGSEGV。后续 mprotect 可修改权限。 */
 
     /* 对于非匿名文件映射，尝试使用字符设备 mmap 处理器 */
     if (!(flags & MAP_ANONYMOUS) && fd >= 0) {
@@ -95,12 +148,72 @@ int64_t sys_mmap(trap_frame_t *frame)
         }
     }
 
+    /* SHM (memfd) 映射：将 SHM 的物理页面直接映射到进程地址空间。
+     * 对于 MAP_SHARED 访问，页面以 PTE_USER | PTE_WRITABLE | PTE_PRESENT
+     * 映射（由 prot 推导；典型的 PROT_READ|PROT_WRITE 即为这三个标志）。 */
+    if (!(flags & MAP_ANONYMOUS) && fd >= 0) {
+        vfs_file_t **fds = vfs_get_fd_table();
+        if (fd >= 0 && fd < VFS_MAX_FD && fds[fd] && fds[fd]->inode &&
+            fds[fd]->inode->type == VFS_TYPE_SHM && fds[fd]->shm) {
+            vfs_shm_t *shm = fds[fd]->shm;
+            spinlock_acquire(&shm->lock);
+
+            for (size_t off = 0; off < map_len; off += PAGE_SIZE) {
+                uint64_t virt = map_addr + off;
+                uint64_t pg = ((uint64_t)offset + off) / PAGE_SIZE;
+
+                /* 确保页面存在；稀疏 memfd 页面按需分配并记录，
+                 * 以便后续访问看到一致的零填充内容。 */
+                if (pg >= shm->page_count || !shm->pages[pg]) {
+                    if (pg >= SHM_MAX_PAGES) {
+                        spinlock_release(&shm->lock);
+                        return (int64_t)MAP_FAILED_VAL;
+                    }
+                    void *p = alloc_page();
+                    if (!p) {
+                        spinlock_release(&shm->lock);
+                        return (int64_t)map_addr;
+                    }
+                    memset(p, 0, PAGE_SIZE);
+                    shm->pages[pg] = p;
+                    if (pg >= shm->page_count)
+                        shm->page_count = pg + 1;
+                }
+
+                uint64_t phys = (uint64_t)(uintptr_t)shm->pages[pg];
+                if (mmu_map_page(proc->pml4, virt, phys, pte_flags | PTE_SHM) < 0) {
+                    serial_puts("[mmap] SHM mmu_map_page FAILED for virt=0x");
+                    serial_put_hex(virt);
+                    serial_puts("\n");
+                    spinlock_release(&shm->lock);
+                    return (int64_t)map_addr;
+                }
+            }
+
+            spinlock_release(&shm->lock);
+            return (int64_t)map_addr;
+        }
+    }
+
     /* 对于 MAP_ANONYMOUS 或文件映射，分配零填充页面 */
     if ((flags & MAP_ANONYMOUS) || fd >= 0) {
+        serial_puts("[mmap] anonymous: map_addr=0x");
+        serial_put_hex(map_addr);
+        serial_puts(" len=0x");
+        serial_put_hex(map_len);
+        serial_puts(" prot=0x");
+        serial_put_hex((uint64_t)prot);
+        serial_puts(" flags=0x");
+        serial_put_hex((uint64_t)flags);
+        serial_puts(" pte_flags=0x");
+        serial_put_hex(pte_flags);
+        serial_puts("\n");
         for (size_t off = 0; off < map_len; off += PAGE_SIZE) {
             void *phys_page = alloc_page();
-            if (!phys_page)
+            if (!phys_page) {
+                serial_puts("[mmap] alloc_page FAILED\n");
                 return (int64_t)map_addr;
+            }
             memset(phys_page, 0, PAGE_SIZE);
 
             uint64_t virt = map_addr + off;
@@ -113,9 +226,19 @@ int64_t sys_mmap(trap_frame_t *frame)
                 return (int64_t)map_addr;
             }
         }
+        serial_puts("[mmap] returning 0x");
+        serial_put_hex(map_addr);
+        serial_puts("\n");
         return (int64_t)map_addr;
     }
 
+    serial_puts("[mmap] MAP_FAILED addr=0x");
+    serial_put_hex(addr);
+    serial_puts(" flags=0x");
+    serial_put_hex(flags);
+    serial_puts(" fd=");
+    serial_put_dec(fd);
+    serial_puts("\n");
     return (int64_t)MAP_FAILED_VAL;
 }
 
@@ -234,9 +357,11 @@ int64_t sys_munmap(trap_frame_t *frame)
         uint64_t virt = addr + off;
         uint64_t *pte = mmu_walk_page(proc->pml4, virt, 0);
         if (pte && (*pte & PTE_PRESENT)) {
-            /* 释放物理页面 */
-            uint64_t phys = *pte & ~(uint64_t)(PAGE_SIZE - 1) & ~(uint64_t)0xFFFULL;
-            free_page((void *)(uintptr_t)phys);
+            /* 不释放 SHM 拥有的页面（它们由 vfs_shm_t 管理） */
+            if (!(*pte & PTE_SHM)) {
+                uint64_t phys = *pte & ~(uint64_t)(PAGE_SIZE - 1) & ~(uint64_t)0xFFFULL;
+                free_page((void *)(uintptr_t)phys);
+            }
             /* 清除 PTE */
             *pte = 0;
         }

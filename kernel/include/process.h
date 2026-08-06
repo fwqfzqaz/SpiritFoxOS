@@ -119,6 +119,7 @@ typedef struct process {
 
     /* Thread/clone data */
     uint64_t        clear_tid_address;  /* Address to clear on thread exit (set_tid_address) */
+    uint64_t        fs_base;            /* FS_BASE MSR value for TLS (saved across fork) */
 
     /* Process tree */
     struct process *parent;        /* Parent process */
@@ -141,8 +142,8 @@ void process_init(void);
 /* Create a kernel thread */
 process_t *process_create_kthread(void (*entry)(void *), void *arg);
 
-/* Fork the current process */
-int process_fork(void);
+/* Fork the current process; caller_frame is the trap_frame on the kernel stack */
+int process_fork(trap_frame_t *caller_frame);
 
 /* Execute a new program in the current process */
 int process_exec(const char *path, const char *const argv[], const char *const envp[]);
@@ -171,6 +172,16 @@ void process_yield(void);
 /* Put current process to sleep until given time */
 void process_sleep(uint64_t ms);
 
+/* Wake up a blocked process and enqueue it to the ready queue.
+ * This MUST be used instead of directly setting proc->state = PROC_READY,
+ * because the scheduler only picks processes from the ready queue. */
+void process_wake(process_t *proc);
+
+/* Enqueue a process to the ready queue (sets state to PROC_READY).
+ * Use this for newly created processes (fork, clone, kthread)
+ * and for waking up blocked processes from non-BLOCKED states. */
+void process_enqueue(process_t *proc);
+
 /* Send a signal to a process */
 int process_kill(int pid, int sig);
 
@@ -190,6 +201,9 @@ void scheduler_tick(void);
 
 /* Schedule next process */
 void scheduler_schedule(void);
+
+/* Yield CPU: mark need_reschedule and hlt, allowing other processes to run */
+void scheduler_yield(void);
 
 /* Check and clear the need_reschedule flag */
 int need_reschedule_check(void);

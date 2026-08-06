@@ -12,6 +12,7 @@
 #include "memory.h"
 #include "timer.h"
 #include "smp.h"
+#include "apic.h"
 #include "string.h"
 #include "serial.h"
 #include "vga.h"
@@ -138,6 +139,21 @@ void process_sleep(uint64_t ms)
     scheduler_schedule();
 }
 
+void process_wake(process_t *proc)
+{
+    if (!proc || proc->state != PROC_BLOCKED)
+        return;
+    proc->sleep_until = 0;
+    enqueue_process(proc);
+}
+
+void process_enqueue(process_t *proc)
+{
+    if (!proc)
+        return;
+    enqueue_process(proc);
+}
+
 /* ========================================================================
  * 调度器时钟（从定时器中断调用）
  * ======================================================================== */
@@ -151,6 +167,31 @@ void scheduler_tick(void)
 
     cur->cpu_time++;
     cur->priority--;
+
+    /* 心跳：每 2000 ticks (2秒) 打印一次，确认调度器仍在运行 */
+    {
+        static uint64_t heartbeat_count = 0;
+        heartbeat_count++;
+        if (heartbeat_count % 2000 == 0) {
+            serial_puts("[HB] tick=");
+            serial_put_dec(heartbeat_count);
+            serial_puts(" cur=");
+            serial_put_dec((uint64_t)cur->pid);
+            /* 打印所有非 UNUSED 进程的状态 */
+            for (int i = 0; i < MAX_PROCS; i++) {
+                if (proc_table[i].state != PROC_UNUSED) {
+                    serial_puts(" [P");
+                    serial_put_dec((uint64_t)i);
+                    serial_puts(":st=");
+                    serial_put_dec((uint64_t)proc_table[i].state);
+                    serial_puts(",pri=");
+                    serial_put_dec((uint64_t)proc_table[i].priority);
+                    serial_puts("]");
+                }
+            }
+            serial_puts("\n");
+        }
+    }
 
     /* 唤醒时间已到的休眠进程 */
     uint64_t now = timer_get_ms();
@@ -178,6 +219,41 @@ void scheduler_tick(void)
 __attribute__((noinline))
 void scheduler_schedule(void)
 {
+    /* 确保 GS_BASE 正确。
+     * arch_switch_to 不保存/恢复 GS_BASE MSR，因此上下文
+     * 切换后 GS_BASE 可能是前一个进程遗留的值。
+     * 如果前一个进程在 swapgs 后（返回用户态途中）被切换，
+     * GS_BASE 会是 0（用户态值），导致 this_cpu() 返回 NULL。
+     * 修复：在调度器入口强制恢复 GS_BASE 为 cpu_locals 地址。
+     * 使用 cpu_id 字段确定当前 CPU：LAPIC ID 可直接读取，
+     * 不依赖 GS_BASE。 */
+    {
+        uint32_t lapic_id = apic_get_lapic_id();
+        int cpu_idx = -1;
+        for (int i = 0; i < smp_get_cpu_count(); i++) {
+            cpu_info_t *info = smp_get_cpu_info(i);
+            if (info && info->apic_id == lapic_id) {
+                cpu_idx = i;
+                break;
+            }
+        }
+        if (cpu_idx >= 0) {
+            uint64_t expected_gs = (uint64_t)&cpu_locals[cpu_idx];
+            uint64_t actual_gs = hal_read_msr(MSR_IA32_GS_BASE);
+            if (actual_gs != expected_gs) {
+                serial_puts("[sched] FIX GS_BASE: 0x");
+                serial_put_hex(actual_gs);
+                serial_puts(" -> 0x");
+                serial_put_hex(expected_gs);
+                serial_puts("\n");
+                hal_write_msr(MSR_IA32_GS_BASE, expected_gs);
+                /* 同步 KERNEL_GS_BASE：swapgs 会交换这两个值，
+                 * KERNEL_GS_BASE 应为用户态 GS（通常为 0） */
+                hal_write_msr(MSR_IA32_KERNEL_GS_BASE, 0);
+            }
+        }
+    }
+
     cpu_local_t *cpu = this_cpu();
     process_t *old = cpu->current_process;
     if (!old) {
@@ -186,6 +262,24 @@ void scheduler_schedule(void)
     }
 
     process_t *new_p = dequeue_process();
+
+    /* 调试：显示就绪队列状态（仅前5次） */
+    {
+        static int dq_count = 0;
+        dq_count++;
+        if (dq_count <= 5) {
+            serial_puts("[sched_dq] old=");
+            serial_put_dec((uint64_t)old->pid);
+            serial_puts("(st=");
+            serial_put_dec((uint64_t)old->state);
+            serial_puts(") dq=");
+            if (new_p) { serial_put_dec((uint64_t)new_p->pid); serial_puts("(st="); serial_put_dec((uint64_t)new_p->state); serial_puts(")"); }
+            else { serial_puts("NULL"); }
+            serial_puts(" rq_count=");
+            serial_put_dec((uint64_t)cpu->runqueue_count);
+            serial_puts("\n");
+        }
+    }
 
     if (!new_p) {
         /* 本 CPU 队列为空，尝试从其他 CPU 窃取进程 */
@@ -254,6 +348,16 @@ void scheduler_schedule(void)
 
     /* 同一进程 – 无需切换 */
     if (old == new_p) {
+        /* 调试：每 1000 次同进程调度打印一次，避免串口洪水 */
+        static int same_proc_count = 0;
+        same_proc_count++;
+        if (same_proc_count % 5000 == 0) {
+            serial_puts("[sched] same-proc PID=");
+            serial_put_dec((uint64_t)old->pid);
+            serial_puts(" (");
+            serial_put_dec((uint64_t)same_proc_count);
+            serial_puts(" times)\n");
+        }
         /* ZOMBIE 进程绝不能继续运行 */
         if (old->state == PROC_ZOMBIE) {
             serial_puts("[sched] BUG: old==new_p for ZOMBIE PID=");
@@ -280,6 +384,25 @@ do_switch:
     if (old->state == PROC_RUNNING)
         old->state = PROC_READY;
 
+    /* 调试：打印进程切换（仅前100次和每5000次） */
+    {
+        static int switch_count = 0;
+        switch_count++;
+        if (switch_count <= 100 || switch_count % 5000 == 0) {
+            serial_puts("[sched] ");
+            serial_put_dec((uint64_t)old->pid);
+            serial_puts("(st=");
+            serial_put_dec((uint64_t)old->state);
+            serial_puts(")->");
+            serial_put_dec((uint64_t)new_p->pid);
+            serial_puts("(st=");
+            serial_put_dec((uint64_t)new_p->state);
+            serial_puts(") #");
+            serial_put_dec((uint64_t)switch_count);
+            serial_puts("\n");
+        }
+    }
+
     new_p->state = PROC_RUNNING;
     new_p->priority = DEFAULT_TIMESLICE;
     new_p->cpu_id = (int)cpu->index;
@@ -302,6 +425,12 @@ do_switch:
         ? (uint64_t)new_p->kernel_stack + (KERNEL_STACK_PAGES * PAGE_SIZE)
         : 0x800000;
     cpu->process_pml4 = new_p->pml4;
+
+    /* 恢复 FS_BASE MSR：用户进程通过 arch_prctl 设置 FS_BASE，
+     * 但 MSR 是 per-CPU 的。当进程迁移到不同 CPU 或被其他
+     * 进程抢占后恢复时，必须从进程结构恢复正确的 FS_BASE。 */
+    if (new_p->fs_base)
+        hal_write_msr(0xC0000100U, new_p->fs_base);  /* MSR_IA32_FS_BASE */
 
     /* Sanity check: 对于 ZOMBIE 进程，这些检查失败也不能返回 */
     if (new_p->kernel_rsp == 0) {
@@ -339,4 +468,13 @@ void scheduler_start(void)
     while (1)
         hal_halt_no_cli();
     __builtin_unreachable();
+}
+
+/* Yield CPU: allow other processes to run.
+ * Used by the shell idle loop to let bgexec'd user processes get CPU time. */
+void scheduler_yield(void)
+{
+    cpu_local_t *cpu = this_cpu();
+    cpu->need_reschedule = 1;
+    __asm__ volatile("sti; hlt" ::: "memory");
 }

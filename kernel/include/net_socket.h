@@ -33,6 +33,27 @@ struct msghdr {
     int           msg_flags;      /* flags on received message */
 };
 
+/* Control message (ancillary data) header.
+ * Layout matches the userland ABI on 64-bit little-endian: a 4-byte
+ * cmsg_len followed by 4 bytes of padding, then cmsg_level/cmsg_type.
+ * sizeof(struct cmsghdr) == 16. */
+struct cmsghdr {
+    uint32_t cmsg_len;    /* bytes including header */
+    uint32_t cmsg_pad;    /* alignment padding (64-bit) */
+    int      cmsg_level;  /* SOL_SOCKET */
+    int      cmsg_type;   /* SCM_RIGHTS, etc. */
+};
+
+#define SCM_RIGHTS      0x01
+
+/* MSG_CTRUNC: control message buffer too small (matches Linux) */
+#define MSG_CTRUNC      0x0008
+
+#define CMSG_ALIGN(len) (((len) + sizeof(size_t) - 1) & ~(sizeof(size_t) - 1))
+#define CMSG_SPACE(len) (CMSG_ALIGN(len) + CMSG_ALIGN(sizeof(struct cmsghdr)))
+#define CMSG_LEN(len)   (CMSG_ALIGN(sizeof(struct cmsghdr)) + (len))
+#define CMSG_DATA(cmsg) ((unsigned char *)(((struct cmsghdr *)(cmsg)) + 1))
+
 int net_sendmsg(int fd, const struct msghdr *msg, int flags);
 int net_recvmsg(int fd, struct msghdr *msg, int flags);
 

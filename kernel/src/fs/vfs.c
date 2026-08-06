@@ -1,10 +1,16 @@
 #include "vfs.h"
+#include "kmalloc.h"
+#include "errno.h"
 #include "memfs.h"
 #include "chardev.h"
 #include "string.h"
 #include "memory.h"
 #include "vga.h"
 #include "process.h"
+#include "net.h"
+#include "net_socket.h"
+#include "net_unix.h"
+#include "serial.h"
 
 /* ========================================================================
  * 全局 VFS 状态
@@ -726,6 +732,59 @@ int vfs_close(int fd)
                 free_page(pipe);
             }
         }
+    } else if (file->inode && file->inode->type == VFS_TYPE_SHM && file->shm) {
+        /* SHM (memfd) close - only release backing memory when the last
+         * reference is dropped. */
+        if (file->refcount <= 0) {
+            vfs_shm_t *shm = file->shm;
+            spinlock_acquire(&shm->lock);
+            for (uint64_t i = 0; i < shm->page_count; i++) {
+                if (shm->pages[i])
+                    free_page(shm->pages[i]);
+            }
+            shm->page_count = 0;
+            spinlock_release(&shm->lock);
+            kfree(shm);
+            file->shm = NULL;
+
+            free_page(file->inode);
+            file->inode = NULL;
+        }
+    } else if (file->inode && file->inode->type == VFS_TYPE_SOCKET && file->socket) {
+        /* Socket close - release net socket resources when the last ref is dropped */
+        if (file->refcount <= 0) {
+            net_socket_t *sock = file->socket;
+            /* Get the net slot index stored in inode->fs_data */
+            int net_fd = (int)(uintptr_t)file->inode->fs_data;
+
+            /* Disconnect peer for Unix sockets */
+            if (sock->domain == AF_UNIX) {
+                if (sock->unix_path[0] != '\0' && sock->state == TCP_LISTEN) {
+                    unix_unregister_listener(sock->unix_path);
+                }
+                if (sock->unix_peer) {
+                    sock->unix_peer->unix_peer = NULL;
+                    sock->unix_peer->state = TCP_CLOSE_WAIT;
+                    if (sock->unix_peer->blocking_pid >= 0) {
+                        process_t *proc = process_get(sock->unix_peer->blocking_pid);
+                        if (proc && proc->state == PROC_BLOCKED) {
+                            process_wake(proc);
+                            sock->unix_peer->blocking_pid = -1;
+                        }
+                    }
+                }
+            }
+
+            /* Free socket buffers and slot */
+            if (sock->rx_buf) { kfree(sock->rx_buf); sock->rx_buf = NULL; }
+            if (sock->tx_buf) { kfree(sock->tx_buf); sock->tx_buf = NULL; }
+            if (net_fd >= 0 && net_fd < NET_MAX_SOCKETS)
+                net_free_socket_slot(net_fd);
+
+            file->socket = NULL;
+            kfree(file->inode);
+            file->inode = NULL;
+        }
     } else if (file->refcount <= 0) {
         /* Regular file - no longer referenced */
         /* If this is a character device, call its close handler */
@@ -756,9 +815,65 @@ int vfs_read(int fd, void *buf, size_t count)
         return pipe_read(file, buf, count);
     }
 
+    /* Handle SHM (memfd) read */
+    if (file->inode->type == VFS_TYPE_SHM && file->shm) {
+        vfs_shm_t *shm = file->shm;
+        spinlock_acquire(&shm->lock);
+
+        /* Don't read past the logical size */
+        uint64_t remaining = (file->offset < shm->size) ? (shm->size - file->offset) : 0;
+        if (remaining > count)
+            remaining = count;
+        if (remaining == 0) {
+            spinlock_release(&shm->lock);
+            return 0;
+        }
+
+        size_t done = 0;
+        while (done < remaining) {
+            uint64_t pg = (file->offset + done) / PAGE_SIZE;
+            uint64_t pgoff = (file->offset + done) % PAGE_SIZE;
+            size_t chunk = PAGE_SIZE - pgoff;
+            if (chunk > remaining - done)
+                chunk = remaining - done;
+
+            if (pg < shm->page_count && shm->pages[pg]) {
+                memcpy((uint8_t *)buf + done,
+                       (uint8_t *)shm->pages[pg] + pgoff, chunk);
+            } else {
+                /* Unmapped page reads as zero */
+                memset((uint8_t *)buf + done, 0, chunk);
+            }
+            done += chunk;
+        }
+
+        file->offset += done;
+        spinlock_release(&shm->lock);
+        return (int)done;
+    }
+
     /* Handle character device read */
     if (file->inode->type == VFS_TYPE_CHARDEV) {
         return chardev_read(file, buf, count);
+    }
+
+    /* Handle socket read */
+    if (file->inode->type == VFS_TYPE_SOCKET && file->socket) {
+        int64_t r = net_recv(fd, buf, count, 0);
+        {
+            static int sr_count = 0;
+            sr_count++;
+            if (sr_count <= 100) {
+                serial_puts("[vfs_read_sock] fd=");
+                serial_put_dec((uint64_t)fd);
+                serial_puts(" count=");
+                serial_put_dec((uint64_t)count);
+                serial_puts(" ret=");
+                serial_put_dec((uint64_t)(int64_t)r);
+                serial_puts("\n");
+            }
+        }
+        return r;
     }
 
     /* Use inode's read operation if available */
@@ -794,9 +909,77 @@ int vfs_write(int fd, const void *buf, size_t count)
         return pipe_write(file, buf, count);
     }
 
+    /* Handle SHM (memfd) write */
+    if (file->inode->type == VFS_TYPE_SHM && file->shm) {
+        vfs_shm_t *shm = file->shm;
+        spinlock_acquire(&shm->lock);
+
+        uint64_t end = file->offset + count;
+        uint64_t pages_needed = (end + PAGE_SIZE - 1) / PAGE_SIZE;
+        if (pages_needed > SHM_MAX_PAGES) {
+            spinlock_release(&shm->lock);
+            return -EINVAL;
+        }
+
+        size_t done = 0;
+        while (done < count) {
+            uint64_t pg = (file->offset + done) / PAGE_SIZE;
+            uint64_t pgoff = (file->offset + done) % PAGE_SIZE;
+            size_t chunk = PAGE_SIZE - pgoff;
+            if (chunk > count - done)
+                chunk = count - done;
+
+            /* Allocate the page on demand */
+            if (pg >= shm->page_count || !shm->pages[pg]) {
+                void *p = alloc_page();
+                if (!p) {
+                    if (file->offset > shm->size)
+                        shm->size = file->offset;
+                    file->inode->size = shm->size;
+                    spinlock_release(&shm->lock);
+                    return done ? (int)done : -ENOMEM;
+                }
+                memset(p, 0, PAGE_SIZE);
+                shm->pages[pg] = p;
+                if (pg >= shm->page_count)
+                    shm->page_count = pg + 1;
+            }
+
+            memcpy((uint8_t *)shm->pages[pg] + pgoff,
+                   (uint8_t *)buf + done, chunk);
+            done += chunk;
+        }
+
+        file->offset += done;
+        if (file->offset > shm->size)
+            shm->size = file->offset;
+        file->inode->size = shm->size;
+        spinlock_release(&shm->lock);
+        return (int)done;
+    }
+
     /* Handle character device write */
     if (file->inode->type == VFS_TYPE_CHARDEV) {
         return chardev_write(file, buf, count);
+    }
+
+    /* Handle socket write */
+    if (file->inode->type == VFS_TYPE_SOCKET && file->socket) {
+        int64_t r = net_send(fd, buf, count, 0);
+        {
+            static int sw_count = 0;
+            sw_count++;
+            if (sw_count <= 100) {
+                serial_puts("[vfs_write_sock] fd=");
+                serial_put_dec((uint64_t)fd);
+                serial_puts(" count=");
+                serial_put_dec((uint64_t)count);
+                serial_puts(" ret=");
+                serial_put_dec((uint64_t)(int64_t)r);
+                serial_puts("\n");
+            }
+        }
+        return r;
     }
 
     /* Use inode's write operation if available */
@@ -1190,6 +1373,177 @@ int vfs_readlink(const char *path, char *buf, size_t bufsiz)
 
     memcpy(buf, dentry->inode->symlink_target, len);
     return (int)len;
+}
+
+/* ========================================================================
+ * Shared memory (memfd) operations
+ * ======================================================================== */
+
+int vfs_shm_create(const char *name, uint32_t flags)
+{
+    /* The vfs_shm_t structure is large (~512KB) due to the pages array,
+     * so it must come from kmalloc rather than a single page. */
+    vfs_shm_t *shm = (vfs_shm_t *)kmalloc(sizeof(vfs_shm_t));
+    if (!shm)
+        return -ENOMEM;
+    memset(shm, 0, sizeof(vfs_shm_t));
+    if (name) {
+        strncpy(shm->name, name, sizeof(shm->name) - 1);
+        shm->name[sizeof(shm->name) - 1] = '\0';
+    }
+    spinlock_init(&shm->lock);
+    shm->seal_flags = (int)flags;
+
+    /* Allocate the inode (single page) */
+    vfs_inode_t *inode = (vfs_inode_t *)alloc_page();
+    if (!inode) {
+        kfree(shm);
+        return -ENOMEM;
+    }
+    memset(inode, 0, PAGE_SIZE);
+    inode->type = VFS_TYPE_SHM;
+    inode->mode = VFS_S_IRUSR | VFS_S_IWUSR;
+    inode->size = 0;
+    inode->nlinks = 1;
+
+    /* Allocate the file descriptor */
+    int fd = vfs_alloc_fd();
+    if (fd < 0) {
+        free_page(inode);
+        kfree(shm);
+        return -EMFILE;
+    }
+
+    vfs_file_t *file = (vfs_file_t *)alloc_page();
+    if (!file) {
+        free_page(inode);
+        kfree(shm);
+        return -ENOMEM;
+    }
+    memset(file, 0, PAGE_SIZE);
+    file->inode = inode;
+    file->flags = VFS_O_RDWR;
+    file->offset = 0;
+    file->refcount = 1;
+    file->shm = shm;
+
+    vfs_get_fd_table()[fd] = file;
+    return fd;
+}
+
+/* Register a net_socket in VFS fd table, returns VFS fd or negative error */
+int vfs_register_socket(net_socket_t *sock)
+{
+    if (!sock)
+        return -EINVAL;
+
+    int fd = vfs_alloc_fd();
+    if (fd < 0)
+        return -EMFILE;
+
+    vfs_inode_t *inode = (vfs_inode_t *)kmalloc(sizeof(vfs_inode_t));
+    if (!inode)
+        return -ENOMEM;
+    memset(inode, 0, sizeof(vfs_inode_t));
+    inode->type = VFS_TYPE_SOCKET;
+    inode->mode = VFS_S_IRUSR | VFS_S_IWUSR;
+    /* Store net socket slot index in fs_data for back-reference */
+    inode->fs_data = (void *)(uintptr_t)sock->fd;
+
+    vfs_file_t *file = (vfs_file_t *)kmalloc(sizeof(vfs_file_t));
+    if (!file) {
+        kfree(inode);
+        return -ENOMEM;
+    }
+    memset(file, 0, sizeof(vfs_file_t));
+    file->inode = inode;
+    file->flags = VFS_O_RDWR;
+    file->refcount = 1;
+    file->socket = sock;
+
+    vfs_get_fd_table()[fd] = file;
+
+    /* Update the socket's fd to point to the VFS fd */
+    sock->fd = fd;
+
+    return fd;
+}
+
+/* Get net_socket_t pointer from VFS fd, or NULL */
+net_socket_t *vfs_get_socket(int fd)
+{
+    if (fd < 0 || fd >= VFS_MAX_FD)
+        return NULL;
+
+    vfs_file_t **fd_table = vfs_get_fd_table();
+    if (!fd_table || !fd_table[fd])
+        return NULL;
+
+    vfs_file_t *file = fd_table[fd];
+    if (file->inode && file->inode->type == VFS_TYPE_SOCKET)
+        return file->socket;
+
+    return NULL;
+}
+
+int vfs_ftruncate(int fd, int64_t length)
+{
+    if (fd < 0 || fd >= VFS_MAX_FD || !vfs_get_fd_table()[fd])
+        return -EBADF;
+
+    vfs_file_t *file = vfs_get_fd_table()[fd];
+    if (!file->inode)
+        return -EBADF;
+
+    if (length < 0)
+        return -EINVAL;
+
+    if (file->inode->type == VFS_TYPE_SHM && file->shm) {
+        vfs_shm_t *shm = file->shm;
+        spinlock_acquire(&shm->lock);
+
+        uint64_t new_size = (uint64_t)length;
+        uint64_t pages_needed = (new_size + PAGE_SIZE - 1) / PAGE_SIZE;
+        if (pages_needed > SHM_MAX_PAGES) {
+            spinlock_release(&shm->lock);
+            return -EINVAL;
+        }
+
+        if (pages_needed > shm->page_count) {
+            /* Grow: allocate the new pages */
+            for (uint64_t pg = shm->page_count; pg < pages_needed; pg++) {
+                void *p = alloc_page();
+                if (!p) {
+                    /* Out of memory - keep what we have allocated so far */
+                    shm->size = shm->page_count * PAGE_SIZE;
+                    file->inode->size = shm->size;
+                    spinlock_release(&shm->lock);
+                    return -ENOMEM;
+                }
+                memset(p, 0, PAGE_SIZE);
+                shm->pages[pg] = p;
+                shm->page_count = pg + 1;
+            }
+        } else if (pages_needed < shm->page_count) {
+            /* Shrink: free the pages beyond the new size */
+            for (uint64_t pg = pages_needed; pg < shm->page_count; pg++) {
+                if (shm->pages[pg]) {
+                    free_page(shm->pages[pg]);
+                    shm->pages[pg] = NULL;
+                }
+            }
+            shm->page_count = pages_needed;
+        }
+
+        shm->size = new_size;
+        file->inode->size = new_size;
+        spinlock_release(&shm->lock);
+        return 0;
+    }
+
+    /* Other file types: just update the inode size */
+    file->inode->size = (uint64_t)length;
+    return 0;
 }
 
 /* ========================================================================

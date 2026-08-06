@@ -277,6 +277,11 @@ static int drm_mmap(vfs_file_t *file, uint64_t addr, size_t len,
                 pte_flags |= PTE_WRITABLE;
             /* DRM 帧缓冲不需要缓存（避免 DMA 一致性问题） */
             pte_flags |= PTE_PCD | PTE_PWT;
+            /* 标记为 SHM 页面，fork 时不 COW，保持父子进程
+             * 共享同一 DRM 帧缓冲区物理页面。否则 fork 后
+             * compositor 写入帧缓冲区会触发 COW 分配新页面，
+             * 导致渲染数据不再反映到 DRM 帧缓冲区。 */
+            pte_flags |= PTE_SHM;
 
             /* 计算起始物理地址（GEM 对象物理地址 + 偏移） */
             uint64_t gem_phys = obj->paddr + off_in_obj;

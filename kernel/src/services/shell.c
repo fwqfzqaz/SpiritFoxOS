@@ -766,7 +766,10 @@ static void user_proc_launcher(void *arg)
 
     /* 继承父进程的 stdin/stdout/stderr (fd 0/1/2)
      * process_create_kthread 创建的进程 fd_table 为空，
-     * 用户进程需要这些 fd 才能进行 I/O 操作 */
+     * 用户进程需要这些 fd 才能进行 I/O 操作。
+     * 对于父进程中缺失的 fd，打开 /dev/null 作为兜底，
+     * 确保 fd 0/1/2 始终可用（libwayland 的 F_DUPFD_CLOEXEC
+     * 依赖 fd 0 被占用以避免 dup 到错误的 fd 编号）。 */
     if (self) {
         process_t *parent = self->parent;
         if (parent) {
@@ -775,6 +778,18 @@ static void user_proc_launcher(void *arg)
                     self->fd_table[fd] = parent->fd_table[fd];
                     self->fd_table[fd]->refcount++;
                 }
+            }
+        }
+        /* 如果 fd 0/1/2 仍然缺失，打开 /dev/null 填充 */
+        for (int fd = 0; fd < 3; fd++) {
+            if (!self->fd_table[fd]) {
+                int nullfd = vfs_open("/dev/null", VFS_O_RDWR, 0);
+                if (nullfd >= 0 && nullfd != fd) {
+                    /* 将 /dev/null 的 fd 移到正确位置 */
+                    self->fd_table[fd] = self->fd_table[nullfd];
+                    self->fd_table[nullfd] = NULL;
+                }
+                /* 如果 vfs_open 返回的正好是目标 fd，无需移动 */
             }
         }
     }

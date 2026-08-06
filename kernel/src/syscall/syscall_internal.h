@@ -44,6 +44,8 @@ int64_t sys_fadvise64(trap_frame_t *frame);
 int64_t sys_pipe2(trap_frame_t *frame);
 int64_t sys_dup3(trap_frame_t *frame);
 int64_t sys_ioctl(trap_frame_t *frame);
+int64_t sys_memfd_create(trap_frame_t *frame);
+int64_t sys_ftruncate(trap_frame_t *frame);
 
 /* 进程/线程/信号系统调用 (syscall_process.c) */
 int64_t sys_fork(trap_frame_t *frame);
@@ -118,6 +120,7 @@ int64_t sys_nanosleep(trap_frame_t *frame);
 int64_t sys_time(trap_frame_t *frame);
 int64_t sys_sched_yield(trap_frame_t *frame);
 int64_t sys_poll(trap_frame_t *frame);
+int64_t sys_ppoll(trap_frame_t *frame);
 int64_t sys_getrandom(trap_frame_t *frame);
 int64_t sys_futex(trap_frame_t *frame);
 int64_t sys_set_robust_list(trap_frame_t *frame);
@@ -127,6 +130,7 @@ int64_t sys_epoll_create(trap_frame_t *frame);
 int64_t sys_epoll_create1(trap_frame_t *frame);
 int64_t sys_epoll_ctl(trap_frame_t *frame);
 int64_t sys_epoll_wait(trap_frame_t *frame);
+int64_t sys_epoll_pwait(trap_frame_t *frame);
 int64_t sys_eventfd(trap_frame_t *frame);
 int64_t sys_eventfd2(trap_frame_t *frame);
 int64_t sys_signalfd(trap_frame_t *frame);

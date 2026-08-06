@@ -411,7 +411,23 @@ uint64_t elf_load(process_t *proc, const void *data, size_t size)
     /* ---- 设置进程字段 ---- */
     proc->entry_point = ehdr->e_entry;
     proc->brk         = (highest_addr + PAGE_SIZE - 1) & ~(uint64_t)(PAGE_SIZE - 1);
-    proc->brk        += 0x100000;  /* 1 MB 堆增长空间 */
+
+    /* ---- 映射初始堆空间（1 MB），使 brk 之下的页面可用 ---- */
+    {
+        uint64_t heap_start = proc->brk;
+        uint64_t heap_end   = heap_start + 0x100000; /* 1 MB 堆增长空间 */
+        for (uint64_t vaddr = heap_start; vaddr < heap_end; vaddr += PAGE_SIZE) {
+            /* 跳过已映射的页面（ELF 段可能已覆盖部分区域） */
+            if (mmu_virt_to_phys(proc->pml4, vaddr) != 0)
+                continue;
+            void *phys_page = alloc_page();
+            if (!phys_page) break;
+            memset(phys_page, 0, PAGE_SIZE);
+            mmu_map_page(proc->pml4, vaddr, (uint64_t)(uintptr_t)phys_page,
+                         PTE_USER | PTE_WRITABLE | PTE_PRESENT);
+        }
+        proc->brk = heap_end;
+    }
 
     /* ---- 映射用户栈：4 MB，位于 0x7FFFF0000000 向下 ---- */
     uint64_t stack_top = 0x7FFFF0000000ULL;
@@ -426,7 +442,11 @@ uint64_t elf_load(process_t *proc, const void *data, size_t size)
     proc->stack_top = stack_top;
 
     /* ---- 设置 mmap_base（供未来的 mmap 实现） ---- */
-    proc->mmap_base = proc->brk + 0x10000000ULL;  /* brk 之后 256 MB */
+    /* 使用接近 Linux 标准的 mmap 区域（栈之下约 256 MB），
+     * 而非紧接 brk 之后。musl/libwayland 的 malloc 期望
+     * mmap 返回高地址（接近 0x7f...），若返回低地址
+     * 可能导致内部一致性检查失败。 */
+    proc->mmap_base = 0x7F0000000000ULL;
 
     return proc->entry_point;
 }
@@ -626,7 +646,22 @@ int elf_load_with_base(process_t *proc, const void *data, size_t size,
         proc->entry_point = entry;
         proc->brk         = (highest_addr + PAGE_SIZE - 1) &
                             ~(uint64_t)(PAGE_SIZE - 1);
-        proc->brk        += 0x100000;  /* 1 MB 堆增长空间 */
+
+        /* 映射初始堆空间（1 MB），使 brk 之下的页面可用 */
+        {
+            uint64_t heap_start = proc->brk;
+            uint64_t heap_end   = heap_start + 0x100000;
+            for (uint64_t vaddr = heap_start; vaddr < heap_end; vaddr += PAGE_SIZE) {
+                if (mmu_virt_to_phys(proc->pml4, vaddr) != 0)
+                    continue;
+                void *phys_page = alloc_page();
+                if (!phys_page) break;
+                memset(phys_page, 0, PAGE_SIZE);
+                mmu_map_page(proc->pml4, vaddr, (uint64_t)(uintptr_t)phys_page,
+                             PTE_USER | PTE_WRITABLE | PTE_PRESENT);
+            }
+            proc->brk = heap_end;
+        }
 
         /* 映射用户栈 */
         uint64_t stack_top = 0x7FFFF0000000ULL;
@@ -639,7 +674,7 @@ int elf_load_with_base(process_t *proc, const void *data, size_t size,
         }
 
         proc->stack_top = stack_top;
-        proc->mmap_base = proc->brk + 0x10000000ULL;
+        proc->mmap_base = 0x7F0000000000ULL;
     }
 
     return 0;

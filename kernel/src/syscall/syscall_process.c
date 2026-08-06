@@ -23,8 +23,16 @@
 
 int64_t sys_fork(trap_frame_t *frame)
 {
-    (void)frame;
-    return process_fork();
+    serial_puts("[fork] calling process_fork...\n");
+    int64_t pid = process_fork(frame);
+    serial_puts("[fork] ret=");
+    serial_put_dec((uint64_t)(int64_t)pid);
+    serial_puts(" current_pid=");
+    serial_put_dec((uint64_t)process_current()->pid);
+    serial_puts(" current_state=");
+    serial_put_dec((uint64_t)process_current()->state);
+    serial_puts("\n");
+    return pid;
 }
 
 int64_t sys_execve(trap_frame_t *frame)
@@ -302,6 +310,7 @@ int64_t sys_arch_prctl(trap_frame_t *frame)
     switch (code) {
     case ARCH_SET_FS:
         hal_write_msr(MSR_IA32_FS_BASE, addr);
+        process_current()->fs_base = addr;   /* 保存到进程结构，fork 时使用 */
         return 0;
     case ARCH_GET_FS:
         return (int64_t)hal_read_msr(MSR_IA32_FS_BASE);

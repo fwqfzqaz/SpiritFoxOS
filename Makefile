@@ -600,7 +600,10 @@ wayland-deploy: wayland-all build/fat32.img
 	@echo "[WL] Deploying to FAT32 image..."
 	@mcopy -i build/fat32.img build/sf_compositor ::bin/sf_compositor 2>/dev/null || true
 	@mcopy -i build/fat32.img build/sf_test_client ::bin/sf_test_client 2>/dev/null || true
-	@echo "[WL] Deployed. Run 'exec /mnt/bin/sf_compositor' in shell"
+	@$(WL_CC) $(WL_CFLAGS) -c wayland/client/test_malloc.c -o build/test_malloc.o
+	@$(WL_CC) $(WL_LDFLAGS) -o build/test_malloc build/test_malloc.o
+	@mcopy -i build/fat32.img build/test_malloc ::bin/test_malloc 2>/dev/null || true
+	@echo "[WL] Deployed. Run 'exec /mnt/bin/test_malloc' in shell"
 
 # =========================================
 # USB 启动盘制作（实体机用）

@@ -116,6 +116,7 @@
 #define SYS_socketpair  53
 #define SYS_setsockopt  54
 #define SYS_getsockopt  55
+#define SYS_accept4     288
 
 /* Time */
 #define SYS_clock_gettime  228
@@ -137,6 +138,7 @@
 #define SYS_get_robust_list  274
 #define SYS_prctl       157
 #define SYS_getrandom   318
+#define SYS_memfd_create 319
 #define SYS_readlinkat  267
 #define SYS_newfstatat  262
 #define SYS_fstat       5
@@ -170,6 +172,7 @@
 #define SYS_epoll_create1   291
 #define SYS_epoll_ctl       233
 #define SYS_epoll_wait      232
+#define SYS_epoll_pwait     281
 
 /* eventfd */
 #define SYS_eventfd         284

@@ -85,6 +85,64 @@ __attribute__((used)) void kthread_entry(void (*entry)(void *), void *arg)
 }
 
 /* ========================================================================
+ * fork 子进程返回函数
+ *
+ * 当 fork 创建的子进程首次被调度时，通过 kthread_trampoline 进入此函数。
+ * arg 是子进程的 process_t 指针，其中 trap_frame 包含了 fork 时的用户态上下文
+ * （rax 已被设为 0）。
+ * 此函数设置好内核状态后，通过 process_enter_user() 跳转到用户态，
+ * 使子进程从 fork 返回点继续执行，返回值为 0。
+ * ======================================================================== */
+static void fork_child_return(void *arg)
+{
+    process_t *self = (process_t *)arg;
+
+    /* 设置 current 指针（调度器已设置 cpu->current_process，
+     * 但全局 current 可能未同步） */
+    current = self;
+
+    /* 恢复 FS_BASE（TLS 指针）。
+     * musl libc 通过 FS 段寄存器访问 errno 等线程局部变量。
+     * fork 后子进程必须恢复与父进程相同的 FS_BASE 值，
+     * 否则所有 TLS 访问都会读取地址 0（崩溃）。 */
+    if (self->fs_base)
+        hal_write_msr(0xC0000100U, self->fs_base);  /* MSR_IA32_FS_BASE */
+
+    /* 设置 TSS rsp0 和 syscall 暂存字段 */
+    if (self->kernel_stack) {
+        gdt_set_tss_rsp0(this_cpu()->index,
+            (uint64_t)self->kernel_stack + (KERNEL_STACK_PAGES * PAGE_SIZE));
+    }
+
+    cpu_local_t *cpu = this_cpu();
+    cpu->kernel_rsp_top = (self->kernel_stack)
+        ? (uint64_t)self->kernel_stack + (KERNEL_STACK_PAGES * PAGE_SIZE)
+        : cpu_gdts[cpu->index].tss.rsp0;
+    cpu->process_pml4 = self->pml4;
+
+    /* 确保 swapgs 状态正确：我们是从内核态通过调度器进入的，
+     * 此时 GS_BASE = cpu_locals（内核态），KERNEL_GS_BASE = 0。
+     * process_enter_user() 中的 swapgs 会交换到 GS_BASE=0（用户态），
+     * 这是正确的。 */
+
+    serial_puts("[fork_child] PID=");
+    serial_put_dec((uint64_t)self->pid);
+    serial_puts(" returning to user rip=0x");
+    if (self->trap_frame)
+        serial_put_hex(self->trap_frame->rip);
+    serial_puts("\n");
+
+    /* 通过 process_enter_user() 跳转到用户态 — 不返回 */
+    if (self->trap_frame)
+        process_enter_user(self->trap_frame);
+
+    /* 不应到达这里 */
+    serial_puts("[fork_child] ERROR: process_enter_user returned!\n");
+    process_exit(1);
+    __builtin_unreachable();
+}
+
+/* ========================================================================
  * process_init() - 进程初始化
  * ======================================================================== */
 
@@ -199,7 +257,7 @@ process_t *process_create_kthread(void (*entry)(void *), void *arg)
     /* 填充进程属性 */
     p->pid           = pid;
     p->ppid          = current ? current->pid : 0;
-    p->state         = PROC_READY;
+    p->state         = PROC_UNUSED;  /* 防止调度器在初始化完成前扫描到 */
     p->flags         = PROC_FLAG_KERNEL;
     p->uid = p->euid = current ? current->uid : 0;
     p->gid = p->egid = current ? current->gid : 0;
@@ -264,6 +322,10 @@ process_t *process_create_kthread(void (*entry)(void *), void *arg)
            p->pid, stack, (unsigned long)p->kernel_rsp,
            (void *)entry, arg);
 
+    /* 初始化完成，标记为 READY 并入队 */
+    p->state = PROC_READY;
+    process_enqueue(p);
+
     return p;
 }
 
@@ -271,7 +333,7 @@ process_t *process_create_kthread(void (*entry)(void *), void *arg)
  * process_fork() - 进程分叉
  * ======================================================================== */
 
-int process_fork(void)
+int process_fork(trap_frame_t *caller_frame)
 {
     if (!current)
         return -1;
@@ -297,7 +359,13 @@ int process_fork(void)
     child->sleep_until = 0;
     child->cpu_time  = 0;
 
-    /* ---- COW：创建新 PML4，将用户页共享为只读 ---- */
+    /* ---- COW：创建独立页表副本，将用户页共享为只读 ----
+     *
+     * 关键设计：子进程拥有独立的页表结构（PML4/PDPT/PD/PT），
+     * 但叶子页（4KB 数据页）是共享的（COW）。
+     * 这样当 COW 缺页处理时，只更新当前进程的 PTE，
+     * 不会影响另一个进程的页表。
+     */
     {
         /* 1. 分配新 PML4 */
         void *new_pml4_page = alloc_page();
@@ -309,39 +377,99 @@ int process_fork(void)
         uint64_t *dst_pml4 = (uint64_t *)new_pml4_page;
         uint64_t *src_pml4 = (uint64_t *)(uintptr_t)current->pml4;
 
-        /* 2. 复制内核半区（项 256-511） */
+        /* 2. 复制内核半区（项 256-511）- 共享内核映射 */
         for (int i = 256; i < 512; i++)
             dst_pml4[i] = src_pml4[i];
 
-        /* 3. 复制用户半区（项 0-255）- 共享页表
-         *    并将所有用户页标记为只读以实现 COW */
+        /* 3. 递归复制用户半区页表，叶子页标记 COW */
         for (int i = 0; i < 256; i++) {
-            if (src_pml4[i] & PTE_PRESENT) {
-                /* 通过在两者中映射来共享 PDPT 页 */
-                dst_pml4[i] = src_pml4[i];
+            if (!(src_pml4[i] & PTE_PRESENT))
+                continue;
 
-                /* 遍历 PDPT -> PD -> PT，清除 PTE_WRITABLE，
-                 * 设置 PTE_COW */
-                uint64_t *pdpt = (uint64_t *)(src_pml4[i] & PTE_ADDR_MASK);
-                for (int j = 0; j < 512; j++) {
-                    if (!(pdpt[j] & PTE_PRESENT)) continue;
-                    if (pdpt[j] & PTE_HUGE) continue;
-                    uint64_t *pd = (uint64_t *)(pdpt[j] & PTE_ADDR_MASK);
-                    for (int k = 0; k < 512; k++) {
-                        if (!(pd[k] & PTE_PRESENT)) continue;
-                        if (pd[k] & PTE_HUGE) continue;
-                        uint64_t *pt = (uint64_t *)(pd[k] & PTE_ADDR_MASK);
-                        for (int l = 0; l < 512; l++) {
-                            if (pt[l] & PTE_PRESENT) {
-                                pt[l] = (pt[l] & ~PTE_WRITABLE) | PTE_COW;
-                            }
-                        }
-                    }
-                }
+            /* 分配新的 PDPT 页 */
+            void *new_pdpt_page = alloc_page();
+            if (!new_pdpt_page) {
+                /* TODO: 清理已分配的页 */
+                child->state = PROC_UNUSED;
+                return -1;
             }
+            uint64_t *dst_pdpt = (uint64_t *)new_pdpt_page;
+            uint64_t *src_pdpt = (uint64_t *)(src_pml4[i] & PTE_ADDR_MASK);
+            uint64_t pdpt_flags = src_pml4[i] & ~PTE_ADDR_MASK;
+
+            for (int j = 0; j < 512; j++) {
+                if (!(src_pdpt[j] & PTE_PRESENT))
+                    continue;
+                if (src_pdpt[j] & PTE_HUGE) {
+                    /* 1GB 大页：直接共享 */
+                    dst_pdpt[j] = src_pdpt[j];
+                    continue;
+                }
+
+                /* 分配新的 PD 页 */
+                void *new_pd_page = alloc_page();
+                if (!new_pd_page) {
+                    child->state = PROC_UNUSED;
+                    return -1;
+                }
+                uint64_t *dst_pd = (uint64_t *)new_pd_page;
+                uint64_t *src_pd = (uint64_t *)(src_pdpt[j] & PTE_ADDR_MASK);
+                uint64_t pd_flags = src_pdpt[j] & ~PTE_ADDR_MASK;
+
+                for (int k = 0; k < 512; k++) {
+                    if (!(src_pd[k] & PTE_PRESENT))
+                        continue;
+                    if (src_pd[k] & PTE_HUGE) {
+                        /* 2MB 大页：直接共享 */
+                        dst_pd[k] = src_pd[k];
+                        continue;
+                    }
+
+                    /* 分配新的 PT 页 */
+                    void *new_pt_page = alloc_page();
+                    if (!new_pt_page) {
+                        child->state = PROC_UNUSED;
+                        return -1;
+                    }
+                    uint64_t *dst_pt = (uint64_t *)new_pt_page;
+                    uint64_t *src_pt = (uint64_t *)(src_pd[k] & PTE_ADDR_MASK);
+                    uint64_t pt_flags = src_pd[k] & ~PTE_ADDR_MASK;
+
+                    for (int l = 0; l < 512; l++) {
+                        if (!(src_pt[l] & PTE_PRESENT)) {
+                            dst_pt[l] = 0;
+                            continue;
+                        }
+                        /* SHM 页面（PTE_SHM）：保持共享，不 COW。
+                         * SHM 包括 memfd_create 创建的共享内存和
+                         * DRM dumb buffer 映射。这些页面在父子
+                         * 进程间必须共享同一物理页，否则写入
+                         * 新分配的 COW 页面不会反映到 DRM
+                         * 帧缓冲区，导致画面不更新甚至冻结。 */
+                        if (src_pt[l] & PTE_SHM) {
+                            dst_pt[l] = src_pt[l];
+                            continue;
+                        }
+                        /* 叶子页：共享物理页，标记只读 + COW */
+                        dst_pt[l] = (src_pt[l] & ~PTE_WRITABLE) | PTE_COW;
+                        /* 同时将父进程的 PTE 也标记为只读 + COW */
+                        src_pt[l] = (src_pt[l] & ~PTE_WRITABLE) | PTE_COW;
+                    }
+
+                    dst_pd[k] = (uint64_t)(uintptr_t)new_pt_page | pt_flags;
+                }
+
+                dst_pdpt[j] = (uint64_t)(uintptr_t)new_pd_page | pd_flags;
+            }
+
+            dst_pml4[i] = (uint64_t)(uintptr_t)new_pdpt_page | pdpt_flags;
         }
 
         child->pml4 = (uint64_t)(uintptr_t)new_pml4_page;
+
+        /* 刷新父进程 TLB：父进程的 PTE 已被修改为只读，
+         * 必须刷新 TLB 以确保后续写入触发 COW 缺页 */
+        hal_flush_tlb();
 
         /* 将父进程和子进程都标记为 COW 进程 */
         child->flags  |= PROC_FLAG_COW;
@@ -386,6 +514,11 @@ int process_fork(void)
     child->mmap_base   = current->mmap_base;
     child->mmap_current = current->mmap_current;
 
+    /* 保存 FS_BASE（TLS 指针）用于子进程恢复。
+     * musl libc 通过 FS 段寄存器访问 errno 等线程局部变量，
+     * 如果 FS_BASE=0 则所有 TLS 访问都会崩溃。 */
+    child->fs_base = hal_read_msr(0xC0000100U);  /* MSR_IA32_FS_BASE */
+
     /* 进程树 */
     child->parent  = current;
     child->next    = NULL;
@@ -402,39 +535,37 @@ int process_fork(void)
     }
 
     /*
-     * Copy the parent's kernel stack contents to the child's stack.
+     * 设置子进程的启动方式。
+     *
+     * 子进程使用 kthread_trampoline 启动，入口为 fork_child_return()。
+     * 子进程的 trap_frame 通过 kmalloc 分配，保存了 fork 时的用户态上下文
+     * （rax=0），来自 caller_frame（syscall 入口压入内核栈的帧）。
+     * fork_child_return() 通过 process_enter_user() 跳转回用户态。
      */
-    if (current->kernel_stack) {
-        uint64_t parent_stack_top = (uint64_t)current->kernel_stack +
-                                     (KERNEL_STACK_PAGES * PAGE_SIZE);
-
-        uint64_t parent_rsp;
-        __asm__ volatile ("mov %%rsp, %0" : "=r"(parent_rsp));
-
-        uint64_t parent_used = parent_stack_top - parent_rsp;
-        uint64_t child_rsp   = child_stack_top - parent_used;
-
-        memcpy((void *)child_rsp, (void *)parent_rsp, parent_used);
-
-        child->kernel_rsp = child_rsp;
-        child->trap_frame = NULL;
-
-        /* 将 trap frame 的 rax 修补为 0，使子进程从 fork 返回 0 */
-        if (current->trap_frame) {
-            int64_t tf_offset = (int64_t)((uint64_t)current->trap_frame -
-                                           parent_stack_top);
-            trap_frame_t *child_tf = (trap_frame_t *)(
-                (int64_t)child_stack_top + tf_offset);
-            child_tf->rax = 0;
+    {
+        /* 为子进程分配 trap_frame，保存 fork 时的用户态上下文 */
+        if (caller_frame) {
+            trap_frame_t *child_tf = kmalloc(sizeof(trap_frame_t));
+            if (!child_tf) {
+                child->state = PROC_UNUSED;
+                return -1;
+            }
+            memcpy(child_tf, caller_frame, sizeof(trap_frame_t));
+            child_tf->rax = 0;  /* fork 在子进程返回 0 */
             child->trap_frame = child_tf;
         }
-    } else {
-        /* Parent is PID 0 using the boot stack – can't copy.
-         * Build a minimal frame that returns 0. */
+
+        /* 构建子进程内核栈：使用 kthread_trampoline 格式
+         * 栈布局（从高到低）：
+         *   arg (child)       ← pop rsi
+         *   fork_child_return ← pop rdi  (entry)
+         *   kthread_trampoline_asm ← ret address for arch_switch_to
+         *   rbp, rbx, r12-r15 ← callee-saved
+         */
         uint64_t *sp = (uint64_t *)child_stack_top;
-        *--sp = 0;   /* arg (not used) */
-        *--sp = 0;   /* entry (not used) */
-        *--sp = (uint64_t)kthread_trampoline_asm;
+        *--sp = (uint64_t)child;                     /* arg → rsi */
+        *--sp = (uint64_t)fork_child_return;         /* entry → rdi */
+        *--sp = (uint64_t)kthread_trampoline_asm;    /* return address for arch_switch_to */
         *--sp = 0;  /* rbp */
         *--sp = 0;  /* rbx */
         *--sp = 0;  /* r12 */
@@ -442,8 +573,10 @@ int process_fork(void)
         *--sp = 0;  /* r14 */
         *--sp = 0;  /* r15 */
         child->kernel_rsp = (uint64_t)sp;
-        child->trap_frame = NULL;
     }
+
+    /* 子进程必须入队，否则调度器无法找到它 */
+    process_enqueue(child);
 
     return pid;
 }
@@ -475,11 +608,7 @@ void process_exit(int code)
     /* Close all open file descriptors */
     for (int i = 0; i < PROC_MAX_FD; i++) {
         if (current->fd_table[i]) {
-            vfs_file_t *file = current->fd_table[i];
-            file->refcount--;
-            if (file->refcount <= 0)
-                free_page(file);
-            current->fd_table[i] = NULL;
+            vfs_close(i);
         }
     }
 
@@ -492,7 +621,7 @@ void process_exit(int code)
 
     /* Wake up parent if it's waiting */
     if (current->parent && current->parent->state == PROC_BLOCKED)
-        current->parent->state = PROC_READY;
+        process_wake(current->parent);
 
     process_t *ch = current->child;
     while (ch) {
@@ -675,7 +804,7 @@ int process_kill(int pid, int sig)
     target->pending_signals |= (1ULL << (sig - 1));
 
     if (target->state == PROC_BLOCKED)
-        target->state = PROC_READY;
+        process_wake(target);
 
     spinlock_release(&proc_table_lock);
     return 0;
@@ -841,6 +970,24 @@ int process_clone(uint64_t flags, uint64_t child_stack,
         /* Store ctid for later use - simplified: we skip this for now */
     }
 
+    /* 子进程必须入队，否则调度器无法找到它 */
+    process_enqueue(child);
+
+    /* vfork 语义：如果设置了 CLONE_VM（vfork 场景），
+     * 父进程必须阻塞直到子进程调用 execve 或 _exit。
+     * 这是因为子进程共享父进程的地址空间，
+     * 两者不能同时运行。 */
+    if (flags & CLONE_VM) {
+        serial_puts("[vfork] parent PID=");
+        serial_put_dec((uint64_t)current->pid);
+        serial_puts(" blocked, child PID=");
+        serial_put_dec((uint64_t)pid);
+        serial_puts("\n");
+        current->state = PROC_BLOCKED;
+        current->sleep_until = 0;  /* 无超时，等待显式唤醒 */
+        this_cpu()->need_reschedule = 1;
+    }
+
     return pid;
 }
 
@@ -862,17 +1009,66 @@ int process_cow_page_fault(uint64_t fault_addr)
     if (!current)
         return -1;
 
-    if (!(current->flags & PROC_FLAG_COW))
+    if (!(current->flags & PROC_FLAG_COW)) {
+        static int cow_skip_count = 0;
+        cow_skip_count++;
+        if (cow_skip_count <= 5) {
+            serial_puts("[COW] SKIP: PID=");
+            serial_put_dec((uint64_t)current->pid);
+            serial_puts(" flags=0x");
+            serial_put_hex((uint64_t)current->flags);
+            serial_puts(" addr=0x");
+            serial_put_hex(fault_addr);
+            serial_puts("\n");
+        }
         return -1;
+    }
 
     uint64_t page_vaddr = fault_addr & ~(uint64_t)(PAGE_SIZE - 1);
+
+    /* 检测同一地址的重复 COW 错误，防止无限循环 */
+    {
+        static uint64_t last_cow_addr = 0;
+        static int cow_repeat_count = 0;
+        if (page_vaddr == last_cow_addr) {
+            cow_repeat_count++;
+            if (cow_repeat_count > 3) {
+                serial_puts("[COW] LOOP DETECTED! addr=0x");
+                serial_put_hex(fault_addr);
+                serial_puts(" PID=");
+                serial_put_dec((uint64_t)current->pid);
+                serial_puts(" pml4=0x");
+                serial_put_hex(current->pml4);
+                serial_puts("\n");
+                /* 全局 TLB 刷新作为最后手段 */
+                hal_flush_tlb();
+                cow_repeat_count = 0;
+            }
+        } else {
+            last_cow_addr = page_vaddr;
+            cow_repeat_count = 0;
+        }
+    }
+
     uint64_t *pte = mmu_walk_page(current->pml4, page_vaddr, 0);
-    if (!pte || !(*pte & PTE_PRESENT))
+    if (!pte || !(*pte & PTE_PRESENT)) {
+        serial_puts("[COW] FAIL: no PTE for addr=0x");
+        serial_put_hex(fault_addr);
+        serial_puts(" PID=");
+        serial_put_dec((uint64_t)current->pid);
+        serial_puts("\n");
         return -1;
+    }
 
     /* 检查 COW 标记（位 9） */
-    if (!(*pte & PTE_COW))
+    if (!(*pte & PTE_COW)) {
+        serial_puts("[COW] FAIL: not COW pte=0x");
+        serial_put_hex(*pte);
+        serial_puts(" addr=0x");
+        serial_put_hex(fault_addr);
+        serial_puts("\n");
         return -1;
+    }
 
     uint64_t old_phys = *pte & PTE_ADDR_MASK;
     void *new_page = alloc_page();
@@ -884,6 +1080,28 @@ int process_cow_page_fault(uint64_t fault_addr)
     uint64_t new_phys = (uint64_t)(uintptr_t)new_page;
     *pte = new_phys | (*pte & ~(PTE_ADDR_MASK | PTE_COW)) | PTE_WRITABLE;
 
+    /* 刷新 TLB：先尝试单页刷新，如果重复则全局刷新 */
     hal_flush_tlb_page((uintptr_t)page_vaddr);
+
+    /* 验证 PTE 已正确更新 */
+    uint64_t *verify_pte = mmu_walk_page(current->pml4, page_vaddr, 0);
+    if (verify_pte && !(*verify_pte & PTE_WRITABLE)) {
+        serial_puts("[COW] BUG: PTE still not writable after update! pte=0x");
+        serial_put_hex(*verify_pte);
+        serial_puts("\n");
+        hal_flush_tlb();
+    }
+
+    {
+        static int cow_count = 0;
+        cow_count++;
+        if (cow_count <= 10 || cow_count % 200 == 0) {
+            serial_puts("[COW] #");
+            serial_put_dec((uint64_t)cow_count);
+            serial_puts(" PID=");
+            serial_put_dec((uint64_t)current->pid);
+            serial_puts("\n");
+        }
+    }
     return 0;
 }

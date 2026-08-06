@@ -24,6 +24,9 @@
 #define SF_CLOSE_BUTTON_SIZE 20
 #define SF_CLOSE_BUTTON_PAD  4
 
+/* 桌面面板（任务栏） */
+#define SF_PANEL_HEIGHT      32
+
 /* 前向声明 */
 typedef struct sf_compositor sf_compositor_t;
 typedef struct sf_surface    sf_surface_t;
@@ -192,6 +195,9 @@ struct sf_compositor {
     /* 运行状态 */
     int running;
     int need_composite;  /* 需要重新合成 */
+
+    /* 背景缓存（预渲染，避免每帧重算） */
+    uint32_t *bg_cache;
 };
 
 /* ========================================================================

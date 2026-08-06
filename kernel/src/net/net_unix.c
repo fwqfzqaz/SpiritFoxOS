@@ -15,39 +15,41 @@
 #include "process.h"
 #include "smp.h"
 #include "errno.h"
+#include "vfs.h"
+#include "memory.h"
 
 #define UNIX_MAX_LISTENERS 32
 
-/* Global table of bound Unix sockets (path -> fd) */
+/* Global table of bound Unix sockets (path -> socket pointer) */
 static struct {
     char path[UNIX_PATH_MAX];
-    int  fd;
+    net_socket_t *sock;
 } unix_listeners[UNIX_MAX_LISTENERS];
 static int unix_listener_count = 0;
 
-/* Find a listening Unix socket by path, return fd or -1 */
-static int unix_find_listener(const char *path)
+/* Find a listening Unix socket by path, return socket pointer or NULL */
+static net_socket_t *unix_find_listener(const char *path)
 {
     for (int i = 0; i < unix_listener_count; i++) {
         if (strcmp(unix_listeners[i].path, path) == 0)
-            return unix_listeners[i].fd;
+            return unix_listeners[i].sock;
     }
-    return -1;
+    return NULL;
 }
 
 /* Register a Unix socket listener */
-static int unix_register_listener(const char *path, int fd)
+static int unix_register_listener(const char *path, net_socket_t *sock)
 {
     if (unix_listener_count >= UNIX_MAX_LISTENERS)
         return -ENOMEM;
     strcpy(unix_listeners[unix_listener_count].path, path);
-    unix_listeners[unix_listener_count].fd = fd;
+    unix_listeners[unix_listener_count].sock = sock;
     unix_listener_count++;
     return 0;
 }
 
 /* Unregister a Unix socket listener */
-static void unix_unregister_listener(const char *path)
+void unix_unregister_listener(const char *path)
 {
     for (int i = 0; i < unix_listener_count; i++) {
         if (strcmp(unix_listeners[i].path, path) == 0) {
@@ -56,6 +58,28 @@ static void unix_unregister_listener(const char *path)
             return;
         }
     }
+}
+
+/* Release a reference on a duplicated vfs_file that was queued for
+ * SCM_RIGHTS delivery but will not be consumed (e.g. socket closed or
+ * the receiver's fd table / cmsg buffer is full).  Uses the standard
+ * close path so pipe / chardev cleanup is handled consistently. */
+static void unix_release_file(vfs_file_t *f)
+{
+    if (!f)
+        return;
+
+    int tmpfd = vfs_alloc_fd();
+    if (tmpfd >= 0) {
+        vfs_get_fd_table()[tmpfd] = f;
+        vfs_close(tmpfd);
+        return;
+    }
+
+    /* No free fd slot available: drop the reference directly. */
+    f->refcount--;
+    if (f->refcount <= 0)
+        free_page(f);
 }
 
 /* Create an AF_UNIX socket */
@@ -69,18 +93,18 @@ int unix_socket(int type, int protocol)
     if (protocol != 0)
         return -EPROTONOSUPPORT;
 
-    int fd = net_alloc_socket_slot();
-    if (fd < 0)
+    int net_fd = net_alloc_socket_slot();
+    if (net_fd < 0)
         return -ENOMEM;
 
-    net_socket_t *s = net_get_socket(fd);
+    net_socket_t *s = net_get_socket(net_fd);
     if (!s) {
-        net_free_socket_slot(fd);
+        net_free_socket_slot(net_fd);
         return -ENOMEM;
     }
 
     memset(s, 0, sizeof(*s));
-    s->fd = fd;
+    s->fd = net_fd;  /* temporarily the net slot index */
     s->domain = AF_UNIX;
     s->type = SOCK_STREAM;
     s->protocol = 0;
@@ -95,7 +119,7 @@ int unix_socket(int type, int protocol)
     s->rx_size = NET_RX_BUF_SIZE;
     s->rx_buf = kmalloc(s->rx_size);
     if (!s->rx_buf) {
-        net_free_socket_slot(fd);
+        net_free_socket_slot(net_fd);
         return -ENOMEM;
     }
     s->rx_read_pos = 0;
@@ -106,7 +130,15 @@ int unix_socket(int type, int protocol)
     s->unix_peer = NULL;
     s->blocking_pid = -1;
 
-    return fd;
+    /* Register in VFS fd table to unify the fd namespace */
+    int vfs_fd = vfs_register_socket(s);
+    if (vfs_fd < 0) {
+        net_free_socket_slot(net_fd);
+        kfree(s->rx_buf);
+        return vfs_fd;
+    }
+
+    return vfs_fd;
 }
 
 /* Bind an AF_UNIX socket to a path */
@@ -121,7 +153,7 @@ int unix_bind(int fd, const sockaddr_un_t *addr, socklen_t addrlen)
         return -EINVAL;  /* already bound */
 
     /* Check if path already in use */
-    if (unix_find_listener(addr->sun_path) >= 0)
+    if (unix_find_listener(addr->sun_path) != NULL)
         return -EADDRINUSE;
 
     strncpy(s->unix_path, addr->sun_path, UNIX_PATH_MAX - 1);
@@ -143,8 +175,9 @@ int unix_listen(int fd, int backlog)
     s->state = TCP_LISTEN;
     s->pending_count = 0;
 
-    /* Register as a listener */
-    int ret = unix_register_listener(s->unix_path, fd);
+    /* Register as a listener — store the socket pointer directly
+     * so that cross-process lookups work regardless of fd namespace */
+    int ret = unix_register_listener(s->unix_path, s);
     if (ret < 0)
         return ret;
 
@@ -191,27 +224,31 @@ int unix_accept(int fd, sockaddr_un_t *addr, socklen_t *addrlen)
     s->pending_count--;
 
     /* Create a new server-side socket for this connection */
-    int new_fd = net_alloc_socket_slot();
-    if (new_fd < 0)
+    int net_fd = net_alloc_socket_slot();
+    if (net_fd < 0)
         return -ENOMEM;
 
-    net_socket_t *server_conn = net_get_socket(new_fd);
+    net_socket_t *server_conn = net_get_socket(net_fd); /* gets from net slot table */
     if (!server_conn) {
-        net_free_socket_slot(new_fd);
+        net_free_socket_slot(net_fd);
         return -ENOMEM;
     }
 
     memset(server_conn, 0, sizeof(*server_conn));
-    server_conn->fd = new_fd;
+    server_conn->fd = net_fd;  /* temporarily net slot, vfs_register_socket updates it */
     server_conn->domain = AF_UNIX;
     server_conn->type = SOCK_STREAM;
     server_conn->state = TCP_ESTABLISHED;
+    /* Accepted sockets are non-blocking by default — libwayland-server
+     * expects this and does not explicitly set O_NONBLOCK.  Without it,
+     * recvmsg blocks when no data is available, freezing the compositor. */
+    server_conn->flags |= 0x01;  /* SOCKF_NONBLOCK */
 
     /* Allocate rx buffer */
     server_conn->rx_size = NET_RX_BUF_SIZE;
     server_conn->rx_buf = kmalloc(server_conn->rx_size);
     if (!server_conn->rx_buf) {
-        net_free_socket_slot(new_fd);
+        net_free_socket_slot(net_fd);
         return -ENOMEM;
     }
 
@@ -220,28 +257,49 @@ int unix_accept(int fd, sockaddr_un_t *addr, socklen_t *addrlen)
     client->unix_peer = server_conn;
     client->state = TCP_ESTABLISHED;
 
+    /* Set SO_PEERCRED on the server-side socket:
+     * the peer of the server socket is the client process */
+    server_conn->peer_pid = client->peer_pid;
+    server_conn->peer_uid = client->peer_uid;
+    server_conn->peer_gid = client->peer_gid;
+
     /* If client was blocked waiting for connect, wake it */
     if (client->blocking_pid >= 0) {
         process_t *proc = process_get(client->blocking_pid);
         if (proc && proc->state == PROC_BLOCKED) {
-            proc->state = PROC_READY;
+            process_wake(proc);
             client->blocking_pid = -1;
         }
     }
 
-    /* Return address info */
-    if (addr && addrlen) {
-        addr->sun_family = AF_UNIX;
-        strncpy(addr->sun_path, client->unix_path, UNIX_PATH_MAX - 1);
-        *addrlen = (socklen_t)(offsetof(sockaddr_un_t, sun_path) + strlen(addr->sun_path) + 1);
+    /* Register the new server-side socket in VFS fd table */
+    int vfs_fd = vfs_register_socket(server_conn);
+    if (vfs_fd < 0) {
+        kfree(server_conn->rx_buf);
+        net_free_socket_slot(net_fd);
+        return vfs_fd;
     }
+
+    /* Set O_NONBLOCK on the VFS fd as well — the socket flags alone
+     * are not enough for fcntl(F_GETFL) to report non-blocking. */
+    {
+        vfs_file_t **fds = vfs_get_fd_table();
+        if (fds && fds[vfs_fd])
+            fds[vfs_fd]->flags |= 0x800;  /* LINUX_O_NONBLOCK */
+    }
+
+    /* Return address info - skip if userspace pointer is inaccessible.
+     * libwayland passes NULL for addr, so this rarely matters.
+     * TODO: implement copy_to_user for proper userspace writes. */
+    (void)addr;
+    (void)addrlen;
 
     serial_puts("[UNIX] accepted connection on ");
     serial_puts(s->unix_path);
-    serial_puts(" (new_fd=");
-    serial_put_dec((uint64_t)new_fd);
+    serial_puts(" (new_vfs_fd=");
+    serial_put_dec((uint64_t)vfs_fd);
     serial_puts(")\n");
-    return new_fd;
+    return vfs_fd;
 }
 
 /* Connect to an AF_UNIX socket */
@@ -254,13 +312,13 @@ int unix_connect(int fd, const sockaddr_un_t *addr, socklen_t addrlen)
     if (!addr)
         return -EINVAL;
 
-    /* Find the listening socket */
-    int listen_fd = unix_find_listener(addr->sun_path);
-    if (listen_fd < 0)
+    /* Find the listening socket — returns the socket pointer directly,
+     * bypassing the fd namespace so cross-process lookups work */
+    net_socket_t *listener = unix_find_listener(addr->sun_path);
+    if (!listener)
         return -ECONNREFUSED;
 
-    net_socket_t *listener = net_get_socket(listen_fd);
-    if (!listener || listener->state != TCP_LISTEN)
+    if (listener->state != TCP_LISTEN)
         return -ECONNREFUSED;
 
     if (listener->pending_count >= NET_TCP_BACKLOG)
@@ -274,11 +332,21 @@ int unix_connect(int fd, const sockaddr_un_t *addr, socklen_t addrlen)
     listener->pending_conns[listener->pending_count++] = s;
     s->state = TCP_SYN_SENT;  /* connecting */
 
+    /* Record the connecting process credentials for SO_PEERCRED */
+    {
+        process_t *cur = process_current();
+        if (cur) {
+            s->peer_pid = cur->pid;
+            s->peer_uid = 0;  /* root for now */
+            s->peer_gid = 0;  /* root for now */
+        }
+    }
+
     /* Wake up the listener if it was blocked in accept() */
     if (listener->blocking_pid >= 0) {
         process_t *proc = process_get(listener->blocking_pid);
         if (proc && proc->state == PROC_BLOCKED) {
-            proc->state = PROC_READY;
+            process_wake(proc);
             listener->blocking_pid = -1;
         }
     }
@@ -302,8 +370,13 @@ int unix_connect(int fd, const sockaddr_un_t *addr, socklen_t addrlen)
     return 0;
 }
 
-/* Send data on an AF_UNIX socket */
-int unix_send(int fd, const void *buf, size_t len, int flags)
+/* Send data on an AF_UNIX socket.  If fds != NULL and fd_count > 0, the
+ * referenced file descriptors are passed to the peer via SCM_RIGHTS:
+ * each vfs_file is duplicated (refcount bumped) and queued on the peer's
+ * pending list, to be materialized into the receiver's fd table by
+ * unix_recv/recvmsg. */
+int unix_send(int fd, const void *buf, size_t len, int flags,
+              const int *fds, int fd_count)
 {
     (void)flags;
     net_socket_t *s = net_get_socket(fd);
@@ -316,16 +389,52 @@ int unix_send(int fd, const void *buf, size_t len, int flags)
     if (!peer)
         return -EPIPE;
 
+    /* Validate fds to pass via SCM_RIGHTS up front (before sending). */
+    if (fd_count > 0) {
+        if (!fds || fd_count > 8)
+            return -EINVAL;
+        if (peer->pending_fd_count + fd_count > 8)
+            return -EINVAL;  /* no room in peer's pending fd buffer */
+        vfs_file_t **sender_fds = vfs_get_fd_table();
+        for (int i = 0; i < fd_count; i++) {
+            int f = fds[i];
+            if (f < 0 || f >= VFS_MAX_FD || !sender_fds[f])
+                return -EBADF;
+        }
+    }
+
     /* Write data to peer's rx buffer */
     int written = net_rx_buffer_write(peer, buf, len);
     if (written < 0)
         return -EAGAIN;
 
+    /* Queue passed fds on the peer: duplicate each (bump refcount) and
+     * hold the reference in pending_files until the peer consumes it. */
+    if (fd_count > 0) {
+        int base = peer->pending_fd_count;
+        for (int i = 0; i < fd_count; i++) {
+            int tmpfd = vfs_dup(fds[i]);
+            if (tmpfd < 0) {
+                /* Rollback fds queued so far in this call */
+                for (int j = 0; j < i; j++)
+                    unix_release_file(peer->pending_files[base + j]);
+                peer->pending_fd_count = base;
+                return -EBADF;
+            }
+            /* Detach the temporary sender fd slot but keep the refcount
+             * bump; the reference now belongs to pending_files. */
+            vfs_file_t *f = vfs_get_fd_table()[tmpfd];
+            vfs_get_fd_table()[tmpfd] = NULL;
+            peer->pending_files[base + i] = f;
+            peer->pending_fd_count = base + i + 1;
+        }
+    }
+
     /* Wake up any process blocked on recv for the peer */
     if (peer->blocking_pid >= 0) {
         process_t *proc = process_get(peer->blocking_pid);
         if (proc && proc->state == PROC_BLOCKED) {
-            proc->state = PROC_READY;
+            process_wake(proc);
             peer->blocking_pid = -1;
         }
     }
@@ -333,19 +442,44 @@ int unix_send(int fd, const void *buf, size_t len, int flags)
     return written;
 }
 
-/* Receive data on an AF_UNIX socket */
-int unix_recv(int fd, void *buf, size_t len, int flags)
+/* Receive data on an AF_UNIX socket.  If fds/fd_count are non-NULL, any
+ * fds previously passed via SCM_RIGHTS are materialized into the current
+ * (receiver) process's fd table and reported through fds[]; *fd_count is
+ * the caller capacity on input and the number delivered on output.  Undelivered
+ * pending fds (capacity exceeded) are released so they do not leak. */
+int unix_recv(int fd, void *buf, size_t len, int flags,
+              int *fds, int *fd_count)
 {
-    (void)flags;
     net_socket_t *s = net_get_socket(fd);
     if (!s || s->domain != AF_UNIX)
         return -EBADF;
     if (s->state != TCP_ESTABLISHED)
         return -ENOTCONN;
 
-    /* Check if data is available */
-    if (s->rx_count == 0) {
-        if (s->flags & SOCKF_NONBLOCK)
+    int dontwait = (flags & MSG_DONTWAIT) || (s->flags & SOCKF_NONBLOCK);
+
+    {
+        static int recv_log_count = 0;
+        recv_log_count++;
+        if (recv_log_count <= 50 || recv_log_count % 1000 == 0) {
+            serial_puts("[unix_recv] fd=");
+            serial_put_dec((uint64_t)fd);
+            serial_puts(" flags=0x");
+            serial_put_hex((uint64_t)flags);
+            serial_puts(" dontwait=");
+            serial_put_dec((uint64_t)dontwait);
+            serial_puts(" rx_count=");
+            serial_put_dec((uint64_t)s->rx_count);
+            serial_puts("\n");
+        }
+    }
+
+    int has_fd_request = (fds != NULL && fd_count != NULL);
+
+    /* Block until data or passed fds are available.  A recvmsg that only
+     * needs to drain pending fds must not block on absent data. */
+    if (s->rx_count == 0 && (!has_fd_request || s->pending_fd_count == 0)) {
+        if (dontwait)
             return -EAGAIN;
 
         /* Block until data arrives */
@@ -359,6 +493,44 @@ int unix_recv(int fd, void *buf, size_t len, int flags)
     }
 
     int rd = net_rx_buffer_read(s, buf, len);
+
+    /* Materialize any pending SCM_RIGHTS fds into the receiver's table. */
+    if (has_fd_request) {
+        int capacity = *fd_count;
+        if (capacity < 0)
+            capacity = 0;
+        if (capacity > 8)
+            capacity = 8;
+        int n = s->pending_fd_count;
+        int delivered = 0;
+
+        if (n > 0 && capacity > 0) {
+            vfs_file_t **recv_fds = vfs_get_fd_table();
+            for (int i = 0; i < n && i < capacity; i++) {
+                int newfd = vfs_alloc_fd();
+                if (newfd < 0)
+                    break;  /* receiver fd table full */
+                recv_fds[newfd] = s->pending_files[i];
+                s->pending_fds[i] = newfd;
+                fds[i] = newfd;
+                delivered++;
+            }
+        }
+
+        /* Release any pending fds that could not be delivered. */
+        for (int i = delivered; i < n; i++)
+            unix_release_file(s->pending_files[i]);
+
+        *fd_count = delivered;
+
+        /* Reset the pending queues (consumed). */
+        for (int i = 0; i < s->pending_fd_count; i++) {
+            s->pending_files[i] = NULL;
+            s->pending_fds[i] = 0;
+        }
+        s->pending_fd_count = 0;
+    }
+
     return rd;
 }
 
@@ -381,11 +553,20 @@ int unix_close(int fd)
         if (s->unix_peer->blocking_pid >= 0) {
             process_t *proc = process_get(s->unix_peer->blocking_pid);
             if (proc && proc->state == PROC_BLOCKED) {
-                proc->state = PROC_READY;
+                process_wake(proc);
                 s->unix_peer->blocking_pid = -1;
             }
         }
     }
+
+    /* Release any unconsumed SCM_RIGHTS file references */
+    for (int i = 0; i < s->pending_fd_count; i++) {
+        if (s->pending_files[i])
+            unix_release_file(s->pending_files[i]);
+        s->pending_files[i] = NULL;
+        s->pending_fds[i] = 0;
+    }
+    s->pending_fd_count = 0;
 
     /* Free rx buffer */
     if (s->rx_buf) {
@@ -399,6 +580,14 @@ int unix_close(int fd)
         s->tx_buf = NULL;
     }
 
-    net_free_socket_slot(fd);
+    /* Get the net slot index from the VFS inode's fs_data */
+    vfs_file_t **fds = vfs_get_fd_table();
+    int net_fd = -1;
+    if (fds && fd >= 0 && fd < VFS_MAX_FD && fds[fd] && fds[fd]->inode)
+        net_fd = (int)(uintptr_t)fds[fd]->inode->fs_data;
+
+    if (net_fd >= 0)
+        net_free_socket_slot(net_fd);
+
     return 0;
 }

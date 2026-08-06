@@ -292,10 +292,26 @@ main(int argc, char **argv)
     (void)argc;
     (void)argv;
 
+    /* Earliest possible output to verify main() is reached */
+    {
+        const char *_m = "[CL] main() entered\n";
+        write(2, _m, strlen(_m));
+    }
+
     fprintf(stderr, "[client] SpiritFoxOS Wayland test client\n");
 
     /* 1. 连接到 Wayland 显示 */
+    {
+        const char *_m = "[CL] calling wl_display_connect\n";
+        write(2, _m, strlen(_m));
+    }
     display = wl_display_connect(NULL);
+    if (!display) {
+        const char *_m = "[CL] wl_display_connect FAILED, retrying in 1s...\n";
+        write(2, _m, strlen(_m));
+        sleep(1);
+        display = wl_display_connect(NULL);
+    }
     if (!display) {
         fprintf(stderr, "[client] ERROR: cannot connect to Wayland display\n");
         return 1;

@@ -434,8 +434,11 @@ int terminal_readline(char *buf, int maxlen)
             char c = keyboard_get_char();
             terminal_input(c);
         } else {
-            /* 无输入时让出 CPU */
-            __asm__ volatile ("hlt");
+            /* 无输入时让出 CPU，让调度器运行其他就绪进程（如 bgexec 启动的用户程序）。
+             * sti + hlt 确保中断可以到来（时钟中断触发调度），
+             * 同时主动标记 need_reschedule 以确保用户进程获得调度时间。 */
+            extern void scheduler_yield(void);
+            scheduler_yield();
         }
     }
 

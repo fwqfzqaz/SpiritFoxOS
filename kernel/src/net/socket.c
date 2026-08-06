@@ -14,11 +14,15 @@
 #include "net.h"
 #include "kmalloc.h"
 #include "string.h"
+#include "vfs.h"
 #include "vga.h"
 #include "hal.h"
 #include "timer.h"
 #include "rtl8139.h"
 #include "net_arp.h"
+#include "process.h"
+#include "mmu.h"
+#include "serial.h"
 
 /* ========================================================================
  * Error codes (match syscall.c definitions)
@@ -58,6 +62,12 @@ int      net_hw_initialized = 0;
 
 net_socket_t *net_get_socket(int fd)
 {
+    /* First try VFS fd table — the fd is now a VFS fd */
+    net_socket_t *vs = vfs_get_socket(fd);
+    if (vs)
+        return vs;
+
+    /* Fallback: try the net slot table (for internal kernel use) */
     if (fd < 0 || fd >= NET_MAX_SOCKETS)
         return NULL;
     if (!socket_used[fd])
@@ -342,12 +352,12 @@ int net_socket(int domain, int type, int protocol)
     if (type == SOCK_DGRAM && protocol != 0 && protocol != IP_PROTO_UDP)
         return -EPROTONOSUPPORT;
 
-    int fd = net_alloc_socket_slot();
-    if (fd < 0)
+    int net_fd = net_alloc_socket_slot();
+    if (net_fd < 0)
         return -ENOMEM;
 
-    net_socket_t *s = &sockets[fd];
-    s->fd = fd;
+    net_socket_t *s = &sockets[net_fd];
+    s->fd = net_fd;  /* temporarily the net slot index */
     s->domain = domain;
     s->type = type;
     s->protocol = (type == SOCK_STREAM) ? IP_PROTO_TCP : IP_PROTO_UDP;
@@ -383,7 +393,7 @@ int net_socket(int domain, int type, int protocol)
     s->rx_buf = (uint8_t *)kmalloc(NET_RX_BUF_SIZE);
     s->tx_buf = (uint8_t *)kmalloc(NET_TX_BUF_SIZE);
     if (!s->rx_buf || !s->tx_buf) {
-        net_free_socket_slot(fd);
+        net_free_socket_slot(net_fd);
         return -ENOMEM;
     }
     s->rx_size = NET_RX_BUF_SIZE;
@@ -395,7 +405,16 @@ int net_socket(int domain, int type, int protocol)
     s->tx_write_pos = 0;
     s->tx_count = 0;
 
-    return fd;
+    /* Register in VFS fd table to unify the fd namespace */
+    int vfs_fd = vfs_register_socket(s);
+    if (vfs_fd < 0) {
+        if (s->rx_buf) kfree(s->rx_buf);
+        if (s->tx_buf) kfree(s->tx_buf);
+        net_free_socket_slot(net_fd);
+        return vfs_fd;
+    }
+
+    return vfs_fd;
 }
 
 int net_bind(int fd, const net_sockaddr_t *addr, socklen_t addrlen)
@@ -493,13 +512,10 @@ int net_accept(int fd, net_sockaddr_t *addr, socklen_t *addrlen)
         return -EAGAIN;
     }
 
-    if (addr && addrlen && *addrlen >= sizeof(net_sockaddr_t)) {
-        addr->sin_family = AF_INET;
-        addr->sin_port = htons(child->remote_port);
-        addr->sin_addr = htonl(child->remote_ip);
-        memset(addr->sin_zero, 0, sizeof(addr->sin_zero));
-        *addrlen = sizeof(net_sockaddr_t);
-    }
+    /* Skip userspace addr fill - would need copy_to_user.
+     * Most callers (libwayland) pass NULL anyway. */
+    (void)addr;
+    (void)addrlen;
 
     for (int i = child_idx; i < s->pending_count - 1; i++)
         s->pending_conns[i] = s->pending_conns[i + 1];
@@ -567,8 +583,14 @@ int net_send(int fd, const void *buf, size_t len, int flags)
         return -EBADF;
 
     /* AF_UNIX dispatch */
-    if (s->domain == AF_UNIX)
-        return unix_send(fd, buf, len, flags);
+    if (s->domain == AF_UNIX) {
+        serial_puts("[net_send] unix fd=");
+        serial_put_dec((uint64_t)fd);
+        serial_puts(" len=");
+        serial_put_dec((uint64_t)len);
+        serial_puts("\n");
+        return unix_send(fd, buf, len, flags, NULL, 0);
+    }
 
     if (s->type != SOCK_STREAM)
         return -EOPNOTSUPP;
@@ -627,7 +649,7 @@ int net_recv(int fd, void *buf, size_t len, int flags)
 
     /* AF_UNIX dispatch */
     if (s->domain == AF_UNIX)
-        return unix_recv(fd, buf, len, flags);
+        return unix_recv(fd, buf, len, flags, NULL, NULL);
 
     if (s->type != SOCK_STREAM)
         return -EOPNOTSUPP;
@@ -765,7 +787,15 @@ int net_close(int fd)
         }
     }
 
-    net_free_socket_slot(fd);
+    /* Get the net slot index from the VFS inode's fs_data */
+    vfs_file_t **fds = vfs_get_fd_table();
+    int net_fd = -1;
+    if (fds && fd >= 0 && fd < VFS_MAX_FD && fds[fd] && fds[fd]->inode)
+        net_fd = (int)(uintptr_t)fds[fd]->inode->fs_data;
+
+    if (net_fd >= 0)
+        net_free_socket_slot(net_fd);
+
     return 0;
 }
 
@@ -791,6 +821,15 @@ int net_setsockopt(int fd, int level, int optname, const void *optval, socklen_t
     return -EOPNOTSUPP;
 }
 
+/* Linux struct ucred for SO_PEERCRED */
+struct ucred {
+    int pid;
+    int uid;
+    int gid;
+};
+
+#define SO_PEERCRED 17
+
 int net_getsockopt(int fd, int level, int optname, void *optval, socklen_t *optlen)
 {
     net_socket_t *s = net_get_socket(fd);
@@ -801,10 +840,40 @@ int net_getsockopt(int fd, int level, int optname, void *optval, socklen_t *optl
         switch (optname) {
         case SO_REUSEADDR: {
             int val = 1;
-            if (optval && optlen && *optlen >= sizeof(int)) {
-                memcpy(optval, &val, sizeof(int));
-                *optlen = sizeof(int);
+            if (optval && optlen) {
+                socklen_t klen = 0;
+                /* Read optlen from userspace via physical mapping */
+                process_t *proc = process_current();
+                uint64_t phys = mmu_virt_to_phys(proc->pml4, (uint64_t)optlen);
+                if (phys)
+                    klen = *(socklen_t *)(uintptr_t)phys;
+                if (klen >= sizeof(int)) {
+                    write_user_mem(proc, (uint64_t)optval, &val, sizeof(int));
+                    klen = sizeof(int);
+                    write_user_mem(proc, (uint64_t)optlen, &klen, sizeof(socklen_t));
+                }
             }
+            return 0;
+        }
+        case SO_PEERCRED: {
+            if (s->domain != AF_UNIX)
+                return -EOPNOTSUPP;
+            if (!optval || !optlen)
+                return -EINVAL;
+            process_t *proc = process_current();
+            socklen_t klen = 0;
+            uint64_t phys = mmu_virt_to_phys(proc->pml4, (uint64_t)optlen);
+            if (phys)
+                klen = *(socklen_t *)(uintptr_t)phys;
+            if (klen < sizeof(struct ucred))
+                return -EINVAL;
+            struct ucred cred;
+            cred.pid = s->peer_pid;
+            cred.uid = s->peer_uid;
+            cred.gid = s->peer_gid;
+            write_user_mem(proc, (uint64_t)optval, &cred, sizeof(cred));
+            klen = sizeof(cred);
+            write_user_mem(proc, (uint64_t)optlen, &klen, sizeof(socklen_t));
             return 0;
         }
         default:
@@ -863,7 +932,76 @@ int net_sendmsg(int fd, const struct msghdr *msg, int flags)
     if (!msg)
         return -EINVAL;
 
-    /* Skip address and control for now */
+    net_socket_t *s = net_get_socket(fd);
+    if (!s)
+        return -EBADF;
+
+    /* AF_UNIX: parse SCM_RIGHTS control messages and pass fds with the data. */
+    if (s->domain == AF_UNIX) {
+        int pass_fds[8];
+        int pass_fd_count = 0;
+
+        if (msg->msg_control && msg->msg_controllen >= sizeof(struct cmsghdr)) {
+            unsigned char *ctrl = (unsigned char *)msg->msg_control;
+            unsigned char *ctrl_end = ctrl + msg->msg_controllen;
+            struct cmsghdr *cm = (struct cmsghdr *)ctrl;
+            while ((unsigned char *)cm + sizeof(struct cmsghdr) <= ctrl_end) {
+                if (cm->cmsg_len < sizeof(struct cmsghdr) ||
+                    (unsigned char *)cm + cm->cmsg_len > ctrl_end)
+                    break;
+                if (cm->cmsg_level == SOL_SOCKET && cm->cmsg_type == SCM_RIGHTS) {
+                    int *data = (int *)CMSG_DATA(cm);
+                    int data_bytes = (int)cm->cmsg_len -
+                                     (int)CMSG_ALIGN(sizeof(struct cmsghdr));
+                    int n = data_bytes / (int)sizeof(int);
+                    for (int i = 0; i < n && pass_fd_count < 8; i++)
+                        pass_fds[pass_fd_count++] = data[i];
+                }
+                /* Advance to the next (aligned) control message. */
+                size_t adv = CMSG_ALIGN(cm->cmsg_len);
+                if (adv < sizeof(struct cmsghdr))
+                    break;
+                cm = (struct cmsghdr *)((unsigned char *)cm + adv);
+            }
+        }
+
+        /* Gather iovs; pass the fds with the first chunk that carries data. */
+        size_t total = 0;
+        int fds_sent = 0;
+        serial_puts("[net_sendmsg] unix fd=");
+        serial_put_dec((uint64_t)fd);
+        serial_puts(" iovlen=");
+        serial_put_dec((uint64_t)msg->msg_iovlen);
+        serial_puts("\n");
+        for (size_t i = 0; i < msg->msg_iovlen; i++) {
+            struct iovec *iov = &msg->msg_iov[i];
+            if (!iov || iov->iov_len == 0)
+                continue;
+            int ret = unix_send(fd, iov->iov_base, iov->iov_len, flags,
+                                fds_sent ? NULL : pass_fds,
+                                fds_sent ? 0 : pass_fd_count);
+            fds_sent = 1;
+            if (ret < 0) {
+                if (total > 0)
+                    return (int)total;
+                return ret;
+            }
+            total += (size_t)ret;
+            if ((size_t)ret < iov->iov_len)
+                break;  /* partial write */
+        }
+
+        /* If fds were supplied but no iov carried data, still pass the fds. */
+        if (!fds_sent && pass_fd_count > 0) {
+            int ret = unix_send(fd, NULL, 0, flags, pass_fds, pass_fd_count);
+            if (ret < 0 && total == 0)
+                return ret;
+        }
+
+        return (int)total;
+    }
+
+    /* Generic path (TCP/UDP): no control message support */
     size_t total = 0;
     for (size_t i = 0; i < msg->msg_iovlen; i++) {
         struct iovec *iov = &msg->msg_iov[i];
@@ -883,11 +1021,90 @@ int net_sendmsg(int fd, const struct msghdr *msg, int flags)
     return (int)total;
 }
 
-int net_recvmsg(int fd, struct msghdr *msg, int flags)
+static int net_recvmsg_impl(int fd, struct msghdr *msg, int flags)
 {
     if (!msg)
         return -EINVAL;
 
+    net_socket_t *s = net_get_socket(fd);
+    if (!s)
+        return -EBADF;
+
+    /* AF_UNIX: deliver any pending SCM_RIGHTS fds via the control buffer. */
+    if (s->domain == AF_UNIX) {
+        int recv_fds[8];
+        int fd_count = 0;
+
+        /* Determine how many fds the caller's control buffer can hold, so
+         * unix_recv only materializes what can actually be reported. */
+        int cap = 0;
+        if (msg->msg_control) {
+            for (int n = 1; n <= 8; n++) {
+                if (CMSG_SPACE((size_t)n * sizeof(int)) <= msg->msg_controllen)
+                    cap = n;
+                else
+                    break;
+            }
+        }
+        fd_count = cap;
+
+        size_t total = 0;
+        int fds_fetched = 0;
+        for (size_t i = 0; i < msg->msg_iovlen; i++) {
+            struct iovec *iov = &msg->msg_iov[i];
+            if (!iov || iov->iov_len == 0)
+                continue;
+            int ret;
+            if (!fds_fetched) {
+                fd_count = cap;
+                ret = unix_recv(fd, iov->iov_base, iov->iov_len, flags,
+                                recv_fds, &fd_count);
+                fds_fetched = 1;
+            } else {
+                ret = unix_recv(fd, iov->iov_base, iov->iov_len, flags,
+                                NULL, NULL);
+            }
+            if (ret < 0) {
+                if (total > 0)
+                    break;
+                return ret;
+            }
+            total += (size_t)ret;
+            if ((size_t)ret < iov->iov_len)
+                break;  /* partial read or no more data */
+        }
+
+        /* If no iov carried a read, we cannot report fds this call; leave
+         * any pending fds queued for a subsequent recvmsg with a buffer. */
+        if (!fds_fetched)
+            fd_count = 0;
+
+        /* Build the SCM_RIGHTS control message if fds were received. */
+        if (fds_fetched && fd_count > 0) {
+            size_t need = CMSG_SPACE((size_t)fd_count * sizeof(int));
+            if (msg->msg_control && msg->msg_controllen >= need) {
+                struct cmsghdr *cm = (struct cmsghdr *)msg->msg_control;
+                cm->cmsg_len = (uint32_t)CMSG_LEN((size_t)fd_count * sizeof(int));
+                cm->cmsg_pad = 0;
+                cm->cmsg_level = SOL_SOCKET;
+                cm->cmsg_type = SCM_RIGHTS;
+                int *data = (int *)CMSG_DATA(cm);
+                for (int i = 0; i < fd_count; i++)
+                    data[i] = recv_fds[i];
+                msg->msg_controllen = need;
+            } else {
+                /* Buffer too small: report truncation, no control data. */
+                msg->msg_flags |= MSG_CTRUNC;
+                msg->msg_controllen = 0;
+            }
+        } else {
+            msg->msg_controllen = 0;
+        }
+
+        return (int)total;
+    }
+
+    /* Generic path (TCP/UDP) */
     size_t total = 0;
     for (size_t i = 0; i < msg->msg_iovlen; i++) {
         struct iovec *iov = &msg->msg_iov[i];
@@ -905,4 +1122,31 @@ int net_recvmsg(int fd, struct msghdr *msg, int flags)
     }
 
     return (int)total;
+}
+
+int net_recvmsg(int fd, struct msghdr *msg, int flags)
+{
+    int ret = net_recvmsg_impl(fd, msg, flags);
+    serial_puts("[recvmsg] fd=");
+    serial_put_dec((uint64_t)fd);
+    serial_puts(" ret=");
+    serial_put_dec((uint64_t)ret);
+    if (ret > 0 && ret <= 64) {
+        /* Dump first bytes of received data for protocol debugging */
+        net_socket_t *s = net_get_socket(fd);
+        if (s && s->domain == AF_UNIX && msg && msg->msg_iov && msg->msg_iovlen > 0) {
+            struct iovec *iov = &msg->msg_iov[0];
+            if (iov && iov->iov_base && iov->iov_len > 0) {
+                serial_puts(" data=");
+                int dump_len = ret < 24 ? ret : 24;
+                uint8_t *p = (uint8_t *)iov->iov_base;
+                for (int i = 0; i < dump_len; i++) {
+                    serial_put_hex((uint64_t)p[i]);
+                    serial_puts(" ");
+                }
+            }
+        }
+    }
+    serial_puts("\n");
+    return ret;
 }

@@ -246,6 +246,7 @@ static inline void hal_halt_no_cli(void) {
 #define PTE_HUGE      (1ULL << 7)
 #define PTE_NX        (1ULL << 63)
 #define PTE_ADDR_MASK 0x000FFFFFFFFFF000ULL
+#define PTE_SHM       (1ULL << 10) /* SHM-backed page: don't free on munmap/exit */
 
 /* Map a 2MB page at virtual address to physical address */
 void hal_map_2mb(uintptr_t virt, uintptr_t phys, uint64_t flags);

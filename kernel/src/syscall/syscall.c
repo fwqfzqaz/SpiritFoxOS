@@ -77,7 +77,8 @@ static const char *syscall_names[] = {
     [60]  = "exit",
     [61]  = "wait4",
     [62]  = "kill",
-    [63]  = "uname",
+    [63] = "uname",
+    [319] = "memfd_create",
 };
 
 static const int syscall_names_max = sizeof(syscall_names) / sizeof(syscall_names[0]);
@@ -130,6 +131,9 @@ const char *syscall_name(uint64_t num)
     case SYS_get_robust_list: return "get_robust_list";
     case SYS_gettid:       return "gettid";
     case SYS_epoll_create1: return "epoll_create1";
+    case SYS_epoll_ctl:     return "epoll_ctl";
+    case SYS_epoll_wait:    return "epoll_wait";
+    case SYS_epoll_pwait:   return "epoll_pwait";
     case SYS_sfk_register_pkg: return "sfk_register_pkg";
     case SYS_sfk_check_perm:   return "sfk_check_perm";
     case SYS_sfk_request_perm: return "sfk_request_perm";
@@ -155,23 +159,28 @@ void syscall_handler_c(trap_frame_t *frame)
     uint64_t syscall_num = frame->rax;
     int64_t ret;
 
-    /* 调试：记录来自用户进程（PID > 0）的前 300 次系统调用 */
+    /* 调试：记录关键系统调用（fork/exec/connect/recvmsg/sendmsg/epoll/poll） */
     static int user_syscall_debug_count = 0;
     process_t *cur_proc = process_current();
-    if (cur_proc && cur_proc->pid > 0 && user_syscall_debug_count < 300) {
-        serial_puts("[USYSCALL] PID=");
-        serial_put_dec((uint64_t)cur_proc->pid);
-        serial_puts(" num=");
-        serial_put_dec(syscall_num);
-        serial_puts("(");
-        const char *name = syscall_name(syscall_num);
-        serial_puts(name);
-        serial_puts(") rdi=0x");
-        serial_put_hex(frame->rdi);
-        serial_puts(" rsi=0x");
-        serial_put_hex(frame->rsi);
-        serial_puts("\n");
-        user_syscall_debug_count++;
+    if (cur_proc && cur_proc->pid > 0 && user_syscall_debug_count < 500) {
+        /* 只记录关键系统调用，减少串口噪音 */
+        int important = (syscall_num == 57 || syscall_num == 59 ||   /* fork, execve */
+                         syscall_num == 42 || syscall_num == 46 ||   /* connect, sendmsg */
+                         syscall_num == 47 ||                        /* recvmsg */
+                         syscall_num == 7  ||                        /* poll */
+                         syscall_num == 281 ||                       /* epoll_pwait */
+                         syscall_num == 233);                        /* epoll_ctl */
+        if (important) {
+            serial_puts("[USYSCALL] PID=");
+            serial_put_dec((uint64_t)cur_proc->pid);
+            serial_puts(" num=");
+            serial_put_dec(syscall_num);
+            serial_puts("(");
+            const char *name = syscall_name(syscall_num);
+            serial_puts(name);
+            serial_puts(")\n");
+            user_syscall_debug_count++;
+        }
     }
 
     switch (syscall_num) {
@@ -212,6 +221,8 @@ void syscall_handler_c(trap_frame_t *frame)
     case SYS_fadvise64:     ret = sys_fadvise64(frame);     break;
     case SYS_pipe2:         ret = sys_pipe2(frame);         break;
     case SYS_dup3:          ret = sys_dup3(frame);          break;
+    case SYS_ftruncate:     ret = sys_ftruncate(frame);     break;
+    case SYS_memfd_create:  ret = sys_memfd_create(frame);  break;
 
     /* 内存 */
     case SYS_mmap:          ret = sys_mmap(frame);          break;
@@ -295,6 +306,7 @@ void syscall_handler_c(trap_frame_t *frame)
     case SYS_socket:        ret = sys_socket(frame);        break;
     case SYS_connect:       ret = sys_connect(frame);       break;
     case SYS_accept:        ret = sys_accept(frame);        break;
+    case SYS_accept4:       ret = sys_accept(frame);        break;
     case SYS_bind:          ret = sys_bind(frame);          break;
     case SYS_listen:        ret = sys_listen(frame);        break;
     case SYS_sendto:        ret = sys_sendto(frame);        break;
@@ -313,6 +325,7 @@ void syscall_handler_c(trap_frame_t *frame)
     case SYS_epoll_create1: ret = sys_epoll_create1(frame); break;
     case SYS_epoll_ctl:     ret = sys_epoll_ctl(frame);     break;
     case SYS_epoll_wait:    ret = sys_epoll_wait(frame);    break;
+    case SYS_epoll_pwait:   ret = sys_epoll_pwait(frame);   break;
 
     /* eventfd 相关 */
     case SYS_eventfd:       ret = sys_eventfd(frame);       break;
@@ -345,8 +358,8 @@ void syscall_handler_c(trap_frame_t *frame)
     /* ioctl - 字符设备控制 */
     case SYS_ioctl:         ret = sys_ioctl(frame);         break;
 
-    /* ppoll 桩函数 */
-    case SYS_ppoll:         ret = 0;                        break;
+    /* ppoll：委托给 sys_poll（忽略 sigmask 参数） */
+    case SYS_ppoll:         ret = sys_ppoll(frame);         break;
 
     default:
         ret = -ENOSYS;
@@ -355,6 +368,15 @@ void syscall_handler_c(trap_frame_t *frame)
 
     /* 返回用户态之前投递待处理信号 */
     process_signal_deliver();
+
+    /* 调试：记录 mmap/brk 返回值 */
+    if (cur_proc && cur_proc->pid > 0 && user_syscall_debug_count <= 300) {
+        if (syscall_num == 9 || syscall_num == 12) { /* mmap / brk */
+            serial_puts("[USYSCALL]   ret=0x");
+            serial_put_hex((uint64_t)ret);
+            serial_puts("\n");
+        }
+    }
 
     frame->rax = (uint64_t)ret;
 }
