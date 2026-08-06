@@ -1,7 +1,7 @@
 /*
- * Linker script for UEFI bootloader
- * Produces a minimal ELF that will be converted to PE32+.
- * Keep .rela sections for gen_reloc.py to generate PE relocations.
+ * EFI Stub 链接脚本
+ * 生成最小 ELF，随后由 objcopy 转为 PE32+。
+ * 保留 .rela 段供 gen_reloc.py 生成 PE 重定位表。
  */
 OUTPUT_FORMAT(elf64-x86-64)
 ENTRY(_start)
@@ -33,7 +33,7 @@ SECTIONS
         *(COMMON)
     }
 
-    /* Keep relocation sections so gen_reloc.py can extract them */
+    /* 保留重定位段，供 gen_reloc.py 提取 */
     .rela.dyn : {
         *(.rela.init)
         *(.rela.text .rela.text.*)

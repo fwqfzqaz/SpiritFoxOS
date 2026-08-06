@@ -4,7 +4,7 @@
 
 **灵狐操作系统**
 
-一个从零构建的 x86_64 操作系统内核，采用 Multiboot2 / UEFI 双引导，兼容 Linux ABI
+一个从零构建的 x86_64 操作系统内核，采用 Linux EFI Stub 引导模型，兼容 Linux ABI
 
 [![License: GPL-3.0](https://img.shields.io/badge/License-GPL%203.0-blue.svg)](LICENSE.txt)
 [![Architecture](https://img.shields.io/badge/Arch-x86__64-green.svg)]()
@@ -41,10 +41,11 @@
 
 ## 项目简介
 
-SpiritFoxOS 是一个教育性质的操作系统内核项目，从引导加载器到内核全部从零实现。内核运行在 x86_64 长模式下，支持两种引导方式：
+SpiritFoxOS 是一个教育性质的操作系统内核项目，从引导加载器到内核全部从零实现。内核运行在 x86_64 长模式下，采用 **Linux EFI Stub** 引导模型：
 
-- **BIOS 引导**：通过 32 位 Multiboot2 引导器完成从保护模式到长模式的切换
-- **UEFI 引导**：自包含 UEFI bootloader，无需 gnu-efi 依赖，直接进入 64 位长模式
+- **EFI Stub**：内核 ELF 内嵌于 EFI stub 中，打包为单一 `kernel.efi`，UEFI 固件直接加载
+- **自包含**：无需 gnu-efi 依赖，stub 完成 ELF 解析、GOP/内存映射/页表/GDT 设置后跳转内核
+- **Linux bzImage 式**：`kernel.efi = [EFI stub] + [kernel.elf]`，stub 运行于 UEFI 加载地址
 
 项目实现了完整的操作系统基础设施：物理/虚拟/SLAB 内存管理、多进程调度与 SMP、VFS 虚拟文件系统、FAT32 文件系统、AHCI 磁盘驱动、分层网络协议栈 (RTL8139 + TCP/IP + ICMP)、图形界面、交互式 Shell 以及包管理和沙箱等高级服务。
 
@@ -56,7 +57,7 @@ SpiritFoxOS 是一个教育性质的操作系统内核项目，从引导加载�
 
 | 类别 | 特性 |
 |------|------|
-| **架构** | x86_64 长模式，Multiboot2 / UEFI 双引导，32→64 位模式切换 |
+| **架构** | x86_64 长模式，Linux EFI Stub 引导 (kernel.efi = stub + 内嵌 kernel.elf) |
 | **内存** | 位图式物理页帧分配器、4 级页表 (PML4) 虚拟内存、内核堆 (kmalloc)、SLAB 分配器、ELF 加载器 |
 | **进程** | PCB 进程控制块、优先级调度、fork/exec/clone、信号、futex、COW 写时复制 |
 | **SMP** | 多核启动 (AP Trampoline)、Per-CPU 数据、自旋锁、IPI 中断 |
@@ -76,17 +77,13 @@ SpiritFoxOS 是一个教育性质的操作系统内核项目，从引导加载�
 ```
 SpiritFoxOS/
 ├── boot/
-│   ├── multiboot/              # 32 位 Multiboot2 引导加载器 (BIOS)
-│   │   ├── boot32.S            #   汇编入口 (GRUB → 保护模式)
-│   │   ├── multiboot32.c       #   C 入口 (收集启动信息, 切换到长模式)
-│   │   └── linker.ld           #   32 位链接脚本
-│   └── uefi/                   # UEFI 引导加载器
-│       ├── boot.c              #   自包含 UEFI bootloader (无 gnu-efi)
-│       ├── boot.h              #   UEFI 类型与协议定义
-│       ├── crt0-efi-x86_64.S   #   UEFI 入口汇编
-│       ├── gen_reloc.py        #   PE 重定位表生成脚本
-│       ├── linker.ld           #   UEFI 链接脚本
-│       └── test_efi.c          #   UEFI 测试代码
+│   └── efi_stub/               # Linux EFI Stub (kernel.efi = stub + 内嵌 kernel.elf)
+│       ├── efi_main.c          #   stub 主逻辑 (ELF 加载/GOP/内存映射/页表/GDT/跳转)
+│       ├── efi_boot.h          #   UEFI 类型定义与 BootInfo 结构
+│       ├── payload.S           #   内嵌 kernel.elf payload (.incbin)
+│       ├── crt0-efi-x86_64.S   #   UEFI 入口汇编 (MS x64 ABI → efi_main)
+│       ├── gen_reloc.py        #   PE .reloc 重定位表生成脚本
+│       └── linker.ld           #   EFI stub 链接脚本
 ├── kernel/
 │   ├── include/                # 内核头文件 (55+ 个模块)
 │   │   ├── acpi.h              #   ACPI 表解析
@@ -150,13 +147,10 @@ SpiritFoxOS/
 │       ├── init.c              #   子系统分步初始化
 │       ├── string.c            #   字符串/内存工具函数
 │       ├── kernel.ld           #   64 位链接脚本
-│       ├── kernel32.ld         #   32 位链接脚本
-│       ├── osimage.ld          #   OS 镜像链接脚本
 │       ├── arch/x86_64/        #   架构相关代码
 │       │   ├── acpi.c          #     ACPI 表解析 (RSDP/RSDT/MADT)
 │       │   ├── apic.c          #     Local APIC & IO APIC
 │       │   ├── ap_trampoline.S #     AP 启动跳板代码 (raw binary)
-│       │   ├── boot32.S        #     32 位启动汇编
 │       │   ├── gdt.c           #     GDT 加载与 TSS
 │       │   ├── hal.c           #     硬件抽象层 (中断开关)
 │       │   ├── idt.c           #     IDT 初始化与 ISR 注册
@@ -266,12 +260,20 @@ SpiritFoxOS/
 │       ├── time.c              #     时间函数
 │       └── unistd.c            #     POSIX 函数
 ├── tests/                      # 用户态测试程序
-│   ├── test_hello.c            #   Hello World 测试程序
+│   ├── test_hello.c            #   Hello World (裸机)
+│   ├── test_musl_hello.c       #   Hello World (musl libc)
 │   ├── test_crt.S              #   最小 C 运行时
-│   └── test.ld                 #   测试链接脚本
+│   ├── test.ld                 #   测试链接脚本
+│   ├── test_exitonly.c         #   exit 系统调用测试
+│   ├── test_getpid.c           #   getpid 系统调用测试
+│   └── test_syscall_ret.c      #   系统调用返回值测试
 ├── tools/
 │   ├── png2c.py                #   Logo PNG → C 头文件转换工具
-│   └── build_jre_deb.sh        #   JRE DEB 包构建脚本
+│   ├── x86_64-spiritfoxos-gcc  #   musl libc 交叉编译器封装
+│   ├── build_jre_deb.sh        #   JRE DEB 包构建脚本
+│   ├── build.sh                #   构建辅助脚本
+│   ├── env.sh                  #   环境变量配置
+│   └── port.sh                 #   软件移植辅助脚本
 ├── Makefile                    # 主构建系统
 ├── logo.png                    #   启动 Logo
 ├── LICENSE.txt                 #   GPL-3.0 许可证
@@ -288,17 +290,16 @@ SpiritFoxOS/
 | `gcc` / `x86_64-linux-gnu-gcc` | 交叉编译器 | `sudo apt install gcc gcc-multilib` |
 | `nasm` | 汇编器 | `sudo apt install nasm` |
 | `ld` / `objcopy` | 链接器与二进制工具 | `sudo apt install binutils` |
-| `grub-mkrescue` | 生成 GRUB 可启动 ISO | `sudo apt install grub-pc-bin grub-common` |
-| `xorriso` | ISO 生成依赖 | `sudo apt install xorriso` |
+| `sgdisk` | GPT 分区表创建 | `sudo apt install gdisk` |
 | `mtools` | FAT32 镜像操作 | `sudo apt install mtools` |
 | `qemu-system-x86_64` | 运行与调试 | `sudo apt install qemu-system-x86` |
 | `ovmf` | UEFI 固件 (QEMU 运行 UEFI) | `sudo apt install ovmf` |
-| `python3` | Logo 资源生成 / UEFI 重定位 | `sudo apt install python3` |
+| `python3` | Logo 资源生成 / PE 重定位表 | `sudo apt install python3` |
 
 一键安装所有依赖：
 
 ```bash
-sudo apt install gcc gcc-multilib nasm binutils grub-pc-bin grub-common xorriso mtools qemu-system-x86 ovmf python3
+sudo apt install gcc gcc-multilib nasm binutils gdisk mtools qemu-system-x86 ovmf python3
 ```
 
 ---
@@ -306,24 +307,18 @@ sudo apt install gcc gcc-multilib nasm binutils grub-pc-bin grub-common xorriso 
 ## 构建与运行
 
 ```bash
-# 构建所有 (生成 GRUB 可启动 ISO)
+# 构建所有 (生成 UEFI 磁盘镜像 build/spiritfox.img)
+# 流程: kernel.elf → 内嵌到 EFI stub → kernel.efi → GPT+ESP 磁盘镜像
 make
 
-# 仅构建内核 (需要先生成 Logo 头文件)
-make logo    # 首次需要: logo.png → kernel/include/logo_data.h
+# 仅构建内核 (生成 build/kernel/kernel.elf)
 make kernel
 
-# 仅构建引导加载器
-make loader
+# 仅构建 EFI stub (生成 build/efi_stub/kernel.efi)
+make uefi-stub
 
-# 构建 UEFI 引导加载器
-make uefi-bootloader
-
-# 构建 UEFI 磁盘镜像
+# 构建 UEFI 磁盘镜像 (GPT + ESP, BOOTX64.EFI = kernel.efi)
 make uefi-image
-
-# 构建 BIOS+UEFI 双启动 ISO
-make dual-iso
 
 # 构建用户态测试 ELF
 make test-elf
@@ -331,9 +326,9 @@ make test-elf
 # 构建 libc
 make libc
 
-# ---- 运行 (QEMU) ----
+# ---- 运行 (QEMU, UEFI 模式) ----
 
-# BIOS 模式运行 (1GB 内存, 串口终端, 网络, AHCI 磁盘)
+# 默认运行 (2GB 内存, OVMF 固件, 串口终端, 网络, AHCI 磁盘)
 make run
 
 # 日志模式 (串口输出到 build/serial.log, 无显示)
@@ -342,11 +337,8 @@ make run-log
 # 调试模式 (GDB 远程调试, 端口 1234)
 make run-debug
 
-# UEFI 模式运行
+# UEFI 模式运行 (同 make run)
 make run-uefi
-
-# UEFI 模式从双启动 ISO 运行
-make run-uefi-iso
 
 # 制作 USB 启动盘 (实体机)
 make usb DEVICE=/dev/sdX
@@ -355,19 +347,27 @@ make usb DEVICE=/dev/sdX
 make clean
 ```
 
+### 构建产物
+
+| 产物 | 说明 |
+|------|------|
+| `build/kernel/kernel.elf` | 内核 ELF 镜像 (链接地址 0x100000) |
+| `build/efi_stub/kernel.efi` | UEFI 应用 (EFI stub + 内嵌 kernel.elf, ~950KB) |
+| `build/spiritfox.img` | UEFI 磁盘镜像 (GPT + ESP, 64MB) |
+| `build/fat32.img` | FAT32 用户数据磁盘 (64MB, 含测试程序) |
+
 ### QEMU 运行配置
 
-`make run` 启动的 QEMU 包含以下硬件模拟：
+`make run` (UEFI 模式) 启动的 QEMU 包含以下硬件模拟：
 
-- **内存**: 1GB RAM
-- **显示**: 串口终端 (stdio) + 标准 VGA
-- **网络**: RTL8139 网卡，端口转发 `tcp::25565 → :25565`
+- **固件**: OVMF UEFI (pflash, 代码+变量)
+- **内存**: 2GB RAM
+- **显示**: 串口终端 (stdio) + VGA 图形
+- **网络**: RTL8139 网卡，端口转发 `tcp::25566 → :25565`
 - **存储**: AHCI 控制器 + 两个磁盘镜像
-  - `build/fat32.img` — 512MB FAT32 磁盘 (自动创建，含测试程序)
-  - `build/disk.img` — 16MB 原始磁盘 (自动创建)
-- **串口**: COM1 → 标准输出 (用于内核日志和 Shell 交互)
-
-`make run-uefi` 使用 OVMF 固件，2GB 内存，端口转发 `tcp::25566 → :25565`。
+  - `build/fat32.img` — 64MB FAT32 磁盘 (含测试程序)
+  - `build/disk.img` — 16MB 原始磁盘
+- **引导**: UEFI 从 `build/spiritfox.img` 启动 (ESP 含 BOOTX64.EFI)
 
 ---
 
@@ -375,16 +375,19 @@ make clean
 
 ```
 ┌─────────────────────────────────────────────────┐
-│  1a. GRUB 加载 loader.elf (Multiboot2 协议)      │
-│      └── 读取 /boot/grub/grub.cfg                │
-│  1b. UEFI 加载 BOOTX64.EFI → kernel.elf         │
-│      └── 自包含 UEFI bootloader                   │
+│  1. UEFI 固件加载 kernel.efi (BOOTX64.EFI)       │
+│     └── kernel.efi = [EFI stub] + [kernel.elf]   │
 ├─────────────────────────────────────────────────┤
-│  2. boot32.S / multiboot32.c (32 位保护模式)      │
-│     ├── 收集 Multiboot2 启动信息                   │
-│     ├── 设置临时页表 (1GB identity mapping)        │
-│     ├── 启用分页, 切换到 64 位长模式               │
-│     └── 跳转至 _start64                           │
+│  2. EFI Stub (boot/efi_stub/efi_main.c)         │
+│     ├── 解析内嵌 kernel.elf 的 ELF 头             │
+│     ├── 将 PT_LOAD 段拷贝到 0x100000 (含 BSS 清零)│
+│     ├── 获取 GOP 帧缓冲信息                       │
+│     ├── 获取 UEFI 内存映射                        │
+│     ├── ExitBootServices (退出引导服务)           │
+│     ├── 构造 BootInfo (帧缓冲/内存映射/ACPI RSDP) │
+│     ├── 建立页表 (0~4GB 恒等 + 高半核映射)        │
+│     ├── 在栈上构建 GDT 并 lgdt                    │
+│     └── 跳转 _start64, rdi = BootInfo*           │
 ├─────────────────────────────────────────────────┤
 │  3. _start64 (entry.c)                           │
 │     ├── 设置内核栈 (0x800000)                     │
@@ -825,12 +828,16 @@ KERNEL_CFLAGS="-DKERNEL_SELFTEST" make
 
 ### UEFI 调试
 
-UEFI 模式需要安装 OVMF 固件：
+系统默认以 UEFI 模式运行，需要安装 OVMF 固件：
 
 ```bash
 sudo apt install ovmf
-make run-uefi
+make run         # 串口输出到终端
+make run-log     # 串口输出到 build/serial.log
+make run-debug   # GDB 远程调试 (端口 1234)
 ```
+
+EFI stub 通过 COM1 串口输出详细启动日志 (`[EFISTUB]` 前缀)，包括内核 ELF 加载、GOP 设置、内存映射、ExitBootServices、页表构建和内核跳转等阶段。
 
 ---
 

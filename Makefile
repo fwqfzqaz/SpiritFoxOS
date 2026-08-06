@@ -1,7 +1,11 @@
 # SpiritFoxOS - Makefile
-# 灵狐操作系统构建系统
+# 灵狐操作系统构建系统 (Linux EFI Stub 模型)
 
-.PHONY: all clean kernel loader image iso dual-iso run run-iso run-debug logo uefi-bootloader uefi-image run-uefi run-uefi-iso usb test-elf musl-static musl-dynamic musl-test musl-deploy wayland-protocol wayland-libs wayland-compositor wayland-client wayland-all wayland-deploy
+.PHONY: all clean kernel logo uefi-stub uefi-image run run-uefi run-log run-debug \
+        libc libc-clean ap-trampoline test-elf \
+        musl-static musl-dynamic musl-test musl-deploy \
+        wayland-protocol wayland-libs wayland-compositor wayland-client wayland-all wayland-deploy \
+        usb
 
 # =========================================
 # 工具链配置
@@ -20,22 +24,17 @@ KERNEL_SRC     = $(KERNEL_DIR)/src
 KERNEL_INC     = $(KERNEL_DIR)/include
 KERNEL_BUILD   = build/kernel
 
-LOADER_DIR     = boot/multiboot
-LOADER_BUILD   = build/loader
+# EFI Stub (Linux bzImage 式: stub + 内嵌 kernel.elf → kernel.efi)
+EFI_STUB_DIR   = boot/efi_stub
+EFI_BUILD      = build/efi_stub
+KERNEL_EFI     = $(EFI_BUILD)/kernel.efi
 
-ISO_DIR        = build/iso
+IMAGE_DIR      = build/disk
+EFI_DIR        = $(IMAGE_DIR)/EFI/Boot
+IMAGE_FILE     = build/spiritfox.img
 
-# UEFI Boot variables
-UEFI_DIR        = boot/uefi
-UEFI_BUILD      = build/uefi
-IMAGE_DIR       = build/disk
-EFI_DIR         = $(IMAGE_DIR)/EFI/Boot
-OS_DIR          = $(IMAGE_DIR)/EFI/SpiritFoxOS
-IMAGE_FILE      = build/spiritfox.img
-GNU_EFI_INC     ?= /usr/include/efi
-GNU_EFI_LIB     ?= /usr/lib
-OVMF_CODE       ?= /usr/share/OVMF/OVMF_CODE.fd
-OVMF_VARS       ?= /usr/share/OVMF/OVMF_VARS.fd
+OVMF_CODE      ?= /usr/share/OVMF/OVMF_CODE.fd
+OVMF_VARS      ?= /usr/share/OVMF/OVMF_VARS.fd
 
 # =========================================
 # 64-bit 内核编译选项
@@ -63,6 +62,11 @@ KERNEL_ASM_OBJS  = $(patsubst $(KERNEL_SRC)/%.S,$(KERNEL_BUILD)/%.o,$(KERNEL_ASM
 KERNEL_OBJS      = $(KERNEL_C_OBJS) $(KERNEL_ASM_OBJS)
 
 # =========================================
+# 默认目标 (必须是 Makefile 中第一个目标)
+# =========================================
+all: uefi-image
+
+# =========================================
 # Logo data (PNG → C header)
 # =========================================
 LOGO_PNG       = logo.png
@@ -76,12 +80,7 @@ $(LOGO_HEADER): $(LOGO_PNG) tools/png2c.py
 logo: $(LOGO_HEADER)
 
 # =========================================
-# 默认目标
-# =========================================
-all: iso
-
-# =========================================
-# 64-bit 内核构建
+# 64-bit 内核构建 (产物 kernel.elf 既是调试符号, 又是 EFI stub payload)
 # =========================================
 $(KERNEL_BUILD):
 	@mkdir -p $(KERNEL_BUILD)
@@ -104,11 +103,7 @@ $(KERNEL_BUILD)/kernel.elf: $(KERNEL_OBJS) $(KERNEL_SRC)/kernel.ld
 	@echo "[LD64] $@"
 	@$(LD) $(KERNEL_LDFLAGS) -o $@ $(KERNEL_OBJS)
 
-$(KERNEL_BUILD)/kernel.bin: $(KERNEL_BUILD)/kernel.elf
-	@echo "[BIN] $@"
-	@$(OBJCOPY) -O binary $< $@
-
-kernel: logo $(KERNEL_BUILD)/kernel.bin
+kernel: logo $(KERNEL_BUILD)/kernel.elf
 
 # =========================================
 # libc 构建
@@ -134,58 +129,41 @@ $(KERNEL_BUILD)/ap_trampoline.bin: $(KERNEL_SRC)/arch/x86_64/ap_trampoline.S
 ap-trampoline: $(KERNEL_BUILD)/ap_trampoline.bin
 
 # =========================================
-# 32-bit multiboot 加载器构建
+# EFI Stub 构建 (Linux EFI Stub: kernel.efi = stub + 内嵌 kernel.elf)
+#   UEFI 固件直接加载 kernel.efi；stub 解析内嵌 ELF，加载段到 0x100000，
+#   完成 GOP/内存映射/ExitBootServices/页表/GDT，跳转 _start64。
 # =========================================
-LOADER_CFLAGS  = -m32 -ffreestanding -nostdlib -fno-builtin \
-                 -fno-stack-protector -fno-pic -fno-pie \
-                 -Wall -Wextra
+EFI_CFLAGS = -ffreestanding -fno-stack-protector -fpic \
+             -fvisibility=hidden -fno-plt \
+             -fshort-wchar -mno-red-zone -mno-mmx -mno-sse -mno-sse2 \
+             -Wall -Wextra -Wno-unused-function -Wno-unused-variable \
+             -I$(EFI_STUB_DIR)
 
-LOADER_LDFLAGS = -m elf_i386 -T $(LOADER_DIR)/linker.ld -nostdlib -static
+EFI_LDFLAGS = -nostdlib -T $(EFI_STUB_DIR)/linker.ld -static
 
-$(LOADER_BUILD):
-	@mkdir -p $(LOADER_BUILD)
+$(EFI_BUILD):
+	@mkdir -p $(EFI_BUILD)
 
-$(LOADER_BUILD)/multiboot32.o: $(LOADER_DIR)/multiboot32.c | $(LOADER_BUILD)
-	@echo "[CC32] $<"
-	@gcc $(LOADER_CFLAGS) -c $< -o $@
+# payload.S 依赖 kernel.elf (内嵌对象)
+$(EFI_BUILD)/payload.o: $(EFI_STUB_DIR)/payload.S $(KERNEL_BUILD)/kernel.elf | $(EFI_BUILD)
+	@echo "[AS-PAYLOAD] $< (embedding kernel.elf)"
+	@$(CC) $(EFI_CFLAGS) -DKERNEL_PAYLOAD_PATH='"$(KERNEL_BUILD)/kernel.elf"' -c $< -o $@
 
-$(LOADER_BUILD)/boot32.o: $(LOADER_DIR)/boot32.S | $(LOADER_BUILD)
-	@echo "[AS32] $<"
-	@gcc -m32 -c $< -o $@
-
-$(LOADER_BUILD)/loader.elf: $(LOADER_BUILD)/multiboot32.o $(LOADER_BUILD)/boot32.o $(LOADER_DIR)/linker.ld
-	@echo "[LD32] $@"
-	@ld $(LOADER_LDFLAGS) -o $@ $(LOADER_BUILD)/multiboot32.o $(LOADER_BUILD)/boot32.o
-
-loader: $(LOADER_BUILD)/loader.elf
-
-# =========================================
-# UEFI Bootloader (self-contained, no gnu-efi)
-# =========================================
-UEFI_CFLAGS = -ffreestanding -fno-stack-protector -fpic \
-              -fshort-wchar -mno-red-zone -mno-mmx -mno-sse -mno-sse2 \
-              -Wall -Wextra -Wno-unused-function -Wno-unused-variable \
-              -I$(UEFI_DIR)
-
-UEFI_LDFLAGS = -nostdlib -T $(UEFI_DIR)/linker.ld -static
-
-$(UEFI_BUILD):
-	@mkdir -p $(UEFI_BUILD)
-
-$(UEFI_BUILD)/crt0.o: $(UEFI_DIR)/crt0-efi-x86_64.S | $(UEFI_BUILD)
-	@echo "[AS-UEFI] $<"
+$(EFI_BUILD)/crt0.o: $(EFI_STUB_DIR)/crt0-efi-x86_64.S | $(EFI_BUILD)
+	@echo "[AS-EFI] $<"
 	@$(CC) -c $< -o $@
 
-$(UEFI_BUILD)/boot.o: $(UEFI_DIR)/boot.c | $(UEFI_BUILD)
-	@echo "[CC-UEFI] $<"
-	@$(CC) $(UEFI_CFLAGS) -c $< -o $@
+$(EFI_BUILD)/efi_main.o: $(EFI_STUB_DIR)/efi_main.c | $(EFI_BUILD)
+	@echo "[CC-EFI] $<"
+	@$(CC) $(EFI_CFLAGS) -c $< -o $@
 
-$(UEFI_BUILD)/bootloader.elf: $(UEFI_BUILD)/crt0.o $(UEFI_BUILD)/boot.o
-	@echo "[LD-UEFI] $@"
-	@$(LD) $(UEFI_LDFLAGS) -o $@ $^
+$(EFI_BUILD)/stub.elf: $(EFI_BUILD)/crt0.o $(EFI_BUILD)/efi_main.o $(EFI_BUILD)/payload.o $(EFI_STUB_DIR)/linker.ld
+	@echo "[LD-EFI] $@"
+	@$(LD) $(EFI_LDFLAGS) -o $@ $(EFI_BUILD)/crt0.o $(EFI_BUILD)/efi_main.o $(EFI_BUILD)/payload.o
 
-$(UEFI_BUILD)/BOOTX64.EFI: $(UEFI_BUILD)/bootloader.elf
-	@echo "[OBJCOPY-UEFI] $@"
+# ELF → PE32+ (EFI application)
+$(KERNEL_EFI): $(EFI_BUILD)/stub.elf
+	@echo "[OBJCOPY-EFI] $@"
 	@objcopy -j .text -j .rodata -j .data -j .bss \
 	         --target=efi-app-x86_64 \
 	         $< $@ 2>/dev/null || \
@@ -194,103 +172,23 @@ $(UEFI_BUILD)/BOOTX64.EFI: $(UEFI_BUILD)/bootloader.elf
 	         $< $@ 2>/dev/null || \
 	  cp $< $@
 	@echo "[GEN-RELOC] Generating PE .reloc..."
-	@python3 $(UEFI_DIR)/gen_reloc.py $< $@
+	@python3 $(EFI_STUB_DIR)/gen_reloc.py $< $@
+	@echo "[EFI] kernel.efi ready: $@ (`stat -c%s $@ 2>/dev/null || echo ?` bytes)"
 
-uefi-bootloader: $(UEFI_BUILD)/BOOTX64.EFI
-
-# =========================================
-# GRUB ISO 镜像 (BIOS only)
-# =========================================
-ISO_FILE = build/spiritfox.iso
-
-iso: kernel loader build/fat32.img
-	@echo "[ISO] Building GRUB bootable ISO..."
-	@rm -rf $(ISO_DIR)
-	@mkdir -p $(ISO_DIR)/boot/grub
-	@cp $(LOADER_BUILD)/loader.elf $(ISO_DIR)/boot/loader.elf
-	@cp $(KERNEL_BUILD)/kernel.bin $(ISO_DIR)/boot/kernel.bin
-	@cp build/fat32.img $(ISO_DIR)/boot/initrd.img
-	@echo 'serial --speed=115200 --unit=0 --word=8 --parity=no --stop=1' > $(ISO_DIR)/boot/grub/grub.cfg
-	@echo 'terminal_input serial console' >> $(ISO_DIR)/boot/grub/grub.cfg
-	@echo 'terminal_output serial console' >> $(ISO_DIR)/boot/grub/grub.cfg
-	@echo 'insmod all_video' >> $(ISO_DIR)/boot/grub/grub.cfg
-	@echo 'insmod gfxterm' >> $(ISO_DIR)/boot/grub/grub.cfg
-	@echo 'set timeout=1' >> $(ISO_DIR)/boot/grub/grub.cfg
-	@echo 'set default=0' >> $(ISO_DIR)/boot/grub/grub.cfg
-	@echo '' >> $(ISO_DIR)/boot/grub/grub.cfg
-	@echo 'menuentry "SpiritFoxOS (1024x768x32)" {' >> $(ISO_DIR)/boot/grub/grub.cfg
-	@echo '  echo "Loading SpiritFoxOS..."' >> $(ISO_DIR)/boot/grub/grub.cfg
-	@echo '  set gfxpayload=1024x768x32' >> $(ISO_DIR)/boot/grub/grub.cfg
-	@echo '  multiboot2 /boot/loader.elf' >> $(ISO_DIR)/boot/grub/grub.cfg
-	@echo '  module2 /boot/kernel.bin' >> $(ISO_DIR)/boot/grub/grub.cfg
-	@echo '  module2 /boot/initrd.img' >> $(ISO_DIR)/boot/grub/grub.cfg
-	@echo '}' >> $(ISO_DIR)/boot/grub/grub.cfg
-	@echo '' >> $(ISO_DIR)/boot/grub/grub.cfg
-	@echo 'menuentry "SpiritFoxOS (Text Mode)" {' >> $(ISO_DIR)/boot/grub/grub.cfg
-	@echo '  echo "Loading SpiritFoxOS (text mode)..."' >> $(ISO_DIR)/boot/grub/grub.cfg
-	@echo '  multiboot2 /boot/loader.elf' >> $(ISO_DIR)/boot/grub/grub.cfg
-	@echo '  module2 /boot/kernel.bin' >> $(ISO_DIR)/boot/grub/grub.cfg
-	@echo '  module2 /boot/initrd.img' >> $(ISO_DIR)/boot/grub/grub.cfg
-	@echo '}' >> $(ISO_DIR)/boot/grub/grub.cfg
-	@grub-mkrescue -o $(ISO_FILE) $(ISO_DIR) 2>/dev/null
-	@echo "========================================="
-	@echo "  SpiritFoxOS ISO created: $(ISO_FILE)"
-	@echo "========================================="
+uefi-stub: $(KERNEL_EFI)
 
 # =========================================
-# 双启动 ISO 镜像 (BIOS + UEFI)
-# =========================================
-DUAL_ISO_FILE = build/spiritfox-dual.iso
-
-dual-iso: kernel loader uefi-bootloader
-	@echo "[DUAL-ISO] Building BIOS+UEFI dual-boot ISO..."
-	@rm -rf $(ISO_DIR)
-	@mkdir -p $(ISO_DIR)/boot/grub
-	@mkdir -p $(ISO_DIR)/EFI/Boot
-	@mkdir -p $(ISO_DIR)/EFI/SpiritFoxOS
-	@cp $(LOADER_BUILD)/loader.elf $(ISO_DIR)/boot/loader.elf
-	@cp $(KERNEL_BUILD)/kernel.bin $(ISO_DIR)/boot/kernel.bin
-	@cp $(KERNEL_BUILD)/kernel.elf $(ISO_DIR)/EFI/SpiritFoxOS/kernel.elf
-	@cp $(UEFI_BUILD)/BOOTX64.EFI $(ISO_DIR)/EFI/Boot/BOOTX64.EFI
-	@echo 'serial --speed=115200 --unit=0 --word=8 --parity=no --stop=1' > $(ISO_DIR)/boot/grub/grub.cfg
-	@echo 'terminal_input serial console' >> $(ISO_DIR)/boot/grub/grub.cfg
-	@echo 'terminal_output serial console' >> $(ISO_DIR)/boot/grub/grub.cfg
-	@echo 'insmod all_video' >> $(ISO_DIR)/boot/grub/grub.cfg
-	@echo 'insmod gfxterm' >> $(ISO_DIR)/boot/grub/grub.cfg
-	@echo 'set timeout=5' >> $(ISO_DIR)/boot/grub/grub.cfg
-	@echo 'set default=0' >> $(ISO_DIR)/boot/grub/grub.cfg
-	@echo '' >> $(ISO_DIR)/boot/grub/grub.cfg
-	@echo 'menuentry "SpiritFoxOS (1024x768x32)" {' >> $(ISO_DIR)/boot/grub/grub.cfg
-	@echo '  echo "Loading SpiritFoxOS..."' >> $(ISO_DIR)/boot/grub/grub.cfg
-	@echo '  set gfxpayload=1024x768x32' >> $(ISO_DIR)/boot/grub/grub.cfg
-	@echo '  multiboot2 /boot/loader.elf' >> $(ISO_DIR)/boot/grub/grub.cfg
-	@echo '  module2 /boot/kernel.bin' >> $(ISO_DIR)/boot/grub/grub.cfg
-	@echo '}' >> $(ISO_DIR)/boot/grub/grub.cfg
-	@echo '' >> $(ISO_DIR)/boot/grub/grub.cfg
-	@echo 'menuentry "SpiritFoxOS (Text Mode)" {' >> $(ISO_DIR)/boot/grub/grub.cfg
-	@echo '  echo "Loading SpiritFoxOS (text mode)..."' >> $(ISO_DIR)/boot/grub/grub.cfg
-	@echo '  multiboot2 /boot/loader.elf' >> $(ISO_DIR)/boot/grub/grub.cfg
-	@echo '  module2 /boot/kernel.bin' >> $(ISO_DIR)/boot/grub/grub.cfg
-	@echo '}' >> $(ISO_DIR)/boot/grub/grub.cfg
-	@grub-mkrescue -o $(DUAL_ISO_FILE) $(ISO_DIR) 2>/dev/null
-	@echo "========================================="
-	@echo "  SpiritFoxOS Dual-boot ISO created: $(DUAL_ISO_FILE)"
-	@echo "  Supports both BIOS and UEFI boot"
-	@echo "========================================="
-
-# =========================================
-# UEFI disk image
+# UEFI 磁盘镜像 (GPT + ESP, 仅含 BOOTX64.EFI = kernel.efi)
 # =========================================
 $(IMAGE_DIR):
 	@mkdir -p $(IMAGE_DIR)
 
-uefi-image: kernel uefi-bootloader
+uefi-image: kernel uefi-stub
 	@echo "[UEFI-IMG] Building UEFI disk image..."
 	@rm -rf $(IMAGE_DIR)
-	@mkdir -p $(EFI_DIR) $(OS_DIR)
-	@cp $(UEFI_BUILD)/BOOTX64.EFI $(EFI_DIR)/BOOTX64.EFI
-	@cp $(KERNEL_BUILD)/kernel.elf $(OS_DIR)/kernel.elf
-	@# Create 64MB raw image with GPT + ESP partition
+	@mkdir -p $(EFI_DIR)
+	@cp $(KERNEL_EFI) $(EFI_DIR)/BOOTX64.EFI
+	@# 创建 64MB 原始镜像 (GPT + ESP 分区)
 	@dd if=/dev/zero of=$(IMAGE_FILE) bs=1M count=64 2>/dev/null
 	@if command -v sgdisk >/dev/null 2>&1; then \
 		echo "[UEFI-IMG] Creating GPT with ESP partition..."; \
@@ -306,9 +204,8 @@ uefi-image: kernel uefi-bootloader
 		dd if=/dev/zero of=build/esp.img bs=512 count=$$ESP_SIZE 2>/dev/null; \
 		echo "[UEFI-IMG] Formatting FAT32..."; \
 		mformat -i build/esp.img -v SPIRITFOX :: ; \
-		mmd -i build/esp.img ::EFI ::EFI/Boot ::EFI/SpiritFoxOS ; \
+		mmd -i build/esp.img ::EFI ::EFI/Boot ; \
 		mcopy -i build/esp.img $(EFI_DIR)/BOOTX64.EFI ::EFI/Boot/BOOTX64.EFI ; \
-		mcopy -i build/esp.img $(OS_DIR)/kernel.elf ::EFI/SpiritFoxOS/kernel.elf ; \
 		echo "[UEFI-IMG] Creating startup.nsh for OVMF auto-boot..." ; \
 		echo 'FS0:\EFI\Boot\BOOTX64.EFI' > build/startup.nsh ; \
 		mcopy -i build/esp.img build/startup.nsh ::startup.nsh ; \
@@ -319,63 +216,19 @@ uefi-image: kernel uefi-bootloader
 	else \
 		echo "[UEFI-IMG] sgdisk not found, using raw FAT image..."; \
 		mformat -i $(IMAGE_FILE) -v SPIRITFOX :: ; \
-		mmd -i $(IMAGE_FILE) ::EFI ::EFI/Boot ::EFI/SpiritFoxOS ; \
+		mmd -i $(IMAGE_FILE) ::EFI ::EFI/Boot ; \
 		mcopy -i $(IMAGE_FILE) $(EFI_DIR)/BOOTX64.EFI ::EFI/Boot/BOOTX64.EFI ; \
-		mcopy -i $(IMAGE_FILE) $(OS_DIR)/kernel.elf ::EFI/SpiritFoxOS/kernel.elf ; \
 	fi
 	@echo "========================================="
 	@echo "  UEFI disk image: $(IMAGE_FILE)"
+	@echo "  (kernel.efi embedded in BOOTX64.EFI)"
 	@echo "========================================="
 
 # =========================================
-# QEMU 运行
+# QEMU 运行 (UEFI, 默认)
 # =========================================
-run-iso: iso build/disk.img build/fat32.img
-	qemu-system-x86_64 \
-	    -cdrom $(ISO_FILE) \
-	    -boot d \
-	    -m 1G \
-	    -serial stdio \
-	    -netdev user,id=net0,hostfwd=tcp::25565-:25565 \
-	    -device rtl8139,netdev=net0 \
-	    -no-reboot \
-	    -vga std \
-	    -device ahci,id=ahci0 \
-	    -drive id=fat32disk,file=build/fat32.img,if=none,format=raw \
-	    -device ide-hd,drive=fat32disk,bus=ahci0.0 \
-	    -drive id=disk0,file=build/disk.img,if=none,format=raw \
-	    -device ide-hd,drive=disk0,bus=ahci0.1
+run: run-uefi
 
-run: run-iso
-
-run-log: iso build/disk.img build/fat32.img
-	qemu-system-x86_64 \
-	    -cdrom $(ISO_FILE) \
-	    -boot d \
-	    -m 256M \
-	    -serial file:build/serial.log \
-	    -display none \
-	    -net none \
-	    -no-reboot \
-	    -vga std \
-	    -device ahci,id=ahci0 \
-	    -drive id=fat32disk,file=build/fat32.img,if=none,format=raw \
-	    -device ide-hd,drive=fat32disk,bus=ahci0.0 \
-	    -drive id=disk0,file=build/disk.img,if=none,format=raw \
-	    -device ide-hd,drive=disk0,bus=ahci0.1 \
-	    -d cpu_reset 2>build/qemu_debug.log
-
-run-debug: iso
-	qemu-system-x86_64 \
-	    -cdrom $(ISO_FILE) \
-	    -m 256M \
-	    -serial stdio \
-	    -net none \
-	    -S -gdb tcp::1234
-
-# =========================================
-# QEMU UEFI run
-# =========================================
 run-uefi: uefi-image build/ovmf_vars.fd build/disk.img build/fat32.img
 	@if [ ! -f $(OVMF_CODE) ]; then \
 		echo "ERROR: OVMF firmware not found at $(OVMF_CODE)"; \
@@ -398,8 +251,8 @@ run-uefi: uefi-image build/ovmf_vars.fd build/disk.img build/fat32.img
 	    -drive id=disk0,file=build/disk.img,if=none,format=raw \
 	    -device ide-hd,drive=disk0,bus=ahci0.1
 
-# 双启动 ISO 的 UEFI 运行（从光盘引导 UEFI）
-run-uefi-iso: dual-iso build/ovmf_vars.fd build/disk.img build/fat32.img
+# 日志模式: 串口输出到 build/serial.log, 无显示
+run-log: uefi-image build/ovmf_vars.fd build/disk.img build/fat32.img
 	@if [ ! -f $(OVMF_CODE) ]; then \
 		echo "ERROR: OVMF firmware not found at $(OVMF_CODE)"; \
 		echo "Install it: sudo apt install ovmf"; \
@@ -408,13 +261,36 @@ run-uefi-iso: dual-iso build/ovmf_vars.fd build/disk.img build/fat32.img
 	qemu-system-x86_64 \
 	    -drive if=pflash,format=raw,readonly=on,file=$(OVMF_CODE) \
 	    -drive if=pflash,format=raw,file=build/ovmf_vars.fd \
-	    -cdrom $(DUAL_ISO_FILE) \
+	    -drive if=ide,format=raw,file=$(IMAGE_FILE) \
+	    -m 2G \
+	    -serial file:build/serial.log \
+	    -display none \
+	    -net none \
+	    -no-reboot -no-shutdown \
+	    -boot c \
+	    -device ahci,id=ahci0 \
+	    -drive id=fat32disk,file=build/fat32.img,if=none,format=raw \
+	    -device ide-hd,drive=fat32disk,bus=ahci0.0 \
+	    -drive id=disk0,file=build/disk.img,if=none,format=raw \
+	    -device ide-hd,drive=disk0,bus=ahci0.1
+
+# 调试模式: GDB 远程调试 (端口 1234)
+run-debug: uefi-image build/ovmf_vars.fd build/disk.img build/fat32.img
+	@if [ ! -f $(OVMF_CODE) ]; then \
+		echo "ERROR: OVMF firmware not found at $(OVMF_CODE)"; \
+		echo "Install it: sudo apt install ovmf"; \
+		exit 1; \
+	fi
+	qemu-system-x86_64 \
+	    -drive if=pflash,format=raw,readonly=on,file=$(OVMF_CODE) \
+	    -drive if=pflash,format=raw,file=build/ovmf_vars.fd \
+	    -drive if=ide,format=raw,file=$(IMAGE_FILE) \
 	    -m 2G \
 	    -serial stdio \
-	    -netdev user,id=net0,hostfwd=tcp::25566-:25565 \
-	    -device rtl8139,netdev=net0 \
-	    -no-reboot \
-	    -boot d \
+	    -net none \
+	    -no-reboot -no-shutdown \
+	    -boot c \
+	    -S -gdb tcp::1234 \
 	    -device ahci,id=ahci0 \
 	    -drive id=fat32disk,file=build/fat32.img,if=none,format=raw \
 	    -device ide-hd,drive=fat32disk,bus=ahci0.0 \
@@ -465,7 +341,7 @@ build/fat32.img: build/test_hello build/test_musl_hello build/test_musl_dyn buil
 			echo "[FAT32] ERROR: Failed to copy server.jar (disk full?)"; \
 		fi; \
 	fi
-	@echo "[FAT32] Image created (512MB)"
+	@echo "[FAT32] Image created (64MB)"
 
 # =========================================
 # 测试 ELF 用户程序
@@ -611,7 +487,7 @@ wayland-deploy: wayland-all build/fat32.img
 # =========================================
 USB_DEVICE ?= /dev/sdX
 
-usb: iso
+usb: uefi-image
 	@if [ "$(USB_DEVICE)" = "/dev/sdX" ]; then \
 		echo "ERROR: 请指定 USB 设备路径，例如: make usb DEVICE=/dev/sdb"; \
 		echo "警告: 请确保指定的设备是 USB 驱动器，此操作将擦除其所有数据！"; \
@@ -621,13 +497,13 @@ usb: iso
 		echo "ERROR: $(USB_DEVICE) 不是块设备"; \
 		exit 1; \
 	fi
-	@echo "[USB] 将 ISO 写入 $(USB_DEVICE) ..."
+	@echo "[USB] 将 UEFI 镜像写入 $(USB_DEVICE) ..."
 	@echo "[USB] 警告: 这将擦除 $(USB_DEVICE) 上的所有数据！"
 	@echo "[USB] 3 秒后开始，按 Ctrl+C 取消..."
 	@sleep 3
-	@sudo dd if=$(ISO_FILE) of=$(USB_DEVICE) bs=4M status=progress
+	@sudo dd if=$(IMAGE_FILE) of=$(USB_DEVICE) bs=4M status=progress
 	@sudo sync
-	@echo "[USB] 完成！可以从 USB 启动 SpiritFoxOS"
+	@echo "[USB] 完成！可以从 USB 启动 SpiritFoxOS (UEFI)"
 
 # =========================================
 # 清理
@@ -636,6 +512,5 @@ clean:
 	@echo "[CLEAN] Removing build artifacts..."
 	@rm -rf build/
 	@rm -f $(LOGO_HEADER)
-	@rm -f build/ovmf_vars.fd
 	@$(MAKE) -C $(LIBC_DIR) clean 2>/dev/null || true
 	@echo "Done."
