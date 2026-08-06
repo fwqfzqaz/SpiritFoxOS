@@ -830,42 +830,44 @@ void fb_term_disable_render(void)
 
 static void fb_term_scroll(void)
 {
-    if (!fb_back) {
-        /* 无后缓冲区：就地滚动前缓冲区 */
-        size_t row_bytes = fb_pitch * FB_TERM_CHAR_H;
-        int stride = fb_pitch / 4;
-        int scroll_offset = FB_TERM_CHAR_H * stride;
-        uint32_t bg32 = fb_term_bg;
-
-        memmove(fb_front, fb_front + scroll_offset, row_bytes * (fb_term_rows - 1));
-        uint32_t *last_row_front = fb_front + (fb_term_rows - 1) * FB_TERM_CHAR_H * stride;
-        for (size_t i = 0; i < row_bytes / 4; i++) {
-            last_row_front[i] = bg32;
-        }
-        return;
-    }
-
-    /* 双缓冲：滚动后缓冲区，然后复制到前缓冲区 */
     size_t row_bytes = fb_pitch * FB_TERM_CHAR_H;
     int stride = fb_pitch / 4;
     int scroll_offset = FB_TERM_CHAR_H * stride;
-    uint32_t bg32 = fb_term_bg;
 
-    /* 滚动后缓冲区 */
-    memmove(fb_back, fb_back + scroll_offset, row_bytes * (fb_term_rows - 1));
-    /* 清除后缓冲区最后一行 */
+    if (!fb_back) {
+        /* 无后缓冲区：就地滚动前缓冲区（实机较慢但无替代方案） */
+        memmove(fb_front, fb_front + scroll_offset,
+                row_bytes * (fb_term_rows - 1));
+        uint32_t *last_row = fb_front + (fb_term_rows - 1) * FB_TERM_CHAR_H * stride;
+        uint64_t bg64 = ((uint64_t)fb_term_bg << 32) | fb_term_bg;
+        size_t pairs = row_bytes / 8;
+        uint64_t *last_row64 = (uint64_t *)last_row;
+        for (size_t i = 0; i < pairs; i++)
+            last_row64[i] = bg64;
+        if (row_bytes & 4)
+            last_row[pairs * 2] = fb_term_bg;
+        return;
+    }
+
+    /* 双缓冲：仅在 RAM 后缓冲区上滚动（快），再 fb_flip 到前缓冲区。
+     * 切勿直接 memmove 前缓冲区 —— 前缓冲区是 uncacheable MMIO，
+     * 逐字节写极慢（实机可见从上往下逐行更新）。fb_flip 使用 rep movsq
+     * 单次 64 位批量拷贝，并等待 VSync，远快于直接写 MMIO。 */
+    memmove(fb_back, fb_back + scroll_offset,
+            row_bytes * (fb_term_rows - 1));
+
+    /* 清除后缓冲区最后一行（RAM，快） */
     uint32_t *last_row = fb_back + (fb_term_rows - 1) * FB_TERM_CHAR_H * stride;
-    for (size_t i = 0; i < row_bytes / 4; i++) {
-        last_row[i] = bg32;
-    }
+    uint64_t bg64 = ((uint64_t)fb_term_bg << 32) | fb_term_bg;
+    size_t pairs = row_bytes / 8;
+    uint64_t *last_row64 = (uint64_t *)last_row;
+    for (size_t i = 0; i < pairs; i++)
+        last_row64[i] = bg64;
+    if (row_bytes & 4)
+        last_row[pairs * 2] = fb_term_bg;
 
-    /* 同时就地滚动前缓冲区，避免完整的 3MB 内存复制 */
-    memmove(fb_front, fb_front + scroll_offset, row_bytes * (fb_term_rows - 1));
-    /* 清除前缓冲区最后一行 */
-    uint32_t *last_row_front = fb_front + (fb_term_rows - 1) * FB_TERM_CHAR_H * stride;
-    for (size_t i = 0; i < row_bytes / 4; i++) {
-        last_row_front[i] = bg32;
-    }
+    /* 单次 fb_flip 将整个后缓冲区同步到前缓冲区 */
+    fb_flip();
 }
 
 void fb_term_putchar(char c)

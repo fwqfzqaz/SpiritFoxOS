@@ -54,6 +54,36 @@ char* strcat(char* dest, const char* src) {
 
 void* memset(void* s, int c, size_t n) {
     unsigned char* p = (unsigned char*)s;
+    /* 小数据量直接逐字节填充 */
+    if (n < 16) {
+        while (n--)
+            *p++ = (unsigned char)c;
+        return s;
+    }
+    /* 对齐到 8 字节边界 */
+    size_t head = (size_t)p & 7;
+    if (head) {
+        head = 8 - head;
+        if (head > n) head = n;
+        for (size_t i = 0; i < head; i++)
+            p[i] = (unsigned char)c;
+        p += head;
+        n -= head;
+    }
+    /* 64 位批量填充 (rep stosq，每次写 8 字节) */
+    uint64_t c64 = (uint8_t)c;
+    c64 |= c64 << 8;
+    c64 |= c64 << 16;
+    c64 |= c64 << 32;
+    size_t qwords = n >> 3;
+    if (qwords) {
+        __asm__ volatile ("rep stosq"
+            : "+D"(p), "+c"(qwords)
+            : "a"(c64)
+            : "memory");
+    }
+    /* 尾部不足 8 字节 */
+    n &= 7;
     while (n--)
         *p++ = (unsigned char)c;
     return s;
@@ -62,6 +92,33 @@ void* memset(void* s, int c, size_t n) {
 void* memcpy(void* dest, const void* src, size_t n) {
     unsigned char* d = (unsigned char*)dest;
     const unsigned char* s = (const unsigned char*)src;
+    /* 小数据量直接逐字节拷贝 */
+    if (n < 16) {
+        while (n--)
+            *d++ = *s++;
+        return dest;
+    }
+    /* 对齐目标地址到 8 字节边界 */
+    size_t head = (size_t)d & 7;
+    if (head) {
+        head = 8 - head;
+        if (head > n) head = n;
+        for (size_t i = 0; i < head; i++)
+            d[i] = s[i];
+        d += head;
+        s += head;
+        n -= head;
+    }
+    /* 64 位批量拷贝 (rep movsq，每次拷 8 字节) */
+    size_t qwords = n >> 3;
+    if (qwords) {
+        __asm__ volatile ("rep movsq"
+            : "+S"(s), "+D"(d), "+c"(qwords)
+            :
+            : "memory");
+    }
+    /* 尾部不足 8 字节 */
+    n &= 7;
     while (n--)
         *d++ = *s++;
     return dest;
@@ -70,12 +127,52 @@ void* memcpy(void* dest, const void* src, size_t n) {
 void* memmove(void* dest, const void* src, size_t n) {
     unsigned char* d = (unsigned char*)dest;
     const unsigned char* s = (const unsigned char*)src;
+    if (d == s || n == 0)
+        return dest;
+
     if (d < s) {
+        /* 正向拷贝：对齐到 8 字节后用 rep movsq */
+        size_t head = (size_t)d & 7;
+        if (head) {
+            head = 8 - head;
+            if (head > n) head = n;
+            for (size_t i = 0; i < head; i++)
+                d[i] = s[i];
+            d += head;
+            s += head;
+            n -= head;
+        }
+        size_t qwords = n >> 3;
+        if (qwords) {
+            __asm__ volatile ("rep movsq"
+                : "+S"(s), "+D"(d), "+c"(qwords)
+                :
+                : "memory");
+        }
+        n &= 7;
         while (n--)
             *d++ = *s++;
     } else {
+        /* 反向拷贝：先处理尾部对齐，再 64 位反向拷贝，最后处理头部 */
         d += n;
         s += n;
+        /* 尾部字节使目标 8 字节对齐 */
+        size_t tail = (size_t)d & 7;
+        if (tail) {
+            if (tail > n) tail = n;
+            for (size_t i = 0; i < tail; i++)
+                *--d = *--s;
+            n -= tail;
+        }
+        /* 64 位反向拷贝 */
+        size_t qwords = n >> 3;
+        while (qwords--) {
+            d -= 8;
+            s -= 8;
+            *(uint64_t*)d = *(const uint64_t*)s;
+        }
+        /* 剩余头部字节 */
+        n &= 7;
         while (n--)
             *--d = *--s;
     }
