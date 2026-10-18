@@ -35,6 +35,20 @@ static char cwd[VFS_MAX_PATH] = "/";
 
 /* 文件描述符表（process_init 之前早期启动时的后备） */
 static vfs_file_t *fd_table[VFS_MAX_FD];
+/* Namespace publication and last-close reclamation must not interleave. The
+ * current filesystem callbacks are synchronous; they must not sleep here. */
+static unsigned char namespace_lock;
+static uint64_t namespace_enter(void)
+{
+    uint64_t flags = hal_save_interrupts();
+    while (__atomic_test_and_set(&namespace_lock, __ATOMIC_ACQUIRE)) __asm__ volatile("pause");
+    return flags;
+}
+static void namespace_leave(uint64_t flags)
+{
+    __atomic_clear(&namespace_lock, __ATOMIC_RELEASE);
+    hal_restore_interrupts(flags);
+}
 
 /* 获取当前活跃的 fd 表 - 优先使用每进程表 */
 vfs_file_t **vfs_get_fd_table(void)
@@ -107,6 +121,7 @@ static int path_split(const char *path, char components[][VFS_MAX_NAME], int max
         while (path[i] && path[i] != '/' && j < VFS_MAX_NAME - 1) {
             components[count][j++] = path[i++];
         }
+        if (path[i] && path[i] != '/') return -1;
         components[count][j] = '\0';
 
         if (j > 0) {
@@ -119,7 +134,7 @@ static int path_split(const char *path, char components[][VFS_MAX_NAME], int max
             i++;
     }
 
-    return count;
+    return path[i] ? -1 : count;
 }
 
 /* 内部路径解析，支持符号链接跟随。
@@ -137,6 +152,7 @@ static vfs_dentry_t *vfs_resolve_dentry_internal(const char *path, int depth, in
     /* 处理绝对路径与相对路径 */
     char full_path[VFS_MAX_PATH];
     if (path[0] == '/') {
+        if (strlen(path) >= VFS_MAX_PATH) return NULL;
         strncpy(full_path, path, VFS_MAX_PATH - 1);
         full_path[VFS_MAX_PATH - 1] = '\0';
     } else {
@@ -158,6 +174,7 @@ static vfs_dentry_t *vfs_resolve_dentry_internal(const char *path, int depth, in
         return root_dentry;
 
     count = path_split(full_path, components, 32);
+    if (count < 0) return NULL;
     if (count == 0) return root_dentry;
 
     /* 遍历目录项树 */
@@ -400,6 +417,7 @@ int vfs_mount(const char *source, const char *target,
         if (mount_point) {
             mount_point->mounted = 1;
             mount_point->mount_root = sb->root;
+            sb->root->parent = mount_point->parent;
             printf("[VFS_MOUNT] set mounted=1 on dentry '%s' at %p, mount_root=%p\n",
                    mount_point->name ? mount_point->name : "(null)", (void *)mount_point, (void *)sb->root);
             /* Verify: read back the flag */
@@ -421,7 +439,8 @@ int vfs_unmount(const char *target)
         if (mounts[i].active && strcmp(mounts[i].path, target) == 0) {
             /* Call filesystem unmount */
             if (mounts[i].sb->fs->unmount) {
-                mounts[i].sb->fs->unmount(mounts[i].sb);
+                int result = mounts[i].sb->fs->unmount(mounts[i].sb);
+                if (result) return result;
             }
             mounts[i].active = 0;
             return 0;
@@ -604,15 +623,14 @@ static int pipe_write(vfs_file_t *file, const void *buf, size_t count)
  * File operations
  * ======================================================================== */
 
-int vfs_open(const char *path, uint32_t flags, uint32_t mode)
+static int open_internal(const char *path, uint32_t flags, uint32_t mode)
 {
     vfs_dentry_t *dentry = vfs_resolve_dentry(path);
 
     if (!dentry || !dentry->inode) {
         /* File doesn't exist - check O_CREAT */
         if (flags & VFS_O_CREAT) {
-            /* For now, only memfs supports creation.
-             * Find the parent directory and create the file there. */
+            /* Find the parent directory and create through its filesystem. */
             /* Find last component */
             const char *last_slash = NULL;
             for (const char *p = path; *p; p++) {
@@ -620,15 +638,17 @@ int vfs_open(const char *path, uint32_t flags, uint32_t mode)
             }
 
             char dir_path[VFS_MAX_PATH];
-            char filename[VFS_MAX_NAME];
+            char filename[VFS_MAX_NAME] = {0};
 
             if (last_slash) {
+                if (strlen(last_slash + 1) >= VFS_MAX_NAME) return -ENAMETOOLONG;
                 int dir_len = last_slash - path + 1;
                 if (dir_len >= VFS_MAX_PATH) return -1;
                 memcpy(dir_path, path, dir_len);
                 dir_path[dir_len] = '\0';
                 strncpy(filename, last_slash + 1, VFS_MAX_NAME - 1);
             } else {
+                if (strlen(path) >= VFS_MAX_NAME) return -ENAMETOOLONG;
                 strcpy(dir_path, cwd);
                 strncpy(filename, path, VFS_MAX_NAME - 1);
             }
@@ -651,6 +671,12 @@ int vfs_open(const char *path, uint32_t flags, uint32_t mode)
             new_inode->mode = mode;
             new_inode->size = 0;
 
+            /* Allocate the directory entry before publishing the backend node. */
+            vfs_dentry_t *new_dentry = dentry_alloc(filename, new_inode);
+            if (!new_dentry) {
+                parent->inode->sb->fs->destroy_inode(new_inode);
+                return -4;
+            }
             /* Call filesystem create callback if available */
             if (parent->inode->sb && parent->inode->sb->fs &&
                 parent->inode->sb->fs->create) {
@@ -659,13 +685,10 @@ int vfs_open(const char *path, uint32_t flags, uint32_t mode)
                     /* Create failed - clean up */
                     if (parent->inode->sb->fs->destroy_inode)
                         parent->inode->sb->fs->destroy_inode(new_inode);
+                    free_page(new_dentry);
                     return ret;
                 }
             }
-
-            /* Create dentry */
-            vfs_dentry_t *new_dentry = dentry_alloc(filename, new_inode);
-            if (!new_dentry) return -4;
 
             dentry_add_child(parent, new_dentry);
             dentry = new_dentry;
@@ -685,8 +708,15 @@ int vfs_open(const char *path, uint32_t flags, uint32_t mode)
     file->inode = dentry->inode;
     file->dentry = dentry;
     file->flags = flags;
+    file->fcntl_flags = (flags & 0x80000u) ? 1u : 0u; /* Linux O_CLOEXEC */
     file->offset = 0;
     file->refcount = 1;
+
+    if (file->inode->open) {
+        int result = file->inode->open(file);
+        if (result) { free_page(file); return result; }
+        file->inode->open_count++;
+    }
 
     /* If append mode, set offset to end */
     if (flags & VFS_O_APPEND)
@@ -701,12 +731,18 @@ int vfs_open(const char *path, uint32_t flags, uint32_t mode)
     return fd;
 }
 
-int vfs_close(int fd)
+/* Reclaim only filesystems which opt into the open/release lifetime contract. */
+static void reclaim_unlinked(vfs_dentry_t *entry)
 {
-    if (fd < 0 || fd >= VFS_MAX_FD || !vfs_get_fd_table()[fd])
-        return -1;
+    vfs_inode_t *inode = entry ? entry->inode : NULL;
+    if (!inode || !inode->release || inode->nlinks || inode->open_count) return;
+    inode->sb->fs->destroy_inode(inode);
+    free_page(entry);
+}
 
-    vfs_file_t *file = vfs_get_fd_table()[fd];
+static void file_put_internal(vfs_file_t *file)
+{
+    if (!file) return;
     file->refcount--;
 
     /* Handle pipe close */
@@ -787,18 +823,27 @@ int vfs_close(int fd)
         }
     } else if (file->refcount <= 0) {
         /* Regular file - no longer referenced */
-        /* If this is a character device, call its close handler */
         if (file->inode && file->inode->type == VFS_TYPE_CHARDEV) {
             chardev_close(file);
         }
+        if (file->inode && file->inode->release) {
+            file->inode->release(file);
+            file->inode->open_count--;
+            reclaim_unlinked(file->dentry);
+        }
     }
-
-    vfs_get_fd_table()[fd] = NULL;
 
     if (file->refcount <= 0) {
         free_page(file);
     }
+}
 
+int vfs_close(int fd)
+{
+    if (fd < 0 || fd >= VFS_MAX_FD || !vfs_get_fd_table()[fd]) return -1;
+    vfs_file_t *file = vfs_get_fd_table()[fd];
+    vfs_get_fd_table()[fd] = NULL;
+    vfs_file_put(file);
     return 0;
 }
 
@@ -1050,7 +1095,7 @@ int vfs_fstat(int fd, vfs_inode_t *stat)
     return 0;
 }
 
-int vfs_mkdir(const char *path, uint32_t mode)
+static int mkdir_internal(const char *path, uint32_t mode)
 {
     /* Find parent directory */
     const char *last_slash = NULL;
@@ -1059,15 +1104,17 @@ int vfs_mkdir(const char *path, uint32_t mode)
     }
 
     char dir_path[VFS_MAX_PATH];
-    char dirname[VFS_MAX_NAME];
+    char dirname[VFS_MAX_NAME] = {0};
 
     if (last_slash) {
+        if (strlen(last_slash + 1) >= VFS_MAX_NAME) return -ENAMETOOLONG;
         int dir_len = last_slash - path + 1;
         if (dir_len >= VFS_MAX_PATH) return -1;
         memcpy(dir_path, path, dir_len);
         dir_path[dir_len] = '\0';
         strncpy(dirname, last_slash + 1, VFS_MAX_NAME - 1);
     } else {
+        if (strlen(path) >= VFS_MAX_NAME) return -ENAMETOOLONG;
         strcpy(dir_path, cwd);
         strncpy(dirname, path, VFS_MAX_NAME - 1);
     }
@@ -1095,6 +1142,11 @@ int vfs_mkdir(const char *path, uint32_t mode)
     new_inode->size = 0;
     new_inode->nlinks = 2;
 
+    vfs_dentry_t *new_dentry = dentry_alloc(dirname, new_inode);
+    if (!new_dentry) {
+        parent->inode->sb->fs->destroy_inode(new_inode);
+        return -5;
+    }
     /* Call filesystem mkdir callback if available */
     if (parent->inode->sb && parent->inode->sb->fs &&
         parent->inode->sb->fs->mkdir) {
@@ -1102,6 +1154,7 @@ int vfs_mkdir(const char *path, uint32_t mode)
         if (ret != 0) {
             if (parent->inode->sb->fs->destroy_inode)
                 parent->inode->sb->fs->destroy_inode(new_inode);
+            free_page(new_dentry);
             return ret;
         }
     }
@@ -1112,19 +1165,18 @@ int vfs_mkdir(const char *path, uint32_t mode)
         new_inode->fs_data = NULL;
     }
 
-    /* Create dentry */
-    vfs_dentry_t *new_dentry = dentry_alloc(dirname, new_inode);
-    if (!new_dentry) return -5;
-
     dentry_add_child(parent, new_dentry);
     return 0;
 }
 
-int vfs_rmdir(const char *path)
+static int rmdir_internal(const char *path)
 {
-    vfs_dentry_t *dentry = vfs_resolve_dentry(path);
+    vfs_dentry_t *dentry = vfs_resolve_dentry_nofollow(path);
     if (!dentry || !dentry->inode || dentry->inode->type != VFS_TYPE_DIR)
         return -1;
+    /* A mounted root must not be detached through rmdir. */
+    if (dentry == root_dentry || (dentry->inode->sb &&
+        dentry == dentry->inode->sb->root)) return -EBUSY;
 
     /* Check if directory is empty */
     if (dentry->child)
@@ -1150,12 +1202,14 @@ int vfs_rmdir(const char *path)
         }
     }
 
+    dentry->inode->nlinks = 0;
+    reclaim_unlinked(dentry);
     return 0;
 }
 
-int vfs_unlink(const char *path)
+static int unlink_internal(const char *path)
 {
-    vfs_dentry_t *dentry = vfs_resolve_dentry(path);
+    vfs_dentry_t *dentry = vfs_resolve_dentry_nofollow(path);
     if (!dentry || !dentry->inode || dentry->inode->type == VFS_TYPE_DIR)
         return -1;
 
@@ -1179,10 +1233,12 @@ int vfs_unlink(const char *path)
         }
     }
 
+    dentry->inode->nlinks = 0;
+    reclaim_unlinked(dentry);
     return 0;
 }
 
-int vfs_readdir(int fd, int index, char *name, int namelen, vfs_inode_t *stat)
+static int readdir_internal(int fd, int index, char *name, int namelen, vfs_inode_t *stat)
 {
     if (fd < 0 || fd >= VFS_MAX_FD || !vfs_get_fd_table()[fd])
         return -1;
@@ -1190,6 +1246,8 @@ int vfs_readdir(int fd, int index, char *name, int namelen, vfs_inode_t *stat)
     vfs_file_t *file = vfs_get_fd_table()[fd];
     if (!file->inode || file->inode->type != VFS_TYPE_DIR)
         return -2;
+    if (file->inode->readdir)
+        return file->inode->readdir(file, index, name, namelen, stat);
 
     /* Walk dentry children */
     vfs_dentry_t *dentry = file->dentry;
@@ -1217,7 +1275,7 @@ const char *vfs_get_cwd(void)
     return cwd;
 }
 
-int vfs_chdir(const char *path)
+static int chdir_internal(const char *path)
 {
     /* Verify the path exists and is a directory */
     vfs_dentry_t *dentry = vfs_resolve_dentry(path);
@@ -1289,8 +1347,9 @@ int vfs_dup2(int oldfd, int newfd)
  * Symlink operations
  * ======================================================================== */
 
-int vfs_symlink(const char *target, const char *linkpath)
+static int symlink_internal(const char *target, const char *linkpath)
 {
+    if (!target || !target[0] || strlen(target) >= VFS_MAX_PATH) return -ENAMETOOLONG;
     /* Find parent directory */
     const char *last_slash = NULL;
     for (const char *p = linkpath; *p; p++) {
@@ -1301,6 +1360,7 @@ int vfs_symlink(const char *target, const char *linkpath)
     char linkname[VFS_MAX_NAME];
 
     if (last_slash) {
+        if (strlen(last_slash + 1) >= VFS_MAX_NAME) return -ENAMETOOLONG;
         int dir_len = last_slash - linkpath + 1;
         if (dir_len >= VFS_MAX_PATH) return -1;
         memcpy(dir_path, linkpath, dir_len);
@@ -1308,6 +1368,7 @@ int vfs_symlink(const char *target, const char *linkpath)
         strncpy(linkname, last_slash + 1, VFS_MAX_NAME - 1);
         linkname[VFS_MAX_NAME - 1] = '\0';
     } else {
+        if (strlen(linkpath) >= VFS_MAX_NAME) return -ENAMETOOLONG;
         strcpy(dir_path, cwd);
         strncpy(linkname, linkpath, VFS_MAX_NAME - 1);
         linkname[VFS_MAX_NAME - 1] = '\0';
@@ -1342,15 +1403,20 @@ int vfs_symlink(const char *target, const char *linkpath)
     strncpy(new_inode->symlink_target, target, VFS_MAX_PATH - 1);
     new_inode->symlink_target[VFS_MAX_PATH - 1] = '\0';
 
-    /* Create dentry */
     vfs_dentry_t *new_dentry = dentry_alloc(linkname, new_inode);
     if (!new_dentry) {
-        if (parent->inode->sb && parent->inode->sb->fs &&
-            parent->inode->sb->fs->destroy_inode)
+        if (parent->inode->sb && parent->inode->sb->fs && parent->inode->sb->fs->destroy_inode)
             parent->inode->sb->fs->destroy_inode(new_inode);
-        else
-            free_page(new_inode);
+        else free_page(new_inode);
         return -5;
+    }
+    if (parent->inode->sb && parent->inode->sb->fs && parent->inode->sb->fs->symlink) {
+        int result = parent->inode->sb->fs->symlink(parent, linkname, new_inode);
+        if (result) {
+            parent->inode->sb->fs->destroy_inode(new_inode);
+            free_page(new_dentry);
+            return result;
+        }
     }
 
     dentry_add_child(parent, new_dentry);
@@ -1541,6 +1607,11 @@ int vfs_ftruncate(int fd, int64_t length)
         return 0;
     }
 
+    /* 文件系统负责实际截断，不能只改 inode 大小而保留服务中的旧数据。 */
+    if (file->inode->truncate) {
+        if (file->inode->open && !(file->flags & (VFS_O_WRONLY | VFS_O_RDWR))) return -EBADF;
+        return file->inode->truncate(file->inode, (uint64_t)length);
+    }
     /* Other file types: just update the inode size */
     file->inode->size = (uint64_t)length;
     return 0;
@@ -1695,4 +1766,60 @@ int vfs_selftest(void)
 
     printf("VFS Self-Test (with pipe): %d/%d passed\n", passed, passed+failed);
     return failed;
+}
+
+int vfs_open(const char *path, uint32_t flags, uint32_t mode)
+{
+    uint64_t saved = namespace_enter();
+    int result = open_internal(path, flags, mode);
+    namespace_leave(saved);
+    return result;
+}
+void vfs_file_put(vfs_file_t *file)
+{
+    uint64_t saved = namespace_enter();
+    file_put_internal(file);
+    namespace_leave(saved);
+}
+int vfs_mkdir(const char *path, uint32_t mode)
+{
+    uint64_t saved = namespace_enter();
+    int result = mkdir_internal(path, mode);
+    namespace_leave(saved);
+    return result;
+}
+int vfs_rmdir(const char *path)
+{
+    uint64_t saved = namespace_enter();
+    int result = rmdir_internal(path);
+    namespace_leave(saved);
+    return result;
+}
+int vfs_unlink(const char *path)
+{
+    uint64_t saved = namespace_enter();
+    int result = unlink_internal(path);
+    namespace_leave(saved);
+    return result;
+}
+int vfs_readdir(int fd, int index, char *name, int namelen, vfs_inode_t *stat)
+{
+    uint64_t saved = namespace_enter();
+    int result = readdir_internal(fd, index, name, namelen, stat);
+    namespace_leave(saved);
+    return result;
+}
+int vfs_chdir(const char *path)
+{
+    uint64_t saved = namespace_enter();
+    int result = chdir_internal(path);
+    namespace_leave(saved);
+    return result;
+}
+int vfs_symlink(const char *target, const char *linkpath)
+{
+    uint64_t saved = namespace_enter();
+    int result = symlink_internal(target, linkpath);
+    namespace_leave(saved);
+    return result;
 }

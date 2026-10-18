@@ -9,7 +9,7 @@ import re
 import select
 import fcntl
 
-PROJECT_DIR = "/media/fwqfzqaz/王峥/SpiritFoxOS"
+PROJECT_DIR = os.path.dirname(os.path.abspath(__file__))
 
 TESTS = [
     ("V01", "列出根目录", "ls /", ["bin/", "etc/", "dev/", "tmp/"]),

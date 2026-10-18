@@ -23,6 +23,7 @@ typedef struct vfs_file vfs_file_t;
 #define PROC_FLAG_KERNEL  0x01   /* Kernel thread */
 #define PROC_FLAG_SFK     0x02   /* SFK sandboxed app */
 #define PROC_FLAG_DEB     0x04   /* DEB native Linux app */
+#define PROC_FLAG_VFORK_WAIT 0x10 /* legacy CLONE_VM parent waits for exec */
 #define PROC_FLAG_COW     0x08   /* COW (Copy-on-Write) fork */
 
 /* ========================================================================

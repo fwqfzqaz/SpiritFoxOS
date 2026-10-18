@@ -79,7 +79,9 @@ struct sf_surface {
 
     /* 当前缓冲区 */
     struct wl_resource *buffer_resource;
-    void *buffer_data;      /* SHM 缓冲区数据指针 */
+    struct wl_listener pending_buffer_destroy;
+    int buffer_pending;
+    void *buffer_data;      /* 服务器拥有的已提交像素快照 */
     int32_t buffer_width;
     int32_t buffer_height;
     uint32_t buffer_format;

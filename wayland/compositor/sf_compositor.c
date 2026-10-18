@@ -78,7 +78,7 @@ typedef struct sf_shm_pool {
 /* SHM buffer：从池中偏移截取的像素数据 */
 typedef struct sf_buffer {
 	sf_shm_pool_t *pool;
-	void          *data;     /* pool->data + offset */
+	size_t         offset;   /* resize 后从 pool->data 重新计算 */
 	int32_t        width;
 	int32_t        height;
 	int32_t        stride;
@@ -383,6 +383,9 @@ static void sf_surface_resource_destroy(struct wl_resource *resource)
 		free(cb);
 	}
 
+	if (surface->buffer_resource)
+		wl_list_remove(&surface->pending_buffer_destroy.link);
+	free(surface->buffer_data);
 	wl_list_remove(&surface->link);
 	free(surface);
 }
@@ -394,6 +397,14 @@ static void sf_surface_destroy_impl(struct wl_client *client,
 	wl_resource_destroy(resource);
 }
 
+static void sf_pending_buffer_destroy(struct wl_listener *listener, void *data)
+{
+	(void)data;
+	sf_surface_t *s = wl_container_of(listener, s, pending_buffer_destroy);
+	wl_list_remove(&s->pending_buffer_destroy.link);
+	s->buffer_resource = NULL;
+}
+
 static void sf_surface_attach_impl(struct wl_client *client,
                                    struct wl_resource *resource,
                                    struct wl_resource *buffer, int32_t x, int32_t y)
@@ -403,7 +414,14 @@ static void sf_surface_attach_impl(struct wl_client *client,
 	(void)y;
 	sf_surface_t *surface = wl_resource_get_user_data(resource);
 	/* 暂存为 pending buffer，commit 时解析 */
+	if (surface->buffer_resource)
+		wl_list_remove(&surface->pending_buffer_destroy.link);
 	surface->buffer_resource = buffer;
+	surface->buffer_pending = 1;
+	if (buffer) {
+		surface->pending_buffer_destroy.notify = sf_pending_buffer_destroy;
+		wl_resource_add_destroy_listener(buffer, &surface->pending_buffer_destroy);
+	}
 }
 
 static void sf_surface_damage_impl(struct wl_client *client,
@@ -461,12 +479,27 @@ void sf_surface_commit(sf_surface_t *surface)
 {
 	sf_compositor_t *comp = surface->comp;
 	struct wl_resource *bres = surface->buffer_resource;
+	/* 没有 attach 的 commit 保留当前内容。 */
+	if (!surface->buffer_pending)
+		return;
+	surface->buffer_pending = 0;
+	if (bres)
+		wl_list_remove(&surface->pending_buffer_destroy.link);
+	surface->buffer_resource = NULL;
 
 	if (bres) {
 		sf_buffer_t *buf = wl_resource_get_user_data(bres);
 		if (buf) {
+			size_t bytes = (size_t)buf->stride * buf->height;
+			void *snapshot = malloc(bytes);
+			if (!snapshot) {
+				wl_client_post_no_memory(wl_resource_get_client(bres));
+				return;
+			}
+			memcpy(snapshot, (char *)buf->pool->data + buf->offset, bytes);
 			int was_mapped = surface->mapped;
-			surface->buffer_data   = buf->data;
+			free(surface->buffer_data);
+			surface->buffer_data   = snapshot;
 			surface->buffer_width  = buf->width;
 			surface->buffer_height = buf->height;
 			surface->buffer_format = buf->format;
@@ -485,9 +518,12 @@ void sf_surface_commit(sf_surface_t *surface)
 				/* 新映射的表面获得键盘焦点 */
 				sf_seat_set_keyboard_focus(&comp->seat, comp, surface);
 			}
+			/* 快照完成后不再依赖客户端 buffer/pool 的生命周期。 */
+			wl_buffer_send_release(bres);
 		}
 	} else {
 		/* attach(NULL) 或无缓冲区提交：取消映射 */
+		free(surface->buffer_data);
 		surface->buffer_data = NULL;
 		if (surface->mapped) {
 			surface->mapped = 0;
@@ -653,6 +689,11 @@ static void sf_shm_create_pool_impl(struct wl_client *client,
                                     int32_t fd, int32_t size)
 {
 	(void)resource;
+	if (size <= 0 || size > 64 * 1024 * 1024) {
+		close(fd);
+		wl_resource_post_error(resource, WL_SHM_ERROR_INVALID_STRIDE, "invalid pool size");
+		return;
+	}
 	void *data = mmap(NULL, (size_t)size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
 	if (data == MAP_FAILED) {
 		close(fd);
@@ -730,7 +771,7 @@ static void sf_shm_pool_resize_impl(struct wl_client *client,
 {
 	(void)client;
 	sf_shm_pool_t *pool = wl_resource_get_user_data(resource);
-	if (size <= 0 || (size_t)size <= pool->size)
+	if (size <= 0 || size > 64 * 1024 * 1024 || (size_t)size <= pool->size)
 		return;
 	/* 重新 mmap 扩展映射 */
 	void *new_data = mmap(NULL, (size_t)size, PROT_READ | PROT_WRITE,
@@ -768,13 +809,20 @@ static void sf_shm_create_buffer_impl(struct wl_client *client,
                                       int32_t stride, uint32_t format)
 {
 	sf_shm_pool_t *pool = wl_resource_get_user_data(resource);
+	if (offset < 0 || width <= 0 || height <= 0 || stride <= 0 ||
+	    (uint64_t)width * 4 > (uint64_t)stride ||
+	    (uint64_t)offset + (uint64_t)stride * height > pool->size ||
+	    (format != WL_SHM_FORMAT_XRGB8888 && format != WL_SHM_FORMAT_ARGB8888)) {
+		wl_resource_post_error(resource, WL_SHM_ERROR_INVALID_STRIDE, "invalid buffer geometry");
+		return;
+	}
 	sf_buffer_t *buf = calloc(1, sizeof(*buf));
 	if (!buf) {
 		wl_client_post_no_memory(client);
 		return;
 	}
 	buf->pool   = pool;
-	buf->data   = (char *)pool->data + offset;
+	buf->offset = (size_t)offset;
 	buf->width  = width;
 	buf->height = height;
 	buf->stride = stride;
@@ -1323,6 +1371,7 @@ static void sf_xdg_toplevel_set_minimized_impl(struct wl_client *client,
 	sf_surface_t *surface = wl_resource_get_user_data(resource);
 	if (surface) {
 		surface->mapped = 0;
+		free(surface->buffer_data);
 		surface->buffer_data = NULL;
 	}
 }

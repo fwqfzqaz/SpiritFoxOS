@@ -257,6 +257,43 @@ def patch_pe(pe_path, reloc_data):
         # Need to add .reloc section
         print("No .reloc section found, adding one...")
 
+        # A new section header may cross into the first section's file data.
+        # Grow the file header first, preserving RVAs and shifting file offsets.
+        file_alignment = struct.unpack_from('<I', pe_data, opt_offset + 36)[0]
+        if file_alignment == 0:
+            raise ValueError('PE FileAlignment must be nonzero')
+        header_end = section_start + (num_sections + 1) * 40
+        header_size = ((header_end + file_alignment - 1) // file_alignment) * file_alignment
+        raw_pointers = []
+        for i in range(num_sections):
+            sec_offset = section_start + i * 40
+            raw_size, raw_ptr = struct.unpack_from('<II', pe_data, sec_offset + 16)
+            if raw_size and raw_ptr:
+                raw_pointers.append(raw_ptr)
+        first_raw = min(raw_pointers) if raw_pointers else len(pe_data)
+        if header_size > first_raw:
+            delta = header_size - first_raw
+            pe_data[first_raw:first_raw] = b'\0' * delta
+            for i in range(num_sections):
+                sec_offset = section_start + i * 40
+                for field in (20, 24, 28):
+                    pointer = struct.unpack_from('<I', pe_data, sec_offset + field)[0]
+                    if pointer and pointer >= first_raw:
+                        struct.pack_into('<I', pe_data, sec_offset + field, pointer + delta)
+            symbol_pointer = struct.unpack_from('<I', pe_data, coff_offset + 8)[0]
+            if symbol_pointer and symbol_pointer >= first_raw:
+                struct.pack_into('<I', pe_data, coff_offset + 8, symbol_pointer + delta)
+            # Unlike other data directories, the certificate directory uses a
+            # file offset rather than an RVA.
+            if struct.unpack_from('<I', pe_data, opt_offset + 108)[0] >= 5:
+                security_entry = opt_offset + 112 + 4 * 8
+                pointer = struct.unpack_from('<I', pe_data, security_entry)[0]
+                if pointer and pointer >= first_raw:
+                    struct.pack_into('<I', pe_data, security_entry, pointer + delta)
+            print(f"Expanded PE headers by {delta} bytes")
+        previous_header_size = struct.unpack_from('<I', pe_data, opt_offset + 60)[0]
+        struct.pack_into('<I', pe_data, opt_offset + 60, max(previous_header_size, header_size))
+
         # Calculate new section position.
         # Bug fix: iterate over ALL sections to find the actual end of
         # file content and the highest virtual address. We cannot just use
@@ -276,12 +313,11 @@ def patch_pe(pe_path, reloc_data):
             max_vaddr_end = max(max_vaddr_end, s_vaddr + s_vsize)
 
         new_vaddr = (max_vaddr_end + 0xFFF) & ~0xFFF
-        # Bug fix: Python's ~0x1FF = -512 (arbitrary precision), so
-        # (val & ~0x1FF) does NOT work as a 0x200 alignment mask.
-        # Use integer division instead: ((val + 0x1FF) // 0x200) * 0x200
-        new_raw_ptr = ((max_raw_end + 0x1FF) // 0x200) * 0x200
+        # Preserve trailing symbol/string tables as well as loaded sections.
+        raw_end = max(max_raw_end, len(pe_data))
+        new_raw_ptr = ((raw_end + file_alignment - 1) // file_alignment) * file_alignment
         new_vsize = len(reloc_data)
-        new_raw_size = ((len(reloc_data) + 0x1FF) // 0x200) * 0x200
+        new_raw_size = ((len(reloc_data) + file_alignment - 1) // file_alignment) * file_alignment
 
         # Pad PE data to accommodate new section
         needed_size = new_raw_ptr + new_raw_size

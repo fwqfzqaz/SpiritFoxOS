@@ -144,6 +144,8 @@ int autorun_create_default(const char *path)
     const char *default_content =
         "# SpiritFoxOS Autorun Configuration\n"
         "#\n"
+        "# Module file service regression check\n"
+        "exec /mnt/bin/test_sfmod_file\n"
         "# Wayland compositor\n"
         "bgexec /mnt/bin/sf_compositor\n";
 

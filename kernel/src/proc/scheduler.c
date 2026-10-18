@@ -219,6 +219,9 @@ void scheduler_tick(void)
 __attribute__((noinline))
 void scheduler_schedule(void)
 {
+    /* 进程指针、CR3/TSS 与 RSP 的发布必须是一个不可被定时器重入的切换。
+     * 恢复标志位在旧进程再次被调度、回到自己的栈之后执行。 */
+    uint64_t interrupt_flags = hal_save_interrupts();
     /* 确保 GS_BASE 正确。
      * arch_switch_to 不保存/恢复 GS_BASE MSR，因此上下文
      * 切换后 GS_BASE 可能是前一个进程遗留的值。
@@ -258,6 +261,7 @@ void scheduler_schedule(void)
     process_t *old = cpu->current_process;
     if (!old) {
         serial_puts("[sched] BUG: old=NULL\n");
+        hal_restore_interrupts(interrupt_flags);
         return;
     }
 
@@ -339,6 +343,7 @@ void scheduler_schedule(void)
                     old->priority = DEFAULT_TIMESLICE;
                 }
                 cpu->need_reschedule = 0;
+                hal_restore_interrupts(interrupt_flags);
                 return;
             }
         } else {
@@ -376,6 +381,7 @@ void scheduler_schedule(void)
         old->state = PROC_RUNNING;
         old->priority = DEFAULT_TIMESLICE;
         cpu->need_reschedule = 0;
+        hal_restore_interrupts(interrupt_flags);
         return;
     }
 
@@ -408,9 +414,11 @@ do_switch:
     new_p->cpu_id = (int)cpu->index;
     cpu->need_reschedule = 0;
 
-    /* Switch page tables if different */
-    if (old->pml4 != new_p->pml4)
-        hal_write_cr3(new_p->pml4);
+    /* exec 加载 ELF 时用 pml4=0 表示尚未创建新地址空间。内核线程仍可被
+     * 抢占，恢复它时必须使用内核页表，绝不能向 CR3 写入这个占位值。 */
+    uint64_t next_pml4 = new_p->pml4 ? new_p->pml4 : cpu->kernel_cr3;
+    if (hal_read_cr3() != next_pml4)
+        hal_write_cr3(next_pml4);
 
     /* 更新 TSS rsp0 用于中断特权级转换 */
     if (new_p->kernel_stack) {
@@ -424,7 +432,7 @@ do_switch:
     cpu->kernel_rsp_top = (new_p->kernel_stack)
         ? (uint64_t)new_p->kernel_stack + (KERNEL_STACK_PAGES * PAGE_SIZE)
         : 0x800000;
-    cpu->process_pml4 = new_p->pml4;
+    cpu->process_pml4 = next_pml4;
 
     /* 恢复 FS_BASE MSR：用户进程通过 arch_prctl 设置 FS_BASE，
      * 但 MSR 是 per-CPU 的。当进程迁移到不同 CPU 或被其他
@@ -456,6 +464,7 @@ do_switch:
     switch_to(&old->kernel_rsp, new_p->kernel_rsp);
 
     /* 当本进程被重新调度时，执行到达此处。 */
+    hal_restore_interrupts(interrupt_flags);
 }
 
 /* ========================================================================

@@ -10,11 +10,12 @@
 # =========================================
 # 工具链配置
 # =========================================
-CROSS   ?= x86_64-linux-gnu-
+CROSS   ?= $(shell for tool in gcc ld objcopy ar ranlib; do command -v x86_64-linux-gnu-$$tool >/dev/null 2>&1 || exit 0; done; printf '%s' x86_64-linux-gnu-)
 CC      = $(CROSS)gcc
 LD      = $(CROSS)ld
 NASM    = nasm
 OBJCOPY = $(CROSS)objcopy
+HOST_CC ?= cc
 
 # =========================================
 # 目录配置
@@ -33,19 +34,19 @@ IMAGE_DIR      = build/disk
 EFI_DIR        = $(IMAGE_DIR)/EFI/Boot
 IMAGE_FILE     = build/spiritfox.img
 
-OVMF_CODE      ?= /usr/share/OVMF/OVMF_CODE.fd
-OVMF_VARS      ?= /usr/share/OVMF/OVMF_VARS.fd
+OVMF_CODE      ?= $(firstword $(wildcard /usr/share/OVMF/OVMF_CODE.fd /usr/share/OVMF/OVMF_CODE_4M.fd /usr/share/edk2/x64/OVMF_CODE.4m.fd /usr/share/edk2/ovmf/OVMF_CODE.fd))
+OVMF_VARS      ?= $(subst OVMF_CODE,OVMF_VARS,$(OVMF_CODE))
 
 # =========================================
 # 64-bit 内核编译选项
 # =========================================
-KERNEL_CFLAGS  = -ffreestanding -nostdlib \
+KERNEL_CFLAGS  = -std=gnu11 -ffreestanding -nostdlib \
                  -fno-builtin -fno-stack-protector \
                  -fno-pic -fno-pie -mno-red-zone \
                  -mno-mmx -mno-sse -mno-sse2 \
                  -mcmodel=small \
                  -Wall -Wextra -Wno-unused-function -Wno-unused-variable \
-                 -I$(KERNEL_INC)
+                 -I$(KERNEL_INC) -MMD -MP
 
 KERNEL_LDFLAGS = -T $(KERNEL_SRC)/kernel.ld -nostdlib -static
 
@@ -59,7 +60,13 @@ KERNEL_ASM_SRCS  := $(shell find $(KERNEL_SRC) -name '*.S' -type f ! -name 'ap_t
 KERNEL_C_OBJS    = $(patsubst $(KERNEL_SRC)/%.c,$(KERNEL_BUILD)/%.o,$(KERNEL_C_SRCS))
 KERNEL_ASM_OBJS  = $(patsubst $(KERNEL_SRC)/%.S,$(KERNEL_BUILD)/%.o,$(KERNEL_ASM_SRCS))
 
-KERNEL_OBJS      = $(KERNEL_C_OBJS) $(KERNEL_ASM_OBJS)
+CORE_C_SRCS     := $(shell find kernel/core -name '*.c' -type f)
+CORE_C_OBJS      = $(patsubst kernel/core/%.c,$(KERNEL_BUILD)/core/%.o,$(CORE_C_SRCS))
+KERNEL_OBJS      = $(KERNEL_C_OBJS) $(KERNEL_ASM_OBJS) $(CORE_C_OBJS) $(KERNEL_BUILD)/core/boot/package.o
+
+.DEFAULT_GOAL := all
+-include $(KERNEL_C_OBJS:.o=.d)
+-include $(CORE_C_OBJS:.o=.d)
 
 # =========================================
 # 默认目标 (必须是 Makefile 中第一个目标)
@@ -85,6 +92,13 @@ logo: $(LOGO_HEADER)
 $(KERNEL_BUILD):
 	@mkdir -p $(KERNEL_BUILD)
 
+build:
+	@mkdir -p $@
+
+$(KERNEL_BUILD)/video/window.o: $(LOGO_HEADER)
+
+$(KERNEL_BUILD)/proc/process_user.o: KERNEL_CFLAGS += -Werror=frame-larger-than=4096
+
 $(KERNEL_BUILD)/%.o: $(KERNEL_SRC)/%.c | $(KERNEL_BUILD)
 	@mkdir -p $(dir $@)
 	@echo "[CC64] $<"
@@ -98,6 +112,46 @@ $(KERNEL_BUILD)/%.o: $(KERNEL_SRC)/%.S | $(KERNEL_BUILD)
 	@mkdir -p $(dir $@)
 	@echo "[NASM64] $<"
 	@$(NASM) -f elf64 $< -o $@
+
+$(KERNEL_BUILD)/core/%.o: kernel/core/%.c
+	@mkdir -p $(dir $@)
+	$(CC) $(KERNEL_CFLAGS) -Werror -Wframe-larger-than=2048 -c $< -o $@
+
+$(KERNEL_BUILD)/core/boot/package.o: kernel/core/boot/package.S build/modules/init.sfpack
+	@mkdir -p $(dir $@)
+	$(NASM) -f elf64 $< -o $@
+
+# 单独编译/链接模块；不链接内核或宿主 libc。
+SFM_FLAGS = -std=gnu11 -O2 -ffreestanding -fno-builtin -fno-stack-protector \
+            -fno-pic -fno-pie -fno-common -fno-asynchronous-unwind-tables \
+            -fno-unwind-tables -mno-red-zone -mno-mmx -mno-sse -mno-sse2 \
+            -Wall -Wextra -Werror -Ikernel/include
+SFM_NAMES := $(shell sed -e '/^[[:space:]]*\#/d' -e '/^[[:space:]]*$$/d' modules/manifest.txt | awk '{print $$1}')
+SFM_FILES = $(addprefix build/modules/,$(addsuffix .sfmod,$(SFM_NAMES)))
+define SFM_RULE
+build/modules/$(1).sfmod: modules/$(2) kernel/include/sfmod.h
+	@mkdir -p build/modules
+	$$(CC) $$(SFM_FLAGS) -c $$< -o build/modules/$(1).o
+	$$(LD) -r -o $$@ build/modules/$(1).o
+endef
+$(foreach name,$(SFM_NAMES),$(eval $(call SFM_RULE,$(name),$(shell awk '$$1=="$(name)" {print $$2}' modules/manifest.txt))))
+
+build/modules/init.sfpack: $(SFM_FILES) tools/pack-modules.py modules/manifest.txt
+	python3 tools/pack-modules.py
+
+.PHONY: modules test-modules
+modules: build/modules/init.sfpack
+
+build/modules/test.fail.sfmod: tests/modules/fail.c kernel/include/sfmod.h
+	@mkdir -p build/modules
+	$(CC) $(SFM_FLAGS) -c $< -o build/modules/test.fail.o
+	$(LD) -r -o $@ build/modules/test.fail.o
+
+test-modules: modules build/modules/test.fail.sfmod
+	$(HOST_CC) -std=gnu11 -O1 -g -Wall -Wextra -Werror -no-pie -fsanitize=undefined -fno-sanitize-recover=all -Ikernel/include \
+	    tests/test_sfmod.c kernel/core/ipc/endpoint.c kernel/core/module/elf.c \
+	    kernel/core/module/loader.c kernel/core/selftest.c -o build/test_sfmod
+	build/test_sfmod build/modules/init.sfpack build/modules/test.fail.sfmod $(SFM_FILES)
 
 $(KERNEL_BUILD)/kernel.elf: $(KERNEL_OBJS) $(KERNEL_SRC)/kernel.ld
 	@echo "[LD64] $@"
@@ -133,7 +187,7 @@ ap-trampoline: $(KERNEL_BUILD)/ap_trampoline.bin
 #   UEFI 固件直接加载 kernel.efi；stub 解析内嵌 ELF，加载段到 0x100000，
 #   完成 GOP/内存映射/ExitBootServices/页表/GDT，跳转 _start64。
 # =========================================
-EFI_CFLAGS = -ffreestanding -fno-stack-protector -fpic \
+EFI_CFLAGS = -std=gnu11 -ffreestanding -fno-stack-protector -fpic \
              -fvisibility=hidden -fno-plt \
              -fshort-wchar -mno-red-zone -mno-mmx -mno-sse -mno-sse2 \
              -Wall -Wextra -Wno-unused-function -Wno-unused-variable \
@@ -162,15 +216,15 @@ $(EFI_BUILD)/stub.elf: $(EFI_BUILD)/crt0.o $(EFI_BUILD)/efi_main.o $(EFI_BUILD)/
 	@$(LD) $(EFI_LDFLAGS) -o $@ $(EFI_BUILD)/crt0.o $(EFI_BUILD)/efi_main.o $(EFI_BUILD)/payload.o
 
 # ELF → PE32+ (EFI application)
-$(KERNEL_EFI): $(EFI_BUILD)/stub.elf
+$(KERNEL_EFI): $(EFI_BUILD)/stub.elf $(EFI_STUB_DIR)/gen_reloc.py
 	@echo "[OBJCOPY-EFI] $@"
-	@objcopy -j .text -j .rodata -j .data -j .bss \
-	         --target=efi-app-x86_64 \
+	@$(OBJCOPY) -j .text -j .rodata -j .data -j .bss \
+	         --output-target=efi-app-x86_64 \
 	         $< $@ 2>/dev/null || \
-	  objcopy -j .text -j .rodata -j .data -j .bss \
-	         --target=pei-x86-64 \
+	  $(OBJCOPY) -j .text -j .rodata -j .data -j .bss \
+	         --output-target=pei-x86-64 --subsystem=10 --image-base=0 \
 	         $< $@ 2>/dev/null || \
-	  cp $< $@
+	  { echo 'ERROR: objcopy could not create an EFI PE executable'; exit 1; }
 	@echo "[GEN-RELOC] Generating PE .reloc..."
 	@python3 $(EFI_STUB_DIR)/gen_reloc.py $< $@
 	@echo "[EFI] kernel.efi ready: $@ (`stat -c%s $@ 2>/dev/null || echo ?` bytes)"
@@ -298,7 +352,9 @@ run-debug: uefi-image build/ovmf_vars.fd build/disk.img build/fat32.img
 	    -device ide-hd,drive=disk0,bus=ahci0.1
 
 build/ovmf_vars.fd:
-	@cp $(OVMF_VARS) $@ 2>/dev/null || dd if=/dev/zero of=$@ bs=1 count=0 seek=262143 2>/dev/null
+	@test -f "$(OVMF_VARS)" || { echo 'ERROR: matching OVMF firmware not found; set OVMF_CODE and OVMF_VARS'; exit 1; }
+	@mkdir -p build
+	@cp "$(OVMF_VARS)" $@
 
 # =========================================
 # QEMU disk images (auto-created if missing)
@@ -306,7 +362,7 @@ build/ovmf_vars.fd:
 build/disk.img:
 	@dd if=/dev/zero of=$@ bs=1M count=16 2>/dev/null
 
-build/fat32.img: build/test_hello build/test_musl_hello build/test_musl_dyn build/sf_compositor build/sf_test_client
+build/fat32.img: build/test_hello build/test_musl_hello build/test_musl_dyn build/test_sfmod_file build/sf_compositor build/sf_test_client
 	@echo "[FAT32] Creating disk image..."
 	@dd if=/dev/zero of=$@ bs=1M count=64 2>/dev/null
 	@mkfs.fat -F 32 $@
@@ -317,6 +373,7 @@ build/fat32.img: build/test_hello build/test_musl_hello build/test_musl_dyn buil
 		mcopy -i $@ build/test_hello ::test_hello 2>/dev/null
 	@mcopy -i $@ build/test_musl_hello ::bin/test_musl_hello 2>/dev/null || true
 	@mcopy -i $@ build/test_musl_dyn ::bin/test_musl_dyn 2>/dev/null || true
+	@mcopy -i $@ build/test_sfmod_file ::bin/test_sfmod_file
 	@mcopy -i $@ build/sf_compositor ::bin/sf_compositor 2>/dev/null || true
 	@mcopy -i $@ build/sf_test_client ::bin/sf_test_client 2>/dev/null || true
 	@mcopy -i $@ $(SYSROOT)/lib/ld-musl-x86_64.so.1 ::lib/ld-musl-x86_64.so.1 2>/dev/null || true
@@ -374,7 +431,7 @@ test-elf: build/test_hello
 # musl libc 用户程序
 # =========================================
 MUSL_CC   = tools/x86_64-spiritfoxos-gcc
-SYSROOT   = $(CURDIR)/sysroot
+SYSROOT   = $(if $(SPIRITFOX_SYSROOT),$(SPIRITFOX_SYSROOT),$(CURDIR)/build/sysroot)
 
 musl-static: build/test_musl_hello
 	@echo "[MUSL] Static test binary: build/test_musl_hello"
@@ -395,6 +452,9 @@ build/test_musl_dyn: tests/test_musl_hello.c | build
 	@echo "[MUSL-CC] $< (dynamic)"
 	@$(MUSL_CC) -O2 -o $@ $<
 
+build/test_sfmod_file: tests/test_sfmod_file.c | build
+	$(MUSL_CC) -static -O2 -Wall -Wextra -Werror -o $@ $<
+
 # 将 musl 测试程序和动态链接器部署到 FAT32 磁盘镜像
 musl-deploy: musl-test build/fat32.img
 	@echo "[MUSL] Deploying to FAT32 image..."
@@ -412,7 +472,7 @@ WL_CC       = tools/x86_64-spiritfoxos-gcc
 WL_CFLAGS   = -O2 -Wall -Iwayland/compositor -Iwayland/generated \
               -I$(SYSROOT)/usr/include -I$(SYSROOT)/usr/include/wayland
 WL_LDFLAGS  = -static -L$(SYSROOT)/usr/lib
-WL_SCANNER  = build/wayland/wayland-scanner
+WL_SCANNER  ?= $(SYSROOT)/../host-tools/bin/wayland-scanner
 WL_PROTOCOL = wayland/protocol
 
 # wayland 协议绑定（已预生成，检查存在性）
@@ -441,16 +501,16 @@ wayland-libs:
 wayland-compositor: build/sf_compositor
 	@echo "[WL] Compositor: build/sf_compositor"
 
-build/sf_compositor: build/compositor_main.o build/sf_compositor.o
+build/sf_compositor: build/compositor_main.o build/sf_compositor.o build/xdg-shell-protocol.o
 	@echo "[WL-LD] $@"
-	@$(WL_CC) $(WL_LDFLAGS) -o $@ build/compositor_main.o build/sf_compositor.o \
+	@$(WL_CC) $(WL_LDFLAGS) -o $@ build/compositor_main.o build/sf_compositor.o build/xdg-shell-protocol.o \
 	    -lwayland-server -lffi
 
-build/compositor_main.o: wayland/compositor/main.c
+build/compositor_main.o: wayland/compositor/main.c | build wayland-protocol wayland-libs
 	@echo "[WL-CC] $<"
 	@$(WL_CC) $(WL_CFLAGS) -c $< -o $@
 
-build/sf_compositor.o: wayland/compositor/sf_compositor.c
+build/sf_compositor.o: wayland/compositor/sf_compositor.c | build wayland-protocol wayland-libs
 	@echo "[WL-CC] $<"
 	@$(WL_CC) $(WL_CFLAGS) -c $< -o $@
 
@@ -458,11 +518,18 @@ build/sf_compositor.o: wayland/compositor/sf_compositor.c
 wayland-client: build/sf_test_client
 	@echo "[WL] Test client: build/sf_test_client"
 
-build/sf_test_client: build/sf_test_client.o
+build/sf_test_client: build/sf_test_client.o build/xdg-shell-protocol.o
 	@echo "[WL-LD] $@"
-	@$(WL_CC) $(WL_LDFLAGS) -o $@ build/sf_test_client.o -lwayland-client -lffi
+	@$(WL_CC) $(WL_LDFLAGS) -o $@ build/sf_test_client.o build/xdg-shell-protocol.o -lwayland-client -lffi
 
-build/sf_test_client.o: wayland/client/sf_test_client.c
+wayland/generated/xdg-shell-protocol.c: wayland/protocol/xdg-shell.xml
+	@mkdir -p wayland/generated
+	$(WL_SCANNER) private-code $< $@
+
+build/xdg-shell-protocol.o: wayland/generated/xdg-shell-protocol.c | build wayland-protocol wayland-libs
+	$(WL_CC) $(WL_CFLAGS) -c $< -o $@
+
+build/sf_test_client.o: wayland/client/sf_test_client.c | build wayland-protocol wayland-libs
 	@echo "[WL-CC] $<"
 	@$(WL_CC) $(WL_CFLAGS) -c $< -o $@
 

@@ -10,6 +10,8 @@
 #include "elf64.h"
 #include "hal.h"
 #include "memory.h"
+#include "mmu.h"
+#include "smp.h"
 #include "kmalloc.h"
 #include "string.h"
 #include "vfs.h"
@@ -156,74 +158,63 @@ static uint64_t map_user_range(process_t *proc, uint64_t virt, size_t size,
  * create_user_pml4 – 分配新的PML4并复制内核映射
  * ======================================================================== */
 
-/* 深拷贝页表：分配新页面，复制所有页表项。
- * 这对于低半部分PML4项是必要的，以便在进程副本中
- * 拆分大页时不会影响内核。 */
-static uint64_t deep_copy_table(uint64_t src_table_phys)
+/* 仅复制页表页，叶子映射继续指向内核恒等映射。失败时回收已复制的表。 */
+static void free_page_tables(uint64_t table_phys, int level)
 {
-    void *new_table = alloc_page();
-    if (!new_table)
-        return 0;
-    memcpy(new_table, (void *)(uintptr_t)src_table_phys, PAGE_SIZE);
-    return (uint64_t)(uintptr_t)new_table;
+    uint64_t *table = (uint64_t *)(uintptr_t)table_phys;
+    if (level > 1) {
+        for (size_t i = 0; i < 512; i++) {
+            if ((table[i] & PTE_PRESENT) && !(table[i] & PTE_HUGE))
+                free_page_tables(table[i] & PTE_ADDR_MASK, level - 1);
+        }
+    }
+    free_page(table);
+}
+
+static uint64_t copy_page_tables(uint64_t source, int level)
+{
+    uint64_t *copy = alloc_page();
+    if (!copy) return 0;
+    memset(copy, 0, PAGE_SIZE);
+    uint64_t *original = (uint64_t *)(uintptr_t)source;
+    for (size_t i = 0; i < 512; i++) {
+        uint64_t entry = original[i];
+        if (level > 1 && (entry & PTE_PRESENT) && !(entry & PTE_HUGE)) {
+            uint64_t child = copy_page_tables(entry & PTE_ADDR_MASK, level - 1);
+            if (!child) {
+                free_page_tables((uint64_t)(uintptr_t)copy, level);
+                return 0;
+            }
+            entry = child | (entry & ~PTE_ADDR_MASK) | PTE_USER | PTE_WRITABLE;
+        }
+        copy[i] = entry;
+    }
+    return (uint64_t)(uintptr_t)copy;
 }
 
 static uint64_t create_user_pml4(void)
 {
-    void *new_pml4 = alloc_page();
-    if (!new_pml4)
-        return 0;
-
-    uint64_t *dst = (uint64_t *)new_pml4;
-    uint64_t *src = (uint64_t *)(uintptr_t)hal_read_cr3();
-
-    /* 从内核页表复制所有512个PML4项。
-     * 内核在低半部分（PML4[0..255]）使用恒等映射
-     * 用于代码、数据、堆和MMIO。只复制高半部分
-     *（PML4[256..511]）会丢失所有内核映射。
-     *
-     * 对于低半部分的PML4项（用户空间范围），我们
-     * 深拷贝PDPT，以便在进程页表中拆分大页时
-     * 不会影响内核的映射。
-     * 对于高半部分（仅内核使用），浅拷贝是安全的。 */
-    for (int i = 0; i < 256; i++) {
-        if (src[i] & PTE_PRESENT) {
-            /* 深拷贝此PML4项对应的PDPT */
-            uint64_t pdpt_phys = src[i] & PTE_ADDR_MASK;
-            uint64_t new_pdpt = deep_copy_table(pdpt_phys);
-            if (!new_pdpt) {
-                /* 回退：浅拷贝 */
-                dst[i] = src[i];
-            } else {
-                /* 从原始项复制标志位，但添加 USER | WRITABLE
-                 * 以使用户态代码可以遍历这些页表。
-                 * 实际的页面权限在PT级别强制执行。 */
-                dst[i] = new_pdpt | (src[i] & ~PTE_ADDR_MASK) | PTE_USER | PTE_WRITABLE;
-            }
-
-            /* 同时深拷贝PDPT中的每个PD，因为
-             * 我们可能需要将2MB大页拆分为4KB页。
-             * 同样为PD项添加 USER | WRITABLE。 */
-            uint64_t *pdpt = (uint64_t *)(new_pdpt ? new_pdpt : pdpt_phys);
-            for (int j = 0; j < 512; j++) {
-                if (pdpt[j] & PTE_PRESENT) {
-                    uint64_t pd_phys = pdpt[j] & PTE_ADDR_MASK;
-                    uint64_t new_pd = deep_copy_table(pd_phys);
-                    if (new_pd) {
-                        pdpt[j] = new_pd | (pdpt[j] & ~PTE_ADDR_MASK) | PTE_USER | PTE_WRITABLE;
-                    }
-                }
-            }
-        } else {
-            dst[i] = 0;
+    uint64_t *dst = alloc_page();
+    if (!dst) return 0;
+    memset(dst, 0, PAGE_SIZE);
+    /* exec 可能从用户页表进入。始终从原始内核页表开始，不能继承旧程序的
+     * PT 或用户映射；否则新 ELF 会改写父进程/旧程序的页表和 argv/envp。 */
+    uint64_t kernel_root = this_cpu()->kernel_cr3;
+    if (!kernel_root) kernel_root = hal_read_cr3();
+    uint64_t *src = (uint64_t *)(uintptr_t)kernel_root;
+    for (size_t i = 0; i < 256; i++) {
+        if (!(src[i] & PTE_PRESENT)) continue;
+        uint64_t copied = copy_page_tables(src[i] & PTE_ADDR_MASK, 3);
+        if (!copied) {
+            for (size_t j = 0; j < i; j++)
+                if (dst[j] & PTE_PRESENT) free_page_tables(dst[j] & PTE_ADDR_MASK, 3);
+            free_page(dst);
+            return 0;
         }
+        dst[i] = copied | (src[i] & ~PTE_ADDR_MASK) | PTE_USER | PTE_WRITABLE;
     }
-
-    /* 高半部分：浅拷贝（仅内核使用，无需拆分） */
-    for (int i = 256; i < 512; i++)
-        dst[i] = src[i];
-
-    return (uint64_t)(uintptr_t)new_pml4;
+    for (size_t i = 256; i < 512; i++) dst[i] = src[i];
+    return (uint64_t)(uintptr_t)dst;
 }
 
 /* ========================================================================

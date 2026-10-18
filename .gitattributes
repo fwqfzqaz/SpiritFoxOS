@@ -1,0 +1,18 @@
+* text=auto eol=lf
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.deb binary
+*.gz binary
+*.xz binary
+*.zst binary
+*.zip binary
+*.img binary
+*.iso binary
+*.a binary
+*.so binary
+*.elf binary
+*.efi binary
+*.o binary
+*.sfmod binary
+*.sfpack binary

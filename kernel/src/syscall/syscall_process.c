@@ -7,6 +7,7 @@
 #include "errno.h"
 #include "clone.h"
 #include "mmu.h"
+#include "serial.h"
 
 /* ========================================================================
  * arch_prctl 子功能

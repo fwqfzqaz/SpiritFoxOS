@@ -1148,12 +1148,19 @@ int pkgmgr_query(const char *pkg_id, pkg_info_t *info)
 
 int pkgmgr_list(pkg_info_t *packages, int max_entries)
 {
-    char pkg_ids[128][64];
+    int capacity = max_entries > 128 ? 128 : max_entries;
+    if (!packages || capacity <= 0)
+        return 0;
+    /* Match registry_list_software's row stride without growing the kernel stack. */
+    char (*pkg_ids)[REG_MAX_KEY_NAME] = kmalloc((size_t)capacity * sizeof(*pkg_ids));
+    if (!pkg_ids)
+        return 0;
     int count;
     int i;
 
-    count = registry_list_software(pkg_ids, max_entries > 128 ? 128 : max_entries);
+    count = registry_list_software(pkg_ids, capacity);
     if (count < 0) {
+        kfree(pkg_ids);
         return 0;
     }
 
@@ -1164,6 +1171,7 @@ int pkgmgr_list(pkg_info_t *packages, int max_entries)
         }
     }
 
+    kfree(pkg_ids);
     return i;
 }
 

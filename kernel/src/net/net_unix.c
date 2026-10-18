@@ -76,10 +76,8 @@ static void unix_release_file(vfs_file_t *f)
         return;
     }
 
-    /* No free fd slot available: drop the reference directly. */
-    f->refcount--;
-    if (f->refcount <= 0)
-        free_page(f);
+    /* Still run filesystem release when no descriptor slot is available. */
+    vfs_file_put(f);
 }
 
 /* Create an AF_UNIX socket */

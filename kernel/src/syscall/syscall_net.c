@@ -46,7 +46,7 @@ int64_t sys_accept(trap_frame_t *frame)
 {
     int fd = (int)frame->rdi;
     net_sockaddr_t *addr = (net_sockaddr_t *)frame->rsi;
-    socklen_t *addrlen = (socklen_t)frame->rdx;
+    socklen_t *addrlen = (socklen_t *)(uintptr_t)frame->rdx;
     serial_puts("[sys_accept] fd=");
     serial_put_dec((uint64_t)fd);
     serial_puts("\n");

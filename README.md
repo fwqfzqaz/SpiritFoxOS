@@ -12,6 +12,9 @@
 
 </div>
 
+开发环境与 Windows / Arch Linux 协作说明见 [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)。
+首次开发请先安装构建工具并运行 `bash tools/bootstrap-deps.sh`，再执行构建和启动检查。
+
 ---
 
 ## 目录

@@ -1,10 +1,10 @@
 # SpiritFoxOS libc
-CROSS   ?= x86_64-linux-gnu-
+CROSS   ?= $(shell for tool in gcc ld objcopy ar ranlib; do command -v x86_64-linux-gnu-$$tool >/dev/null 2>&1 || exit 0; done; printf '%s' x86_64-linux-gnu-)
 CC      = $(CROSS)gcc
 AR      = $(CROSS)ar
 RANLIB  = $(CROSS)ranlib
 
-CFLAGS  = -Os -ffreestanding -nostdlib -fno-builtin \
+CFLAGS  = -std=gnu11 -Os -ffreestanding -nostdlib -fno-builtin \
           -fno-stack-protector -fno-pic -fno-pie \
           -mno-red-zone -mno-mmx -mno-sse -mno-sse2 \
           -D_SPIRITFOXOS_ \
