@@ -32,7 +32,10 @@ jobs:
           fi
       - name: Build and boot from clean sources
         shell: bash
-        run: bash tools/check-linux.sh
+        run: |
+          # Container UID and checkout owner can differ; trust only this job's checkout.
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          bash tools/check-linux.sh
       - uses: actions/upload-artifact@v4
         if: always()
         with:
