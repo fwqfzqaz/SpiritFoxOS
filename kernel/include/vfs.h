@@ -30,9 +30,9 @@
 #define VFS_O_WRONLY    0x01
 #define VFS_O_RDWR      0x02
 #define VFS_O_CREAT     0x40
-#define VFS_O_TRUNC     0x80
-#define VFS_O_APPEND    0x100
-#define VFS_O_DIRECTORY 0x200
+#define VFS_O_TRUNC     0x200
+#define VFS_O_APPEND    0x400
+#define VFS_O_DIRECTORY 0x10000
 
 /* Seek whence */
 #define VFS_SEEK_SET    0
@@ -118,9 +118,13 @@ struct vfs_inode {
     vfs_superblock_t *sb;
 
     /* Operations */
+    uint32_t open_count;          /* Distinct open file descriptions, not dup/fork refs */
+    int (*open)(vfs_file_t *file);
+    void (*release)(vfs_file_t *file);
     int (*read)(vfs_file_t *file, void *buf, size_t count);
     int (*write)(vfs_file_t *file, const void *buf, size_t count);
     int (*truncate)(vfs_inode_t *inode, uint64_t size);
+    int (*readdir)(vfs_file_t *file, int index, char *name, int namelen, vfs_inode_t *stat);
 };
 
 /* ========================================================================
@@ -179,6 +183,7 @@ struct vfs_filesystem {
     int (*create)(vfs_dentry_t *parent, const char *name, vfs_inode_t *inode);
     int (*mkdir)(vfs_dentry_t *parent, const char *name, vfs_inode_t *inode);
     int (*unlink)(vfs_dentry_t *dentry);
+    int (*symlink)(vfs_dentry_t *parent, const char *name, vfs_inode_t *inode);
 };
 
 /* ========================================================================
@@ -214,6 +219,8 @@ int vfs_open(const char *path, uint32_t flags, uint32_t mode);
 
 /* Close a file descriptor */
 int vfs_close(int fd);
+/* Drop a shared file description even without a spare descriptor slot. */
+void vfs_file_put(vfs_file_t *file);
 
 /* Read from a file descriptor */
 int vfs_read(int fd, void *buf, size_t count);

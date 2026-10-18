@@ -355,13 +355,7 @@ int process_exec(const char *path, const char *const argv[],
     #endif
     for (int i = 0; i < VFS_MAX_FD; i++) {
         if (current->fd_table[i] && (current->fd_table[i]->fcntl_flags & FD_CLOEXEC)) {
-            vfs_file_t *f = current->fd_table[i];
-            f->refcount--;
-            if (f->refcount <= 0) {
-                /* Last reference — free the vfs_file */
-                kfree(f);
-            }
-            current->fd_table[i] = NULL;
+            vfs_close(i);
         }
     }
 

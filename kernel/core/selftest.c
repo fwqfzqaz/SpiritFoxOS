@@ -2,6 +2,95 @@
 #include "internal.h"
 
 #define CHECK(condition) do { if (!(condition)) goto fail; } while (0)
+static void path_request(sfm_message_t *req, uint32_t operation, uint64_t parent, const char *path)
+{
+    sfm_clear(req, sizeof(*req));
+    req->type = operation;
+    req->handle = parent;
+    while (path[req->size]) req->size++;
+    req->size++;
+    sfm_copy(req->data, path, req->size);
+}
+
+static int tree_test(uint64_t vfs, sfm_message_t *req, sfm_message_t *resp)
+{
+    path_request(req, SFM_FILE_OPEN, 0, "/tmp");
+    CHECK(!sfm_call(vfs, req, resp) && resp->flags == SFM_NODE_DIR);
+    uint64_t root = resp->handle;
+    path_request(req, SFM_FILE_OPEN, 0, "/tmp-other/file");
+    CHECK(sfm_call(vfs, req, resp) == -2);
+    path_request(req, SFM_FILE_OPEN, root, "../escape");
+    CHECK(sfm_call(vfs, req, resp) == -22);
+    path_request(req, SFM_FILE_OPEN, root, "bad//name");
+    CHECK(sfm_call(vfs, req, resp) == -22);
+    path_request(req, SFM_FILE_MKDIR, 0, "/tmp/nested");
+    CHECK(!sfm_call(vfs, req, resp));
+    uint64_t directory = resp->handle;
+    CHECK(sfm_call(vfs, req, resp) == -17);
+    path_request(req, SFM_FILE_OPEN, directory, "data");
+    req->flags = SFM_CREATE;
+    CHECK(!sfm_call(vfs, req, resp));
+    uint64_t original = resp->handle;
+    req->type = SFM_FILE_REMOVE;
+    req->handle = directory;
+    req->size = 0;
+    CHECK(sfm_call(vfs, req, resp) == -39);
+    req->type = SFM_FILE_READDIR;
+    CHECK(!sfm_call(vfs, req, resp) && resp->result == 1 &&
+          resp->handle == original && resp->size == sizeof("data") && resp->data[0] == 'd');
+    req->offset = 1;
+    CHECK(!sfm_call(vfs, req, resp) && !resp->result);
+    req->type = SFM_FILE_RETAIN;
+    req->handle = original;
+    CHECK(!sfm_call(vfs, req, resp));
+    req->type = SFM_FILE_WRITE;
+    req->offset = 0;
+    req->size = 3;
+    sfm_copy(req->data, "old", 3);
+    CHECK(!sfm_call(vfs, req, resp) && resp->result == 3);
+    req->type = SFM_FILE_REMOVE;
+    req->size = 0;
+    CHECK(!sfm_call(vfs, req, resp));
+    path_request(req, SFM_FILE_OPEN, directory, "data");
+    CHECK(sfm_call(vfs, req, resp) == -2);
+    req->flags = SFM_CREATE;
+    CHECK(!sfm_call(vfs, req, resp) && resp->handle != original);
+    uint64_t replacement = resp->handle;
+    path_request(req, SFM_FILE_OPEN, 0, "/run/data");
+    req->flags = SFM_CREATE;
+    CHECK(!sfm_call(vfs, req, resp) && resp->handle != replacement);
+    uint64_t other_mount = resp->handle;
+    path_request(req, SFM_FILE_OPEN, 0, "/tmp/data");
+    CHECK(sfm_call(vfs, req, resp) == -2);
+    sfm_clear(req, sizeof(*req));
+    req->type = SFM_FILE_READ;
+    req->handle = original;
+    req->size = sizeof(uint32_t);
+    uint32_t count = 8;
+    sfm_copy(req->data, &count, sizeof(count));
+    CHECK(!sfm_call(vfs, req, resp) && resp->result == 3 && resp->data[0] == 'o');
+    req->type = SFM_FILE_RELEASE;
+    req->size = 0;
+    CHECK(!sfm_call(vfs, req, resp));
+    req->type = SFM_FILE_STAT;
+    CHECK(sfm_call(vfs, req, resp) == -9);
+    req->type = SFM_FILE_RELEASE;
+    req->handle = replacement;
+    CHECK(sfm_call(vfs, req, resp) == -9);
+    req->type = SFM_FILE_REMOVE;
+    CHECK(!sfm_call(vfs, req, resp));
+    req->handle = other_mount;
+    CHECK(!sfm_call(vfs, req, resp));
+    req->handle = directory;
+    CHECK(!sfm_call(vfs, req, resp));
+    req->handle = root;
+    CHECK(sfm_call(vfs, req, resp) == -16);
+    return 0;
+fail:
+    sf_log("[sfmod] tmpfs tree assertion failed\n");
+    return -1;
+}
+
 int sfm_selftest(void)
 {
     sfm_message_t *req = sf_alloc(sizeof(*req));
@@ -62,6 +151,7 @@ int sfm_selftest(void)
     CHECK(!sfm_call(vfs, req, resp));
     req->type = SFM_FILE_STAT;
     CHECK(sfm_call(vfs, req, resp) == -9);
+    CHECK(!tree_test(vfs, req, resp));
     CHECK(sfm_module_unload("fs.tmpfs") == SFM_EBUSY);
     sf_free(req);
     sf_free(resp);

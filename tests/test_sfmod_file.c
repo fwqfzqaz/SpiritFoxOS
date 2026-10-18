@@ -4,6 +4,73 @@
 #include <string.h>
 #include <unistd.h>
 #include <sys/wait.h>
+#include <sys/stat.h>
+#include <dirent.h>
+
+#define VERIFY(expr) do { if (!(expr)) { printf("[sfmod-user] FAILED line %d\n", __LINE__); return -1; } } while (0)
+
+static int tree_test(void)
+{
+    const char *path = "/tmp/sfmod-user/sub/data";
+    VERIFY(!mkdir("/tmp/sfmod-user", 0700) && !mkdir("/tmp/sfmod-user/sub", 0700));
+    VERIFY(!mkdir("/run/sfmod-user", 0700));
+    int fd = open(path, O_CREAT | O_RDWR, 0600);
+    VERIFY(fd >= 0 && write(fd, "old", 3) == 3);
+    VERIFY(rmdir("/tmp/sfmod-user/sub") < 0 && rmdir("/tmp") < 0);
+    DIR *directory = opendir("/tmp/sfmod-user/sub");
+    VERIFY(directory);
+    int found = 0;
+    struct dirent *entry;
+    while ((entry = readdir(directory)))
+        if (!strcmp(entry->d_name, "data") && entry->d_type == DT_REG) found++;
+    VERIFY(found == 1 && !closedir(directory));
+    int duplicate = dup(fd);
+    VERIFY(duplicate >= 0 && !unlink(path));
+    pid_t reader = fork();
+    if (!reader) _exit(0); /* 退出必须只释放子进程对共享描述的引用。 */
+    int child_status = -1;
+    VERIFY(reader > 0 && waitpid(reader, &child_status, 0) == reader && !child_status);
+    struct stat status;
+    VERIFY(!fstat(fd, &status) && status.st_nlink == 0);
+    int replacement = open(path, O_CREAT | O_RDWR, 0600);
+    VERIFY(replacement >= 0 && write(replacement, "new", 3) == 3);
+    char buffer[8];
+    VERIFY(lseek(fd, 0, SEEK_SET) == 0 && read(duplicate, buffer, sizeof(buffer)) == 3 &&
+           !memcmp(buffer, "old", 3));
+    VERIFY(!close(fd) && lseek(duplicate, 0, SEEK_SET) == 0 &&
+           read(duplicate, buffer, 3) == 3 && !memcmp(buffer, "old", 3) && !close(duplicate));
+    int independent = open("/run/sfmod-user/data", O_CREAT | O_RDWR, 0600);
+    VERIFY(independent >= 0 && write(independent, "run", 3) == 3 && !close(independent));
+    int append = open(path, O_WRONLY | O_APPEND);
+    VERIFY(append >= 0 && lseek(append, 0, SEEK_SET) == 0 && write(append, "+", 1) == 1 && !close(append));
+    VERIFY(lseek(replacement, 0, SEEK_SET) == 0 && read(replacement, buffer, 8) == 4 &&
+           !memcmp(buffer, "new+", 4) && !close(replacement));
+    fd = open(path, O_WRONLY | O_TRUNC);
+    VERIFY(fd >= 0 && !fstat(fd, &status) && status.st_size == 0 && !close(fd));
+    fd = open(path, O_RDONLY);
+    VERIFY(fd >= 0 && write(fd, "x", 1) < 0 && read(fd, buffer, 8) == 0 && !close(fd));
+    independent = open("/run/sfmod-user/data", O_RDONLY);
+    VERIFY(independent >= 0 && read(independent, buffer, 8) == 3 &&
+           !memcmp(buffer, "run", 3) && !close(independent));
+    VERIFY(!unlink(path) && !rmdir("/tmp/sfmod-user/sub") && !rmdir("/tmp/sfmod-user"));
+    VERIFY(!unlink("/run/sfmod-user/data") && !rmdir("/run/sfmod-user"));
+    /* 超过节点上限次数的创建/删除，确认最后 close 实际回收模块节点。 */
+    for (int i = 0; i < 80; i++) {
+        fd = open("/tmp/recycle", O_CREAT | O_RDWR, 0600);
+        VERIFY(fd >= 0 && write(fd, "x", 1) == 1 && !unlink("/tmp/recycle") && !close(fd));
+    }
+    char boundary[80] = "/tmp/";
+    memset(boundary + 5, 'n', 63);
+    boundary[68] = 0;
+    fd = open(boundary, O_CREAT | O_RDWR | O_CLOEXEC, 0600);
+    VERIFY(fd >= 0 && (fcntl(fd, F_GETFD) & FD_CLOEXEC) && !close(fd));
+    boundary[68] = 'n'; boundary[69] = 0;
+    VERIFY(open(boundary, O_CREAT | O_RDWR, 0600) < 0);
+    boundary[68] = 0;
+    VERIFY(!unlink(boundary));
+    puts("[sfmod-user] tmpfs trees/lifetimes passed");
+    return 0;
+}
 
 int main(void)
 {
@@ -19,6 +86,7 @@ int main(void)
     fd = open("/modules/README", O_RDONLY);
     if (fd < 0 || read(fd, buffer, 4) != 4 || memcmp(buffer, "This", 4) || close(fd))
         goto fail;
+    if (tree_test()) goto fail;
     for (int i = 0; i < 16; i++) {
         pid_t child = fork();
         if (!child) _exit(0);

@@ -1,11 +1,11 @@
-/* SpiritFoxOS 模块 SDK。ABI 1：仅适用于受信任的内核态模块。 */
+/* SpiritFoxOS 模块 SDK。ABI 1.1：仅适用于受信任的内核态模块。 */
 #ifndef SPIRITFOX_SFMOD_H
 #define SPIRITFOX_SFMOD_H
 
 #include <stddef.h>
 #include <stdint.h>
 
-#define SFM_ABI 0x00010000u
+#define SFM_ABI 0x00010001u
 #define SFM_MAGIC 0x004d4653u
 #define SFM_PAYLOAD 4096u
 #define SFM_MAX_MODULES 16u
@@ -21,9 +21,23 @@ enum sfm_operation
     SFM_FILE_WRITE = 0x1004,
     SFM_FILE_STAT = 0x1007,
     SFM_FILE_TRUNCATE = 0x1008,
-    SFM_FILE_REMOVE = 0x1014
+    SFM_FILE_MKDIR = 0x1010,
+    SFM_FILE_READDIR = 0x1011,
+    SFM_FILE_RETAIN = 0x1012,
+    SFM_FILE_RELEASE = 0x1013,
+    SFM_FILE_REMOVE = 0x1014,
+    SFM_FILE_SYMLINK = 0x1015,
+    SFM_FS_ROOT = 0x2000
 };
 #define SFM_CREATE 1u
+#define SFM_NODE_FILE 1u
+#define SFM_NODE_DIR 2u
+#define SFM_NODE_SYMLINK 3u
+#define SFM_FS_INSTANCES 3u
+#define SFM_FILE_NODES 64u
+#define SFM_FILE_CAPACITY 65536u
+#define SFM_FILE_NAME 64u
+#define SFM_FILE_PATH 256u
 
 typedef struct sfm_message
 {

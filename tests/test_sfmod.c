@@ -116,6 +116,57 @@ static void test_elf(const uint8_t *original, size_t size)
 
 typedef struct item { char name[32]; uint64_t offset, size; } item_t;
 
+static void test_tmpfs_limits(void)
+{
+    uint64_t backend = sfm_lookup("fs.tmpfs"), handles[SFM_FILE_NODES];
+    sfm_message_t *req = calloc(1, sizeof(*req)), *resp = calloc(1, sizeof(*resp));
+    assert(req && resp && backend);
+    req->type = SFM_FS_ROOT;
+    assert(!sfm_call(backend, req, resp));
+    uint64_t root = resp->handle;
+    req->type = SFM_FILE_OPEN;
+    req->handle = root;
+    req->flags = SFM_CREATE;
+    req->size = sizeof("oom");
+    memcpy(req->data, "oom", req->size);
+    assert(!sfm_call(backend, req, resp));
+    uint64_t file = resp->handle;
+    req->handle = file;
+    req->type = SFM_FILE_WRITE;
+    req->size = 1;
+    req->data[0] = 'x';
+    size_t before = allocations;
+    fail_after = 0;
+    assert(sfm_call(backend, req, resp) == SFM_ENOMEM);
+    fail_after = -1;
+    assert(allocations == before);
+    req->type = SFM_FILE_STAT;
+    assert(!sfm_call(backend, req, resp) && !resp->result);
+    req->type = SFM_FILE_WRITE;
+    assert(!sfm_call(backend, req, resp) && resp->result == 1);
+    req->type = SFM_FILE_REMOVE;
+    assert(!sfm_call(backend, req, resp) && allocations == before);
+    size_t count = 0;
+    for (; count < SFM_FILE_NODES; count++)
+    {
+        req->type = SFM_FILE_OPEN;
+        req->handle = root;
+        req->size = (uint32_t)snprintf((char *)req->data, SFM_PAYLOAD, "quota-%zu", count) + 1;
+        int result = sfm_call(backend, req, resp);
+        if (result) { assert(result == SFM_ENOSPC); break; }
+        handles[count] = resp->handle;
+    }
+    assert(count == SFM_FILE_NODES - SFM_FS_INSTANCES);
+    for (size_t i = 0; i < count; i++)
+    {
+        req->type = SFM_FILE_REMOVE;
+        req->handle = handles[i];
+        assert(!sfm_call(backend, req, resp));
+    }
+    free(req);
+    free(resp);
+}
+
 static void test_package(uint8_t *package, size_t size, uint8_t *failure, size_t fail_size)
 {
     uint8_t *copy = malloc(size);
@@ -168,6 +219,7 @@ static void test_package(uint8_t *package, size_t size, uint8_t *failure, size_t
     }
     assert(succeeded);
     assert(!sfm_selftest());
+    test_tmpfs_limits();
     assert(sfm_package_load(package, size) == SFM_EBUSY);
     assert(sfm_module_unload("fs.tmpfs") == SFM_EBUSY);
     assert(!sfm_module_unload("fs.vfs"));

@@ -41,9 +41,11 @@ command = [args.qemu, "-machine", "pc,accel=tcg", "-m", "2G", "-smp", "1",
     "-net", "none", "-no-reboot", "-no-shutdown"]
 required = [b"[SpiritFoxOS] Enabling interrupts...", b"[SpiritFoxOS] shell_run...", b"[autorun] done,",
             b"[sfmod] self-test passed:", b"[sfmod] VFS bridge passed:",
-            b"[sfmod-user] file IO passed", b"[sfmod-user] fork/wait stress passed", b"[client] Window created", b"[client] frame 10"]
+            b"[sfmod-user] file IO passed", b"[sfmod-user] fork/wait stress passed",
+            b"[sfmod] tmpfs mounted: /tmp /run", b"[sfmod-user] tmpfs trees/lifetimes passed",
+            b"[client] Window created", b"[client] frame 10"]
 bad = [b"KERNEL PANIC", b"Triple fault", b"[EXCEPTION]", b"!!! EXCEPTION:", b"System Halted.",
-       b"[client] ERROR:", b"[client] wl_display_dispatch error:", b"[sfmod-user] FAILED", b"[exit] BUG:", b"[sched] BUG:", b"[wait] BUG:"]
+       b"[client] ERROR:", b"[client] wl_display_dispatch error:", b"[sfmod-user] FAILED", b"[exit] BUG:", b"[sched] BUG:", b"[wait] BUG:", b"[sfmod] bridge release failed"]
 with error.open("wb") as errors:
     process = subprocess.Popen(command, cwd=root, stdout=subprocess.DEVNULL, stderr=errors)
     try:
