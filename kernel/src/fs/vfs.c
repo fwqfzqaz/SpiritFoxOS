@@ -1541,6 +1541,9 @@ int vfs_ftruncate(int fd, int64_t length)
         return 0;
     }
 
+    /* 文件系统负责实际截断，不能只改 inode 大小而保留服务中的旧数据。 */
+    if (file->inode->truncate)
+        return file->inode->truncate(file->inode, (uint64_t)length);
     /* Other file types: just update the inode size */
     file->inode->size = (uint64_t)length;
     return 0;

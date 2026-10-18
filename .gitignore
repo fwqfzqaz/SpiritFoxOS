@@ -58,3 +58,10 @@ sysroot/lib/ld-musl-x86_64.so.1
 sysroot/usr/lib/libwayland-*.a
 sysroot/usr/include/wayland/
 wayland/generated/
+
+# Local dependency builds and development settings
+libc/libc.a
+sysroot/usr/lib/pkgconfig/
+sysroot/usr/lib/*.la
+sysroot/usr/share/aclocal/
+.spiritfox-local.json

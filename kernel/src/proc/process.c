@@ -79,6 +79,8 @@ static int alloc_pid(void)
 /* 从跳板调用，(entry, arg) 在 rdi, rsi 中 */
 __attribute__((used)) void kthread_entry(void (*entry)(void *), void *arg)
 {
+    /* 新线程没有可恢复的 scheduler_schedule 调用帧，切换已完成后才开中断。 */
+    hal_enable_interrupts();
     entry(arg);
     process_exit(0);
     __builtin_unreachable();
@@ -692,97 +694,49 @@ static int reap_zombie_locked(process_t *child, process_t *prev, int *status)
 
 int process_wait(int pid, int *status, int options)
 {
-    if (!current)
-        return -1;
-
-    serial_puts("[wait] PID=");
-    serial_put_dec((uint64_t)current->pid);
-    serial_puts(" waitfor=");
-    serial_put_dec((uint64_t)pid);
-    serial_puts(" options=");
-    serial_put_dec((uint64_t)options);
-    serial_puts(" child=");
-    serial_put_hex((uint64_t)(uintptr_t)current->child);
-    serial_puts("\n");
-
-    /* WNOHANG: 如果没有僵尸子进程，立即返回 0 */
-    #define WNOHANG 1
-
-    /* 扫描僵尸子进程 */
-    process_t *child = current->child;
-    process_t *prev  = NULL;
-
-    while (child) {
-        /* 验证 child 指针在 proc_table 范围内 */
-        uintptr_t child_addr = (uintptr_t)child;
-        uintptr_t table_start = (uintptr_t)&proc_table[0];
-        uintptr_t table_end = (uintptr_t)&proc_table[MAX_PROCS];
-        if (child_addr < table_start || child_addr >= table_end ||
-            (child_addr - table_start) % sizeof(process_t) != 0) {
-            serial_puts("[wait] BUG: corrupted child pointer=");
-            serial_put_hex((uint64_t)child_addr);
-            serial_puts(" on PID=");
-            serial_put_dec((uint64_t)current->pid);
-            serial_puts("\n");
-            /* 跳过损坏的指针，清空 child 链表 */
-            if (prev)
-                prev->sibling = NULL;
-            else
-                current->child = NULL;
-            break;
+    process_t *waiting = process_current();
+    if (!waiting) return -1;
+    /* 扫描子进程与标记 BLOCKED 之间不能被子进程退出打断，否则丢失唤醒。
+     * scheduler_schedule 保持中断关闭直到当前进程恢复到自己的栈。 */
+    uint64_t interrupt_flags = hal_save_interrupts();
+    for (;;) {
+        spinlock_acquire(&proc_table_lock);
+        process_t *child = waiting->child;
+        process_t *previous = NULL;
+        int found = 0;
+        size_t visited = 0;
+        while (child) {
+            uintptr_t address = (uintptr_t)child;
+            if (++visited > MAX_PROCS || address < (uintptr_t)proc_table ||
+                address >= (uintptr_t)&proc_table[MAX_PROCS] ||
+                (address - (uintptr_t)proc_table) % sizeof(process_t)) {
+                serial_puts("[wait] BUG: invalid child list\n");
+                spinlock_release(&proc_table_lock);
+                hal_restore_interrupts(interrupt_flags);
+                return -5;
+            }
+            if (pid == -1 || child->pid == pid) {
+                found = 1;
+                if (child->state == PROC_ZOMBIE) {
+                    int result = reap_zombie(child, previous, status);
+                    spinlock_release(&proc_table_lock);
+                    hal_restore_interrupts(interrupt_flags);
+                    return result;
+                }
+            }
+            previous = child;
+            child = child->sibling;
         }
-
-        if ((pid == -1 || child->pid == pid) &&
-            child->state == PROC_ZOMBIE) {
-            return reap_zombie_locked(child, prev, status);
+        if (!found || (options & 1)) {
+            spinlock_release(&proc_table_lock);
+            hal_restore_interrupts(interrupt_flags);
+            return found ? 0 : -10; /* WNOHANG / ECHILD */
         }
-        prev = child;
-        child = child->sibling;
+        waiting->state = PROC_BLOCKED;
+        spinlock_release(&proc_table_lock);
+        scheduler_schedule();
+        /* 允许伪唤醒，只回收与 pid 匹配的子进程。 */
     }
-
-    /* WNOHANG: 不阻塞，直接返回 0 */
-    if (options & WNOHANG)
-        return 0;
-
-    /* 验证指定的子进程是否存在 */
-    if (pid != -1) {
-        process_t *target = process_get(pid);
-        if (!target || target->ppid != current->pid)
-            return -1;
-    }
-
-    /* 阻塞直到子进程退出 */
-    serial_puts("[wait] blocking PID=");
-    serial_put_dec((uint64_t)current->pid);
-    serial_puts("\n");
-    current->state = PROC_BLOCKED;
-    scheduler_schedule();
-
-    serial_puts("[wait] PID=");
-    serial_put_dec((uint64_t)current->pid);
-    serial_puts(" woke up, rescanning child=");
-    serial_put_hex((uint64_t)(uintptr_t)current->child);
-    serial_puts("\n");
-    /* 被唤醒 – 重新扫描僵尸进程 */
-    child = current->child;
-    prev  = NULL;
-    while (child) {
-        /* 再次验证 child 指针 */
-        uintptr_t ca = (uintptr_t)child;
-        if (ca < (uintptr_t)&proc_table[0] || ca >= (uintptr_t)&proc_table[MAX_PROCS]) {
-            if (prev)
-                prev->sibling = NULL;
-            else
-                current->child = NULL;
-            break;
-        }
-        if (child->state == PROC_ZOMBIE)
-            return reap_zombie_locked(child, prev, status);
-        prev = child;
-        child = child->sibling;
-    }
-
-    return -1;
 }
 
 /* ========================================================================
@@ -978,6 +932,7 @@ int process_clone(uint64_t flags, uint64_t child_stack,
      * 这是因为子进程共享父进程的地址空间，
      * 两者不能同时运行。 */
     if (flags & CLONE_VM) {
+        child->flags |= PROC_FLAG_VFORK_WAIT;
         serial_puts("[vfork] parent PID=");
         serial_put_dec((uint64_t)current->pid);
         serial_puts(" blocked, child PID=");

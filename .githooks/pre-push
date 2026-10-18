@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+set -euo pipefail
+root=$(git rev-parse --show-toplevel)
+while read -r local_ref local_oid remote_ref remote_oid; do
+    [[ "$local_oid" =~ ^0+$ ]] && continue
+    commit=$(git rev-parse "$local_oid^{commit}")
+    echo "[pre-push] Checking $local_ref ($commit) in Linux"
+    case "$(uname -s)" in
+        MINGW*|MSYS*|CYGWIN*)
+            powershell.exe -NoProfile -File "$root/tools/dev.ps1" verify-ref "$commit"
+            ;;
+        Linux)
+            mkdir -p "$root/build"
+            snapshot=$(mktemp -d "$root/build/push-check.XXXXXXXX")
+            git archive "$commit" | tar -xf - -C "$snapshot"
+            if [[ ! -f "$snapshot/tools/check-linux.sh" ]]; then
+                echo 'Candidate commit is missing the Linux verification tools; commit them first.' >&2
+                exit 1
+            fi
+            SPIRITFOX_SYSROOT="$root/build/push-sysroot" \
+                SPIRITFOX_DOWNLOAD_CACHE="$root/build/downloads" \
+                bash "$snapshot/tools/check-linux.sh"
+            ;;
+        *) echo 'Push blocked: use a supported Linux or Windows development environment.' >&2; exit 1 ;;
+    esac
+done

@@ -54,6 +54,9 @@ void kernel_main(BootInfo* boot_info)
     init_storage();
     init_filesystem();
     init_services();
+    /* 受信任模块的机制/消息测试先于用户程序启动；兼容路径继续保留。 */
+    extern void sfm_boot(void);
+    sfm_boot();
     init_fs_hierarchy();
     init_input();
     init_drm();

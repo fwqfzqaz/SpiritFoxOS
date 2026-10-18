@@ -141,6 +141,8 @@ frame_callback_handler(void *data, struct wl_callback *callback, uint32_t time)
 
     /* 渲染 */
     render_frame(pixels, window_width, window_height, frame_count++);
+    if (frame_count == 10)
+        fprintf(stderr, "[client] frame 10 rendered\n");
 
     /* 创建 wl_shm_pool 和 wl_buffer */
     struct wl_shm_pool *pool = wl_shm_create_pool(shm, fd, size);

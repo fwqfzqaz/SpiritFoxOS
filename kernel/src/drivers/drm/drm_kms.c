@@ -6,6 +6,7 @@
 #include "memory.h"
 #include "timer.h"
 #include "hal.h"
+#include "serial.h"
 
 /* 刷新指定内存范围的 CPU 缓存行。
  * 用于解决 DRM GEM 缓冲区的缓存一致性问题：

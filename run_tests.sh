@@ -4,7 +4,7 @@
 
 set -e
 
-PROJECT_DIR="/media/fwqfzqaz/王峥/SpiritFoxOS"
+PROJECT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 BUILD_DIR="$PROJECT_DIR/build"
 SERIAL_LOG="$BUILD_DIR/test_serial.log"
 TEST_OUTPUT="$BUILD_DIR/test_results.log"

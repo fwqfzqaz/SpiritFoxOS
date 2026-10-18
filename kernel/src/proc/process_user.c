@@ -95,6 +95,53 @@ int process_exec(const char *path, const char *const argv[],
         kpath[i] = '\0';
     }
 
+    /* 计算 argv 数量并将字符串复制到内核空间 */
+    /* Argument strings alone occupy 64 KiB, while a process kernel stack is
+     * only 8 KiB. Keep the staging area on the heap, including its metadata. */
+    struct exec_arguments {
+        char argv_buf[PROC_MAX_ARGS][VFS_MAX_PATH];
+        char envp_buf[PROC_MAX_ENV][VFS_MAX_PATH];
+        size_t argv_len[PROC_MAX_ARGS];
+        size_t envp_len[PROC_MAX_ENV];
+        uint64_t argv_addr[PROC_MAX_ARGS];
+        uint64_t envp_addr[PROC_MAX_ENV];
+    };
+    struct exec_arguments *arguments = kmalloc(sizeof(*arguments));
+    if (!arguments) return -1;
+    int    argc_val = 0;
+    char (*kargv_buf)[VFS_MAX_PATH] = arguments->argv_buf;
+    size_t *kargv_len = arguments->argv_len;
+
+    if (argv) {
+        while (argc_val < PROC_MAX_ARGS && argv[argc_val]) {
+            size_t len = 0;
+            while (len < VFS_MAX_PATH - 1 && argv[argc_val][len])
+                len++;
+            memcpy(kargv_buf[argc_val], argv[argc_val], len);
+            kargv_buf[argc_val][len] = '\0';
+            kargv_len[argc_val] = len + 1;   /* 包含 NUL */
+            argc_val++;
+        }
+    }
+
+    /* Count envp and copy strings to kernel space */
+    int    envc_val = 0;
+    char (*kenvp_buf)[VFS_MAX_PATH] = arguments->envp_buf;
+    size_t *kenvp_len = arguments->envp_len;
+
+    if (envp) {
+        while (envc_val < PROC_MAX_ENV && envp[envc_val]) {
+            size_t len = 0;
+            while (len < VFS_MAX_PATH - 1 && envp[envc_val][len])
+                len++;
+            memcpy(kenvp_buf[envc_val], envp[envc_val], len);
+            kenvp_buf[envc_val][len] = '\0';
+            kenvp_len[envc_val] = len + 1;
+            envc_val++;
+        }
+    }
+
+
     /* ---- 2. Save old address-space state for rollback ---- */
     uint64_t old_pml4      = current->pml4;
     uint64_t old_entry     = current->entry_point;
@@ -124,6 +171,7 @@ int process_exec(const char *path, const char *const argv[],
             current->stack_top  = old_stack_top;
             current->brk        = old_brk;
             current->mmap_base  = old_mmap_base;
+            kfree(arguments);
             return -1;
         }
 
@@ -138,6 +186,7 @@ int process_exec(const char *path, const char *const argv[],
             current->stack_top  = old_stack_top;
             current->brk        = old_brk;
             current->mmap_base  = old_mmap_base;
+            kfree(arguments);
             return -1;
         }
         vfs_seek(fd, 0, VFS_SEEK_SET);
@@ -155,6 +204,7 @@ int process_exec(const char *path, const char *const argv[],
             current->stack_top  = old_stack_top;
             current->brk        = old_brk;
             current->mmap_base  = old_mmap_base;
+            kfree(arguments);
             return -1;
         }
 
@@ -173,6 +223,7 @@ int process_exec(const char *path, const char *const argv[],
             current->stack_top  = old_stack_top;
             current->brk        = old_brk;
             current->mmap_base  = old_mmap_base;
+            kfree(arguments);
             return -1;
         }
 
@@ -239,6 +290,7 @@ int process_exec(const char *path, const char *const argv[],
             current->stack_top  = old_stack_top;
             current->brk        = old_brk;
             current->mmap_base  = old_mmap_base;
+            kfree(arguments);
             return -1;
         }
 
@@ -391,51 +443,17 @@ int process_exec(const char *path, const char *const argv[],
     if (has_interp)
         main_base = 0x7FF000000000ULL;
 
-    /* 计算 argv 数量并将字符串复制到内核空间 */
-    int    argc_val = 0;
-    char   kargv_buf[PROC_MAX_ARGS][VFS_MAX_PATH];
-    size_t kargv_len[PROC_MAX_ARGS];
-
-    if (argv) {
-        while (argv[argc_val] && argc_val < PROC_MAX_ARGS) {
-            size_t len = 0;
-            while (argv[argc_val][len] && len < VFS_MAX_PATH - 1)
-                len++;
-            memcpy(kargv_buf[argc_val], argv[argc_val], len);
-            kargv_buf[argc_val][len] = '\0';
-            kargv_len[argc_val] = len + 1;   /* 包含 NUL */
-            argc_val++;
-        }
-    }
-
-    /* Count envp and copy strings to kernel space */
-    int    envc_val = 0;
-    char   kenvp_buf[PROC_MAX_ENV][VFS_MAX_PATH];
-    size_t kenvp_len[PROC_MAX_ENV];
-
-    if (envp) {
-        while (envp[envc_val] && envc_val < PROC_MAX_ENV) {
-            size_t len = 0;
-            while (envp[envc_val][len] && len < VFS_MAX_PATH - 1)
-                len++;
-            memcpy(kenvp_buf[envc_val], envp[envc_val], len);
-            kenvp_buf[envc_val][len] = '\0';
-            kenvp_len[envc_val] = len + 1;
-            envc_val++;
-        }
-    }
-
     uint64_t sp = current->stack_top;
 
     /* Push string data (argv strings, then envp strings) at the bottom */
-    uint64_t kargv_str_addr[PROC_MAX_ARGS];
+    uint64_t *kargv_str_addr = arguments->argv_addr;
     for (int j = argc_val - 1; j >= 0; j--) {
         sp -= kargv_len[j];
         kargv_str_addr[j] = sp;
         write_user_mem(current, sp, kargv_buf[j], kargv_len[j]);
     }
 
-    uint64_t kenvp_str_addr[PROC_MAX_ENV];
+    uint64_t *kenvp_str_addr = arguments->envp_addr;
     for (int j = envc_val - 1; j >= 0; j--) {
         sp -= kenvp_len[j];
         kenvp_str_addr[j] = sp;
@@ -499,6 +517,8 @@ int process_exec(const char *path, const char *const argv[],
     uint64_t argc64 = (uint64_t)argc_val;
     write_user_mem(current, sp, &argc64, 8);
 
+    kfree(arguments);
+
     /* ---- 7. Build trap frame on kernel stack ---- */
     process_setup_frame(current, current->entry_point, sp, 0);
 
@@ -506,10 +526,12 @@ int process_exec(const char *path, const char *const argv[],
      * 如果当前进程是通过 vfork 创建的，父进程在 process_clone
      * 中被阻塞。execve 成功后，子进程有了独立的地址空间，
      * 可以安全地唤醒父进程继续运行。 */
-    if (current->parent && current->parent->state == PROC_BLOCKED) {
+    if ((current->flags & PROC_FLAG_VFORK_WAIT) && current->parent &&
+        current->parent->state == PROC_BLOCKED) {
         serial_puts("[exec] vfork: waking parent PID=");
         serial_put_dec((uint64_t)current->parent->pid);
         serial_puts("\n");
+        current->flags &= ~PROC_FLAG_VFORK_WAIT;
         process_wake(current->parent);
     }
 
