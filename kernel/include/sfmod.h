@@ -36,6 +36,7 @@ enum sfm_operation
 #define SFM_FS_INSTANCES 3u
 #define SFM_FILE_NODES 64u
 #define SFM_FILE_CAPACITY 65536u
+#define SFM_TEMP_CAPACITY 1048576u
 #define SFM_FILE_NAME 64u
 #define SFM_FILE_PATH 256u
 

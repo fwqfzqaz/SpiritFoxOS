@@ -68,6 +68,17 @@ static int tree_test(void)
     VERIFY(open(boundary, O_CREAT | O_RDWR, 0600) < 0);
     boundary[68] = 0;
     VERIFY(!unlink(boundary));
+    /* /tmp 和 /run 保留旧 memfs 的 1 MiB 单文件容量，而非演示区的 64 KiB。 */
+    const char *large_paths[] = {"/tmp/large-temp", "/run/large-temp"};
+    for (int i = 0; i < 2; i++) {
+        fd = open(large_paths[i], O_CREAT | O_RDWR, 0600);
+        VERIFY(fd >= 0 && lseek(fd, 70000, SEEK_SET) == 70000 && write(fd, "big", 3) == 3);
+        VERIFY(lseek(fd, 69998, SEEK_SET) == 69998 && read(fd, buffer, 8) == 5 &&
+               !buffer[0] && !buffer[1] && !memcmp(buffer + 2, "big", 3));
+        VERIFY(!ftruncate(fd, 1048576) && ftruncate(fd, 1048577) < 0 &&
+               lseek(fd, -4, SEEK_END) == 1048572 && read(fd, buffer, 8) == 4 &&
+               !buffer[0] && !buffer[3] && !close(fd) && !unlink(large_paths[i]));
+    }
     puts("[sfmod-user] tmpfs trees/lifetimes passed");
     return 0;
 }

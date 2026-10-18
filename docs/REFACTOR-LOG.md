@@ -7,7 +7,8 @@
 memfs、FAT32、devfs、procfs 与驱动调用路径。
 
 - ABI 升为 1.1，目录句柄、树形路径、mkdir/readdir、符号链接存储、retain/release；
-  旧 ABI 包需一起重新编译。64 节点共享配额、63 字节名称、单文件 64 KiB。
+  旧 ABI 包需一起重新编译。64 节点共享配额、63 字节名称；/modules 单文件 64 KiB，
+  /tmp、/run 保留旧 memfs 的 1 MiB 上限，数据按需以 4 KiB 粒度扩充。
 - 普通 Linux 文件调用实际进入模块；unlink 后已打开的文件继续可用，重建同名文件
   不改变旧描述。dup/fork 共享描述，最后 close、进程退出和 exec 的关闭走统一回收。
 - 目录项在发布后端节点前分配；命名空间修改/open/最后关闭串行，挂载根不能 rmdir，
@@ -15,7 +16,8 @@ memfs、FAT32、devfs、procfs 与驱动调用路径。
 - 修正 VFS O_TRUNC/O_APPEND/O_DIRECTORY 与 Linux 数值不一致，按权限处理普通文件
   读写/截断，追加时重新取文件尾；关闭使用预留 RPC 缓冲区，不因临时 OOM 遗失引用。
 - 新增模块层独立根/目录/旧句柄、满配额和首次写入 OOM 恢复测试；用户态检查嵌套目录、
-  getdents64、删除后 dup/fork 引用、同名重建、独立根、截断/追加、80 次回收及名称边界。
+  getdents64、删除后 dup/fork 引用、同名重建、独立根、截断/追加、80 次回收及名称边界，
+  以及两处临时目录超过 64 KiB 的空洞写入、扩展至 1 MiB 和超限拒绝。
   原模块加载、16 子进程和 Wayland 启动检查继续执行。
 
 仍未实现动态多后端挂载、rename、完整 POSIX 权限与硬件故障隔离。目录缓存与符号链接

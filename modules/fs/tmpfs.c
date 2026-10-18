@@ -6,7 +6,7 @@ typedef struct node
     char name[SFM_FILE_NAME];
     uint8_t *data;
     uint64_t parent;
-    uint32_t generation, type, length, references, linked, root;
+    uint32_t generation, type, length, references, linked, root, limit, allocated;
 } node_t;
 static node_t nodes[SFM_FILE_NODES];
 static uint64_t roots[SFM_FS_INSTANCES];
@@ -43,6 +43,8 @@ static node_t *allocate(uint32_t type, uint64_t parent, const char *name)
         node->generation = generation;
         node->type = type;
         node->parent = parent;
+        node_t *directory = resolve(parent);
+        node->limit = directory ? directory->limit : SFM_FILE_CAPACITY;
         node->linked = 1;
         for (size_t j = 0; name[j]; j++) node->name[j] = name[j];
         return node;
@@ -209,15 +211,20 @@ static int receive(const sfm_message_t *req, sfm_message_t *resp)
         {
             if (node->type != SFM_NODE_FILE) return node->type == SFM_NODE_DIR ? -21 : -22;
             uint64_t length = req->type == SFM_FILE_WRITE ? req->size : 0;
-            if (req->offset > SFM_FILE_CAPACITY || length > SFM_FILE_CAPACITY - req->offset)
+            if (req->offset > node->limit || length > node->limit - req->offset)
                 return -28;
             if (req->type == SFM_FILE_WRITE && !length) return 0;
             uint32_t end = (uint32_t)(req->offset + length);
-            if (end && !node->data)
+            if (end > node->allocated)
             {
-                node->data = core->alloc(SFM_FILE_CAPACITY);
-                if (!node->data) return -12;
-                sfm_clear(node->data, SFM_FILE_CAPACITY);
+                uint32_t capacity = (end + 4095u) & ~4095u;
+                uint8_t *data = core->alloc(capacity);
+                if (!data) return -12;
+                sfm_clear(data, capacity);
+                if (node->length) sfm_copy(data, node->data, node->length);
+                core->free(node->data);
+                node->data = data;
+                node->allocated = capacity;
             }
             if (req->type == SFM_FILE_TRUNCATE)
             {
@@ -260,6 +267,7 @@ static int start(const sfm_api_t *api, uint32_t owner)
         node_t *root = allocate(SFM_NODE_DIR, 0, "");
         if (!root) return -28;
         root->root = 1;
+        root->limit = i ? SFM_TEMP_CAPACITY : SFM_FILE_CAPACITY;
         roots[i] = handle(root);
     }
     endpoint = core->endpoint_create(owner, "fs.tmpfs", receive);

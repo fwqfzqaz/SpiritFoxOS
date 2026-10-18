@@ -144,6 +144,18 @@ static void test_tmpfs_limits(void)
     assert(!sfm_call(backend, req, resp) && !resp->result);
     req->type = SFM_FILE_WRITE;
     assert(!sfm_call(backend, req, resp) && resp->result == 1);
+    req->offset = 5000;
+    fail_after = 0;
+    assert(sfm_call(backend, req, resp) == SFM_ENOMEM);
+    fail_after = -1;
+    req->type = SFM_FILE_STAT;
+    assert(!sfm_call(backend, req, resp) && resp->result == 1);
+    req->type = SFM_FILE_READ;
+    req->offset = 0;
+    req->size = sizeof(uint32_t);
+    uint32_t read_length = 1;
+    memcpy(req->data, &read_length, sizeof(read_length));
+    assert(!sfm_call(backend, req, resp) && resp->result == 1 && resp->data[0] == 'x');
     req->type = SFM_FILE_REMOVE;
     assert(!sfm_call(backend, req, resp) && allocations == before);
     size_t count = 0;
