@@ -90,7 +90,11 @@ void kernel_main(BootInfo* boot_info)
     test_fat32();
 #endif
 
+    /* The timer can print scheduler diagnostics between serial characters.
+     * Keep this boot milestone intact for humans and the boot smoke checker. */
+    uint64_t milestone_flags = hal_save_interrupts();
     serial_puts("[SpiritFoxOS] shell_run...\n");
+    hal_restore_interrupts(milestone_flags);
     shell_init();
 
     /* Execute autorun commands before interactive shell */
