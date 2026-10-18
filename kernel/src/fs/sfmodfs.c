@@ -3,11 +3,14 @@
 #include "vfs.h"
 #include "memory.h"
 #include "string.h"
+#include "devfs.h"
 
 static uint64_t service;
 /* 当前 RPC 不阻塞；短临界区串行复用缓冲区，使 close/unlink 不依赖临时分配。 */
 static sfm_message_t request, response;
 static unsigned char rpc_lock;
+static uint64_t inode_route(const vfs_inode_t *inode)
+{ return (uint64_t)(uintptr_t)inode->fs_data; }
 
 static uint64_t begin(void)
 {
@@ -27,6 +30,7 @@ static int control(vfs_inode_t *inode, uint32_t operation, uint64_t offset)
     uint64_t flags = begin();
     request.type = operation;
     request.handle = inode->ino;
+    request.route = inode_route(inode);
     request.offset = offset;
     int result = sfm_call(service, &request, &response);
     end(flags);
@@ -68,16 +72,18 @@ static int transfer(vfs_file_t *file, void *buffer, size_t count, int writing)
     if (count > SFM_PAYLOAD) count = SFM_PAYLOAD;
     uint64_t flags = begin();
     int result = 0;
-    if (writing && (file->flags & VFS_O_APPEND))
+    if (writing && file->inode->type == VFS_TYPE_FILE && (file->flags & VFS_O_APPEND))
     {
         request.type = SFM_FILE_STAT;
         request.handle = file->inode->ino;
+        request.route = inode_route(file->inode);
         result = sfm_call(service, &request, &response);
         if (result || response.result < 0) goto done;
         file->offset = (uint64_t)response.result;
     }
     request.type = writing ? SFM_FILE_WRITE : SFM_FILE_READ;
     request.handle = file->inode->ino;
+    request.route = inode_route(file->inode);
     request.offset = file->offset;
     uint32_t length = (uint32_t)count;
     request.size = writing ? length : sizeof(length);
@@ -90,8 +96,10 @@ static int transfer(vfs_file_t *file, void *buffer, size_t count, int writing)
         { result = -5; goto done; }
         result = (int)response.result;
         if (!writing) sfm_copy(buffer, response.data, (size_t)result);
-        file->offset += (size_t)result;
-        if (writing && file->offset > file->inode->size) file->inode->size = file->offset;
+        if (file->inode->type == VFS_TYPE_FILE) {
+            file->offset += (size_t)result;
+            if (writing && file->offset > file->inode->size) file->inode->size = file->offset;
+        }
     }
 done:
     end(flags);
@@ -101,6 +109,22 @@ static int read_file(vfs_file_t *file, void *buffer, size_t count)
 { return transfer(file, buffer, count, 0); }
 static int write_file(vfs_file_t *file, const void *buffer, size_t count)
 { return transfer(file, (void *)buffer, count, 1); }
+
+static int64_t seek_device(vfs_file_t *file, int64_t offset, int whence)
+{
+    if (whence < 0 || whence > 2) return SFM_EINVAL;
+    uint64_t flags = begin();
+    request.type = SFM_FILE_SEEK;
+    request.handle = file->inode->ino;
+    request.route = inode_route(file->inode);
+    request.offset = (uint64_t)offset;
+    request.flags = (uint32_t)whence;
+    int result = sfm_call(service, &request, &response);
+    int64_t position = result ? result : response.result;
+    if (position >= 0) file->offset = (uint64_t)position;
+    end(flags);
+    return position;
+}
 
 static int truncate_file(vfs_inode_t *inode, uint64_t size)
 {
@@ -115,6 +139,7 @@ static int read_directory(vfs_file_t *file, int index, char *name, int namelen, 
     uint64_t flags = begin();
     request.type = SFM_FILE_READDIR;
     request.handle = file->inode->ino;
+    request.route = inode_route(file->inode);
     request.offset = (uint64_t)index;
     int result = sfm_call(service, &request, &response);
     if (!result && response.result)
@@ -130,8 +155,10 @@ static int read_directory(vfs_file_t *file, int index, char *name, int namelen, 
             memset(stat, 0, sizeof(*stat));
             stat->ino = response.handle;
             stat->type = response.flags == SFM_NODE_DIR ? VFS_TYPE_DIR :
-                response.flags == SFM_NODE_SYMLINK ? VFS_TYPE_SYMLINK : VFS_TYPE_FILE;
-            stat->size = response.offset;
+                response.flags == SFM_NODE_SYMLINK ? VFS_TYPE_SYMLINK :
+                response.flags == SFM_NODE_CHARDEV ? VFS_TYPE_CHARDEV : VFS_TYPE_FILE;
+            stat->size = stat->type == VFS_TYPE_CHARDEV ? 0 : response.offset;
+            if (stat->type == VFS_TYPE_CHARDEV) stat->rdev = response.offset;
             stat->nlinks = 1;
             stat->mode = stat->type == VFS_TYPE_DIR ? 0700 : 0600;
         }
@@ -168,10 +195,15 @@ static int create_node(vfs_dentry_t *parent, const char *name, vfs_inode_t *inod
     request.type = directory ? SFM_FILE_MKDIR : SFM_FILE_OPEN;
     request.flags = SFM_CREATE;
     request.handle = parent->inode->ino;
+    request.route = inode_route(parent->inode);
     request.size = (uint32_t)length + 1;
     sfm_copy(request.data, name, request.size);
     int result = sfm_call(service, &request, &response);
-    if (!result) inode->ino = response.handle;
+    if (!result && response.flags != (directory ? SFM_NODE_DIR : SFM_NODE_FILE)) result = -17;
+    if (!result) {
+        inode->ino = response.handle;
+        inode->fs_data = (void *)(uintptr_t)response.route;
+    }
     end(flags);
     return result;
 }
@@ -189,11 +221,15 @@ static int create_symlink(vfs_dentry_t *parent, const char *name, vfs_inode_t *i
     uint64_t flags = begin();
     request.type = SFM_FILE_SYMLINK;
     request.handle = parent->inode->ino;
+    request.route = inode_route(parent->inode);
     request.size = (uint32_t)(length + target + 2);
     sfm_copy(request.data, name, length + 1);
     sfm_copy(request.data + length + 1, inode->symlink_target, target + 1);
     int result = sfm_call(service, &request, &response);
-    if (!result) inode->ino = response.handle;
+    if (!result) {
+        inode->ino = response.handle;
+        inode->fs_data = (void *)(uintptr_t)response.route;
+    }
     end(flags);
     return result;
 }
@@ -213,6 +249,7 @@ static int mount_fs(vfs_superblock_t *sb, uint8_t device, const char *path)
     int result = sfm_call(service, &request, &response);
     if (!result && response.flags != SFM_NODE_DIR) result = -20;
     root->ino = response.handle;
+    root->fs_data = (void *)(uintptr_t)response.route;
     end(flags);
     if (result) { free_page(dentry); free_page(root); return result; }
     memset(dentry, 0, PAGE_SIZE);
@@ -231,6 +268,41 @@ static vfs_filesystem_t filesystem = {
     .alloc_inode = allocate_inode, .destroy_inode = destroy_inode,
     .create = create_file, .mkdir = make_directory, .unlink = unlink_file, .symlink = create_symlink
 };
+
+static int attach_devices(void)
+{
+    static const char *names[] = {"null", "zero"};
+    for (size_t i = 0; i < sizeof(names) / sizeof(names[0]); i++) {
+        uint64_t flags = begin();
+        request.type = SFM_FILE_OPEN;
+        request.size = 5u + (uint32_t)strlen(names[i]) + 1u;
+        sfm_copy(request.data, "/dev/", 5);
+        sfm_copy(request.data + 5, names[i], strlen(names[i]) + 1);
+        int result = sfm_call(service, &request, &response);
+        if (!result && (response.flags != SFM_NODE_CHARDEV ||
+                        response.route != SFM_ROUTE_DEVFS || !response.handle)) result = -5;
+        vfs_inode_t *inode = result ? NULL : devfs_boot_char_node(names[i]);
+        if (inode) {
+            inode->ino = response.handle;
+            inode->fs_data = (void *)(uintptr_t)response.route;
+            inode->rdev = response.offset;
+            inode->type = VFS_TYPE_CHARDEV;
+            inode->mode = 0020000u | 0666u;
+            inode->nlinks = 1;
+            inode->chardev_id = UINT32_MAX; /* No legacy dispatcher slot. */
+            inode->open = open_file;
+            inode->release = release_file;
+            inode->read = read_file;
+            inode->write = write_file;
+            inode->truncate = truncate_file;
+            inode->seek = seek_device;
+        }
+        end(flags);
+        if (result || !inode) return -1;
+    }
+    sf_log("[sfmod] special devices attached: /dev/null /dev/zero\n");
+    return 0;
+}
 
 int sfm_mount_compat(void)
 {
@@ -261,5 +333,5 @@ int sfm_mount_compat(void)
         vfs_unlink("/tmp/link-test/readme") || !vfs_resolve_path("/modules/README") ||
         vfs_rmdir("/tmp/link-test") || vfs_unmount("/tmp") != SFM_EBUSY) return -1;
     sf_log("[sfmod] tmpfs mounted: /tmp /run (independent roots)\n");
-    return 0;
+    return attach_devices();
 }

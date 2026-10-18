@@ -723,7 +723,7 @@ static int open_internal(const char *path, uint32_t flags, uint32_t mode)
         file->offset = dentry->inode->size;
 
     /* If this is a character device, call its open handler */
-    if (file->inode->type == VFS_TYPE_CHARDEV) {
+    if (file->inode->type == VFS_TYPE_CHARDEV && !file->inode->open) {
         chardev_open(file);
     }
 
@@ -823,7 +823,7 @@ static void file_put_internal(vfs_file_t *file)
         }
     } else if (file->refcount <= 0) {
         /* Regular file - no longer referenced */
-        if (file->inode && file->inode->type == VFS_TYPE_CHARDEV) {
+        if (file->inode && file->inode->type == VFS_TYPE_CHARDEV && !file->inode->release) {
             chardev_close(file);
         }
         if (file->inode && file->inode->release) {
@@ -899,6 +899,7 @@ int vfs_read(int fd, void *buf, size_t count)
 
     /* Handle character device read */
     if (file->inode->type == VFS_TYPE_CHARDEV) {
+        if (file->inode->read) return file->inode->read(file, buf, count);
         return chardev_read(file, buf, count);
     }
 
@@ -1005,6 +1006,7 @@ int vfs_write(int fd, const void *buf, size_t count)
 
     /* Handle character device write */
     if (file->inode->type == VFS_TYPE_CHARDEV) {
+        if (file->inode->write) return file->inode->write(file, buf, count);
         return chardev_write(file, buf, count);
     }
 
@@ -1060,6 +1062,7 @@ int64_t vfs_seek(int fd, int64_t offset, int whence)
         return -1;
 
     vfs_file_t *file = vfs_get_fd_table()[fd];
+    if (file->inode && file->inode->seek) return file->inode->seek(file, offset, whence);
     int64_t new_offset;
 
     switch (whence) {

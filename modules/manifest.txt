@@ -2,3 +2,4 @@
 fs.vfs fs/vfs.c
 demo.hello demo/hello.c
 fs.tmpfs fs/tmpfs.c
+dev.tmpfs dev/tmpfs.c

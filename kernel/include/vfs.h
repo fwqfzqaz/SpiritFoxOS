@@ -107,6 +107,7 @@ struct vfs_inode {
     uint64_t        ctime;         /* Change time */
     uint32_t        blkdev_id;     /* Block device ID (for VFS_TYPE_BLKDEV) */
     uint32_t        chardev_id;    /* Char device ID (for VFS_TYPE_CHARDEV) */
+    uint64_t        rdev;          /* Encoded device number, zero for ordinary files */
 
     /* Symlink target path (for VFS_TYPE_SYMLINK) */
     char            symlink_target[VFS_MAX_PATH];
@@ -124,6 +125,7 @@ struct vfs_inode {
     int (*read)(vfs_file_t *file, void *buf, size_t count);
     int (*write)(vfs_file_t *file, const void *buf, size_t count);
     int (*truncate)(vfs_inode_t *inode, uint64_t size);
+    int64_t (*seek)(vfs_file_t *file, int64_t offset, int whence);
     int (*readdir)(vfs_file_t *file, int index, char *name, int namelen, vfs_inode_t *stat);
 };
 

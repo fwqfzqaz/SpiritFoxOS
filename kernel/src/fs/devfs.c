@@ -160,6 +160,12 @@ static void devfs_destroy_inode(vfs_inode_t *inode)
     free_page(inode);
 }
 
+/* Keep module-owned special nodes in place; other legacy behavior is unchanged. */
+static int devfs_unlink(vfs_dentry_t *entry)
+{
+    return entry && entry->inode && entry->inode->open ? -1 : 0;
+}
+
 /* ========================================================================
  * 文件系统类型定义
  * ======================================================================== */
@@ -170,6 +176,7 @@ vfs_filesystem_t devfs_fs = {
     .unmount = devfs_unmount,
     .alloc_inode = devfs_alloc_inode,
     .destroy_inode = devfs_destroy_inode,
+    .unlink = devfs_unlink,
 };
 
 /* ========================================================================
@@ -251,4 +258,31 @@ void devfs_init(void)
 vfs_dentry_t *devfs_get_root(void)
 {
     return devfs_root_dentry;
+}
+
+vfs_inode_t *devfs_boot_char_node(const char *name)
+{
+    if (!devfs_root_dentry || !name || !name[0]) return NULL;
+    size_t length = 0;
+    while (length < VFS_MAX_NAME && name[length]) {
+        if (name[length] == '/' || (unsigned char)name[length] < 32) return NULL;
+        length++;
+    }
+    if (length >= VFS_MAX_NAME || !strcmp(name, ".") || !strcmp(name, "..")) return NULL;
+    for (vfs_dentry_t *entry = devfs_root_dentry->child; entry; entry = entry->next)
+        if (!strcmp(entry->name, name))
+            return entry->inode && entry->inode->type == VFS_TYPE_CHARDEV ? entry->inode : NULL;
+    vfs_inode_t *inode = devfs_alloc_inode(devfs_root_dentry->inode->sb);
+    if (!inode) return NULL;
+    vfs_dentry_t *entry = alloc_page();
+    if (!entry) { devfs_destroy_inode(inode); return NULL; }
+    memset(entry, 0, PAGE_SIZE);
+    memcpy(entry->name, name, length + 1);
+    inode->type = VFS_TYPE_CHARDEV;
+    inode->nlinks = 1;
+    entry->inode = inode;
+    entry->parent = devfs_root_dentry;
+    entry->next = devfs_root_dentry->child;
+    devfs_root_dentry->child = entry;
+    return inode;
 }

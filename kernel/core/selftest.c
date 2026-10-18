@@ -91,6 +91,85 @@ fail:
     return -1;
 }
 
+static int device_test(uint64_t vfs, sfm_message_t *req, sfm_message_t *resp)
+{
+    path_request(req, SFM_FILE_OPEN, 0, "/dev");
+    CHECK(!sfm_call(vfs, req, resp) && resp->route == SFM_ROUTE_DEVFS &&
+          resp->flags == SFM_NODE_DIR);
+    uint64_t root = resp->handle;
+    sfm_clear(req, sizeof(*req));
+    req->type = SFM_FILE_READDIR;
+    req->route = SFM_ROUTE_DEVFS;
+    req->handle = root;
+    CHECK(!sfm_call(vfs, req, resp) && resp->result == 1 &&
+          resp->flags == SFM_NODE_CHARDEV && resp->data[0] == 'n');
+    req->offset = 1;
+    CHECK(!sfm_call(vfs, req, resp) && resp->result == 1 && resp->data[0] == 'z');
+    req->offset = 2;
+    CHECK(!sfm_call(vfs, req, resp) && !resp->result);
+    path_request(req, SFM_FILE_OPEN, 0, "/dev/null");
+    CHECK(!sfm_call(vfs, req, resp) && resp->route == SFM_ROUTE_DEVFS &&
+          resp->flags == SFM_NODE_CHARDEV && resp->offset == 0x103);
+    uint64_t null = resp->handle;
+    req->handle = null;
+    req->route = SFM_ROUTE_DEVFS;
+    req->type = SFM_FILE_READ;
+    uint32_t count = 32;
+    req->size = sizeof(count);
+    sfm_copy(req->data, &count, sizeof(count));
+    CHECK(!sfm_call(vfs, req, resp) && !resp->result && !resp->size);
+    req->type = SFM_FILE_WRITE;
+    req->size = 3;
+    req->offset = UINT64_MAX;
+    CHECK(!sfm_call(vfs, req, resp) && resp->result == 3);
+    req->type = SFM_FILE_STAT;
+    CHECK(!sfm_call(vfs, req, resp) && !resp->result && resp->offset == 0x103);
+    req->type = SFM_FILE_REMOVE;
+    CHECK(sfm_call(vfs, req, resp) == -30);
+    req->type = SFM_FILE_RELEASE;
+    CHECK(sfm_call(vfs, req, resp) == -9);
+    path_request(req, SFM_FILE_OPEN, 0, "/dev/zero");
+    CHECK(!sfm_call(vfs, req, resp) && resp->route == SFM_ROUTE_DEVFS && resp->offset == 0x105);
+    req->route = SFM_ROUTE_DEVFS;
+    req->handle = resp->handle;
+    req->type = SFM_FILE_RETAIN;
+    req->size = 0;
+    CHECK(!sfm_call(vfs, req, resp));
+    req->type = SFM_FILE_READ;
+    count = SFM_PAYLOAD;
+    req->size = sizeof(count);
+    sfm_copy(req->data, &count, sizeof(count));
+    CHECK(!sfm_call(vfs, req, resp) && resp->result == SFM_PAYLOAD && resp->size == SFM_PAYLOAD);
+    for (size_t i = 0; i < SFM_PAYLOAD; i++) CHECK(!resp->data[i]);
+    count++;
+    sfm_copy(req->data, &count, sizeof(count));
+    CHECK(sfm_call(vfs, req, resp) == -22);
+    req->type = SFM_FILE_SEEK;
+    req->flags = 2;
+    CHECK(!sfm_call(vfs, req, resp) && !resp->result);
+    req->flags = 3;
+    CHECK(sfm_call(vfs, req, resp) == -22);
+    req->type = SFM_FILE_STAT;
+    req->route = SFM_ROUTE_COUNT;
+    CHECK(sfm_call(vfs, req, resp) == -22);
+    req->route = SFM_ROUTE_TMPFS;
+    CHECK(sfm_call(vfs, req, resp) == -9);
+    req->route = SFM_ROUTE_DEVFS;
+    req->type = SFM_FILE_RELEASE;
+    CHECK(!sfm_call(vfs, req, resp));
+    path_request(req, SFM_FILE_OPEN, 0, "/dev/null");
+    req->flags = SFM_CREATE;
+    CHECK(sfm_call(vfs, req, resp) == -30);
+    path_request(req, SFM_FILE_OPEN, 0, "/dev-other/null");
+    CHECK(sfm_call(vfs, req, resp) == -2);
+    CHECK(sfm_module_unload("dev.tmpfs") == SFM_EBUSY);
+    sf_log("[sfmod] device service self-test passed\n");
+    return 0;
+fail:
+    sf_log("[sfmod] device service self-test failed\n");
+    return -1;
+}
+
 int sfm_selftest(void)
 {
     sfm_message_t *req = sf_alloc(sizeof(*req));
@@ -152,6 +231,7 @@ int sfm_selftest(void)
     req->type = SFM_FILE_STAT;
     CHECK(sfm_call(vfs, req, resp) == -9);
     CHECK(!tree_test(vfs, req, resp));
+    CHECK(!device_test(vfs, req, resp));
     CHECK(sfm_module_unload("fs.tmpfs") == SFM_EBUSY);
     sf_free(req);
     sf_free(resp);

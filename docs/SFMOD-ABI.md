@@ -1,7 +1,7 @@
-# sfmod ABI 1.1 与服务接口
+# sfmod ABI 1.2 与服务接口
 
-本 ABI（0x00010001）面向 x86_64、小端、受信任 Ring 0 插件。SDK 是 `kernel/include/sfmod.h`。
-1.0 的平面文件服务已替换为目录句柄协议；旧版本包/模块会被拒绝，必须一起重新编译。
+本 ABI（0x00010002）面向 x86_64、小端、受信任 Ring 0 插件。SDK 是 `kernel/include/sfmod.h`。
+1.2 在消息头偏移 56 增加后端 route 语义；1.0/1.1 包和模块会被拒绝，必须一起重新编译。
 代码入口通过核心提供的 `sfm_api_t` 表调用服务；不解析任意内核符号，不链接宿主 libc。
 API 的 `abi` 和 `size` 描述接口版本。需要扩展语义时提高 ABI 版本，并补兼容测试。
 
@@ -49,9 +49,12 @@ SFPK 包：16 字节头 `<magic, abi, count, total_size>`，其后每个目录�
 
 ## 文件服务
 
-`fs.vfs` 依赖 `fs.tmpfs`，固定启动挂载表把 `/modules`、`/tmp`、`/run` 路由到三个
-独立 tmpfs 根。绝对 OPEN/MKDIR 使用最长组件前缀匹配（`/tmp-other` 不属于 `/tmp`）；
-带目录句柄的相对操作及其他请求直接转发。尚未实现通用动态多后端挂载协议。
+`fs.vfs` 依赖 `fs.tmpfs` 和 `dev.tmpfs`，固定启动挂载表把 `/modules`、`/tmp`、`/run`
+路由到三个独立 tmpfs 根，把 `/dev` 路由到 null/zero 服务。
+绝对 OPEN/MKDIR 使用最长组件前缀匹配（`/tmp-other` 不属于 `/tmp`）；
+相对及其他句柄请求按 route 转发。uint64_t route 为 0=tmpfs、1=devfs，其他值
+返回 EINVAL；响应返回实际 route。文件身份为 (route, handle)，编号不是安全能力。
+尚无通用动态挂载协议；SFM_DEPENDS 支持多个依赖名称。
 
 | 请求 | 头部字段 | 载荷/响应 |
 | --- | --- | --- |
@@ -64,6 +67,7 @@ SFPK 包：16 字节头 `<magic, abi, count, total_size>`，其后每个目录�
 | FILE_WRITE | handle、offset | data/size；响应 result=写入字节数 |
 | FILE_READ | handle、offset | 载荷为 uint32 期望长度；响应 data/size/result |
 | FILE_STAT | handle | 响应 result=文件大小、flags=节点类型 |
+| FILE_SEEK | handle、flags=whence、offset=有符号偏移的位表示 | 设备支持 0..2 并返回位置 0；tmpfs 仍由兼容桥计算位置 |
 | FILE_TRUNCATE | handle、offset=新长度 | 缩短后扩展的内容为零 |
 | FILE_REMOVE | handle | 解除命名链接；无打开引用才回收，非空目录返回 ENOTEMPTY，根返回 EBUSY |
 
@@ -88,6 +92,13 @@ VFS 的命名空间修改、open、目录枚举和最后一次 close 使用同�
 引用/锁协议，当前未据此宣称完整 SMP 文件系统并发支持。
 模块的直接内部测试文件不自动成为旧 VFS 的目录项；迁移期以兼容桥为公共入口。
 挂载后本阶段不提供卸载/服务替换操作，避免仍有文件引用时释放代码。
+
+`dev.tmpfs` 的 ROOT 仅接受 offset=0，固定节点类型为 DIR 和新增 CHARDEV=4。
+OPEN/STAT/READDIR 的字符设备响应 offset 编码设备号（null=0x103、zero=0x105），
+文件大小 result 保持 0；READDIR 的 result=1 表示存在条目。OPEN 不隐式 RETAIN。
+设备支持短读写、引用计数和位置归零，名字空间不允许变更。
+旧 devfs 只将 null/zero 绑定到消息服务，保留硬件节点；ioctl 返回 ENOTTY、mmap
+返回 ENODEV，尚无 poll 或用户态驱动。详见 [本轮对接](integration/20261019-devfs-services.md)。
 
 可在交互 shell 读取 `cat /modules/README`。默认 autorun 先运行
 `/mnt/bin/test_sfmod_file`，通过实际用户态调用验证文件读写与截断，再启动 Wayland。

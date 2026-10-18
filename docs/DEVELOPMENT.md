@@ -62,9 +62,9 @@ make run OVMF_CODE=/path/to/OVMF_CODE.fd OVMF_VARS=/path/to/OVMF_VARS.fd
 
 1. 同步远端并处理冲突，改动集中在当前任务范围。
 2. 检查 `git diff --check`，确认没有个人配置、镜像或生成库。
-3. 提交需要交付的源码；新增脚本使用 `git add --chmod=+x` 保留可执行位。
+3. 先写/更新 `docs/integration/*.md` 对接说明与 `docs/handoff/NEXT.md` 交接，再提交源码；pre-commit 检查两个路径均有暂存改动。新增脚本使用 `git add --chmod=+x` 保留可执行位。
 4. 推送钩子对本次推送的每个分支或标签目标提交执行 Linux 编译和启动检查；失败会阻止推送。
-5. GitHub Actions 对 Ubuntu 24.04 和 Arch 容器分别验证，保存日志。工作流文件需要提交并推送后才会在 GitHub 生效。
+5. 推个人 Fork，以 PR 交作者审阅。GitHub Actions 对 Ubuntu 24.04 和 Arch 容器分别验证，保存日志。工作流文件需要提交并推送后才会在 GitHub 生效。
 
 钩子仅对已安装它的克隆生效，可以被人为绕过；它不代替服务器端保护规则。不能保证任意未来改动都无问题，现有检查覆盖源码格式、依赖重建、编译链接及 UEFI 启动。实际应用行为、真机驱动和功能回归需要各自的测试。
 
@@ -75,6 +75,7 @@ make run OVMF_CODE=/path/to/OVMF_CODE.fd OVMF_VARS=/path/to/OVMF_VARS.fd
 启动检查要求模块加载和消息文件自测、`/modules` VFS 桥与用户态文件读写测试通过，
 并检查实际接管 `/tmp`、`/run` 后的嵌套目录/枚举、独立挂载空间、删除后继续访问旧句柄、
 截断/追加及 80 次节点创建/删除回收，
+null/zero 路由、设备号、短读写、引用、lseek、ioctl/mmap 错误与标准输出重定向，
 16 次 fork/exit/wait 压力测试、原 Shell/autorun 完成，Wayland 创建窗口并至少渲染 10 帧，随后继续观察 3 秒。
 内核/用户异常、明确应用失败或超时都会失败。新增 core 和模块按 `-Werror` 编译，
 旧代码仍有现存警告，尚未做到整个仓库零警告。

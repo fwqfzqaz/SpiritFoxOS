@@ -110,6 +110,10 @@ static void test_elf(const uint8_t *original, size_t size)
     sfm_metadata_t *meta = (sfm_metadata_t *)(data + section(data, ".sfmod_meta")->sh_offset);
     meta->permissions = 1;
     assert(sfm_elf_load(data, size, &image));
+    memcpy(data, original, size);
+    meta = (sfm_metadata_t *)(data + section(data, ".sfmod_meta")->sh_offset);
+    meta->abi = 0x00010001u;
+    assert(sfm_elf_load(data, size, &image) == SFM_ENOEXEC);
     assert(!allocations);
     free(data);
 }
@@ -227,15 +231,18 @@ static void test_package(uint8_t *package, size_t size, uint8_t *failure, size_t
         int result = sfm_package_load(package, size);
         fail_after = -1;
         if (!result) { succeeded = 1; break; }
-        assert(!allocations && !sfm_lookup("fs.vfs") && !sfm_lookup("fs.tmpfs"));
+        assert(!allocations && !sfm_lookup("fs.vfs") && !sfm_lookup("fs.tmpfs") &&
+               !sfm_lookup("dev.tmpfs"));
     }
     assert(succeeded);
     assert(!sfm_selftest());
     test_tmpfs_limits();
     assert(sfm_package_load(package, size) == SFM_EBUSY);
     assert(sfm_module_unload("fs.tmpfs") == SFM_EBUSY);
+    assert(sfm_module_unload("dev.tmpfs") == SFM_EBUSY);
     assert(!sfm_module_unload("fs.vfs"));
     assert(!sfm_module_unload("fs.tmpfs"));
+    assert(!sfm_module_unload("dev.tmpfs"));
     assert(!sfm_module_unload("demo.hello"));
     assert(!allocations && !sfm_lookup("fs.vfs"));
     free(copy);

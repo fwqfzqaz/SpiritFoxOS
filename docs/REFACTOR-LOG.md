@@ -1,5 +1,14 @@
 # 重构记录
 
+## 2026-10-19：null/zero 设备服务
+
+从作者合并 PR #1 后的 main `414fd39` 开始。阶段 3 继续推进：实际设备策略进入
+dev.tmpfs，fs.vfs 增加显式 route，ABI 升为 1.2；兼容桥绑定两个节点并保护 unlink。
+保留硬件路径，补全设备号、seek、ioctl/mmap 明确错误；修正启动器标准描述与
+write/writev 的重定向冲突。新增对接/下一步交接入口及每次提交的文档检查钩子。
+测试范围和实际结果见 [对接说明](integration/20261019-devfs-services.md)，
+下次先做设备描述与 PCI 只读枚举接口，见 [交接](handoff/NEXT.md)。
+
 ## 2026-10-18：tmpfs 兼容路径迁移
 
 对应参考文档 D1/D2 与“/tmp、/run -> fs.tmpfs”的下一步实现，不把整套设备/进程迁移

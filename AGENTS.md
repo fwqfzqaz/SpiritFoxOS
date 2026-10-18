@@ -8,3 +8,6 @@
 - 推送前验证将要推送的提交，而非仅验证可能含未提交修改的工作区。启用 `.githooks/pre-push`；禁止为赶进度跳过失败检查。Windows 使用 `tools/dev.ps1 verify-ref <commit>`，Linux 使用归档快照执行 `tools/check-linux.sh`。
 - 通过编译和启动检查只代表对应范围通过，不能宣称所有应用、驱动或真机硬件已经验证。
 - 个人虚拟机、密钥和下载缓存不进入仓库。不要将仓库外的个人环境路径提交给其他开发者。
+- 开始开发先拉取最新远端，检查 docs/integration/ 和 docs/handoff/NEXT.md，再参考架构/ABI 文档；旧待办与当前用户要求冲突时以当前要求为准。
+- 每次提交前必须新增或更新 docs/integration/*.md 的本次对接说明，并更新 docs/handoff/NEXT.md。记录基线、接口/ABI、接入顺序、验证命令和实际结果、限制、下一步验收；未实现或未验证的项目不能写成已完成。.githooks/pre-commit 检查这两个文档路径均有暂存改动。
+- 贡献代码默认推送个人 Fork，通过 PR 交给作者审阅；没有本轮明确授权，不向原作者的代码分支推送或执行合并。

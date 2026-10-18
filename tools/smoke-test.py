@@ -43,8 +43,11 @@ required = [b"[SpiritFoxOS] Enabling interrupts...", b"[SpiritFoxOS] shell_run..
             b"[sfmod] self-test passed:", b"[sfmod] VFS bridge passed:",
             b"[sfmod-user] file IO passed", b"[sfmod-user] fork/wait stress passed",
             b"[sfmod] tmpfs mounted: /tmp /run", b"[sfmod-user] tmpfs trees/lifetimes passed",
+            b"[sfmod] device service self-test passed", b"[sfmod] special devices attached:",
+            b"[sfmod-user] special devices passed",
             b"[client] Window created", b"[client] frame 10"]
 bad = [b"KERNEL PANIC", b"Triple fault", b"[EXCEPTION]", b"!!! EXCEPTION:", b"System Halted.",
+       b"[sfmod-user] redirect leaked",
        b"[client] ERROR:", b"[client] wl_display_dispatch error:", b"[sfmod-user] FAILED", b"[exit] BUG:", b"[sched] BUG:", b"[wait] BUG:", b"[sfmod] bridge release failed"]
 with error.open("wb") as errors:
     process = subprocess.Popen(command, cwd=root, stdout=subprocess.DEVNULL, stderr=errors)
