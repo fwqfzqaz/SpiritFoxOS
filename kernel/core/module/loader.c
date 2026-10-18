@@ -27,7 +27,8 @@ static const sfm_api_t api = {
     .abi = SFM_ABI, .size = sizeof(sfm_api_t),
     .alloc = sf_alloc, .free = sf_free, .log = sf_log,
     .endpoint_create = sfm_endpoint_create, .endpoint_destroy = sfm_endpoint_destroy,
-    .lookup = sfm_lookup, .call = sfm_call, .send = sfm_send, .recv = sfm_recv
+    .lookup = sfm_lookup, .call = sfm_call, .send = sfm_send, .recv = sfm_recv,
+    .pci_read = sf_pci_read
 };
 
 static int find_module(const char *name)

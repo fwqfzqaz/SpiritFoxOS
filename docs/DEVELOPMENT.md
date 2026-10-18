@@ -76,6 +76,7 @@ make run OVMF_CODE=/path/to/OVMF_CODE.fd OVMF_VARS=/path/to/OVMF_VARS.fd
 并检查实际接管 `/tmp`、`/run` 后的嵌套目录/枚举、独立挂载空间、删除后继续访问旧句柄、
 截断/追加及 80 次节点创建/删除回收，
 null/zero 路由、设备号、短读写、引用、lseek、ioctl/mmap 错误与标准输出重定向，
+PCI 快照逐记录对照平台缓存、协议边界和 Bochs 实际通过 dev.pci 选择设备，
 16 次 fork/exit/wait 压力测试、原 Shell/autorun 完成，Wayland 创建窗口并至少渲染 10 帧，随后继续观察 3 秒。
 内核/用户异常、明确应用失败或超时都会失败。新增 core 和模块按 `-Werror` 编译，
 旧代码仍有现存警告，尚未做到整个仓库零警告。

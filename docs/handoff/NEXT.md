@@ -4,40 +4,32 @@
 
 ## 当前落点
 
-基于作者 main `414fd39`，分支 `codex/devfs-services`。本轮已经开始并实现阶段 3
-的 null/zero 设备服务和固定多后端路由。接口、限制与实测见
-`../integration/20261019-devfs-services.md`。阶段 3 尚未整体完成，阶段 4 的
-Ring 3 隔离未开始；模块加载成功不等于硬件驱动迁移完成。
+codex/devfs-services 在 e15af9b 后追加 PCI 只读快照、BAR 描述和 Bochs 设备选择。
+作者 main 仍为 414fd39，PR #2 未合并，沿用同一 PR；下轮先 fetch 复核。
+本轮接口与实测见 [PCI 对接](../integration/20261019-pci-snapshot.md)，此前 null/zero
+对接记录保留。ABI 升至 1.3，PCI 协议 version=1，文件 route 保持 1.2 的布局。
 
-本轮工作区已通过 Ubuntu/Arch 全量构建与各自产物的 QEMU UEFI 启动，含设备、
-文件、fork/wait 与 Wayland 回归。最终提交仍由 pre-push 再验，远端结果看 PR。
+仍属阶段 3，AHCI 数据面、统一设备注册与阶段 4 Ring 3 隔离未完成。
+BAR size=0 且 SIZE_KNOWN 未置位表示未知，不可当作可映射资源范围。
+工作区初版两套构建/启动通过；新增边界测试在干净导出源码上通过宿主 UBSan。
+最终提交仍由 pre-push 完整复测；远端结果以 PR 的 Actions 记录为准。
 
-下一轮先 fetch 两个远端，核对作者是否合并或提供新文档，再从最新 main 开发。
-不得重新使用 ABI 1.1 或把设备句柄当 tmpfs 句柄。按实际文档调整顺序并记下理由。
+## 下一步：统一设备注册与目录视图
 
-## 下一步：设备描述与只读 PCI 枚举
+先按 [设备注册提案](../DEVICE-REGISTRY.md) 评审布局、逻辑 owner、节点代数、
+名字链接/打开引用、旧 devfs 适配器。提案尚未实现，可以按作者新文档调整并记录依据。
+建议先交启动期固定登记和只读 LOOKUP/READDIR，公共 /dev 与消息枚举读取同一记录；
+至少覆盖 null/zero、input、dri。旧 inode 操作继续作为后端适配器，不同时迁移驱动
+数据面。动态注销可以后续实现，首版明确返回不支持，不伪造成功；保留热卸载禁令。
 
-先定位 pci.c、pci.h、devfs/chardev 与 AHCI/DRM 调用方，整理发现、配置访问、
-节点注册和驱动绑定的职责。交付有实际消费者的 PCI 只读描述服务，为 AHCI 迁移
-建立入口；不要同时重写存储数据路径、DMA、IRQ 和调度器。
+## 验收与提交
 
-建议版本化的固定宽度记录返回 BDF、vendor/device、class/subclass/prog-if 和
-经过校验的 BAR 类型/大小。索引有界，末尾与错误有明确结果；不能在不扰动活动
-驱动的情况下探测 BAR 大小时标记未知，不猜测。消息不得暴露内核指针。
-原枚举器提供事实，策略服务提供检索，至少把一个现有消费者的设备选择迁到服务，
-避免只有模块登记。能力模型建立前不向不可信调用方开放任意配置写、端口或物理映射。
+- 两种目录中各设备只出现一次；重复、坏路径、未知 owner、错误版本/长度与容量有测试。
+- open/dup/fork/close 生命周期不回归，不发布没有可用后端的节点。
+- 保留 PCI 快照对照、Bochs 走服务、AHCI FAT32、input/DRM、null/zero、tmpfs、fork/wait 与 Wayland 检查。
+- 改 ABI 时同步 SDK、打包器、模块、调用方、文档和旧包拒绝测试。
+- Ubuntu/Arch 编译及 UEFI 启动通过后推个人 Fork，作者决定是否合并 PR。
+- 每次提交前同时更新 docs/integration/*.md 和本文件，记录基线、实测与未完成项。
 
-同时评审 devfs 统一注册协议的 owner、编号、代数/注销、打开引用，以及如何合并
-硬件与模块两种视图；可先交接口提案，不承诺一次迁移所有设备。
-
-## 验收
-
-- 非法长度/索引、无匹配、多匹配、旧句柄或版本不匹配有测试。
-- QEMU 中服务设备记录与原 PCI 日志一致，现有消费者实际从服务查找设备。
-- AHCI 的 FAT32 程序加载、input/DRM、null/zero、tmpfs、Wayland 检查保留。
-- 改 ABI 时同步 SDK、打包器、模块与文档，测试拒绝旧包。
-- Ubuntu/Arch 全量编译和 UEFI 启动通过后推个人 Fork，由作者审阅 PR。
-- 每次提交前更新 docs/integration/*.md 与本文件，记录实测及未完成事项。
-
-未来独立任务：阻塞/取消 IPC、进程能力、独立页表、IRQ ACK、DMA 边界和驱动监督
-重启，再推进 Ring 3 硬件服务。当前同步 RPC 在禁中断短临界区执行，回调不得睡眠。
+后续再推进 AHCI 控制接口、IRQ/DMA 边界和阻塞/取消 IPC。当前同步 RPC 不能睡眠，
+Ring 0 端点/设备编号不是安全能力，不能仅包装旧函数就宣称用户态驱动完成。

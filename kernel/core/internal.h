@@ -20,6 +20,7 @@ void sf_free(void *);
 void sf_log(const char *);
 uint64_t sf_irq_save(void);
 void sf_irq_restore(uint64_t);
+int sf_pci_read(uint32_t, sfm_pci_record_t *);
 
 typedef struct sfm_image
 {

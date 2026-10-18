@@ -1,11 +1,12 @@
-/* SpiritFoxOS 模块 SDK。ABI 1.2：仅适用于受信任的内核态模块。 */
+/* SpiritFoxOS 模块 SDK。ABI 1.3：仅适用于受信任的内核态模块。 */
 #ifndef SPIRITFOX_SFMOD_H
 #define SPIRITFOX_SFMOD_H
 
 #include <stddef.h>
 #include <stdint.h>
+#include "sfmod_pci.h"
 
-#define SFM_ABI 0x00010002u
+#define SFM_ABI 0x00010003u
 #define SFM_MAGIC 0x004d4653u
 #define SFM_PAYLOAD 4096u
 #define SFM_MAX_MODULES 16u
@@ -90,6 +91,7 @@ typedef struct sfm_api
     int (*call)(uint64_t, const sfm_message_t *, sfm_message_t *);
     int (*send)(uint64_t, const sfm_message_t *);
     int (*recv)(uint32_t owner, uint64_t, sfm_message_t *);
+    int (*pci_read)(uint32_t index, sfm_pci_record_t *);
 } sfm_api_t;
 
 typedef struct sfm_entry

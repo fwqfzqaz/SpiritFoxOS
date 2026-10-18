@@ -1,7 +1,8 @@
-# sfmod ABI 1.2 与服务接口
+# sfmod ABI 1.3 与服务接口
 
-本 ABI（0x00010002）面向 x86_64、小端、受信任 Ring 0 插件。SDK 是 `kernel/include/sfmod.h`。
-1.2 在消息头偏移 56 增加后端 route 语义；1.0/1.1 包和模块会被拒绝，必须一起重新编译。
+本 ABI（0x00010003）面向 x86_64、小端、受信任 Ring 0 插件。SDK 是 `kernel/include/sfmod.h`。
+1.3 在核心 API 表追加只读 pci_read 复制接口，1.2 的 route 布局保持不变；
+1.0/1.1/1.2 包和模块均被拒绝，内核与全部模块必须一起重新编译。
 代码入口通过核心提供的 `sfm_api_t` 表调用服务；不解析任意内核符号，不链接宿主 libc。
 API 的 `abi` 和 `size` 描述接口版本。需要扩展语义时提高 ABI 版本，并补兼容测试。
 
@@ -104,6 +105,11 @@ OPEN/STAT/READDIR 的字符设备响应 offset 编码设备号（null=0x103、ze
 `/mnt/bin/test_sfmod_file`，通过实际用户态调用验证文件读写与截断，再启动 Wayland。
 
 ## 测试实现
+
+PCI 使用独立 version=1 协议，record=176 字节、query=16 字节，支持 ENUM/FIND/GET。
+端点代数标识 snapshot，(snapshot,index) 标识设备引用；不传指针，未知 BAR 大小
+不探测。核心 API 只复制缓存，模块负责快照/查询；Bochs DRM 从服务选择 VGA。
+具体布局、错误与边界见 [PCI 对接](integration/20261019-pci-snapshot.md)。
 
 `make test-modules` 使用 HOST_CC 编译带 UBSan 的 Linux x86_64 宿主测试，模块保持
 目标编译器。测试用 MAP_32BIT 分配可执行内存，以匹配内核低地址重定位约束；这个

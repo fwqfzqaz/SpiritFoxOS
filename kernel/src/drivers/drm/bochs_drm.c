@@ -3,6 +3,7 @@
 #include "drm_gem.h"
 #include "pci.h"
 #include "serial.h"
+#include "../../../core/internal.h"
 
 /* ========================================================================
  * Bochs / QEMU VBE DRM 驱动
@@ -52,45 +53,37 @@ static inline uint16_t vbe_read(uint16_t index)
 /* ---------- 从 PCI 配置空间读取 VGA 设备的 BAR0 地址 ---------- */
 static uint64_t bochs_detect_lfb_addr(void)
 {
-    /* 扫描 PCI 总线寻找 VGA 兼容设备 (class 0x030000 或 0x030001) */
-    for (int bus = 0; bus < 256; bus++) {
-        for (int dev = 0; dev < 32; dev++) {
-            for (int func = 0; func < 8; func++) {
-                uint32_t vendor_dev = pci_read_config(bus, dev, func, 0x00);
-                if (vendor_dev == 0xFFFFFFFF)
-                    continue;
-
-                uint32_t class_rev = pci_read_config(bus, dev, func, 0x08);
-                uint8_t base_class = (class_rev >> 24) & 0xFF;
-                uint8_t sub_class  = (class_rev >> 16) & 0xFF;
-
-                /* VGA 兼容设备: class=0x03, subclass=0x00 */
-                if (base_class == 0x03 && sub_class == 0x00) {
-                    uint32_t bar0 = pci_read_config(bus, dev, func, 0x10);
-                    if (!(bar0 & 0x01)) {  /* 必须是内存空间 BAR */
-                        uint64_t addr = (uint64_t)(bar0 & 0xFFFFFFF0);
-                        /* 对于 64 位 BAR，读取高 32 位 */
-                        if (bar0 & 0x04) {
-                            uint32_t bar0_hi = pci_read_config(bus, dev, func, 0x14);
-                            addr |= ((uint64_t)bar0_hi << 32);
-                        }
-                        serial_puts("[bochs_drm] VGA found at PCI ");
-                        serial_put_dec((uint64_t)bus);
-                        serial_puts(":");
-                        serial_put_dec((uint64_t)dev);
-                        serial_puts(".");
-                        serial_put_dec((uint64_t)func);
-                        serial_puts(" BAR0=0x");
-                        serial_put_hex(addr);
-                        serial_puts("\n");
-                        return addr;
-                    }
-                }
-            }
+    uint64_t service = sfm_lookup("dev.pci"), address = 0;
+    sfm_message_t *req = sf_alloc(sizeof(*req)), *resp = sf_alloc(sizeof(*resp));
+    if (!service || !req || !resp) goto done;
+    sfm_clear(req, sizeof(*req));
+    req->type = SFM_PCI_FIND; req->flags = SFM_PCI_VERSION;
+    sfm_pci_query_t query = {.match = SFM_PCI_CLASS | SFM_PCI_SUBCLASS,
+                             .class_code = PCI_CLASS_DISPLAY, .subclass = 0};
+    req->size = sizeof(query);
+    sfm_copy(req->data, &query, sizeof(query));
+    for (unsigned tries = 0; tries < SFM_PCI_MAX; tries++) {
+        if (sfm_call(service, req, resp) || resp->result != 1 ||
+            resp->size != sizeof(sfm_pci_record_t) || resp->offset < req->offset ||
+            resp->offset >= SFM_PCI_MAX) break;
+        sfm_pci_record_t record;
+        sfm_copy(&record, resp->data, sizeof(record));
+        uint32_t flags = record.bars[0].flags;
+        if (record.version != SFM_PCI_VERSION || record.size != sizeof(record) ||
+            record.snapshot != service) break;
+        if ((flags & SFM_BAR_PRESENT) && (flags & (SFM_BAR_MEM32 | SFM_BAR_MEM64)) &&
+            !(flags & (SFM_BAR_INVALID | SFM_BAR_UNKNOWN)) && record.bars[0].address) {
+            address = record.bars[0].address;
+            serial_puts("[bochs_drm] VGA selected via dev.pci BAR0=");
+            serial_put_hex(address); serial_puts("\n");
+            break;
         }
+        req->offset = resp->offset + 1;
     }
-
-    serial_puts("[bochs_drm] No VGA device found in PCI, using default 0xFD000000\n");
+done:
+    sf_free(req); sf_free(resp);
+    if (address) return address;
+    serial_puts("[bochs_drm] PCI service has no usable VGA BAR; using default 0xFD000000\n");
     return 0xFD000000ULL;
 }
 

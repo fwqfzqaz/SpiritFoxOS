@@ -78,7 +78,7 @@ dev.tmpfs 的 null/zero 服务。ABI 1.2 显式携带后端编号；尚无动态
 2. **模块化基础（已交付）**：64 字节消息、端点队列、请求响应、SDK、受限 ET_REL
    加载器、内嵌启动包、依赖验证；加载 hello、tmpfs、VFS 模块并执行实际消息文件
    创建/写/读/删除测试。畸形包、ELF 边界和重定位由宿主测试覆盖。
-3. **兼容路径迁移（进行中）**：/tmp、/run 已接入消息 tmpfs，支持目录、枚举和打开文件生命周期；null/zero 已接入 dev.tmpfs，硬件设备尚未迁移。按 devfs、PCI/AHCI、
+3. **兼容路径迁移（进行中）**：/tmp、/run 已接入消息 tmpfs，支持目录、枚举和打开文件生命周期；null/zero 已接入 dev.tmpfs；dev.pci 提供只读快照，Bochs 设备选择已走消息，硬件数据面尚未迁移。按 devfs、PCI/AHCI、
    tty、进程/Linux ABI 顺序迁移；每个设备实际启用后才登记为已迁移模块。
 4. **隔离微内核**：分离线程与进程策略，IPC 阻塞/唤醒与取消，地址空间能力、
    IRQ 消息/ACK、DMA 约束、Ring 3 驱动监督及故障重启；最后扩展 SMP。
@@ -106,5 +106,5 @@ dev.tmpfs 的 null/zero 服务。ABI 1.2 显式携带后端编号；尚无动态
 [fault handlers](https://docs.sel4.systems/Tutorials/fault-handlers.html)，
 用于区分端点通信与故障隔离的责任；本项目未复制其实现，也不声称等同 seL4。
 
-每轮先读 [对接记录](integration/20261019-devfs-services.md) 与
+每轮先读 [最新对接记录](integration/20261019-pci-snapshot.md) 与
 [下一步交接](handoff/NEXT.md)，每次提交同时更新两处。
