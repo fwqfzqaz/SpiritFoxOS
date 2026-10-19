@@ -49,5 +49,6 @@ int sfm_package_load(const void *, size_t);
 int sfm_module_unload(const char *);
 void sfm_boot(void);
 int sfm_selftest(void);
+int sfm_device_selftest(void);
 
 #endif

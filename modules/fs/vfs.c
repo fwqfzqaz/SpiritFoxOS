@@ -58,7 +58,7 @@ static int start(const sfm_api_t *api, uint32_t owner)
     core = api;
     owner_id = owner;
     backends[SFM_ROUTE_TMPFS] = core->lookup("fs.tmpfs");
-    backends[SFM_ROUTE_DEVFS] = core->lookup("dev.tmpfs");
+    backends[SFM_ROUTE_DEVFS] = core->lookup("dev.registry");
     if (!backends[0] || !backends[1]) return -2;
     sfm_message_t *req = core->alloc(sizeof(*req)), *resp = core->alloc(sizeof(*resp));
     int result = -12;
@@ -85,5 +85,5 @@ static void stop(void)
     if (endpoint) core->endpoint_destroy(owner_id, endpoint);
     endpoint = 0;
 }
-SFM_DEPENDS("fs.tmpfs", "dev.tmpfs");
+SFM_DEPENDS("fs.tmpfs", "dev.registry");
 SFM_MODULE("fs.vfs", start, stop);

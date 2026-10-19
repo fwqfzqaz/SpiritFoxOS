@@ -68,7 +68,8 @@ UEFI stub -> kernel/src 的现有硬件/内存/进程初始化
 命名链接与打开引用分开计数；删除后旧打开文件可继续访问，重建同名文件得到新节点。
 fs.vfs 的固定启动挂载表为 /modules、/tmp、/run 分配独立根，并将 /dev 路由到
 dev.tmpfs 的 null/zero 服务。ABI 1.2 显式携带后端编号；尚无动态挂载协议。
-兼容桥只绑定旧 devfs 的 null/zero，其他设备保留原驱动与路径。
+dev.registry 在 input/DRM 初始化后导入真实节点并冻结，公共 /dev 与消息目录枚举
+共用注册表；只有 null/zero 数据进入模块，其他设备保留原驱动与路径。
 兼容桥保留路径查找缓存，目录枚举由模块消息提供。页缓存和磁盘事务另行迁移。
 
 ## 阶段及验收
@@ -106,5 +107,5 @@ dev.tmpfs 的 null/zero 服务。ABI 1.2 显式携带后端编号；尚无动态
 [fault handlers](https://docs.sel4.systems/Tutorials/fault-handlers.html)，
 用于区分端点通信与故障隔离的责任；本项目未复制其实现，也不声称等同 seL4。
 
-每轮先读 [最新对接记录](integration/20261019-pci-snapshot.md) 与
+每轮先读 [最新对接记录](integration/20261019-device-registry.md) 与
 [下一步交接](handoff/NEXT.md)，每次提交同时更新两处。

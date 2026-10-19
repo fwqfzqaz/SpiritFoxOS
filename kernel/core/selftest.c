@@ -101,12 +101,14 @@ static int device_test(uint64_t vfs, sfm_message_t *req, sfm_message_t *resp)
     req->type = SFM_FILE_READDIR;
     req->route = SFM_ROUTE_DEVFS;
     req->handle = root;
-    CHECK(!sfm_call(vfs, req, resp) && resp->result == 1 &&
-          resp->flags == SFM_NODE_CHARDEV && resp->data[0] == 'n');
-    req->offset = 1;
-    CHECK(!sfm_call(vfs, req, resp) && resp->result == 1 && resp->data[0] == 'z');
-    req->offset = 2;
-    CHECK(!sfm_call(vfs, req, resp) && !resp->result);
+    unsigned seen_null = 0, seen_zero = 0;
+    for (req->offset = 0; req->offset <= SFM_DEV_MAX; req->offset++) {
+        CHECK(!sfm_call(vfs, req, resp));
+        if (!resp->result) break;
+        if (sfm_name_equal((const char *)resp->data, "null")) seen_null++;
+        if (sfm_name_equal((const char *)resp->data, "zero")) seen_zero++;
+    }
+    CHECK(seen_null == 1 && seen_zero == 1 && req->offset < SFM_DEV_MAX);
     path_request(req, SFM_FILE_OPEN, 0, "/dev/null");
     CHECK(!sfm_call(vfs, req, resp) && resp->route == SFM_ROUTE_DEVFS &&
           resp->flags == SFM_NODE_CHARDEV && resp->offset == 0x103);
@@ -170,6 +172,13 @@ fail:
     return -1;
 }
 
+int sfm_device_selftest(void)
+{
+    sfm_message_t *req = sf_alloc(sizeof(*req)), *resp = sf_alloc(sizeof(*resp));
+    int result = req && resp ? device_test(sfm_lookup("fs.vfs"), req, resp) : -1;
+    sf_free(req); sf_free(resp); return result;
+}
+
 int sfm_selftest(void)
 {
     sfm_message_t *req = sf_alloc(sizeof(*req));
@@ -231,7 +240,6 @@ int sfm_selftest(void)
     req->type = SFM_FILE_STAT;
     CHECK(sfm_call(vfs, req, resp) == -9);
     CHECK(!tree_test(vfs, req, resp));
-    CHECK(!device_test(vfs, req, resp));
     CHECK(sfm_module_unload("fs.tmpfs") == SFM_EBUSY);
     sf_free(req);
     sf_free(resp);

@@ -14,6 +14,28 @@
 
 #define VERIFY(expr) do { if (!(expr)) { printf("[sfmod-user] FAILED line %d\n", __LINE__); return -1; } } while (0)
 
+static int device_directory(const char *path)
+{
+    DIR *directory = opendir(path);
+    VERIFY(directory);
+    char names[64][64];
+    unsigned count = 0;
+    struct dirent *entry;
+    while ((entry = readdir(directory))) {
+        if (!strcmp(entry->d_name, ".") || !strcmp(entry->d_name, "..")) continue;
+        VERIFY(count < 64 && strlen(entry->d_name) < 64);
+        for (unsigned i = 0; i < count; i++) VERIFY(strcmp(names[i], entry->d_name));
+        strcpy(names[count++], entry->d_name);
+        char full[256];
+        VERIFY(snprintf(full, sizeof(full), "%s/%s", path, entry->d_name) < (int)sizeof(full));
+        struct stat status;
+        VERIFY(!stat(full, &status) && entry->d_ino == status.st_ino);
+        VERIFY(entry->d_type == (S_ISDIR(status.st_mode) ? DT_DIR : S_ISCHR(status.st_mode) ? DT_CHR : DT_BLK));
+    }
+    VERIFY(!closedir(directory) && count);
+    return 0;
+}
+
 static int special_devices(void)
 {
     char data[8192];
@@ -48,7 +70,13 @@ static int special_devices(void)
     VERIFY(mmap(NULL, 4096, PROT_READ, MAP_PRIVATE, zero, 0) == MAP_FAILED && errno == ENODEV);
     VERIFY(mmap(NULL, 4096, PROT_READ, MAP_PRIVATE, null, 0) == MAP_FAILED && errno == ENODEV);
     int shared = dup(zero);
-    VERIFY(shared >= 0 && !close(zero) && read(shared, data, 8) == 8 && !close(shared));
+    VERIFY(shared >= 0 && !close(zero) && read(shared, data, 8) == 8);
+    pid_t child = fork();
+    VERIFY(child >= 0);
+    if (!child) _exit(read(shared, data, 8) == 8 && !close(shared) ? 0 : 1);
+    int child_status = 0;
+    VERIFY(waitpid(child, &child_status, 0) == child && WIFEXITED(child_status) && !WEXITSTATUS(child_status));
+    VERIFY(read(shared, data, 8) == 8 && !close(shared));
     VERIFY(unlink("/dev/null") < 0 && unlink("/dev/zero") < 0 && !close(null));
     null = open("/dev/null", O_RDONLY);
     VERIFY(null >= 0 && write(null, data, 1) < 0 && !close(null));
@@ -66,6 +94,10 @@ static int special_devices(void)
     }
     VERIFY(!closedir(directory) && seen_null == 1 && seen_zero == 1 &&
            seen_input == 1 && seen_dri == 1);
+    VERIFY(!device_directory("/dev") && !device_directory("/dev/input") && !device_directory("/dev/dri"));
+    VERIFY(open("/dev/unbacked", O_CREAT | O_RDWR, 0600) < 0 && mkdir("/dev/unbacked-dir", 0700) < 0);
+    VERIFY(symlink("/dev/null", "/dev/unbacked-link") < 0 && unlink("/dev/dri/card0") < 0);
+    puts("[sfmod-user] unified device directories passed");
     puts("[sfmod-user] special devices passed");
     return 0;
 }

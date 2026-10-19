@@ -13,6 +13,7 @@
 #include "net.h"
 #include "net_icmp.h"
 #include "process.h"
+#include "devfs.h"
 
 void kernel_panic(const char* msg)
 {
@@ -61,6 +62,7 @@ void kernel_main(BootInfo* boot_info)
     init_fs_hierarchy();
     init_input();
     init_drm();
+    if (sfm_devices_boot()) kernel_panic("device registry import/validation failed");
 
     serial_puts("[SpiritFoxOS] Enabling interrupts...\n");
     hal_enable_interrupts();

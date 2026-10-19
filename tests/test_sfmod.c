@@ -12,6 +12,9 @@
 static size_t allocations;
 static int fail_after = -1;
 static int ready_messages;
+void test_fail_allocations(int budget) { fail_after = budget; }
+void test_registry(void);
+void test_registry_capacity(void);
 
 void *sf_alloc(size_t size)
 {
@@ -142,7 +145,7 @@ static void test_elf(const uint8_t *original, size_t size)
     assert(sfm_elf_load(data, size, &image));
     memcpy(data, original, size);
     meta = (sfm_metadata_t *)(data + section(data, ".sfmod_meta")->sh_offset);
-    meta->abi = 0x00010002u;
+    meta->abi = 0x00010003u;
     assert(sfm_elf_load(data, size, &image) == SFM_ENOEXEC);
     assert(!allocations);
     free(data);
@@ -218,7 +221,7 @@ static void test_package(uint8_t *package, size_t size, uint8_t *failure, size_t
     uint8_t *copy = malloc(size);
     assert(copy);
     memcpy(copy, package, size);
-    ((uint32_t *)copy)[1] = 0x00010002u;
+    ((uint32_t *)copy)[1] = 0x00010003u;
     assert(sfm_package_load(copy, size) == SFM_ENOEXEC && !allocations);
     for (size_t truncated = 0; truncated < size; truncated++)
         assert(sfm_package_load(package, truncated));
@@ -265,16 +268,20 @@ static void test_package(uint8_t *package, size_t size, uint8_t *failure, size_t
         fail_after = -1;
         if (!result) { succeeded = 1; break; }
         assert(!allocations && !sfm_lookup("fs.vfs") && !sfm_lookup("fs.tmpfs") &&
-               !sfm_lookup("dev.tmpfs") && !sfm_lookup("dev.pci"));
+               !sfm_lookup("dev.tmpfs") && !sfm_lookup("dev.pci") && !sfm_lookup("dev.registry"));
     }
     assert(succeeded);
+    test_registry();
     assert(!sfm_selftest());
+    assert(!sfm_device_selftest());
     assert(!sfm_pci_selftest());
     test_tmpfs_limits();
     assert(sfm_package_load(package, size) == SFM_EBUSY);
     assert(sfm_module_unload("fs.tmpfs") == SFM_EBUSY);
     assert(sfm_module_unload("dev.tmpfs") == SFM_EBUSY);
+    assert(sfm_module_unload("dev.registry") == SFM_EBUSY);
     assert(!sfm_module_unload("fs.vfs"));
+    assert(!sfm_module_unload("dev.registry"));
     assert(!sfm_module_unload("fs.tmpfs"));
     assert(!sfm_module_unload("dev.tmpfs"));
     assert(!sfm_module_unload("demo.hello"));
@@ -306,11 +313,17 @@ int main(int argc, char **argv)
         pci_fixture_count = pass ? SFM_PCI_MAX : 0;
         assert(!sfm_package_load(package, size) && !sfm_pci_selftest());
         assert(!sfm_module_unload("fs.vfs"));
+        assert(!sfm_module_unload("dev.registry"));
         assert(!sfm_module_unload("fs.tmpfs"));
         assert(!sfm_module_unload("dev.tmpfs"));
         assert(!sfm_module_unload("demo.hello"));
         assert(!sfm_module_unload("dev.pci") && !allocations);
     }
+    assert(!sfm_package_load(package, size));
+    test_registry_capacity();
+    assert(!sfm_module_unload("fs.vfs") && !sfm_module_unload("dev.registry"));
+    assert(!sfm_module_unload("dev.tmpfs") && !sfm_module_unload("fs.tmpfs"));
+    assert(!sfm_module_unload("dev.pci") && !sfm_module_unload("demo.hello") && !allocations);
     free(package);
     free(failure);
     puts("sfmod tests passed: malformed ELF/package, dependencies, init rollback, OOM, IPC, file IO, unload");

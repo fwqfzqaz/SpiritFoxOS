@@ -48,6 +48,8 @@ required = [b"[SpiritFoxOS] Enabling interrupts...", b"[SpiritFoxOS] shell_run..
             b"[sfmod] PCI snapshot matches platform inventory",
             b"[bochs_drm] VGA selected via dev.pci",
             b"[process] reserved PID preemption passed",
+            b"[sfmod] unified device registry matches public /dev",
+            b"[sfmod-user] unified device directories passed",
             b"[client] Window created", b"[client] frame 10"]
 bad = [b"KERNEL PANIC", b"Triple fault", b"[EXCEPTION]", b"!!! EXCEPTION:", b"System Halted.",
        b"[SCHED] PANIC:", b"[SCHED] HALT:",

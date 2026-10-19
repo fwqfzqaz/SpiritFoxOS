@@ -1,8 +1,8 @@
-# sfmod ABI 1.3 与服务接口
+# sfmod ABI 1.4 与服务接口
 
-本 ABI（0x00010003）面向 x86_64、小端、受信任 Ring 0 插件。SDK 是 `kernel/include/sfmod.h`。
-1.3 在核心 API 表追加只读 pci_read 复制接口，1.2 的 route 布局保持不变；
-1.0/1.1/1.2 包和模块均被拒绝，内核与全部模块必须一起重新编译。
+本 ABI（0x00010004）面向 x86_64、小端、受信任 Ring 0 插件。SDK 是 `kernel/include/sfmod.h`。
+1.4 增加设备注册协议和 BLKDEV 类型，route=1 改为统一目录服务；1.3 的 PCI API
+保持不变。旧包和模块均被拒绝，内核与全部模块必须一起重新编译。
 代码入口通过核心提供的 `sfm_api_t` 表调用服务；不解析任意内核符号，不链接宿主 libc。
 API 的 `abi` 和 `size` 描述接口版本。需要扩展语义时提高 ABI 版本，并补兼容测试。
 
@@ -50,8 +50,8 @@ SFPK 包：16 字节头 `<magic, abi, count, total_size>`，其后每个目录�
 
 ## 文件服务
 
-`fs.vfs` 依赖 `fs.tmpfs` 和 `dev.tmpfs`，固定启动挂载表把 `/modules`、`/tmp`、`/run`
-路由到三个独立 tmpfs 根，把 `/dev` 路由到 null/zero 服务。
+`fs.vfs` 依赖 `fs.tmpfs` 和 `dev.registry`，固定启动挂载表把 `/modules`、`/tmp`、`/run`
+路由到三个独立 tmpfs 根，把 `/dev` 路由到统一目录，特殊设备数据再进 dev.tmpfs。
 绝对 OPEN/MKDIR 使用最长组件前缀匹配（`/tmp-other` 不属于 `/tmp`）；
 相对及其他句柄请求按 route 转发。uint64_t route 为 0=tmpfs、1=devfs，其他值
 返回 EINVAL；响应返回实际 route。文件身份为 (route, handle)，编号不是安全能力。
@@ -105,6 +105,11 @@ OPEN/STAT/READDIR 的字符设备响应 offset 编码设备号（null=0x103、ze
 `/mnt/bin/test_sfmod_file`，通过实际用户态调用验证文件读写与截断，再启动 Wayland。
 
 ## 测试实现
+
+设备注册协议 version=1，record=328 字节，包含路径、逻辑归属、后端编号与元数据，
+不传指针。启动登记真实节点后封存，公共目录枚举和消息枚举共用此表。
+动态注销/热替换尚未实现，旧硬件 I/O 留在 VFS 适配器。详见
+[设备注册对接](integration/20261019-device-registry.md)。
 
 PCI 使用独立 version=1 协议，record=176 字节、query=16 字节，支持 ENUM/FIND/GET。
 端点代数标识 snapshot，(snapshot,index) 标识设备引用；不传指针，未知 BAR 大小

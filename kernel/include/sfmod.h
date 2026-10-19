@@ -1,12 +1,13 @@
-/* SpiritFoxOS 模块 SDK。ABI 1.3：仅适用于受信任的内核态模块。 */
+/* SpiritFoxOS 模块 SDK。ABI 1.4：仅适用于受信任的内核态模块。 */
 #ifndef SPIRITFOX_SFMOD_H
 #define SPIRITFOX_SFMOD_H
 
 #include <stddef.h>
 #include <stdint.h>
 #include "sfmod_pci.h"
+#include "sfmod_device.h"
 
-#define SFM_ABI 0x00010003u
+#define SFM_ABI 0x00010004u
 #define SFM_MAGIC 0x004d4653u
 #define SFM_PAYLOAD 4096u
 #define SFM_MAX_MODULES 16u
@@ -36,6 +37,7 @@ enum sfm_operation
 #define SFM_NODE_DIR 2u
 #define SFM_NODE_SYMLINK 3u
 #define SFM_NODE_CHARDEV 4u
+#define SFM_NODE_BLKDEV 5u
 #define SFM_ROUTE_TMPFS 0u
 #define SFM_ROUTE_DEVFS 1u
 #define SFM_ROUTE_COUNT 2u

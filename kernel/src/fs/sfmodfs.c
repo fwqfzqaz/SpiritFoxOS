@@ -156,7 +156,8 @@ static int read_directory(vfs_file_t *file, int index, char *name, int namelen, 
             stat->ino = response.handle;
             stat->type = response.flags == SFM_NODE_DIR ? VFS_TYPE_DIR :
                 response.flags == SFM_NODE_SYMLINK ? VFS_TYPE_SYMLINK :
-                response.flags == SFM_NODE_CHARDEV ? VFS_TYPE_CHARDEV : VFS_TYPE_FILE;
+                response.flags == SFM_NODE_CHARDEV ? VFS_TYPE_CHARDEV :
+                response.flags == SFM_NODE_BLKDEV ? VFS_TYPE_BLKDEV : VFS_TYPE_FILE;
             stat->size = stat->type == VFS_TYPE_CHARDEV ? 0 : response.offset;
             if (stat->type == VFS_TYPE_CHARDEV) stat->rdev = response.offset;
             stat->nlinks = 1;
@@ -269,22 +270,28 @@ static vfs_filesystem_t filesystem = {
     .create = create_file, .mkdir = make_directory, .unlink = unlink_file, .symlink = create_symlink
 };
 
-static int attach_devices(void)
+int sfm_prepare_devices(void)
 {
+    uint64_t backend = sfm_lookup("dev.tmpfs"), root;
+    uint64_t saved = begin();
+    request.type = SFM_FS_ROOT;
+    int status = sfm_call(backend, &request, &response);
+    root = response.handle;
+    end(saved);
+    if (status) return status;
     static const char *names[] = {"null", "zero"};
     for (size_t i = 0; i < sizeof(names) / sizeof(names[0]); i++) {
         uint64_t flags = begin();
         request.type = SFM_FILE_OPEN;
-        request.size = 5u + (uint32_t)strlen(names[i]) + 1u;
-        sfm_copy(request.data, "/dev/", 5);
-        sfm_copy(request.data + 5, names[i], strlen(names[i]) + 1);
-        int result = sfm_call(service, &request, &response);
-        if (!result && (response.flags != SFM_NODE_CHARDEV ||
-                        response.route != SFM_ROUTE_DEVFS || !response.handle)) result = -5;
+        request.handle = root;
+        request.size = (uint32_t)strlen(names[i]) + 1u;
+        sfm_copy(request.data, names[i], request.size);
+        int result = sfm_call(backend, &request, &response);
+        if (!result && (response.flags != SFM_NODE_CHARDEV || !response.handle)) result = -5;
         vfs_inode_t *inode = result ? NULL : devfs_boot_char_node(names[i]);
         if (inode) {
             inode->ino = response.handle;
-            inode->fs_data = (void *)(uintptr_t)response.route;
+            inode->fs_data = (void *)(uintptr_t)SFM_ROUTE_DEVFS;
             inode->rdev = response.offset;
             inode->type = VFS_TYPE_CHARDEV;
             inode->mode = 0020000u | 0666u;
@@ -300,9 +307,11 @@ static int attach_devices(void)
         end(flags);
         if (result || !inode) return -1;
     }
-    sf_log("[sfmod] special devices attached: /dev/null /dev/zero\n");
     return 0;
 }
+
+int sfm_devfs_readdir(vfs_file_t *file, int index, char *name, int size, vfs_inode_t *stat)
+{ return read_directory(file, index, name, size, stat); }
 
 int sfm_mount_compat(void)
 {
@@ -333,5 +342,5 @@ int sfm_mount_compat(void)
         vfs_unlink("/tmp/link-test/readme") || !vfs_resolve_path("/modules/README") ||
         vfs_rmdir("/tmp/link-test") || vfs_unmount("/tmp") != SFM_EBUSY) return -1;
     sf_log("[sfmod] tmpfs mounted: /tmp /run (independent roots)\n");
-    return attach_devices();
+    return 0;
 }
