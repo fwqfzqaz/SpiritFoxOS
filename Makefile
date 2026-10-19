@@ -139,7 +139,7 @@ $(foreach name,$(SFM_NAMES),$(eval $(call SFM_RULE,$(name),$(shell awk '$$1=="$(
 build/modules/init.sfpack: $(SFM_FILES) tools/pack-modules.py modules/manifest.txt
 	python3 tools/pack-modules.py
 
-.PHONY: modules test-modules
+.PHONY: modules test-modules test-ramdisk
 modules: build/modules/init.sfpack
 
 build/modules/test.fail.sfmod: tests/modules/fail.c kernel/include/sfmod.h kernel/include/sfmod_pci.h kernel/include/sfmod_device.h kernel/include/sfmod_block.h
@@ -152,6 +152,12 @@ test-modules: modules build/modules/test.fail.sfmod
 	    tests/test_sfmod.c tests/test_registry.c tests/test_pci_client.c tests/test_block.c kernel/core/ipc/endpoint.c kernel/core/module/elf.c \
 	    kernel/core/module/loader.c kernel/core/selftest.c kernel/core/pci.c kernel/core/pci_test.c kernel/core/pci_client.c kernel/core/block.c -o build/test_sfmod
 	build/test_sfmod build/modules/init.sfpack build/modules/test.fail.sfmod $(SFM_FILES)
+
+test-ramdisk:
+	@mkdir -p build
+	$(HOST_CC) -std=gnu11 -O1 -g -Wall -Wextra -Werror -fno-builtin -fsanitize=address,undefined -fno-sanitize-recover=all -Ikernel/include \
+	    tests/test_ramdisk.c kernel/src/fs/ramdisk.c kernel/src/drivers/blkdev.c -o build/test_ramdisk
+	build/test_ramdisk
 
 $(KERNEL_BUILD)/kernel.elf: $(KERNEL_OBJS) $(KERNEL_SRC)/kernel.ld
 	@echo "[LD64] $@"

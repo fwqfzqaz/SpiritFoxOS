@@ -51,6 +51,10 @@ AHCI 控制器查找已走 `dev.pci` 的 FIND 消息；命令提交、DMA 和端
 原始块读写或 FAT32。AHCI/IDE 几何标为未确认，因为旧驱动可能使用默认容量；
 ramdisk 的大小来自其软件缓冲区。详见 [块清单对接](integration/20261019-block-inventory.md)。
 
+RAMDISK 后端改为一次连续页分配、全区清零，容量/页舍入先检查溢出，登记失败回收
+所有自有页。读写使用减法边界检查；借用 initrd 仍由调用者保活，只暴露完整扇区。
+此修复不改变块消息接口或 AHCI 数据面，见 [RAMDISK 对接](integration/20261019-ramdisk-bounds.md)。
+
 ```text
 UEFI stub -> kernel/src 的现有硬件/内存/进程初始化
                     |

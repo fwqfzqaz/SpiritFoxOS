@@ -49,6 +49,7 @@ required = [b"[SpiritFoxOS] Enabling interrupts...", b"[SpiritFoxOS] shell_run..
             b"[sfmod] early services ready before storage",
             b"[AHCI] Controller selected via dev.pci BAR5=",
             b"[AHCI] Port 0: SATA disk sda", b"[AHCI] Port 1: SATA disk sdb",
+            b"[RAMDISK] Created ram0: 2048 sectors",
             b"[FAT32] Mounted on blkdev 0", b"[VFS] Mounted fat32 at /mnt",
             b"[sfmod] filesystem services ready after VFS/process",
             b"[sfmod] sealed block inventory matches platform devices",

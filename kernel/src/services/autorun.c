@@ -16,6 +16,7 @@
 #include "string.h"
 #include "vga.h"
 #include "serial.h"
+#include "hal.h"
 
 #define AUTORUN_MAX_LINE  256
 #define AUTORUN_MAX_ARGS  16
@@ -116,9 +117,12 @@ int autorun_execute(const char *path)
     vfs_close(fd);
 
     printf("[autorun] %d command(s) executed\n", cmd_count);
+    /* Keep the boot milestone intact across timer/preemption diagnostics. */
+    uint64_t milestone_flags = hal_save_interrupts();
     serial_puts("[autorun] done, executed ");
     serial_put_dec((uint64_t)cmd_count);
     serial_puts(" commands\n");
+    hal_restore_interrupts(milestone_flags);
 
     return cmd_count;
 }
