@@ -14,6 +14,7 @@
 #include "net_icmp.h"
 #include "process.h"
 #include "devfs.h"
+#include "../core/block.h"
 
 void kernel_panic(const char* msg)
 {
@@ -56,6 +57,7 @@ void kernel_main(BootInfo* boot_info)
     init_allocators();
     sfm_boot_early();
     init_storage();
+    if (sfm_blocks_publish()) kernel_panic("block inventory import/validation failed");
     init_filesystem();
     init_services();
     sfm_boot_filesystems();

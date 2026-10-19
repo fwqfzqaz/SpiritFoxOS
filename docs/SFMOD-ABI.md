@@ -116,6 +116,16 @@ PCI 使用独立 version=1 协议，record=176 字节、query=16 字节，支持
 不探测。核心 API 只复制缓存，模块负责快照/查询；Bochs DRM 从服务选择 VGA。
 具体布局、错误与边界见 [PCI 对接](integration/20261019-pci-snapshot.md)。
 
+块设备清单 `dev.block` 使用独立 version=1 协议、64 字节固定记录；不改变 ABI 1.4
+的 API 表或包格式。所有消息 flags=version、route=0，REGISTER 接收记录，SEAL
+冻结，ENUM 按清单序号读取，GET 按旧块设备槽号查询且必须携带 snapshot 端点句柄。
+响应 offset 始终为清单序号，record.index 才是旧槽号（有空洞时两者不同）。
+ENUM 的 offset=count 为 EOF，超过 count 为 EINVAL；GET 不存在槽/失效快照为
+ENOENT，槽越界为 EINVAL。未冻结查询 EAGAIN，重复冻结 EBUSY，冻结后登记 EROFS。
+记录含逻辑名称/类型、扇区数和扇区大小，不包含指针或读写能力。
+AHCI/IDE 标 GEOMETRY_UNVERIFIED，不能将旧驱动可能估算的容量视为硬件探测结果。
+具体布局与限制见 [块清单对接](integration/20261019-block-inventory.md)。
+
 `make test-modules` 使用 HOST_CC 编译带 UBSan 的 Linux x86_64 宿主测试，模块保持
 目标编译器。测试用 MAP_32BIT 分配可执行内存，以匹配内核低地址重定位约束；这个
 测试适配不是生产加载器的内存保护实现。

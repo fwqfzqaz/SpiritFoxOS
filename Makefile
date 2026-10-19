@@ -129,7 +129,7 @@ SFM_FLAGS = -std=gnu11 -O2 -ffreestanding -fno-builtin -fno-stack-protector \
 SFM_NAMES := $(shell sed -e '/^[[:space:]]*\#/d' -e '/^[[:space:]]*$$/d' modules/manifest.txt | awk '{print $$1}')
 SFM_FILES = $(addprefix build/modules/,$(addsuffix .sfmod,$(SFM_NAMES)))
 define SFM_RULE
-build/modules/$(1).sfmod: modules/$(2) kernel/include/sfmod.h kernel/include/sfmod_pci.h kernel/include/sfmod_device.h
+build/modules/$(1).sfmod: modules/$(2) kernel/include/sfmod.h kernel/include/sfmod_pci.h kernel/include/sfmod_device.h kernel/include/sfmod_block.h
 	@mkdir -p build/modules
 	$$(CC) $$(SFM_FLAGS) -c $$< -o build/modules/$(1).o
 	$$(LD) -r -o $$@ build/modules/$(1).o
@@ -142,15 +142,15 @@ build/modules/init.sfpack: $(SFM_FILES) tools/pack-modules.py modules/manifest.t
 .PHONY: modules test-modules
 modules: build/modules/init.sfpack
 
-build/modules/test.fail.sfmod: tests/modules/fail.c kernel/include/sfmod.h kernel/include/sfmod_pci.h kernel/include/sfmod_device.h
+build/modules/test.fail.sfmod: tests/modules/fail.c kernel/include/sfmod.h kernel/include/sfmod_pci.h kernel/include/sfmod_device.h kernel/include/sfmod_block.h
 	@mkdir -p build/modules
 	$(CC) $(SFM_FLAGS) -c $< -o build/modules/test.fail.o
 	$(LD) -r -o $@ build/modules/test.fail.o
 
 test-modules: modules build/modules/test.fail.sfmod
 	$(HOST_CC) -std=gnu11 -O1 -g -Wall -Wextra -Werror -no-pie -fsanitize=undefined -fno-sanitize-recover=all -Ikernel/include \
-	    tests/test_sfmod.c tests/test_registry.c tests/test_pci_client.c kernel/core/ipc/endpoint.c kernel/core/module/elf.c \
-	    kernel/core/module/loader.c kernel/core/selftest.c kernel/core/pci.c kernel/core/pci_test.c kernel/core/pci_client.c -o build/test_sfmod
+	    tests/test_sfmod.c tests/test_registry.c tests/test_pci_client.c tests/test_block.c kernel/core/ipc/endpoint.c kernel/core/module/elf.c \
+	    kernel/core/module/loader.c kernel/core/selftest.c kernel/core/pci.c kernel/core/pci_test.c kernel/core/pci_client.c kernel/core/block.c -o build/test_sfmod
 	build/test_sfmod build/modules/init.sfpack build/modules/test.fail.sfmod $(SFM_FILES)
 
 $(KERNEL_BUILD)/kernel.elf: $(KERNEL_OBJS) $(KERNEL_SRC)/kernel.ld

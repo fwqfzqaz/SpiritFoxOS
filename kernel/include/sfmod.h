@@ -6,6 +6,7 @@
 #include <stdint.h>
 #include "sfmod_pci.h"
 #include "sfmod_device.h"
+#include "sfmod_block.h"
 
 #define SFM_ABI 0x00010004u
 #define SFM_MAGIC 0x004d4653u
