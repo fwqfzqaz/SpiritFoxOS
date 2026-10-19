@@ -118,6 +118,7 @@ int chardev_poll(vfs_file_t *file, int events)
 
 int chardev_create_node(const char *path, uint32_t chardev_id, uint32_t mode)
 {
+    if (devfs_is_sealed()) return -30;
     vfs_dentry_t *root = devfs_get_root();
     if (!root) return -1;
 

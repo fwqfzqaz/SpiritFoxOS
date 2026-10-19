@@ -46,7 +46,7 @@ process_t *process_get(int pid)
 {
     if (pid < 0 || pid >= MAX_PROCS)
         return NULL;
-    if (proc_table[pid].state == PROC_UNUSED)
+    if (proc_table[pid].state == PROC_UNUSED || proc_table[pid].state == PROC_ALLOCATING)
         return NULL;
     return &proc_table[pid];
 }

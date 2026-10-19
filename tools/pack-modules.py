@@ -34,6 +34,6 @@ for name in names:
 if offset > 16 * 1024 * 1024:
     raise SystemExit("Module package exceeds 16 MiB")
 args.output.parent.mkdir(parents=True, exist_ok=True)
-args.output.write_bytes(struct.pack("<IIII", 0x4B504653, 0x10001, len(names), offset)
+args.output.write_bytes(struct.pack("<IIII", 0x4B504653, 0x10005, len(names), offset)
                         + directory + payload)
 print(f"[SFMOD] {args.output}: {len(names)} modules, {offset} bytes")

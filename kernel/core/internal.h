@@ -20,6 +20,8 @@ void sf_free(void *);
 void sf_log(const char *);
 uint64_t sf_irq_save(void);
 void sf_irq_restore(uint64_t);
+int sf_pci_read(uint32_t, sfm_pci_record_t *);
+int sf_block_read_sectors(uint32_t, uint64_t, uint32_t, void *, uint32_t);
 
 typedef struct sfm_image
 {
@@ -46,7 +48,7 @@ void sfm_owner_remove(uint32_t);
 void sfm_owner_enable(uint32_t, int);
 int sfm_package_load(const void *, size_t);
 int sfm_module_unload(const char *);
-void sfm_boot(void);
 int sfm_selftest(void);
+int sfm_device_selftest(void);
 
 #endif

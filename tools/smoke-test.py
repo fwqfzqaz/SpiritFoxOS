@@ -43,8 +43,30 @@ required = [b"[SpiritFoxOS] Enabling interrupts...", b"[SpiritFoxOS] shell_run..
             b"[sfmod] self-test passed:", b"[sfmod] VFS bridge passed:",
             b"[sfmod-user] file IO passed", b"[sfmod-user] fork/wait stress passed",
             b"[sfmod] tmpfs mounted: /tmp /run", b"[sfmod-user] tmpfs trees/lifetimes passed",
+            b"[sfmod] device service self-test passed", b"[sfmod] special devices attached:",
+            b"[sfmod-user] special devices passed",
+            b"[sfmod] PCI snapshot matches platform inventory",
+            b"[sfmod] early services ready before storage",
+            b"[AHCI] Controller selected via dev.pci BAR5=",
+            b"[AHCI] Port 0: SATA disk sda", b"[AHCI] Port 1: SATA disk sdb",
+            b"[RAMDISK] Created ram0: 2048 sectors",
+            b"[FAT32] Mounted on blkdev 0", b"[VFS] Mounted fat32 at /mnt",
+            b"[FAT32] BPB and directories via dev.block READ", b"[FAT32] file read via dev.block READ",
+            b"[sfmod] filesystem services ready after VFS/process",
+            b"[sfmod] sealed block inventory matches platform devices",
+            b"[sfmod] read-only block messages match platform sectors",
+            b"[sfmod] compatibility RAM writes use core-owned DMA buffers",
+            b"[sfmod] block READ verified FAT signature",
+            b"[AHCI] verified LBA48/512 geometry registered",
+            b"[bochs_drm] VGA selected via dev.pci",
+            b"[process] reserved PID preemption passed",
+            b"[sfmod] unified device registry matches public /dev",
+            b"[sfmod-user] unified device directories passed",
             b"[client] Window created", b"[client] frame 10"]
 bad = [b"KERNEL PANIC", b"Triple fault", b"[EXCEPTION]", b"!!! EXCEPTION:", b"System Halted.",
+       b"[SCHED] PANIC:", b"[SCHED] HALT:",
+       b"[sfmod] PCI snapshot self-test failed",
+       b"[sfmod-user] redirect leaked",
        b"[client] ERROR:", b"[client] wl_display_dispatch error:", b"[sfmod-user] FAILED", b"[exit] BUG:", b"[sched] BUG:", b"[wait] BUG:", b"[sfmod] bridge release failed"]
 with error.open("wb") as errors:
     process = subprocess.Popen(command, cwd=root, stdout=subprocess.DEVNULL, stderr=errors)
@@ -55,6 +77,22 @@ with error.open("wb") as errors:
             if any(marker in data for marker in bad):
                 raise SystemExit(f"Kernel failed; inspect {log}")
             if all(marker in data for marker in required):
+                # Catch a double package load, allocator reset or late PCI service.
+                ordered = [b"[SpiritFoxOS] kmalloc_init...", b"[SpiritFoxOS] slab_init...",
+                    b"[sfmod] early services ready before storage",
+                    b"[AHCI] Controller selected via dev.pci BAR5=",
+                    b"[sfmod] sealed block inventory matches platform devices",
+                    b"[sfmod] read-only block messages match platform sectors",
+                    b"[SpiritFoxOS] vfs_init...", b"[SpiritFoxOS] process_init...",
+                    b"[sfmod] self-test passed:", b"[sfmod] VFS bridge passed:",
+                    b"[sfmod] filesystem services ready after VFS/process",
+                    b"[sfmod] unified device registry matches public /dev",
+                    b"[SpiritFoxOS] Enabling interrupts..."]
+                positions = [data.find(marker) for marker in ordered]
+                modules = [b"fs.vfs", b"demo.hello", b"fs.tmpfs", b"dev.tmpfs", b"dev.pci", b"dev.registry", b"dev.block"]
+                once = ordered + [b"[sfmod] ready: " + name + b"\n" for name in modules]
+                if any(data.count(marker) != 1 for marker in once) or positions != sorted(positions):
+                    raise SystemExit(f"Boot phase order/package single-load check failed; inspect {log}")
                 # Keep running briefly: a boot marker alone can precede a fault.
                 time.sleep(3)
                 data = log.read_bytes()

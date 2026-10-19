@@ -62,14 +62,40 @@ static int alloc_pid(void)
     spinlock_acquire(&proc_table_lock);
     for (int i = 0; i < MAX_PROCS; i++) {
         if (proc_table[i].state == PROC_UNUSED) {
-            /* 标记为正在分配，防止其他核重复分配 */
-            proc_table[i].state = PROC_READY;
+            /* Clear and reserve under the table lock, before releasing IRQs.
+             * A partially initialized context must never enter the READY scan. */
+            memset(&proc_table[i], 0, sizeof(process_t));
+            proc_table[i].pid = i;
+            proc_table[i].state = PROC_ALLOCATING;
             spinlock_release(&proc_table_lock);
             return i;
         }
     }
     spinlock_release(&proc_table_lock);
     return -1;
+}
+
+/* Boot-only regression: preempt between slot reservation and stack setup. */
+int process_allocation_selftest(void)
+{
+    process_t *caller = process_current();
+    int pid = alloc_pid();
+    if (pid < 0) return -1;
+    process_t *reserved = &proc_table[pid];
+    int valid = reserved->state == PROC_ALLOCATING && !reserved->kernel_rsp &&
+                !process_get(pid);
+    for (int i = 0; valid && i < 8; i++) {
+        scheduler_schedule();
+        valid = process_current() == caller && reserved->state == PROC_ALLOCATING;
+    }
+    spinlock_acquire(&proc_table_lock);
+    reserved->state = PROC_UNUSED;
+    spinlock_release(&proc_table_lock);
+    if (!valid) return -1;
+    uint64_t flags = hal_save_interrupts();
+    serial_puts("[process] reserved PID preemption passed\n");
+    hal_restore_interrupts(flags);
+    return 0;
 }
 
 /* ========================================================================
@@ -242,12 +268,12 @@ process_t *process_create_kthread(void (*entry)(void *), void *arg)
     serial_puts(" alloc_stack...\n");
 
     process_t *p = &proc_table[pid];
-    memset(p, 0, sizeof(process_t));
 
     /* 分配内核栈（2 个连续页） */
     void *stack = alloc_pages(KERNEL_STACK_PAGES);
     if (!stack) {
         serial_puts("[kthread] alloc_pages failed\n");
+        p->state = PROC_UNUSED;
         return NULL;
     }
     serial_puts("[kthread] stack=");
@@ -259,7 +285,7 @@ process_t *process_create_kthread(void (*entry)(void *), void *arg)
     /* 填充进程属性 */
     p->pid           = pid;
     p->ppid          = current ? current->pid : 0;
-    p->state         = PROC_UNUSED;  /* 防止调度器在初始化完成前扫描到 */
+    p->state         = PROC_ALLOCATING;
     p->flags         = PROC_FLAG_KERNEL;
     p->uid = p->euid = current ? current->uid : 0;
     p->gid = p->egid = current ? current->gid : 0;
@@ -325,7 +351,6 @@ process_t *process_create_kthread(void (*entry)(void *), void *arg)
            (void *)entry, arg);
 
     /* 初始化完成，标记为 READY 并入队 */
-    p->state = PROC_READY;
     process_enqueue(p);
 
     return p;
@@ -345,12 +370,11 @@ int process_fork(trap_frame_t *caller_frame)
         return -1;
 
     process_t *child = &proc_table[pid];
-    memset(child, 0, sizeof(process_t));
 
     /* Copy process attributes */
     child->pid       = pid;
     child->ppid      = current->pid;
-    child->state     = PROC_READY;
+    child->state     = PROC_ALLOCATING;
     child->flags     = current->flags;
     child->uid       = current->uid;
     child->euid      = current->euid;
@@ -785,12 +809,11 @@ int process_clone(uint64_t flags, uint64_t child_stack,
         return -1;
 
     process_t *child = &proc_table[pid];
-    memset(child, 0, sizeof(process_t));
 
     /* Copy process attributes */
     child->pid       = pid;
     child->ppid      = (flags & CLONE_THREAD) ? current->ppid : current->pid;
-    child->state     = PROC_READY;
+    child->state     = PROC_ALLOCATING;
     child->flags     = current->flags;
     child->uid       = current->uid;
     child->euid      = current->euid;

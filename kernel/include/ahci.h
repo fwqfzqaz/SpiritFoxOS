@@ -122,6 +122,8 @@ typedef struct {
     uint32_t    signature;      /* Device signature */
     int         is_atapi;       /* Is ATAPI device */
     int         blkdev_id;      /* Block device ID */
+    unsigned char command_busy;
+    int failed;                 /* Timeout: no further commands until reboot. */
 
     /* Allocated memory for command structures */
     ahci_cmd_header_t *cmd_list;   /* Command list (1 page) */

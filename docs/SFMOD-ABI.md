@@ -1,7 +1,9 @@
-# sfmod ABI 1.1 与服务接口
+# sfmod ABI 1.5 与服务接口
 
-本 ABI（0x00010001）面向 x86_64、小端、受信任 Ring 0 插件。SDK 是 `kernel/include/sfmod.h`。
-1.0 的平面文件服务已替换为目录句柄协议；旧版本包/模块会被拒绝，必须一起重新编译。
+本 ABI（0x00010005）面向 x86_64、小端、受信任 Ring 0 插件。SDK 是 `kernel/include/sfmod.h`。
+1.5 在 API 表尾增加受控 block_read(index,lba,count,data,capacity)，表大小 96 字节，
+该指针偏移 88；包版本同步提高，1.4 包/模块被拒绝，必须整体重编译。
+设备注册、文件路由及 PCI 接口布局保持不变；块协议独立升级至 version=2。
 代码入口通过核心提供的 `sfm_api_t` 表调用服务；不解析任意内核符号，不链接宿主 libc。
 API 的 `abi` 和 `size` 描述接口版本。需要扩展语义时提高 ABI 版本，并补兼容测试。
 
@@ -49,9 +51,12 @@ SFPK 包：16 字节头 `<magic, abi, count, total_size>`，其后每个目录�
 
 ## 文件服务
 
-`fs.vfs` 依赖 `fs.tmpfs`，固定启动挂载表把 `/modules`、`/tmp`、`/run` 路由到三个
-独立 tmpfs 根。绝对 OPEN/MKDIR 使用最长组件前缀匹配（`/tmp-other` 不属于 `/tmp`）；
-带目录句柄的相对操作及其他请求直接转发。尚未实现通用动态多后端挂载协议。
+`fs.vfs` 依赖 `fs.tmpfs` 和 `dev.registry`，固定启动挂载表把 `/modules`、`/tmp`、`/run`
+路由到三个独立 tmpfs 根，把 `/dev` 路由到统一目录，特殊设备数据再进 dev.tmpfs。
+绝对 OPEN/MKDIR 使用最长组件前缀匹配（`/tmp-other` 不属于 `/tmp`）；
+相对及其他句柄请求按 route 转发。uint64_t route 为 0=tmpfs、1=devfs，其他值
+返回 EINVAL；响应返回实际 route。文件身份为 (route, handle)，编号不是安全能力。
+尚无通用动态挂载协议；SFM_DEPENDS 支持多个依赖名称。
 
 | 请求 | 头部字段 | 载荷/响应 |
 | --- | --- | --- |
@@ -64,6 +69,7 @@ SFPK 包：16 字节头 `<magic, abi, count, total_size>`，其后每个目录�
 | FILE_WRITE | handle、offset | data/size；响应 result=写入字节数 |
 | FILE_READ | handle、offset | 载荷为 uint32 期望长度；响应 data/size/result |
 | FILE_STAT | handle | 响应 result=文件大小、flags=节点类型 |
+| FILE_SEEK | handle、flags=whence、offset=有符号偏移的位表示 | 设备支持 0..2 并返回位置 0；tmpfs 仍由兼容桥计算位置 |
 | FILE_TRUNCATE | handle、offset=新长度 | 缩短后扩展的内容为零 |
 | FILE_REMOVE | handle | 解除命名链接；无打开引用才回收，非空目录返回 ENOTEMPTY，根返回 EBUSY |
 
@@ -89,10 +95,54 @@ VFS 的命名空间修改、open、目录枚举和最后一次 close 使用同�
 模块的直接内部测试文件不自动成为旧 VFS 的目录项；迁移期以兼容桥为公共入口。
 挂载后本阶段不提供卸载/服务替换操作，避免仍有文件引用时释放代码。
 
+`dev.tmpfs` 的 ROOT 仅接受 offset=0，固定节点类型为 DIR 和新增 CHARDEV=4。
+OPEN/STAT/READDIR 的字符设备响应 offset 编码设备号（null=0x103、zero=0x105），
+文件大小 result 保持 0；READDIR 的 result=1 表示存在条目。OPEN 不隐式 RETAIN。
+设备支持短读写、引用计数和位置归零，名字空间不允许变更。
+旧 devfs 只将 null/zero 绑定到消息服务，保留硬件节点；ioctl 返回 ENOTTY、mmap
+返回 ENODEV，尚无 poll 或用户态驱动。详见 [本轮对接](integration/20261019-devfs-services.md)。
+
 可在交互 shell 读取 `cat /modules/README`。默认 autorun 先运行
 `/mnt/bin/test_sfmod_file`，通过实际用户态调用验证文件读写与截断，再启动 Wayland。
 
 ## 测试实现
+
+设备注册协议 version=1，record=328 字节，包含路径、逻辑归属、后端编号与元数据，
+不传指针。启动登记真实节点后封存，公共目录枚举和消息枚举共用此表。
+动态注销/热替换尚未实现，旧硬件 I/O 留在 VFS 适配器。详见
+[设备注册对接](integration/20261019-device-registry.md)。
+
+PCI 使用独立 version=1 协议，record=176 字节、query=16 字节，支持 ENUM/FIND/GET。
+端点代数标识 snapshot，(snapshot,index) 标识设备引用；不传指针，未知 BAR 大小
+不探测。核心 API 只复制缓存，模块负责快照/查询；Bochs DRM 从服务选择 VGA。
+具体布局、错误与边界见 [PCI 对接](integration/20261019-pci-snapshot.md)。
+
+块设备 `dev.block` 使用独立 version=2 协议、64 字节固定记录。
+原记录的 reserved[0]（偏移 56）改为 geometry_source，偏移 60 保持为零保留项。
+来源 UNKNOWN=0、SOFTWARE=1（仅 RAMDISK）、ATA=2（仅 AHCI），未知来源须带
+GEOMETRY_UNVERIFIED，已知来源不得带该标志。所有消息 flags=version、route=0，REGISTER 接收记录，SEAL
+冻结，ENUM 按清单序号读取，GET 按旧块设备槽号查询且必须携带 snapshot 端点句柄。
+响应 offset 始终为清单序号，record.index 才是旧槽号（有空洞时两者不同）。
+ENUM 的 offset=count 为 EOF，超过 count 为 EINVAL；GET 不存在槽/失效快照为
+ENOENT，槽越界为 EINVAL。未冻结查询 EAGAIN，重复冻结 EBUSY，冻结后登记 EROFS。
+记录不包含指针。READ=0x5004：handle=snapshot、offset=LBA，载荷 16 字节
+`{uint32 index,count; uint64 reserved=0}`。count 非零，最多 4096 字节，来源/容量须已知；
+响应 result=size=字节数，handle=snapshot，offset=LBA。未知容量 ENODEV，越界/长度
+错误 EINVAL，OOM ENOMEM，底层忙 EBUSY，其他底层错误 EIO；错误 size=0，载荷清零。
+WRITE=0x5005 明确 EROFS；没有新增核心写入口。此限制仅针对新消息路径，原 FAT32
+兼容写路径仍存在。核心 API 再检查冻结状态、真实设备/来源及长度/容量，不直接将模块
+缓冲区交给 DMA。底层错误隔离页，忙不隔离，可重试；没有超时复位/热恢复协议。
+详见 [本轮只读块对接](integration/20261019-block-read.md)。历史 v1 清单说明保留供追溯。
+
+FAT32 实际读已使用 kernel-only block_client（不改变 ABI）：固定快照，最多 64 KiB
+拆分 READ，核对每段响应，任意失败清空完整输出；EBUSY/EAGAIN 不自动重试。
+sfm_call 在 transport 拒绝时不保证清空 response，客户端必须先清空并先检查返回码。
+详见 [FAT32 读取对接](integration/20261019-fat32-read.md)。
+
+内核兼容写入器不扩充模块 API/消息：固定已封存卷，核心永久写页、按设备互斥，
+最多 64 KiB 拆分；completed 仅计完整成功段，失败段也可能部分写盘。非忙 I/O 错误
+隔离读写两向，不能以此声称事务/持久性。WRITE RPC 继续 EROFS，ABI 仍 1.5。
+详见 [兼容写入对接](integration/20261019-fat32-write-guard.md)。
 
 `make test-modules` 使用 HOST_CC 编译带 UBSan 的 Linux x86_64 宿主测试，模块保持
 目标编译器。测试用 MAP_32BIT 分配可执行内存，以匹配内核低地址重定位约束；这个

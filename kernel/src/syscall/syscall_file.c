@@ -21,7 +21,7 @@ static void inode_to_stat(const vfs_inode_t *inode, linux_stat_t *stat)
     stat->st_uid     = inode->uid;
     stat->st_gid     = inode->gid;
     stat->__pad0     = 0;
-    stat->st_rdev    = 0;
+    stat->st_rdev    = inode->rdev;
     stat->st_size    = (int64_t)inode->size;
     stat->st_blksize = 4096;
     stat->st_blocks  = (inode->size + 511) / 512;
@@ -36,6 +36,16 @@ static void inode_to_stat(const vfs_inode_t *inode, linux_stat_t *stat)
 /* ========================================================================
  * File I/O syscalls
  * ======================================================================== */
+
+/* Keep early console output, but honor an explicit stdout/stderr redirection. */
+static int uses_boot_console(int fd)
+{
+    if (fd != 1 && fd != 2) return 0;
+    vfs_file_t **table = vfs_get_fd_table();
+    vfs_file_t *file = table ? table[fd] : NULL;
+    return !file || !file->inode || (file->inode->type == VFS_TYPE_CHARDEV &&
+        file->inode->chardev_id == 1 && !file->inode->write);
+}
 
 int64_t sys_read(trap_frame_t *frame)
 {
@@ -52,10 +62,8 @@ int64_t sys_write(trap_frame_t *frame)
     const void *buf = (const void *)frame->rsi;
     size_t count = (size_t)frame->rdx;
 
-    /* 直接写入串口 + VGA 来处理 stdout/stderr。
-     * 新的用户进程可能没有在 VFS 中打开 fd 1/2，
-     * 因此绕过 VFS 直接写入控制台。 */
-    if (fd == 1 || fd == 2) {
+    /* 启动控制台仍写串口；显式标准描述重定向必须进入 VFS。 */
+    if (uses_boot_console(fd)) {
         const char *p = (const char *)buf;
 
         for (size_t i = 0; i < count; i++) {
@@ -571,6 +579,7 @@ int64_t sys_ioctl(trap_frame_t *frame)
 
     /* Dispatch to character device ioctl handler */
     if (file->inode->type == VFS_TYPE_CHARDEV) {
+        if (file->inode->chardev_id == UINT32_MAX && file->inode->open) return -ENOTTY;
         return chardev_ioctl(file, cmd, arg);
     }
 
@@ -619,10 +628,10 @@ int64_t sys_writev(trap_frame_t *frame)
     if (iovcnt <= 0)
         return -EINVAL;
 
-    /* fd 1/2 直接写入串口（与 sys_write 保持一致）。
+    /* 启动控制台直接写入串口（与 sys_write 保持一致）。
      * 暂时跳过 terminal_putchar() 以避免帧缓冲区写入
      * 导致用户代码页损坏。仅写入串口。 */
-    if (fd == 1 || fd == 2) {
+    if (uses_boot_console(fd)) {
         int64_t total = 0;
         for (int i = 0; i < iovcnt; i++) {
             if (iov[i].iov_len == 0)

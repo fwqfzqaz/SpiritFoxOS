@@ -42,6 +42,14 @@ int64_t sys_mmap(trap_frame_t *frame)
     if (!proc)
         return -ENOMEM;
 
+    /* Reject unsupported module-device mappings before reserving an address. */
+    if (!(flags & MAP_ANONYMOUS) && fd >= 0 && fd < VFS_MAX_FD) {
+        vfs_file_t **fds = vfs_get_fd_table();
+        if (fds[fd] && fds[fd]->inode && fds[fd]->inode->type == VFS_TYPE_CHARDEV &&
+            fds[fd]->inode->chardev_id == UINT32_MAX && fds[fd]->inode->open)
+            return -ENODEV;
+    }
+
     size_t map_len = (length + PAGE_SIZE - 1) & ~(size_t)(PAGE_SIZE - 1);
 
     serial_puts("[mmap] mmap_base=0x");

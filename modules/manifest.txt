@@ -2,3 +2,7 @@
 fs.vfs fs/vfs.c
 demo.hello demo/hello.c
 fs.tmpfs fs/tmpfs.c
+dev.tmpfs dev/tmpfs.c
+dev.pci dev/pci.c
+dev.registry dev/registry.c
+dev.block dev/block.c

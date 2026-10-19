@@ -15,6 +15,7 @@
 #define EFAULT      14
 #define ENOTBLK     15
 #define EBUSY       16
+#define ENODEV      19
 #define EBADF       9
 #define EEXIST      17
 #define ENOTDIR     20

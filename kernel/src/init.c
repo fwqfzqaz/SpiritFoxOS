@@ -229,7 +229,8 @@ void init_filesystem(void)
     }
 }
 
-void init_services(void)
+/* GS/physical memory are ready; no process, disk or VFS dependency. */
+void init_allocators(void)
 {
     serial_puts("[SpiritFoxOS] kmalloc_init...\n");
     kmalloc_init();
@@ -237,7 +238,10 @@ void init_services(void)
     serial_puts("[SpiritFoxOS] slab_init...\n");
     slab_init();
     printf("[SLAB] Slab allocator initialized\n");
+}
 
+void init_services(void)
+{
     serial_puts("[SpiritFoxOS] process_init...\n");
     process_init();
 

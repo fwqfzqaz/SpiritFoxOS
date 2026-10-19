@@ -17,5 +17,10 @@ void devfs_remove_blkdev(uint8_t dev_id);
 
 /* Get the root dentry of devfs (for chardev node creation) */
 vfs_dentry_t *devfs_get_root(void);
+/* Boot-only: find/create one root character node before user processes run. */
+vfs_inode_t *devfs_boot_char_node(const char *name);
+int devfs_is_sealed(void);
+void devfs_seal(void);
+int sfm_devices_boot(void);
 
 #endif /* DEVFS_H */

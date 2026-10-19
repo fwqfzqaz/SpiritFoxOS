@@ -5,6 +5,9 @@
 
 void init_core(BootInfo *boot_info);
 void init_hardware(void);
+void init_allocators(void);
+void sfm_boot_early(void);
+void sfm_boot_filesystems(void);
 void init_storage(void);
 void init_filesystem(void);
 void init_services(void);

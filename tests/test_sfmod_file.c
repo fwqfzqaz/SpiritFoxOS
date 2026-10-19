@@ -6,8 +6,101 @@
 #include <sys/wait.h>
 #include <sys/stat.h>
 #include <dirent.h>
+#include <errno.h>
+#include <sys/ioctl.h>
+#include <sys/mman.h>
+#include <sys/sysmacros.h>
+#include <sys/uio.h>
 
 #define VERIFY(expr) do { if (!(expr)) { printf("[sfmod-user] FAILED line %d\n", __LINE__); return -1; } } while (0)
+
+static int device_directory(const char *path)
+{
+    DIR *directory = opendir(path);
+    VERIFY(directory);
+    char names[64][64];
+    unsigned count = 0;
+    struct dirent *entry;
+    while ((entry = readdir(directory))) {
+        if (!strcmp(entry->d_name, ".") || !strcmp(entry->d_name, "..")) continue;
+        VERIFY(count < 64 && strlen(entry->d_name) < 64);
+        for (unsigned i = 0; i < count; i++) VERIFY(strcmp(names[i], entry->d_name));
+        strcpy(names[count++], entry->d_name);
+        char full[256];
+        VERIFY(snprintf(full, sizeof(full), "%s/%s", path, entry->d_name) < (int)sizeof(full));
+        struct stat status;
+        VERIFY(!stat(full, &status) && entry->d_ino == status.st_ino);
+        VERIFY(entry->d_type == (S_ISDIR(status.st_mode) ? DT_DIR : S_ISCHR(status.st_mode) ? DT_CHR : DT_BLK));
+    }
+    VERIFY(!closedir(directory) && count);
+    return 0;
+}
+
+static int special_devices(void)
+{
+    char data[8192];
+    memset(data, 0x5a, sizeof(data));
+    int null = open("/dev/null", O_RDWR);
+    int zero = open("/dev/zero", O_RDWR);
+    struct stat status;
+    VERIFY(null >= 0 && zero >= 0);
+    VERIFY(!fstat(null, &status) && S_ISCHR(status.st_mode) &&
+           major(status.st_rdev) == 1 && minor(status.st_rdev) == 3 && !status.st_size);
+    VERIFY(!fstat(zero, &status) && S_ISCHR(status.st_mode) &&
+           major(status.st_rdev) == 1 && minor(status.st_rdev) == 5);
+    VERIFY(read(null, data, sizeof(data)) == 0 && write(null, data, sizeof(data)) == 4096);
+    VERIFY(read(zero, data, sizeof(data)) == 4096);
+    for (int i = 0; i < 4096; i++) VERIFY(!data[i]);
+    VERIFY(write(zero, data, 7) == 7 && lseek(null, 100, SEEK_SET) == 0 &&
+           lseek(zero, -100, SEEK_CUR) == 0 && !fstat(zero, &status) && !status.st_size);
+    VERIFY(!read(zero, NULL, 0) && !write(null, NULL, 0));
+    for (int target = 1; target <= 2; target++) {
+        int saved = dup(target);
+        VERIFY(saved >= 0 && dup2(null, target) == target);
+        const char marker[] = "[sfmod-user] redirect leaked\n";
+        ssize_t written = write(target, marker, sizeof(marker) - 1);
+        struct iovec vector = {(void *)marker, sizeof(marker) - 1};
+        ssize_t vectored = writev(target, &vector, 1);
+        int restored = dup2(saved, target);
+        int closed = close(saved);
+        VERIFY(restored == target && !closed && written == sizeof(marker) - 1 &&
+               vectored == sizeof(marker) - 1);
+    }
+    VERIFY(ftruncate(zero, 0) < 0 && ioctl(null, 0x1234, 0) < 0 && errno == ENOTTY);
+    VERIFY(mmap(NULL, 4096, PROT_READ, MAP_PRIVATE, zero, 0) == MAP_FAILED && errno == ENODEV);
+    VERIFY(mmap(NULL, 4096, PROT_READ, MAP_PRIVATE, null, 0) == MAP_FAILED && errno == ENODEV);
+    int shared = dup(zero);
+    VERIFY(shared >= 0 && !close(zero) && read(shared, data, 8) == 8);
+    pid_t child = fork();
+    VERIFY(child >= 0);
+    if (!child) _exit(read(shared, data, 8) == 8 && !close(shared) ? 0 : 1);
+    int child_status = 0;
+    VERIFY(waitpid(child, &child_status, 0) == child && WIFEXITED(child_status) && !WEXITSTATUS(child_status));
+    VERIFY(read(shared, data, 8) == 8 && !close(shared));
+    VERIFY(unlink("/dev/null") < 0 && unlink("/dev/zero") < 0 && !close(null));
+    null = open("/dev/null", O_RDONLY);
+    VERIFY(null >= 0 && write(null, data, 1) < 0 && !close(null));
+    zero = open("/dev/zero", O_WRONLY);
+    VERIFY(zero >= 0 && read(zero, data, 1) < 0 && !close(zero));
+    DIR *directory = opendir("/dev");
+    VERIFY(directory);
+    int seen_null = 0, seen_zero = 0, seen_input = 0, seen_dri = 0;
+    struct dirent *entry;
+    while ((entry = readdir(directory))) {
+        if (!strcmp(entry->d_name, "null")) seen_null++;
+        if (!strcmp(entry->d_name, "zero")) seen_zero++;
+        if (!strcmp(entry->d_name, "input")) seen_input++;
+        if (!strcmp(entry->d_name, "dri")) seen_dri++;
+    }
+    VERIFY(!closedir(directory) && seen_null == 1 && seen_zero == 1 &&
+           seen_input == 1 && seen_dri == 1);
+    VERIFY(!device_directory("/dev") && !device_directory("/dev/input") && !device_directory("/dev/dri"));
+    VERIFY(open("/dev/unbacked", O_CREAT | O_RDWR, 0600) < 0 && mkdir("/dev/unbacked-dir", 0700) < 0);
+    VERIFY(symlink("/dev/null", "/dev/unbacked-link") < 0 && unlink("/dev/dri/card0") < 0);
+    puts("[sfmod-user] unified device directories passed");
+    puts("[sfmod-user] special devices passed");
+    return 0;
+}
 
 static int tree_test(void)
 {
@@ -97,7 +190,7 @@ int main(void)
     fd = open("/modules/README", O_RDONLY);
     if (fd < 0 || read(fd, buffer, 4) != 4 || memcmp(buffer, "This", 4) || close(fd))
         goto fail;
-    if (tree_test()) goto fail;
+    if (tree_test() || special_devices()) goto fail;
     for (int i = 0; i < 16; i++) {
         pid_t child = fork();
         if (!child) _exit(0);

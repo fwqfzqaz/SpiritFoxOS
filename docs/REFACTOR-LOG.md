@@ -1,5 +1,28 @@
 # 重构记录
 
+## 2026-10-19：统一设备注册与目录视图
+
+基于 d098b55 继续 PR #2；dev.registry 启动期导入真实节点，封存后公共与消息
+枚举同源。ABI 升 1.4，null/zero 转发到原特殊后端，硬件读写仍在旧 VFS。
+禁止动态增删与空节点创建，不宣称热拔插或隔离。新增注册/配额/OOM 和实际目录
+一致、fork 引用检查。接入及实测见 [对接说明](integration/20261019-device-registry.md)。
+
+## 2026-10-19：PCI 只读快照与显示调用方
+
+作者尚未合并 PR #2，从 e15af9b 追加。ABI 1.3 增加只读硬件缓存复制 API，
+dev.pci 实现有界枚举/筛选/快照引用，Bochs 设备选择改为消息调用。BAR 大小未知，
+不探测活动设备，AHCI 数据面未迁移。新增统一设备注册提案，尚未实施。
+接口与实际测试见 [PCI 对接](integration/20261019-pci-snapshot.md)，后续见 NEXT.md。
+
+## 2026-10-19：null/zero 设备服务
+
+从作者合并 PR #1 后的 main `414fd39` 开始。阶段 3 继续推进：实际设备策略进入
+dev.tmpfs，fs.vfs 增加显式 route，ABI 升为 1.2；兼容桥绑定两个节点并保护 unlink。
+保留硬件路径，补全设备号、seek、ioctl/mmap 明确错误；修正启动器标准描述与
+write/writev 的重定向冲突。新增对接/下一步交接入口及每次提交的文档检查钩子。
+测试范围和实际结果见 [对接说明](integration/20261019-devfs-services.md)，
+下次先做设备描述与 PCI 只读枚举接口，见 [交接](handoff/NEXT.md)。
+
 ## 2026-10-18：tmpfs 兼容路径迁移
 
 对应参考文档 D1/D2 与“/tmp、/run -> fs.tmpfs”的下一步实现，不把整套设备/进程迁移
@@ -71,7 +94,11 @@ memfs、FAT32、devfs、procfs 与驱动调用路径。
 
 ### 后续阶段
 
-本版仍是宏内核兼容路径加受信任插件；尚未迁移 PCI/AHCI/tty/进程/Linux ABI 为
+2026-10-19 增量：PCI 快照与统一设备目录已实现（ABI 1.4）；AHCI 设备选择现通过
+dev.pci，启动包在存储初始化前启动，文件/设备接入在各自依赖就绪后执行。
+驱动 DMA、IRQ、数据读写及 Ring 3 隔离仍未迁移。实测结果以最新 integration 文档为准。
+
+本版仍是宏内核兼容路径加受信任插件；AHCI 数据面、tty、进程/Linux ABI 尚未迁为
 独立模块，尚无 Ring 3 驱动隔离、超时/阻塞 IPC、完整能力模型和驱动监督重启。
 保留现有分配器/调度器，不宣称实现了新的 buddy/SMP 调度。BIOS、ext4、网络和
 真机未在本次验收覆盖。详见 ARCHITECTURE.md 和 SFMOD-ABI.md。

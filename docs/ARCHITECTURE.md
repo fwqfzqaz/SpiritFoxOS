@@ -31,6 +31,34 @@
 
 ## 目标结构与迁移接口
 
+2026-10-19 启动顺序：`init_core`（页分配/MMU/原 PCI 缓存）→
+`init_hardware`（CPU/GS、APIC、时钟，尚未开中断）→ `init_allocators`
+（仅一次 kmalloc/slab）→ `sfm_boot_early`（内嵌包、端点、PCI 快照自测）→
+AHCI/ramdisk → 块设备清单登记/冻结/核对及只读消息对照 → 根 VFS/FAT32 → 进程/syscall/系统服务 →
+`sfm_boot_filesystems`（消息文件自测及 /modules、/tmp、/run 挂载）→
+目录/input/DRM → 统一设备登记/自测/封存 → 开中断及 PID 回归 → 用户程序。
+模块包来自链接进内核的只读数据，早期 init 只依赖内存、日志、消息和 PCI 缓存，
+不访问待初始化的磁盘、旧 VFS 或进程。后期不得再次初始化分配器或加载启动包。
+
+AHCI 控制器查找已走 `dev.pci` 的 FIND 消息；命令提交、DMA 和端口探测仍在原驱动。
+无可用控制器返回空结果；协议失败单独报负错误，不退回原始 PCI 扫描。
+平台启动阶段重复或乱序、包/自测/挂载失败会 panic，停止继续启动。
+包加载失败仍由 loader 逆序回收；挂载开始后尚无事务回滚，失败直接停机，不重试。
+细节和验证见 [早期 PCI/AHCI 对接](integration/20261019-early-pci-ahci.md)。
+
+`dev.block` 在早期只建立空端点，ENUM/GET 返回 EAGAIN；存储探测完成后由核心发送
+有界 REGISTER/SEAL，再逐项核对真实 blkdev 列表。清单不包含函数/驱动指针，不改变
+原始 FAT32 路由。几何现在区分未知、软件声明、ATA 探测；AHCI IDENTIFY 不满足
+LBA48/512 传输条件或失败则不登记，已经删除默认 1 MiB 容量。RAMDISK 来自软件后端。
+只读 READ 经 dev.block 策略及核心 API 到原驱动，单次最多 4096 字节；使用核心永久
+持有的 DMA 页复制返回，错误隔离该设备页，禁止槽复用；WRITE 消息拒绝。
+ABI 1.5、块协议 v2；启动时对比实际首/末扇区与最大负载，CI 额外核验 FAT 引导签名。
+详见 [只读块对接](integration/20261019-block-read.md)。
+
+RAMDISK 后端改为一次连续页分配、全区清零，容量/页舍入先检查溢出，登记失败回收
+所有自有页。读写使用减法边界检查；借用 initrd 仍由调用者保活，只暴露完整扇区。
+此修复不改变块消息接口或 AHCI 数据面，见 [RAMDISK 对接](integration/20261019-ramdisk-bounds.md)。
+
 ```text
 UEFI stub -> kernel/src 的现有硬件/内存/进程初始化
                     |
@@ -49,6 +77,7 @@ UEFI stub -> kernel/src 的现有硬件/内存/进程初始化
 现有 syscall -> 现有 VFS/驱动（兼容路径，本阶段保持）
                     |
                     +-> /modules、/tmp、/run 兼容桥 -> 消息 fs.vfs -> fs.tmpfs
+                    +-> /dev/null、/dev/zero 节点 -> 消息 fs.vfs -> dev.tmpfs
 下一阶段 syscall -> 文件消息 -> fs.vfs -> 更多文件系统/设备服务
 最终阶段 Ring 3 服务 -> syscall IPC -> 核心端点/调度机制
 ```
@@ -65,7 +94,10 @@ UEFI stub -> kernel/src 的现有硬件/内存/进程初始化
 消息结构不传内核指针。文件协议包含操作、资源句柄、偏移和字节数，响应返回
 有符号结果和数据。fs.tmpfs 提供有容量上限的目录树、读写、查询、符号链接和删除，
 命名链接与打开引用分开计数；删除后旧打开文件可继续访问，重建同名文件得到新节点。
-fs.vfs 的固定启动挂载表为 /modules、/tmp、/run 分配独立根；尚无动态多后端挂载协议。
+fs.vfs 的固定启动挂载表为 /modules、/tmp、/run 分配独立根，并将 /dev 路由到
+dev.tmpfs 的 null/zero 服务。ABI 1.2 显式携带后端编号；尚无动态挂载协议。
+dev.registry 在 input/DRM 初始化后导入真实节点并冻结，公共 /dev 与消息目录枚举
+共用注册表；只有 null/zero 数据进入模块，其他设备保留原驱动与路径。
 兼容桥保留路径查找缓存，目录枚举由模块消息提供。页缓存和磁盘事务另行迁移。
 
 ## 阶段及验收
@@ -75,7 +107,7 @@ fs.vfs 的固定启动挂载表为 /modules、/tmp、/run 分配独立根；尚�
 2. **模块化基础（已交付）**：64 字节消息、端点队列、请求响应、SDK、受限 ET_REL
    加载器、内嵌启动包、依赖验证；加载 hello、tmpfs、VFS 模块并执行实际消息文件
    创建/写/读/删除测试。畸形包、ELF 边界和重定位由宿主测试覆盖。
-3. **兼容路径迁移（进行中）**：/tmp、/run 已接入消息 tmpfs，支持目录、枚举和打开文件生命周期；按 devfs、PCI/AHCI、
+3. **兼容路径迁移（进行中）**：/tmp、/run 已接入消息 tmpfs，支持目录、枚举和打开文件生命周期；null/zero 已接入 dev.tmpfs；dev.pci 提供只读快照，Bochs 设备选择已走消息，硬件数据面尚未迁移。按 devfs、PCI/AHCI、
    tty、进程/Linux ABI 顺序迁移；每个设备实际启用后才登记为已迁移模块。
 4. **隔离微内核**：分离线程与进程策略，IPC 阻塞/唤醒与取消，地址空间能力、
    IRQ 消息/ACK、DMA 约束、Ring 3 驱动监督及故障重启；最后扩展 SMP。
@@ -102,3 +134,12 @@ fs.vfs 的固定启动挂载表为 /modules、/tmp、/run 分配独立根；尚�
 设计参考：[seL4 IPC](https://docs.sel4.systems/Tutorials/ipc) 和
 [fault handlers](https://docs.sel4.systems/Tutorials/fault-handlers.html)，
 用于区分端点通信与故障隔离的责任；本项目未复制其实现，也不声称等同 seL4。
+
+FAT32 的 BPB、FAT 表、目录及文件读取已接入 dev.block READ。核心客户端固定已封存
+快照，最多 64 KiB 请求拆成 4 KiB 消息；失败清空输出，忙立即返回，不回退 raw 读。
+FAT32 写入经内核私有兼容写入器，固定卷快照，使用核心永久 DMA 页及失败隔离；
+修改失败不吞错，成功同步 FAT 镜像，失败后可能需要离线修复。WRITE RPC 仍拒绝，
+写权限/事务、flush 和持久化恢复尚未迁移。
+
+每轮先读 [最新对接记录](integration/20261019-fat32-write-guard.md) 与
+[下一步交接](handoff/NEXT.md)，每次提交同时更新两处。

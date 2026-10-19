@@ -12,6 +12,9 @@
 #include "autorun.h"
 #include "net.h"
 #include "net_icmp.h"
+#include "process.h"
+#include "devfs.h"
+#include "../core/block.h"
 
 void kernel_panic(const char* msg)
 {
@@ -51,18 +54,22 @@ void kernel_main(BootInfo* boot_info)
 
     init_core(boot_info);
     init_hardware();
+    init_allocators();
+    sfm_boot_early();
     init_storage();
+    if (sfm_blocks_publish()) kernel_panic("block inventory import/validation failed");
+    if (sfm_block_io_selftest()) kernel_panic("read-only block message self-test failed");
     init_filesystem();
     init_services();
-    /* 受信任模块的机制/消息测试先于用户程序启动；兼容路径继续保留。 */
-    extern void sfm_boot(void);
-    sfm_boot();
+    sfm_boot_filesystems();
     init_fs_hierarchy();
     init_input();
     init_drm();
+    if (sfm_devices_boot()) kernel_panic("device registry import/validation failed");
 
     serial_puts("[SpiritFoxOS] Enabling interrupts...\n");
     hal_enable_interrupts();
+    if (process_allocation_selftest()) kernel_panic("reserved PID scheduled before initialization");
 
     printf("[SpiritFoxOS] All subsystems initialized.\n");
     printf("[SpiritFoxOS] Linux ABI compat | Registry | Packages | Sandbox\n");

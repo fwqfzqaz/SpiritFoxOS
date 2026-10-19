@@ -7,10 +7,19 @@
 #include <string.h>
 #include <sys/mman.h>
 #include "../kernel/core/internal.h"
+#include "../kernel/core/pci.h"
 
 static size_t allocations;
 static int fail_after = -1;
 static int ready_messages;
+void test_fail_allocations(int budget) { fail_after = budget; }
+void test_registry(void);
+void test_registry_capacity(void);
+void test_pci_client(void);
+void test_block_protocol(void);
+void test_block_fixture(unsigned);
+void test_block_publish(void);
+void test_block_client(void);
 
 void *sf_alloc(size_t size)
 {
@@ -39,6 +48,35 @@ void sf_log(const char *text)
 }
 uint64_t sf_irq_save(void) { return 0; }
 void sf_irq_restore(uint64_t value) { (void)value; }
+static uint32_t pci_fixture_count = 3;
+int sf_pci_read(uint32_t index, sfm_pci_record_t *out)
+{
+    if (!out || index > SFM_PCI_MAX) return SFM_EINVAL;
+    if (index >= pci_fixture_count) return 0;
+    pci_device_t device = {.bus = (uint8_t)(index / 32), .device = (uint8_t)(index % 32),
+        .vendor_id = 0x1234, .device_id = (uint16_t)(0x1111 + index),
+        .class_code = 3, .bars = {0x80000008, 0xc001, 0x2000000c, 1}};
+    int result = sfm_pci_describe(&device, out);
+    return result ? result : 1;
+}
+
+static void test_pci_decode(void)
+{
+    pci_device_t device = {.vendor_id = 0x1234,
+        .bars = {0x80000008, 0xc001, 0x2000000c, 1, 0xffffffff, 4}};
+    sfm_pci_record_t record;
+    assert(!sfm_pci_describe(&device, &record));
+    assert(record.bars[0].address == 0x80000000 && record.bars[0].flags ==
+           (SFM_BAR_PRESENT | SFM_BAR_MEM32 | SFM_BAR_PREFETCH));
+    assert(record.bars[1].address == 0xc000 && record.bars[1].flags == (SFM_BAR_PRESENT | SFM_BAR_IO));
+    assert(record.bars[2].address == 0x120000000ull && record.bars[3].flags == SFM_BAR_UPPER);
+    assert(record.bars[4].flags == SFM_BAR_INVALID && record.bars[5].flags == SFM_BAR_INVALID);
+    for (unsigned i = 0; i < 6; i++) assert(!record.bars[i].size && !(record.bars[i].flags & SFM_BAR_SIZE_KNOWN));
+    device.header_type = 1;
+    assert(!sfm_pci_describe(&device, &record) && record.bars[0].flags == SFM_BAR_UNKNOWN);
+    device.function = 8;
+    assert(sfm_pci_describe(&device, &record) == SFM_EINVAL);
+}
 
 static uint8_t *read_file(const char *path, size_t *size)
 {
@@ -110,6 +148,10 @@ static void test_elf(const uint8_t *original, size_t size)
     sfm_metadata_t *meta = (sfm_metadata_t *)(data + section(data, ".sfmod_meta")->sh_offset);
     meta->permissions = 1;
     assert(sfm_elf_load(data, size, &image));
+    memcpy(data, original, size);
+    meta = (sfm_metadata_t *)(data + section(data, ".sfmod_meta")->sh_offset);
+    meta->abi = 0x00010004u;
+    assert(sfm_elf_load(data, size, &image) == SFM_ENOEXEC);
     assert(!allocations);
     free(data);
 }
@@ -183,6 +225,9 @@ static void test_package(uint8_t *package, size_t size, uint8_t *failure, size_t
 {
     uint8_t *copy = malloc(size);
     assert(copy);
+    memcpy(copy, package, size);
+    ((uint32_t *)copy)[1] = 0x00010004u;
+    assert(sfm_package_load(copy, size) == SFM_ENOEXEC && !allocations);
     for (size_t truncated = 0; truncated < size; truncated++)
         assert(sfm_package_load(package, truncated));
     memcpy(copy, package, size);
@@ -227,22 +272,39 @@ static void test_package(uint8_t *package, size_t size, uint8_t *failure, size_t
         int result = sfm_package_load(package, size);
         fail_after = -1;
         if (!result) { succeeded = 1; break; }
-        assert(!allocations && !sfm_lookup("fs.vfs") && !sfm_lookup("fs.tmpfs"));
+        assert(!allocations && !sfm_lookup("fs.vfs") && !sfm_lookup("fs.tmpfs") &&
+               !sfm_lookup("dev.tmpfs") && !sfm_lookup("dev.pci") && !sfm_lookup("dev.registry") &&
+               !sfm_lookup("dev.block"));
     }
     assert(succeeded);
+    test_block_protocol();
+    test_registry();
     assert(!sfm_selftest());
+    assert(!sfm_device_selftest());
+    assert(!sfm_pci_selftest());
     test_tmpfs_limits();
     assert(sfm_package_load(package, size) == SFM_EBUSY);
     assert(sfm_module_unload("fs.tmpfs") == SFM_EBUSY);
+    assert(sfm_module_unload("dev.tmpfs") == SFM_EBUSY);
+    assert(sfm_module_unload("dev.registry") == SFM_EBUSY);
     assert(!sfm_module_unload("fs.vfs"));
+    assert(!sfm_module_unload("dev.registry"));
     assert(!sfm_module_unload("fs.tmpfs"));
+    assert(!sfm_module_unload("dev.tmpfs"));
     assert(!sfm_module_unload("demo.hello"));
+    uint64_t stale_pci = sfm_lookup("dev.pci");
+    assert(!sfm_module_unload("dev.pci"));
+    assert(!sfm_module_unload("dev.block"));
+    sfm_message_t *req = calloc(1, sizeof(*req)), *resp = calloc(1, sizeof(*resp));
+    assert(req && resp && sfm_call(stale_pci, req, resp) == SFM_ENOENT);
+    free(req); free(resp);
     assert(!allocations && !sfm_lookup("fs.vfs"));
     free(copy);
 }
 
 int main(int argc, char **argv)
 {
+    test_pci_decode();
     assert(argc >= 4);
     size_t size, fail_size;
     uint8_t *package = read_file(argv[1], &size);
@@ -255,6 +317,38 @@ int main(int argc, char **argv)
         free(elf);
     }
     test_package(package, size, failure, fail_size);
+    test_pci_client();
+    test_block_client();
+    assert(!allocations);
+    for (unsigned pass = 0; pass < 2; pass++) {
+        pci_fixture_count = pass ? SFM_PCI_MAX : 0;
+        assert(!sfm_package_load(package, size) && !sfm_pci_selftest());
+        assert(!sfm_module_unload("fs.vfs"));
+        assert(!sfm_module_unload("dev.registry"));
+        assert(!sfm_module_unload("fs.tmpfs"));
+        assert(!sfm_module_unload("dev.tmpfs"));
+        assert(!sfm_module_unload("demo.hello"));
+        assert(!sfm_module_unload("dev.pci") && !sfm_module_unload("dev.block") && !allocations);
+    }
+    for (unsigned pass = 0; pass < 3; pass++) {
+        test_block_fixture(pass);
+        assert(!sfm_package_load(package, size));
+        test_block_publish();
+        assert(!sfm_module_unload("fs.vfs") && !sfm_module_unload("dev.registry"));
+        assert(!sfm_module_unload("fs.tmpfs") && !sfm_module_unload("dev.tmpfs"));
+        assert(!sfm_module_unload("demo.hello") && !sfm_module_unload("dev.pci"));
+        uint64_t stale = sfm_lookup("dev.block");
+        assert(!sfm_module_unload("dev.block") && !allocations);
+        sfm_message_t *req = calloc(1, sizeof(*req)), *resp = calloc(1, sizeof(*resp));
+        assert(req && resp && sfm_call(stale, req, resp) == SFM_ENOENT);
+        free(req); free(resp);
+    }
+    assert(!sfm_package_load(package, size));
+    test_registry_capacity();
+    assert(!sfm_module_unload("fs.vfs") && !sfm_module_unload("dev.registry"));
+    assert(!sfm_module_unload("dev.tmpfs") && !sfm_module_unload("fs.tmpfs"));
+    assert(!sfm_module_unload("dev.pci") && !sfm_module_unload("demo.hello"));
+    assert(!sfm_module_unload("dev.block") && !allocations);
     free(package);
     free(failure);
     puts("sfmod tests passed: malformed ELF/package, dependencies, init rollback, OOM, IPC, file IO, unload");

@@ -16,6 +16,9 @@ static uint64_t devfs_next_ino = 1;
 
 /* devfs 根目录项引用（挂载时设置） */
 static vfs_dentry_t *devfs_root_dentry = NULL;
+static int namespace_sealed;
+int devfs_is_sealed(void) { return namespace_sealed; }
+void devfs_seal(void) { namespace_sealed = 1; }
 
 /* ========================================================================
  * devfs 块设备读写
@@ -46,6 +49,7 @@ static int devfs_blkdev_write(vfs_file_t *file, const void *buf, size_t count)
 
 static int devfs_mount(vfs_superblock_t *sb, uint8_t blkdev_id, const char *options)
 {
+    if (namespace_sealed) return -16;
     (void)blkdev_id;
     (void)options;
 
@@ -141,6 +145,7 @@ static int devfs_mount(vfs_superblock_t *sb, uint8_t blkdev_id, const char *opti
 static int devfs_unmount(vfs_superblock_t *sb)
 {
     (void)sb;
+    if (namespace_sealed) return -16;
     devfs_root_dentry = NULL;
     return 0;
 }
@@ -160,6 +165,14 @@ static void devfs_destroy_inode(vfs_inode_t *inode)
     free_page(inode);
 }
 
+/* Once published, the namespace must stay identical to the registry snapshot. */
+static int devfs_unlink(vfs_dentry_t *entry)
+{
+    return namespace_sealed || (entry && entry->inode && entry->inode->open) ? -30 : 0;
+}
+static int devfs_create(vfs_dentry_t *parent, const char *name, vfs_inode_t *inode)
+{ (void)parent; (void)name; (void)inode; return -30; }
+
 /* ========================================================================
  * 文件系统类型定义
  * ======================================================================== */
@@ -170,6 +183,8 @@ vfs_filesystem_t devfs_fs = {
     .unmount = devfs_unmount,
     .alloc_inode = devfs_alloc_inode,
     .destroy_inode = devfs_destroy_inode,
+    .unlink = devfs_unlink,
+    .create = devfs_create, .mkdir = devfs_create, .symlink = devfs_create,
 };
 
 /* ========================================================================
@@ -178,6 +193,7 @@ vfs_filesystem_t devfs_fs = {
 
 void devfs_add_blkdev(uint8_t dev_id, const char *name)
 {
+    if (namespace_sealed) { printf("[devfs] dynamic registration unsupported after seal\n"); return; }
     if (!devfs_root_dentry) return;
 
     /* 从根目录项获取超级块 */
@@ -223,6 +239,7 @@ void devfs_add_blkdev(uint8_t dev_id, const char *name)
 
 void devfs_remove_blkdev(uint8_t dev_id)
 {
+    if (namespace_sealed) { printf("[devfs] dynamic removal unsupported after seal\n"); return; }
     if (!devfs_root_dentry) return;
 
     /* 查找并移除匹配 blkdev_id 的目录项 */
@@ -251,4 +268,32 @@ void devfs_init(void)
 vfs_dentry_t *devfs_get_root(void)
 {
     return devfs_root_dentry;
+}
+
+vfs_inode_t *devfs_boot_char_node(const char *name)
+{
+    if (namespace_sealed) return NULL;
+    if (!devfs_root_dentry || !name || !name[0]) return NULL;
+    size_t length = 0;
+    while (length < VFS_MAX_NAME && name[length]) {
+        if (name[length] == '/' || (unsigned char)name[length] < 32) return NULL;
+        length++;
+    }
+    if (length >= VFS_MAX_NAME || !strcmp(name, ".") || !strcmp(name, "..")) return NULL;
+    for (vfs_dentry_t *entry = devfs_root_dentry->child; entry; entry = entry->next)
+        if (!strcmp(entry->name, name))
+            return entry->inode && entry->inode->type == VFS_TYPE_CHARDEV ? entry->inode : NULL;
+    vfs_inode_t *inode = devfs_alloc_inode(devfs_root_dentry->inode->sb);
+    if (!inode) return NULL;
+    vfs_dentry_t *entry = alloc_page();
+    if (!entry) { devfs_destroy_inode(inode); return NULL; }
+    memset(entry, 0, PAGE_SIZE);
+    memcpy(entry->name, name, length + 1);
+    inode->type = VFS_TYPE_CHARDEV;
+    inode->nlinks = 1;
+    entry->inode = inode;
+    entry->parent = devfs_root_dentry;
+    entry->next = devfs_root_dentry->child;
+    devfs_root_dentry->child = entry;
+    return inode;
 }
