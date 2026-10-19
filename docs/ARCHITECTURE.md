@@ -34,7 +34,7 @@
 2026-10-19 启动顺序：`init_core`（页分配/MMU/原 PCI 缓存）→
 `init_hardware`（CPU/GS、APIC、时钟，尚未开中断）→ `init_allocators`
 （仅一次 kmalloc/slab）→ `sfm_boot_early`（内嵌包、端点、PCI 快照自测）→
-AHCI/ramdisk → 块设备清单登记/冻结/核对 → 根 VFS/FAT32 → 进程/syscall/系统服务 →
+AHCI/ramdisk → 块设备清单登记/冻结/核对及只读消息对照 → 根 VFS/FAT32 → 进程/syscall/系统服务 →
 `sfm_boot_filesystems`（消息文件自测及 /modules、/tmp、/run 挂载）→
 目录/input/DRM → 统一设备登记/自测/封存 → 开中断及 PID 回归 → 用户程序。
 模块包来自链接进内核的只读数据，早期 init 只依赖内存、日志、消息和 PCI 缓存，
@@ -48,8 +48,12 @@ AHCI 控制器查找已走 `dev.pci` 的 FIND 消息；命令提交、DMA 和端
 
 `dev.block` 在早期只建立空端点，ENUM/GET 返回 EAGAIN；存储探测完成后由核心发送
 有界 REGISTER/SEAL，再逐项核对真实 blkdev 列表。清单不包含函数/驱动指针，不改变
-原始块读写或 FAT32。AHCI/IDE 几何标为未确认，因为旧驱动可能使用默认容量；
-ramdisk 的大小来自其软件缓冲区。详见 [块清单对接](integration/20261019-block-inventory.md)。
+原始 FAT32 路由。几何现在区分未知、软件声明、ATA 探测；AHCI IDENTIFY 不满足
+LBA48/512 传输条件或失败则不登记，已经删除默认 1 MiB 容量。RAMDISK 来自软件后端。
+只读 READ 经 dev.block 策略及核心 API 到原驱动，单次最多 4096 字节；使用核心永久
+持有的 DMA 页复制返回，错误隔离该设备页，禁止槽复用；WRITE 消息拒绝。
+ABI 1.5、块协议 v2；启动时对比实际首/末扇区与最大负载，CI 额外核验 FAT 引导签名。
+详见 [只读块对接](integration/20261019-block-read.md)。
 
 RAMDISK 后端改为一次连续页分配、全区清零，容量/页舍入先检查溢出，登记失败回收
 所有自有页。读写使用减法边界检查；借用 initrd 仍由调用者保活，只暴露完整扇区。

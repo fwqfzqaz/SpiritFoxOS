@@ -1,4 +1,5 @@
 #include "ahci.h"
+#include "ata_geometry.h"
 #include "../../core/pci.h"
 #include "serial.h"
 #include "hal.h"
@@ -136,14 +137,18 @@ static int ahci_port_rebase(ahci_port_t *port)
  * AHCI 命令执行（PIO 模式）
  * ======================================================================== */
 
-static int ahci_exec_cmd(ahci_port_t *port, int write, uint8_t cmd_byte,
+static int ahci_exec_locked(ahci_port_t *port, int write, uint8_t cmd_byte,
                          uint64_t lba, uint32_t count, void *buf)
 {
+    uint8_t command_fis[20];
+    if (!buf || ((uintptr_t)buf & 1) || ata_command_fis(command_fis, cmd_byte, lba, count) ||
+        (uintptr_t)buf > UINTPTR_MAX - (uint64_t)count * 512) return -22;
     /* 等待槽位 0 上之前的命令完成 */
     int timeout = 100000;
     while ((ahci_read(port->port_base, AHCI_PORT_CI) & 0x1) && --timeout)
         ;
     if (timeout <= 0) {
+        port->failed = 1;
         printf("[AHCI] Previous command still running on port %d\n", port->port_idx);
         return -1;
     }
@@ -155,20 +160,7 @@ static int ahci_exec_cmd(ahci_port_t *port, int write, uint8_t cmd_byte,
     uint8_t *fis = (uint8_t *)port->cmd_table;
     memset(fis, 0, 64);  /* 清除 FIS 区域 */
 
-    fis[0] = AHCI_FIS_REG_H2D;         /* FIS 类型 */
-    fis[1] = AHCI_FIS_CMD;             /* 命令位 */
-    fis[2] = cmd_byte;                  /* ATA 命令 */
-    fis[3] = 0;                         /* 特征[7:0] */
-    fis[4] = (uint8_t)(lba & 0xFF);           /* LBA 0:7 */
-    fis[5] = (uint8_t)((lba >> 8) & 0xFF);    /* LBA 8:15 */
-    fis[6] = (uint8_t)((lba >> 16) & 0xFF);   /* LBA 16:23 */
-    fis[7] = 0x40 | ((lba >> 24) & 0x0F);    /* 设备：LBA 模式 + LBA 24:27 */
-    fis[8] = (uint8_t)((lba >> 32) & 0xFF);   /* LBA 32:39 */
-    fis[9] = (uint8_t)((lba >> 40) & 0xFF);   /* LBA 40:47 */
-    fis[10] = (uint8_t)((lba >> 48) & 0xFF);  /* LBA 48:55 */
-    fis[11] = 0;                               /* 特征[15:8] */
-    fis[12] = (uint8_t)(count & 0xFF);        /* 计数[7:0] */
-    fis[13] = (uint8_t)((count >> 8) & 0xFF); /* 计数[15:8] */
+    memcpy(fis, command_fis, sizeof(command_fis));
 
     /* 在命令表中设置 PRDT（物理区域描述符表） */
     uint64_t buf_addr = (uint64_t)(uintptr_t)buf;
@@ -235,6 +227,7 @@ static int ahci_exec_cmd(ahci_port_t *port, int write, uint8_t cmd_byte,
         ;
 
     if (timeout <= 0) {
+        port->failed = 1;
         printf("[AHCI] Command timeout on port %d\n", port->port_idx);
         return -1;
     }
@@ -245,8 +238,25 @@ static int ahci_exec_cmd(ahci_port_t *port, int write, uint8_t cmd_byte,
         printf("[AHCI] Command error on port %d, TFD=0x%x\n", port->port_idx, tfd);
         return -2;
     }
+    __atomic_thread_fence(__ATOMIC_ACQUIRE);
+    if (port->cmd_list[0].prdbc != byte_count) return -5;
 
     return 0;
+}
+
+/* Existing filesystem and message reads share command slot 0. Never permit
+ * preemption or another CPU to overwrite its FIS/PRDT while it is in flight. */
+static int ahci_exec_cmd(ahci_port_t *port, int write, uint8_t cmd_byte,
+                         uint64_t lba, uint32_t count, void *buf)
+{
+    uint64_t flags = hal_save_interrupts();
+    if (__atomic_test_and_set(&port->command_busy, __ATOMIC_ACQUIRE)) {
+        hal_restore_interrupts(flags); return -16;
+    }
+    int result = port->failed ? -5 : ahci_exec_locked(port, write, cmd_byte, lba, count, buf);
+    __atomic_clear(&port->command_busy, __ATOMIC_RELEASE);
+    hal_restore_interrupts(flags);
+    return result;
 }
 
 /* ========================================================================
@@ -293,22 +303,13 @@ static uint64_t ahci_get_sector_count(ahci_port_t *port)
     memset(identify, 0, PAGE_SIZE);
 
     if (ahci_exec_cmd(port, 0, ATA_IDENTIFY, 0, 1, identify) != 0) {
-        free_page(identify);
+        /* A timed-out controller may still DMA: quarantine its buffer. */
+        if (!port->failed) free_page(identify);
         return 0;
     }
 
-    /* 检查 LBA48 支持（字 83，位 10） */
     uint64_t sectors = 0;
-    if (identify[83] & (1 << 10)) {
-        /* LBA48：字 100-103 */
-        sectors = (uint64_t)identify[100] |
-                  ((uint64_t)identify[101] << 16) |
-                  ((uint64_t)identify[102] << 32) |
-                  ((uint64_t)identify[103] << 48);
-    } else {
-        /* LBA28：字 60-61 */
-        sectors = (uint32_t)identify[60] | ((uint32_t)identify[61] << 16);
-    }
+    if (ata_identify_geometry(identify, &sectors)) sectors = 0;
 
     free_page(identify);
     return sectors;
@@ -372,9 +373,10 @@ void ahci_init(void)
         port->port_base = port_base;
         port->signature = sig;
         port->is_atapi = (sig == AHCI_SIG_ATAPI);
+        port->command_busy = 0; port->failed = 0;
 
-        if (port->is_atapi) {
-            printf("[AHCI] Port %d: ATAPI device (signature=0x%x), skipping\n", i, sig);
+        if (sig != AHCI_SIG_SATA) {
+            printf("[AHCI] Port %d: unsupported device signature=0x%x, skipping\n", i, sig);
             continue;
         }
 
@@ -387,16 +389,18 @@ void ahci_init(void)
         /* 获取扇区数 */
         uint64_t sectors = ahci_get_sector_count(port);
         if (sectors == 0) {
-            printf("[AHCI] Port %d: IDENTIFY failed, assuming 1MB\n", i);
-            sectors = 2048;  /* 回退值：1MB */
+            printf("[AHCI] Port %d: no supported verified geometry, skipping\n", i);
+            continue;
         }
 
         /* 注册为块设备 */
         char name[16];
         name[0] = 's'; name[1] = 'd'; name[2] = 'a' + ahci_port_count; name[3] = '\0';
 
-        port->blkdev_id = blkdev_register(BLKDEV_TYPE_AHCI, sectors,
+        port->blkdev_id = blkdev_register(BLKDEV_TYPE_AHCI, BLKDEV_GEOMETRY_ATA, sectors,
                                           512, name, &ahci_blkdev_ops, port);
+        if (port->blkdev_id < 0) continue;
+        serial_puts("[AHCI] verified LBA48/512 geometry registered\n");
 
         printf("[AHCI] Port %d: SATA disk %s, %llu sectors (%llu MB)\n",
                i, name, sectors, sectors * 512 / (1024 * 1024));

@@ -47,6 +47,10 @@ void free_page(void *address)
 int main(void)
 {
     blkdev_init(); ramdisk_init();
+    assert(blkdev_register(BLKDEV_TYPE_RAMDISK, BLKDEV_GEOMETRY_ATA, 1, 512, "bad", NULL, NULL) < 0);
+    assert(blkdev_register(BLKDEV_TYPE_AHCI, BLKDEV_GEOMETRY_SOFTWARE, 1, 512, "bad", NULL, NULL) < 0);
+    assert(blkdev_register(BLKDEV_TYPE_AHCI, (blkdev_geometry_t)-1, 1, 512, "bad", NULL, NULL) < 0);
+    assert(blkdev_register(BLKDEV_TYPE_AHCI, BLKDEV_GEOMETRY_ATA, UINT64_MAX, 512, "bad", NULL, NULL) < 0);
     assert(ramdisk_create(0) < 0 && ramdisk_create(UINT64_MAX) < 0);
     assert(ramdisk_create(SIZE_MAX / BLKDEV_SECTOR_SIZE) < 0);
     assert(!allocation_calls && !live_pages && !blkdev_count());
@@ -92,7 +96,7 @@ int main(void)
 
     for (unsigned i = 2; i < BLKDEV_MAX_DEVICES; i++) {
         char name[16]; snprintf(name, sizeof(name), "dummy%u", i);
-        assert(blkdev_register(BLKDEV_TYPE_IDE, 1, 512, name, NULL, NULL) >= 0);
+        assert(blkdev_register(BLKDEV_TYPE_IDE, BLKDEV_GEOMETRY_UNKNOWN, 1, 512, name, NULL, NULL) >= 0);
     }
     assert(ramdisk_create(9) < 0 && live_pages == 3); /* Every allocated page reclaimed. */
     assert(ramdisk_create_from_buffer(borrowed, sizeof(borrowed)) < 0 && live_pages == 3);
@@ -101,6 +105,11 @@ int main(void)
     assert(ramdisk_create_from_buffer(borrowed, sizeof(borrowed)) >= 0);
     size_t calls = allocation_calls;
     assert(ramdisk_create(1) < 0 && allocation_calls == calls);
+    int devices = blkdev_count();
+    assert(!blkdev_seal() && blkdev_is_sealed() && blkdev_seal() == -16);
+    blkdev_unregister(0); blkdev_init();
+    assert(blkdev_count() == devices);
+    assert(blkdev_register(BLKDEV_TYPE_IDE, BLKDEV_GEOMETRY_UNKNOWN, 1, 512, "late", NULL, NULL) < 0);
     for (unsigned i = 0; i < 8; i++) if (extents[i].base) {
         uint8_t *start = extents[i].base; size_t pages = extents[i].pages;
         for (size_t page = 0; page < pages; page++) free_page(start + page * PAGE_SIZE);

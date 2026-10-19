@@ -12,7 +12,10 @@ static int valid(const sfm_block_record_t *r)
         r->index >= SFM_BLOCK_MAX || r->type < SFM_BLOCK_AHCI || r->type > SFM_BLOCK_IDE ||
         !r->sector_size || (r->sector_size & (r->sector_size - 1)) ||
         r->sector_count > UINT64_MAX / r->sector_size ||
-        (r->flags & ~SFM_BLOCK_GEOMETRY_UNVERIFIED) || r->reserved[0] || r->reserved[1]) return 0;
+        r->geometry_source > SFM_BLOCK_GEOMETRY_ATA || r->reserved ||
+        r->flags != (r->geometry_source == SFM_BLOCK_GEOMETRY_UNKNOWN ? SFM_BLOCK_GEOMETRY_UNVERIFIED : 0) ||
+        (r->geometry_source == SFM_BLOCK_GEOMETRY_SOFTWARE && r->type != SFM_BLOCK_RAMDISK) ||
+        (r->geometry_source == SFM_BLOCK_GEOMETRY_ATA && r->type != SFM_BLOCK_AHCI)) return 0;
     unsigned length = 0;
     while (length < sizeof(r->name) && r->name[length]) {
         unsigned char c = (unsigned char)r->name[length++];
@@ -27,6 +30,7 @@ static int receive(const sfm_message_t *req, sfm_message_t *resp)
 {
     if (req->flags != SFM_BLOCK_VERSION) return -93;
     if (req->route) return -22;
+    if (req->type == SFM_BLOCK_WRITE) return -30;
     if (req->type == SFM_BLOCK_REGISTER) {
         if (sealed) return -30;
         if (req->handle || req->offset || req->size != sizeof(sfm_block_record_t)) return -22;
@@ -49,6 +53,28 @@ static int receive(const sfm_message_t *req, sfm_message_t *resp)
         if (sealed) return -16;
         sealed = 1; return 0;
     }
+    if (req->type == SFM_BLOCK_READ) {
+        if (req->size != sizeof(sfm_block_read_t)) return -22;
+        if (!sealed) return -11;
+        if (req->handle != endpoint) return -2;
+        sfm_block_read_t read;
+        sfm_copy(&read, req->data, sizeof(read));
+        if (read.index >= SFM_BLOCK_MAX || read.reserved || !read.count) return -22;
+        const sfm_block_record_t *device = NULL;
+        for (uint32_t i = 0; i < count; i++) if (devices[i].index == read.index) { device = &devices[i]; break; }
+        if (!device) return -2;
+        if (device->geometry_source == SFM_BLOCK_GEOMETRY_UNKNOWN) return -19;
+        if (read.count > SFM_PAYLOAD / device->sector_size || req->offset > device->sector_count ||
+            read.count > device->sector_count - req->offset) return -22;
+        int result = core->block_read(read.index, req->offset, read.count, resp->data, SFM_PAYLOAD);
+        if (result) {
+            sfm_clear(resp->data, SFM_PAYLOAD); resp->size = 0;
+            return result < 0 ? result : -5;
+        }
+        resp->size = read.count * device->sector_size; resp->result = resp->size;
+        resp->handle = endpoint; resp->offset = req->offset;
+        return 0;
+    }
     if (req->type != SFM_BLOCK_ENUM && req->type != SFM_BLOCK_GET) return -38;
     if (req->size) return -22;
     if (!sealed) return -11;
@@ -70,7 +96,7 @@ static int receive(const sfm_message_t *req, sfm_message_t *resp)
 }
 static int start(const sfm_api_t *api, uint32_t owner)
 {
-    if (api->abi != SFM_ABI || api->size < sizeof(*api)) return -93;
+    if (api->abi != SFM_ABI || api->size < sizeof(*api) || !api->block_read) return -93;
     core = api; owner_id = owner; count = 0; sealed = 0;
     endpoint = core->endpoint_create(owner, "dev.block", receive);
     return endpoint ? 0 : -12;

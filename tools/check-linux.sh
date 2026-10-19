@@ -12,7 +12,7 @@ for script in tools/*.sh .githooks/* run_tests.sh; do
     [[ -f "$script" ]] && bash -n "$script"
 done
 bash tools/bootstrap-deps.sh
-make test-modules test-ramdisk
+make test-modules test-ramdisk test-ata
 make -j"${JOBS:-$(getconf _NPROCESSORS_ONLN)}" all libc test-elf musl-test wayland-all build/fat32.img build/disk.img build/ovmf_vars.fd
 file build/kernel/kernel.elf build/efi_stub/kernel.efi
 readelf -h build/kernel/kernel.elf | grep -q 'Advanced Micro Devices X86-64'

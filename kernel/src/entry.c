@@ -58,6 +58,7 @@ void kernel_main(BootInfo* boot_info)
     sfm_boot_early();
     init_storage();
     if (sfm_blocks_publish()) kernel_panic("block inventory import/validation failed");
+    if (sfm_block_io_selftest()) kernel_panic("read-only block message self-test failed");
     init_filesystem();
     init_services();
     sfm_boot_filesystems();

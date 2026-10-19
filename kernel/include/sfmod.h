@@ -1,4 +1,4 @@
-/* SpiritFoxOS 模块 SDK。ABI 1.4：仅适用于受信任的内核态模块。 */
+/* SpiritFoxOS 模块 SDK。ABI 1.5：仅适用于受信任的内核态模块。 */
 #ifndef SPIRITFOX_SFMOD_H
 #define SPIRITFOX_SFMOD_H
 
@@ -8,7 +8,7 @@
 #include "sfmod_device.h"
 #include "sfmod_block.h"
 
-#define SFM_ABI 0x00010004u
+#define SFM_ABI 0x00010005u
 #define SFM_MAGIC 0x004d4653u
 #define SFM_PAYLOAD 4096u
 #define SFM_MAX_MODULES 16u
@@ -95,7 +95,10 @@ typedef struct sfm_api
     int (*send)(uint64_t, const sfm_message_t *);
     int (*recv)(uint32_t owner, uint64_t, sfm_message_t *);
     int (*pci_read)(uint32_t index, sfm_pci_record_t *);
+    /* Synchronous, bounded read through a core-owned DMA bounce page. */
+    int (*block_read)(uint32_t index, uint64_t lba, uint32_t count, void *data, uint32_t capacity);
 } sfm_api_t;
+_Static_assert(offsetof(sfm_api_t, block_read) == 88 && sizeof(sfm_api_t) == 96, "core API 1.5 layout");
 
 typedef struct sfm_entry
 {

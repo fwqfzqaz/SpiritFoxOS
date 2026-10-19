@@ -149,7 +149,7 @@ static void test_elf(const uint8_t *original, size_t size)
     assert(sfm_elf_load(data, size, &image));
     memcpy(data, original, size);
     meta = (sfm_metadata_t *)(data + section(data, ".sfmod_meta")->sh_offset);
-    meta->abi = 0x00010003u;
+    meta->abi = 0x00010004u;
     assert(sfm_elf_load(data, size, &image) == SFM_ENOEXEC);
     assert(!allocations);
     free(data);
@@ -225,7 +225,7 @@ static void test_package(uint8_t *package, size_t size, uint8_t *failure, size_t
     uint8_t *copy = malloc(size);
     assert(copy);
     memcpy(copy, package, size);
-    ((uint32_t *)copy)[1] = 0x00010003u;
+    ((uint32_t *)copy)[1] = 0x00010004u;
     assert(sfm_package_load(copy, size) == SFM_ENOEXEC && !allocations);
     for (size_t truncated = 0; truncated < size; truncated++)
         assert(sfm_package_load(package, truncated));

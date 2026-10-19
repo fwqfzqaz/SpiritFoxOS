@@ -14,6 +14,12 @@ typedef enum {
     BLKDEV_TYPE_IDE,
 } blkdev_type_t;
 
+typedef enum {
+    BLKDEV_GEOMETRY_UNKNOWN = 0,
+    BLKDEV_GEOMETRY_SOFTWARE = 1,
+    BLKDEV_GEOMETRY_ATA = 2,
+} blkdev_geometry_t;
+
 /* Block device operations - each driver implements these */
 typedef struct blkdev_ops {
     /* Read sectors into buffer. Returns 0 on success, negative on error */
@@ -29,6 +35,7 @@ typedef struct blkdev {
     blkdev_type_t   type;       /* Device type */
     uint64_t        sector_count; /* Total number of sectors */
     uint32_t        sector_size;  /* Sector size in bytes (usually 512) */
+    blkdev_geometry_t geometry_source;
     char            name[16];     /* Device name (e.g., "sda", "ram0") */
     blkdev_ops_t    ops;        /* Device operations */
     void           *driver_data; /* Driver-specific private data */
@@ -38,12 +45,14 @@ typedef struct blkdev {
 void blkdev_init(void);
 
 /* Register a block device, returns assigned device ID or -1 on failure */
-int blkdev_register(blkdev_type_t type, uint64_t sector_count,
+int blkdev_register(blkdev_type_t type, blkdev_geometry_t geometry_source, uint64_t sector_count,
                     uint32_t sector_size, const char *name,
                     blkdev_ops_t *ops, void *driver_data);
 
 /* Unregister a block device */
 void blkdev_unregister(uint8_t dev_id);
+int blkdev_seal(void);
+int blkdev_is_sealed(void);
 
 /* Get block device by ID */
 blkdev_t *blkdev_get(uint8_t dev_id);

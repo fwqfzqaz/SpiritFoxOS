@@ -150,7 +150,7 @@ build/modules/test.fail.sfmod: tests/modules/fail.c kernel/include/sfmod.h kerne
 test-modules: modules build/modules/test.fail.sfmod
 	$(HOST_CC) -std=gnu11 -O1 -g -Wall -Wextra -Werror -no-pie -fsanitize=undefined -fno-sanitize-recover=all -Ikernel/include \
 	    tests/test_sfmod.c tests/test_registry.c tests/test_pci_client.c tests/test_block.c kernel/core/ipc/endpoint.c kernel/core/module/elf.c \
-	    kernel/core/module/loader.c kernel/core/selftest.c kernel/core/pci.c kernel/core/pci_test.c kernel/core/pci_client.c kernel/core/block.c -o build/test_sfmod
+	    kernel/core/module/loader.c kernel/core/selftest.c kernel/core/pci.c kernel/core/pci_test.c kernel/core/pci_client.c kernel/core/block.c kernel/core/block_io.c -o build/test_sfmod
 	build/test_sfmod build/modules/init.sfpack build/modules/test.fail.sfmod $(SFM_FILES)
 
 test-ramdisk:
@@ -158,6 +158,13 @@ test-ramdisk:
 	$(HOST_CC) -std=gnu11 -O1 -g -Wall -Wextra -Werror -fno-builtin -fsanitize=address,undefined -fno-sanitize-recover=all -Ikernel/include \
 	    tests/test_ramdisk.c kernel/src/fs/ramdisk.c kernel/src/drivers/blkdev.c -o build/test_ramdisk
 	build/test_ramdisk
+
+.PHONY: test-ata
+test-ata:
+	@mkdir -p build
+	$(HOST_CC) -std=gnu11 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined -fno-sanitize-recover=all -Ikernel/include \
+	    tests/test_ata.c kernel/src/drivers/ata_geometry.c -o build/test_ata
+	build/test_ata
 
 $(KERNEL_BUILD)/kernel.elf: $(KERNEL_OBJS) $(KERNEL_SRC)/kernel.ld
 	@echo "[LD64] $@"

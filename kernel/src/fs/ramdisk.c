@@ -97,7 +97,7 @@ int ramdisk_create(uint64_t sectors)
     name[0] = 'r'; name[1] = 'a'; name[2] = 'm'; name[3] = '0' + slot;
     name[4] = '\0';
 
-    int dev_id = blkdev_register(BLKDEV_TYPE_RAMDISK, sectors,
+    int dev_id = blkdev_register(BLKDEV_TYPE_RAMDISK, BLKDEV_GEOMETRY_SOFTWARE, sectors,
                                  BLKDEV_SECTOR_SIZE, name,
                                  &ramdisk_ops, &ramdisks[slot]);
     if (dev_id < 0) {
@@ -148,7 +148,7 @@ int ramdisk_create_from_buffer(void *data, uint64_t size_bytes)
     char name[16];
     name[0] = 'i'; name[1] = 'n'; name[2] = 'i'; name[3] = 't'; name[4] = 'r'; name[5] = 'd'; name[6] = '\0';
 
-    int dev_id = blkdev_register(BLKDEV_TYPE_RAMDISK, sectors,
+    int dev_id = blkdev_register(BLKDEV_TYPE_RAMDISK, BLKDEV_GEOMETRY_SOFTWARE, sectors,
                                  BLKDEV_SECTOR_SIZE, name,
                                  &ramdisk_ops, &ramdisks[slot]);
     if (dev_id < 0) {

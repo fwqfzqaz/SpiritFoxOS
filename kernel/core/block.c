@@ -1,10 +1,16 @@
 #include "block.h"
+_Static_assert(BLKDEV_GEOMETRY_UNKNOWN == SFM_BLOCK_GEOMETRY_UNKNOWN &&
+               BLKDEV_GEOMETRY_SOFTWARE == SFM_BLOCK_GEOMETRY_SOFTWARE &&
+               BLKDEV_GEOMETRY_ATA == SFM_BLOCK_GEOMETRY_ATA, "geometry source encoding");
 
 int sfm_block_describe(const blkdev_t *d, sfm_block_record_t *out)
 {
     if (!d || !out || !d->in_use || d->id >= SFM_BLOCK_MAX ||
         d->type < BLKDEV_TYPE_AHCI || d->type > BLKDEV_TYPE_IDE || !d->sector_size ||
-        (d->sector_size & (d->sector_size - 1)) || d->sector_count > UINT64_MAX / d->sector_size)
+        (d->sector_size & (d->sector_size - 1)) || d->sector_count > UINT64_MAX / d->sector_size ||
+        d->geometry_source < BLKDEV_GEOMETRY_UNKNOWN || d->geometry_source > BLKDEV_GEOMETRY_ATA ||
+        (d->geometry_source == BLKDEV_GEOMETRY_SOFTWARE && d->type != BLKDEV_TYPE_RAMDISK) ||
+        (d->geometry_source == BLKDEV_GEOMETRY_ATA && d->type != BLKDEV_TYPE_AHCI))
         return SFM_EINVAL;
     unsigned length = 0;
     while (length < sizeof(d->name) && d->name[length]) length++;
@@ -19,7 +25,8 @@ int sfm_block_describe(const blkdev_t *d, sfm_block_record_t *out)
     case BLKDEV_TYPE_IDE: out->type = SFM_BLOCK_IDE; break;
     default: return SFM_EINVAL;
     }
-    if (d->type != BLKDEV_TYPE_RAMDISK) out->flags = SFM_BLOCK_GEOMETRY_UNVERIFIED;
+    out->geometry_source = (uint32_t)d->geometry_source;
+    if (d->geometry_source == BLKDEV_GEOMETRY_UNKNOWN) out->flags = SFM_BLOCK_GEOMETRY_UNVERIFIED;
     sfm_copy(out->name, d->name, length);
     return 0;
 }
@@ -43,6 +50,8 @@ int sfm_blocks_publish(void)
         if (result) goto done;
         count++;
     }
+    result = sf_block_freeze();
+    if (result) goto done;
     sfm_clear(req, sizeof(*req)); req->type = SFM_BLOCK_SEAL; req->flags = SFM_BLOCK_VERSION;
     result = sfm_call(endpoint, req, resp);
     if (result) goto done;

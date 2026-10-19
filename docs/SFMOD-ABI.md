@@ -1,8 +1,9 @@
-# sfmod ABI 1.4 与服务接口
+# sfmod ABI 1.5 与服务接口
 
-本 ABI（0x00010004）面向 x86_64、小端、受信任 Ring 0 插件。SDK 是 `kernel/include/sfmod.h`。
-1.4 增加设备注册协议和 BLKDEV 类型，route=1 改为统一目录服务；1.3 的 PCI API
-保持不变。旧包和模块均被拒绝，内核与全部模块必须一起重新编译。
+本 ABI（0x00010005）面向 x86_64、小端、受信任 Ring 0 插件。SDK 是 `kernel/include/sfmod.h`。
+1.5 在 API 表尾增加受控 block_read(index,lba,count,data,capacity)，表大小 96 字节，
+该指针偏移 88；包版本同步提高，1.4 包/模块被拒绝，必须整体重编译。
+设备注册、文件路由及 PCI 接口布局保持不变；块协议独立升级至 version=2。
 代码入口通过核心提供的 `sfm_api_t` 表调用服务；不解析任意内核符号，不链接宿主 libc。
 API 的 `abi` 和 `size` 描述接口版本。需要扩展语义时提高 ABI 版本，并补兼容测试。
 
@@ -116,15 +117,22 @@ PCI 使用独立 version=1 协议，record=176 字节、query=16 字节，支持
 不探测。核心 API 只复制缓存，模块负责快照/查询；Bochs DRM 从服务选择 VGA。
 具体布局、错误与边界见 [PCI 对接](integration/20261019-pci-snapshot.md)。
 
-块设备清单 `dev.block` 使用独立 version=1 协议、64 字节固定记录；不改变 ABI 1.4
-的 API 表或包格式。所有消息 flags=version、route=0，REGISTER 接收记录，SEAL
+块设备 `dev.block` 使用独立 version=2 协议、64 字节固定记录。
+原记录的 reserved[0]（偏移 56）改为 geometry_source，偏移 60 保持为零保留项。
+来源 UNKNOWN=0、SOFTWARE=1（仅 RAMDISK）、ATA=2（仅 AHCI），未知来源须带
+GEOMETRY_UNVERIFIED，已知来源不得带该标志。所有消息 flags=version、route=0，REGISTER 接收记录，SEAL
 冻结，ENUM 按清单序号读取，GET 按旧块设备槽号查询且必须携带 snapshot 端点句柄。
 响应 offset 始终为清单序号，record.index 才是旧槽号（有空洞时两者不同）。
 ENUM 的 offset=count 为 EOF，超过 count 为 EINVAL；GET 不存在槽/失效快照为
 ENOENT，槽越界为 EINVAL。未冻结查询 EAGAIN，重复冻结 EBUSY，冻结后登记 EROFS。
-记录含逻辑名称/类型、扇区数和扇区大小，不包含指针或读写能力。
-AHCI/IDE 标 GEOMETRY_UNVERIFIED，不能将旧驱动可能估算的容量视为硬件探测结果。
-具体布局与限制见 [块清单对接](integration/20261019-block-inventory.md)。
+记录不包含指针。READ=0x5004：handle=snapshot、offset=LBA，载荷 16 字节
+`{uint32 index,count; uint64 reserved=0}`。count 非零，最多 4096 字节，来源/容量须已知；
+响应 result=size=字节数，handle=snapshot，offset=LBA。未知容量 ENODEV，越界/长度
+错误 EINVAL，OOM ENOMEM，底层忙 EBUSY，其他底层错误 EIO；错误 size=0，载荷清零。
+WRITE=0x5005 明确 EROFS；没有新增核心写入口。此限制仅针对新消息路径，原 FAT32
+兼容写路径仍存在。核心 API 再检查冻结状态、真实设备/来源及长度/容量，不直接将模块
+缓冲区交给 DMA。底层错误隔离页，忙不隔离，可重试；没有超时复位/热恢复协议。
+详见 [本轮只读块对接](integration/20261019-block-read.md)。历史 v1 清单说明保留供追溯。
 
 `make test-modules` 使用 HOST_CC 编译带 UBSan 的 Linux x86_64 宿主测试，模块保持
 目标编译器。测试用 MAP_32BIT 分配可执行内存，以匹配内核低地址重定位约束；这个
