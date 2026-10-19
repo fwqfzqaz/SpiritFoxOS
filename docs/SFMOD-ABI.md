@@ -134,6 +134,11 @@ WRITE=0x5005 明确 EROFS；没有新增核心写入口。此限制仅针对新�
 缓冲区交给 DMA。底层错误隔离页，忙不隔离，可重试；没有超时复位/热恢复协议。
 详见 [本轮只读块对接](integration/20261019-block-read.md)。历史 v1 清单说明保留供追溯。
 
+FAT32 实际读已使用 kernel-only block_client（不改变 ABI）：固定快照，最多 64 KiB
+拆分 READ，核对每段响应，任意失败清空完整输出；EBUSY/EAGAIN 不自动重试。
+sfm_call 在 transport 拒绝时不保证清空 response，客户端必须先清空并先检查返回码。
+详见 [FAT32 读取对接](integration/20261019-fat32-read.md)。
+
 `make test-modules` 使用 HOST_CC 编译带 UBSan 的 Linux x86_64 宿主测试，模块保持
 目标编译器。测试用 MAP_32BIT 分配可执行内存，以匹配内核低地址重定位约束；这个
 测试适配不是生产加载器的内存保护实现。

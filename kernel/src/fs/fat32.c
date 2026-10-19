@@ -3,6 +3,7 @@
 #include "string.h"
 #include "memory.h"
 #include "vga.h"
+#include "../../core/internal.h"
 
 /* ========================================================================
  * fat32 - 支持读写的 FAT32 文件系统驱动
@@ -14,6 +15,17 @@
 /* 下一个 inode 编号 */
 static uint64_t fat32_next_ino = 1;
 
+static void *fat32_cluster_buffer(const fat32_sb_data_t *s)
+{
+    uint32_t bytes = (uint32_t)s->sectors_per_cluster * s->bytes_per_sector;
+    return alloc_pages((bytes + PAGE_SIZE - 1) / PAGE_SIZE);
+}
+static void fat32_free_cluster_buffer(const fat32_sb_data_t *s, void *buffer)
+{
+    uint32_t bytes = (uint32_t)s->sectors_per_cluster * s->bytes_per_sector;
+    for (uint32_t i = 0; i < bytes; i += PAGE_SIZE) free_page((uint8_t *)buffer + i);
+}
+
 /* ========================================================================
  * 底层辅助函数
  * ======================================================================== */
@@ -23,14 +35,15 @@ static uint64_t fat32_next_ino = 1;
  * 成功返回 0，失败返回负数。 */
 static int fat32_read_cluster(fat32_sb_data_t *sb_data, uint32_t cluster, void *buf)
 {
-    if (cluster < 2)
+    if (cluster < 2 || cluster - 2 >= sb_data->total_clusters)
         return -1;
 
     uint64_t lba = sb_data->data_start_sector +
                    (uint64_t)(cluster - 2) * sb_data->sectors_per_cluster;
     uint32_t count = sb_data->sectors_per_cluster;
 
-    return blkdev_read(sb_data->blkdev_id, lba, count, buf);
+    return sf_block_client_read(&sb_data->reader, lba, count, buf,
+                               count * sb_data->bytes_per_sector);
 }
 
 /* 将 buf 中的完整簇写入磁盘。
@@ -49,9 +62,10 @@ static int fat32_write_cluster(fat32_sb_data_t *sb_data, uint32_t cluster, const
 }
 
 /* 读取给定簇的 FAT 表项。
- * 返回下一个簇号，或 >= FAT32_EOC_MIN 的值表示链结束。 */
-static uint32_t fat32_get_fat_entry(fat32_sb_data_t *sb_data, uint32_t cluster)
+ * 成功时写出表项；I/O 错误与链结束严格分开。 */
+static int fat32_get_fat_entry(fat32_sb_data_t *sb_data, uint32_t cluster, uint32_t *out)
 {
+    if (cluster < 2 || cluster - 2 >= sb_data->total_clusters) return -5;
     /* 每个 FAT 表项为 4 字节 */
     uint64_t fat_offset = (uint64_t)cluster * 4;
     uint64_t fat_sector = sb_data->fat_start_sector + fat_offset / sb_data->bytes_per_sector;
@@ -61,19 +75,20 @@ static uint32_t fat32_get_fat_entry(fat32_sb_data_t *sb_data, uint32_t cluster)
     /* 使用完整页面作为临时缓冲区 */
     void *sector_buf = alloc_page();
     if (!sector_buf)
-        return 0x0FFFFFFF; /* 分配失败时返回 EOC */
+        return -12;
 
-    int ret = blkdev_read(sb_data->blkdev_id, fat_sector, 1, sector_buf);
+    int ret = sf_block_client_read(&sb_data->reader, fat_sector, 1, sector_buf, PAGE_SIZE);
     if (ret != 0) {
         free_page(sector_buf);
-        return 0x0FFFFFFF;
+        return ret;
     }
 
     uint32_t entry = *(uint32_t *)((uint8_t *)sector_buf + entry_offset);
     free_page(sector_buf);
 
     /* FAT32 仅使用低 28 位 */
-    return entry & 0x0FFFFFFF;
+    *out = entry & 0x0FFFFFFF;
+    return 0;
 }
 
 /* 写入给定簇的 FAT 表项。
@@ -91,7 +106,7 @@ static int fat32_set_fat_entry(fat32_sb_data_t *sb_data, uint32_t cluster, uint3
     if (!sector_buf)
         return -1;
 
-    int ret = blkdev_read(sb_data->blkdev_id, fat_sector, 1, sector_buf);
+    int ret = sf_block_client_read(&sb_data->reader, fat_sector, 1, sector_buf, PAGE_SIZE);
     if (ret != 0) {
         free_page(sector_buf);
         return -2;
@@ -119,7 +134,9 @@ static int fat32_alloc_cluster(fat32_sb_data_t *sb_data, uint32_t *out_cluster)
 
     /* 扫描 FAT 表项寻找空闲项（值 == 0） */
     for (uint32_t i = start; i < sb_data->total_clusters + 2; i++) {
-        uint32_t val = fat32_get_fat_entry(sb_data, i);
+        uint32_t val;
+        int read_result = fat32_get_fat_entry(sb_data, i, &val);
+        if (read_result) return read_result;
         if (val == 0) {
             /* 找到空闲簇 - 标记为链结束 */
             int ret = fat32_set_fat_entry(sb_data, i, 0x0FFFFFFF);
@@ -135,7 +152,9 @@ static int fat32_alloc_cluster(fat32_sb_data_t *sb_data, uint32_t *out_cluster)
 
     /* 回绕并从簇 2 开始尝试 */
     for (uint32_t i = 2; i < start; i++) {
-        uint32_t val = fat32_get_fat_entry(sb_data, i);
+        uint32_t val;
+        int read_result = fat32_get_fat_entry(sb_data, i, &val);
+        if (read_result) return read_result;
         if (val == 0) {
             int ret = fat32_set_fat_entry(sb_data, i, 0x0FFFFFFF);
             if (ret != 0)
@@ -170,11 +189,11 @@ static int fat32_append_cluster(fat32_sb_data_t *sb_data, uint32_t last_cluster,
     }
 
     /* 将新簇清零，避免泄漏旧数据 */
-    void *zero_buf = alloc_page();
+    void *zero_buf = fat32_cluster_buffer(sb_data);
     if (zero_buf) {
-        memset(zero_buf, 0, PAGE_SIZE);
+        memset(zero_buf, 0, (uint32_t)sb_data->sectors_per_cluster * sb_data->bytes_per_sector);
         fat32_write_cluster(sb_data, new_cluster, zero_buf);
-        free_page(zero_buf);
+        fat32_free_cluster_buffer(sb_data, zero_buf);
     }
 
     *out_new_cluster = new_cluster;
@@ -272,14 +291,16 @@ static int fat32_dir_lookup(fat32_sb_data_t *sb_data, uint32_t dir_cluster,
     uint32_t cluster_size = (uint32_t)sb_data->sectors_per_cluster * sb_data->bytes_per_sector;
     uint32_t entries_per_cluster = cluster_size / sizeof(fat32_dir_entry_t);
 
-    void *cluster_buf = alloc_page();
+    void *cluster_buf = fat32_cluster_buffer(sb_data);
     if (!cluster_buf)
         return -1;
 
+    uint32_t budget = sb_data->total_clusters;
     while (cluster >= 2 && cluster < FAT32_EOC_MIN) {
+        if (!budget--) { fat32_free_cluster_buffer(sb_data, cluster_buf); return -5; }
         int ret = fat32_read_cluster(sb_data, cluster, cluster_buf);
         if (ret != 0) {
-            free_page(cluster_buf);
+            fat32_free_cluster_buffer(sb_data, cluster_buf);
             return -2;
         }
 
@@ -289,7 +310,7 @@ static int fat32_dir_lookup(fat32_sb_data_t *sb_data, uint32_t dir_cluster,
 
             /* 目录结束 */
             if (first_byte == 0x00) {
-                free_page(cluster_buf);
+                fat32_free_cluster_buffer(sb_data, cluster_buf);
                 return -1;
             }
 
@@ -309,16 +330,19 @@ static int fat32_dir_lookup(fat32_sb_data_t *sb_data, uint32_t dir_cluster,
             if (fat32_name_match(entries[i].name, name)) {
                 if (entry)
                     memcpy(entry, &entries[i], sizeof(fat32_dir_entry_t));
-                free_page(cluster_buf);
+                fat32_free_cluster_buffer(sb_data, cluster_buf);
                 return 0;
             }
         }
 
         /* 沿簇链继续 */
-        cluster = fat32_get_fat_entry(sb_data, cluster);
+        if (fat32_get_fat_entry(sb_data, cluster, &cluster)) {
+            fat32_free_cluster_buffer(sb_data, cluster_buf);
+            return -5;
+        }
     }
 
-    free_page(cluster_buf);
+    fat32_free_cluster_buffer(sb_data, cluster_buf);
     return -1;  /* 未找到 */
 }
 
@@ -401,12 +425,17 @@ static int fat32_inode_read(vfs_file_t *file, void *buf, size_t count)
     uint32_t cluster_size = (uint32_t)sb_data->sectors_per_cluster * sb_data->bytes_per_sector;
     uint64_t file_size = inode_data->file_size;
 
+    if (file->offset >= file_size || !count) return 0;
+    if (!buf) return -22;
+
     /* 计算剩余字节数 */
     uint64_t remaining = file_size - file->offset;
     if (remaining > count)
         remaining = count;
+    if (remaining > 0x7fffffff) remaining = 0x7fffffff;
     if (remaining == 0)
         return 0;
+    memset(buf, 0, remaining);
 
     /* 遍历簇链，找到包含当前偏移的簇 */
     uint32_t cluster = inode_data->start_cluster;
@@ -415,23 +444,24 @@ static int fat32_inode_read(vfs_file_t *file, void *buf, size_t count)
     /* 跳过整个簇以到达正确的簇 */
     while (offset >= cluster_size && cluster >= 2 && cluster < FAT32_EOC_MIN) {
         offset -= cluster_size;
-        cluster = fat32_get_fat_entry(sb_data, cluster);
+        if (fat32_get_fat_entry(sb_data, cluster, &cluster)) {
+            return -5;
+        }
     }
 
     if (cluster < 2 || cluster >= FAT32_EOC_MIN)
-        return 0;
+        return -5;
 
     /* 逐簇读取数据 */
     size_t done = 0;
-    void *cluster_buf = alloc_page();
+    int error = 0;
+    void *cluster_buf = fat32_cluster_buffer(sb_data);
     if (!cluster_buf)
         return -2;
 
     while (done < remaining && cluster >= 2 && cluster < FAT32_EOC_MIN) {
         int ret = fat32_read_cluster(sb_data, cluster, cluster_buf);
-        if (ret != 0) {
-            break;
-        }
+        if (ret != 0) { error = ret; break; }
 
         /* 从此簇复制多少数据 */
         uint32_t in_cluster = cluster_size - (uint32_t)offset;
@@ -446,10 +476,21 @@ static int fat32_inode_read(vfs_file_t *file, void *buf, size_t count)
         offset = 0;  /* 后续簇从偏移 0 开始 */
 
         /* 沿链继续 */
-        cluster = fat32_get_fat_entry(sb_data, cluster);
+        if (done < remaining && fat32_get_fat_entry(sb_data, cluster, &cluster)) {
+            error = -5; break;
+        }
     }
 
-    free_page(cluster_buf);
+    fat32_free_cluster_buffer(sb_data, cluster_buf);
+    if (error || done != remaining) {
+        memset(buf, 0, remaining);
+        return error ? error : -5;
+    }
+    static unsigned logged;
+    uint64_t milestone_irq = sf_irq_save();
+    if (!__atomic_exchange_n(&logged, 1, __ATOMIC_RELAXED))
+        sf_log("[FAT32] file read via dev.block READ\n");
+    sf_irq_restore(milestone_irq);
     file->offset += done;
     return (int)done;
 }
@@ -469,16 +510,18 @@ static int fat32_update_direntry(fat32_sb_data_t *sb_data, uint32_t parent_clust
     uint32_t cluster_size = (uint32_t)sb_data->sectors_per_cluster * sb_data->bytes_per_sector;
     uint32_t entries_per_cluster = cluster_size / sizeof(fat32_dir_entry_t);
 
-    void *cluster_buf = alloc_page();
+    void *cluster_buf = fat32_cluster_buffer(sb_data);
     if (!cluster_buf)
         return -1;
 
     uint32_t cluster = parent_cluster;
 
+    uint32_t budget = sb_data->total_clusters;
     while (cluster >= 2 && cluster < FAT32_EOC_MIN) {
+        if (!budget--) { fat32_free_cluster_buffer(sb_data, cluster_buf); return -5; }
         int ret = fat32_read_cluster(sb_data, cluster, cluster_buf);
         if (ret != 0) {
-            free_page(cluster_buf);
+            fat32_free_cluster_buffer(sb_data, cluster_buf);
             return -2;
         }
 
@@ -486,7 +529,7 @@ static int fat32_update_direntry(fat32_sb_data_t *sb_data, uint32_t parent_clust
         for (uint32_t i = 0; i < entries_per_cluster; i++) {
             uint8_t first_byte = entries[i].name[0];
             if (first_byte == 0x00) {
-                free_page(cluster_buf);
+                fat32_free_cluster_buffer(sb_data, cluster_buf);
                 return -1;  /* 未找到 */
             }
             if (first_byte == 0xE5)
@@ -505,15 +548,18 @@ static int fat32_update_direntry(fat32_sb_data_t *sb_data, uint32_t parent_clust
 
                 /* 将簇写回 */
                 ret = fat32_write_cluster(sb_data, cluster, cluster_buf);
-                free_page(cluster_buf);
+                fat32_free_cluster_buffer(sb_data, cluster_buf);
                 return ret;
             }
         }
 
-        cluster = fat32_get_fat_entry(sb_data, cluster);
+        if (fat32_get_fat_entry(sb_data, cluster, &cluster)) {
+            fat32_free_cluster_buffer(sb_data, cluster_buf);
+            return -5;
+        }
     }
 
-    free_page(cluster_buf);
+    fat32_free_cluster_buffer(sb_data, cluster_buf);
     return -1;  /* 未找到 */
 }
 
@@ -531,17 +577,19 @@ static int fat32_create_direntry(fat32_sb_data_t *sb_data, uint32_t parent_clust
     uint8_t name83[11];
     fat32_name_to_83(name, name83);
 
-    void *cluster_buf = alloc_page();
+    void *cluster_buf = fat32_cluster_buffer(sb_data);
     if (!cluster_buf)
         return -1;
 
     uint32_t cluster = parent_cluster;
     uint32_t prev_cluster = 0;
 
+    uint32_t budget = sb_data->total_clusters;
     while (cluster >= 2 && cluster < FAT32_EOC_MIN) {
+        if (!budget--) { fat32_free_cluster_buffer(sb_data, cluster_buf); return -5; }
         int ret = fat32_read_cluster(sb_data, cluster, cluster_buf);
         if (ret != 0) {
-            free_page(cluster_buf);
+            fat32_free_cluster_buffer(sb_data, cluster_buf);
             return -2;
         }
 
@@ -573,25 +621,28 @@ static int fat32_create_direntry(fat32_sb_data_t *sb_data, uint32_t parent_clust
 
                 /* 将簇写回 */
                 ret = fat32_write_cluster(sb_data, cluster, cluster_buf);
-                free_page(cluster_buf);
+                fat32_free_cluster_buffer(sb_data, cluster_buf);
                 return ret;
             }
         }
 
         prev_cluster = cluster;
-        cluster = fat32_get_fat_entry(sb_data, cluster);
+        if (fat32_get_fat_entry(sb_data, cluster, &cluster)) {
+            fat32_free_cluster_buffer(sb_data, cluster_buf);
+            return -5;
+        }
     }
 
     /* 未找到空闲槽位 - 扩展目录的簇链 */
     if (prev_cluster < 2 || prev_cluster >= FAT32_EOC_MIN) {
-        free_page(cluster_buf);
+        fat32_free_cluster_buffer(sb_data, cluster_buf);
         return -3;  /* 无法扩展 */
     }
 
     uint32_t new_cluster;
     int ret = fat32_append_cluster(sb_data, prev_cluster, &new_cluster);
     if (ret != 0) {
-        free_page(cluster_buf);
+        fat32_free_cluster_buffer(sb_data, cluster_buf);
         return ret;
     }
 
@@ -614,7 +665,7 @@ static int fat32_create_direntry(fat32_sb_data_t *sb_data, uint32_t parent_clust
     entries[1].name[0] = 0x00;
 
     ret = fat32_write_cluster(sb_data, new_cluster, cluster_buf);
-    free_page(cluster_buf);
+    fat32_free_cluster_buffer(sb_data, cluster_buf);
     return ret;
 }
 
@@ -649,7 +700,8 @@ static int fat32_inode_write(vfs_file_t *file, const void *buf, size_t count)
     uint64_t offset_remaining = offset;
 
     while (offset_remaining >= cluster_size) {
-        uint32_t next = fat32_get_fat_entry(sb_data, cluster);
+        uint32_t next;
+        if (fat32_get_fat_entry(sb_data, cluster, &next)) return -5;
         if (next >= FAT32_EOC_MIN) {
             /* 需要扩展链 */
             uint32_t new_cluster;
@@ -668,7 +720,7 @@ static int fat32_inode_write(vfs_file_t *file, const void *buf, size_t count)
 
     /* 读-改-写：读取簇，覆盖新数据，写回 */
     size_t done = 0;
-    void *cluster_buf = alloc_page();
+    void *cluster_buf = fat32_cluster_buffer(sb_data);
     if (!cluster_buf)
         return -4;
 
@@ -700,7 +752,11 @@ static int fat32_inode_write(vfs_file_t *file, const void *buf, size_t count)
 
         /* 如果需要写入更多数据，沿链继续或扩展 */
         if (done < count) {
-            uint32_t next = fat32_get_fat_entry(sb_data, cluster);
+            uint32_t next;
+            if (fat32_get_fat_entry(sb_data, cluster, &next)) {
+                fat32_free_cluster_buffer(sb_data, cluster_buf);
+                return -5;
+            }
             if (next >= FAT32_EOC_MIN) {
                 uint32_t new_cluster;
                 ret = fat32_append_cluster(sb_data, cluster, &new_cluster);
@@ -713,7 +769,7 @@ static int fat32_inode_write(vfs_file_t *file, const void *buf, size_t count)
         }
     }
 
-    free_page(cluster_buf);
+    fat32_free_cluster_buffer(sb_data, cluster_buf);
 
     /* 更新文件偏移和大小 */
     file->offset += done;
@@ -779,12 +835,12 @@ static int fat32_mkdir_cb(vfs_dentry_t *parent, const char *name, vfs_inode_t *i
         return ret;
 
     /* 将新簇清零并写入 "." 和 ".." 条目 */
-    void *cluster_buf = alloc_page();
+    void *cluster_buf = fat32_cluster_buffer(sb_data);
     if (!cluster_buf) {
         fat32_set_fat_entry(sb_data, dir_cluster, 0);
         return -2;
     }
-    memset(cluster_buf, 0, PAGE_SIZE);
+    memset(cluster_buf, 0, (uint32_t)sb_data->sectors_per_cluster * sb_data->bytes_per_sector);
 
     fat32_dir_entry_t *entries = (fat32_dir_entry_t *)cluster_buf;
 
@@ -810,7 +866,7 @@ static int fat32_mkdir_cb(vfs_dentry_t *parent, const char *name, vfs_inode_t *i
 
     /* 将簇写入磁盘 */
     ret = fat32_write_cluster(sb_data, dir_cluster, cluster_buf);
-    free_page(cluster_buf);
+    fat32_free_cluster_buffer(sb_data, cluster_buf);
     if (ret != 0) {
         fat32_set_fat_entry(sb_data, dir_cluster, 0);
         return ret;
@@ -845,23 +901,25 @@ static int fat32_unlink_cb(vfs_dentry_t *dentry)
     uint32_t cluster_size = (uint32_t)sb_data->sectors_per_cluster * sb_data->bytes_per_sector;
     uint32_t entries_per_cluster = cluster_size / sizeof(fat32_dir_entry_t);
 
-    void *cluster_buf = alloc_page();
+    void *cluster_buf = fat32_cluster_buffer(sb_data);
     if (!cluster_buf)
         return -2;
 
     uint32_t cluster = inode_data->parent_cluster;
 
+    uint32_t budget = sb_data->total_clusters;
     while (cluster >= 2 && cluster < FAT32_EOC_MIN) {
+        if (!budget--) { fat32_free_cluster_buffer(sb_data, cluster_buf); return -5; }
         int ret = fat32_read_cluster(sb_data, cluster, cluster_buf);
         if (ret != 0) {
-            free_page(cluster_buf);
+            fat32_free_cluster_buffer(sb_data, cluster_buf);
             return -3;
         }
 
         fat32_dir_entry_t *entries = (fat32_dir_entry_t *)cluster_buf;
         for (uint32_t i = 0; i < entries_per_cluster; i++) {
             if (entries[i].name[0] == 0x00) {
-                free_page(cluster_buf);
+                fat32_free_cluster_buffer(sb_data, cluster_buf);
                 return -4;  /* 条目未找到 */
             }
             if (entries[i].name[0] == 0xE5)
@@ -875,13 +933,14 @@ static int fat32_unlink_cb(vfs_dentry_t *dentry)
                 /* 找到 - 标记为已删除 */
                 entries[i].name[0] = 0xE5;
                 ret = fat32_write_cluster(sb_data, cluster, cluster_buf);
-                free_page(cluster_buf);
+                fat32_free_cluster_buffer(sb_data, cluster_buf);
 
                 /* 释放文件链中的所有簇 */
                 if (inode_data->start_cluster >= 2) {
                     uint32_t cl = inode_data->start_cluster;
                     while (cl >= 2 && cl < FAT32_EOC_MIN) {
-                        uint32_t next = fat32_get_fat_entry(sb_data, cl);
+                        uint32_t next;
+                        if (fat32_get_fat_entry(sb_data, cl, &next)) return -5;
                         fat32_set_fat_entry(sb_data, cl, 0);
                         cl = next;
                     }
@@ -891,10 +950,13 @@ static int fat32_unlink_cb(vfs_dentry_t *dentry)
             }
         }
 
-        cluster = fat32_get_fat_entry(sb_data, cluster);
+        if (fat32_get_fat_entry(sb_data, cluster, &cluster)) {
+            fat32_free_cluster_buffer(sb_data, cluster_buf);
+            return -5;
+        }
     }
 
-    free_page(cluster_buf);
+    fat32_free_cluster_buffer(sb_data, cluster_buf);
     return -4;  /* 条目未找到 */
 }
 
@@ -955,7 +1017,7 @@ static int fat32_populate_dir(vfs_superblock_t *sb, vfs_dentry_t *parent,
     uint32_t cluster_size = (uint32_t)sb_data->sectors_per_cluster * sb_data->bytes_per_sector;
     uint32_t entries_per_cluster = cluster_size / sizeof(fat32_dir_entry_t);
 
-    void *cluster_buf = alloc_page();
+    void *cluster_buf = fat32_cluster_buffer(sb_data);
     if (!cluster_buf)
         return -1;
 
@@ -970,10 +1032,12 @@ static int fat32_populate_dir(vfs_superblock_t *sb, vfs_dentry_t *parent,
 
     uint32_t cluster = dir_cluster;
 
+    uint32_t budget = sb_data->total_clusters;
     while (cluster >= 2 && cluster < FAT32_EOC_MIN) {
+        if (!budget--) { fat32_free_cluster_buffer(sb_data, cluster_buf); return -5; }
         int ret = fat32_read_cluster(sb_data, cluster, cluster_buf);
         if (ret != 0) {
-            free_page(cluster_buf);
+            fat32_free_cluster_buffer(sb_data, cluster_buf);
             return -2;
         }
 
@@ -983,7 +1047,7 @@ static int fat32_populate_dir(vfs_superblock_t *sb, vfs_dentry_t *parent,
 
             /* 目录结束 */
             if (first_byte == 0x00) {
-                free_page(cluster_buf);
+                fat32_free_cluster_buffer(sb_data, cluster_buf);
                 return 0;
             }
 
@@ -1095,7 +1159,7 @@ static int fat32_populate_dir(vfs_superblock_t *sb, vfs_dentry_t *parent,
 
             /* 创建 inode */
             vfs_inode_t *new_inode = (vfs_inode_t *)alloc_page();
-            if (!new_inode) continue;
+            if (!new_inode) { fat32_free_cluster_buffer(sb_data, cluster_buf); return -12; }
             memset(new_inode, 0, PAGE_SIZE);
 
             new_inode->ino = fat32_next_ino++;
@@ -1111,7 +1175,7 @@ static int fat32_populate_dir(vfs_superblock_t *sb, vfs_dentry_t *parent,
             fat32_inode_data_t *inode_data = (fat32_inode_data_t *)alloc_page();
             if (!inode_data) {
                 free_page(new_inode);
-                continue;
+                fat32_free_cluster_buffer(sb_data, cluster_buf); return -12;
             }
             memset(inode_data, 0, PAGE_SIZE);
             inode_data->start_cluster = entry_cluster;
@@ -1131,7 +1195,7 @@ static int fat32_populate_dir(vfs_superblock_t *sb, vfs_dentry_t *parent,
             if (!new_dentry) {
                 free_page(inode_data);
                 free_page(new_inode);
-                continue;
+                fat32_free_cluster_buffer(sb_data, cluster_buf); return -12;
             }
             memset(new_dentry, 0, PAGE_SIZE);
             strncpy(new_dentry->name, name, VFS_MAX_NAME - 1);
@@ -1144,10 +1208,13 @@ static int fat32_populate_dir(vfs_superblock_t *sb, vfs_dentry_t *parent,
         }
 
         /* 沿簇链继续 */
-        cluster = fat32_get_fat_entry(sb_data, cluster);
+        if (fat32_get_fat_entry(sb_data, cluster, &cluster)) {
+            fat32_free_cluster_buffer(sb_data, cluster_buf);
+            return -5;
+        }
     }
 
-    free_page(cluster_buf);
+    fat32_free_cluster_buffer(sb_data, cluster_buf);
     return 0;
 }
 
@@ -1157,21 +1224,41 @@ static int fat32_populate_dir(vfs_superblock_t *sb, vfs_dentry_t *parent,
  * 遍历 FAT32 目录树，创建对应的 VFS 目录项。
  * ======================================================================== */
 
-static void fat32_populate_recursive(vfs_superblock_t *sb, vfs_dentry_t *parent,
-                                     uint32_t dir_cluster)
+static int fat32_populate_recursive(vfs_superblock_t *sb, vfs_dentry_t *parent,
+                                     uint32_t dir_cluster, unsigned depth)
 {
+    if (depth >= 64) return -5;
     /* 首先填充此目录 */
-    fat32_populate_dir(sb, parent, dir_cluster);
+    int result = fat32_populate_dir(sb, parent, dir_cluster);
+    if (result) return result;
 
     /* 然后递归进入子目录 */
     vfs_dentry_t *child = parent->child;
     while (child) {
         if (child->inode && child->inode->type == VFS_TYPE_DIR && child->inode->fs_data) {
             fat32_inode_data_t *id = (fat32_inode_data_t *)child->inode->fs_data;
-            fat32_populate_recursive(sb, child, id->start_cluster);
+            result = fat32_populate_recursive(sb, child, id->start_cluster, depth + 1);
+            if (result) return result;
         }
         child = child->next;
     }
+    return 0;
+}
+
+/* Only the not-yet-published mount owns these objects. */
+static void fat32_discard_tree(vfs_dentry_t *entry)
+{
+    vfs_dentry_t *child = entry->child;
+    while (child) {
+        vfs_dentry_t *next = child->next;
+        fat32_discard_tree(child);
+        child = next;
+    }
+    if (entry->inode) {
+        if (entry->inode->fs_data) free_page(entry->inode->fs_data);
+        free_page(entry->inode);
+    }
+    free_page(entry);
 }
 
 /* ========================================================================
@@ -1189,9 +1276,11 @@ static int fat32_mount(vfs_superblock_t *sb, uint8_t blkdev_id, const char *opti
         while (*p) {
             if (strncmp(p, "blkdev=", 7) == 0) {
                 p += 7;
-                int val = 0;
+                uint32_t val = 0;
+                if (*p < '0' || *p > '9') return -22;
                 while (*p >= '0' && *p <= '9') {
                     val = val * 10 + (*p - '0');
+                    if (val >= SFM_BLOCK_MAX) return -22;
                     p++;
                 }
                 dev_id = (uint8_t)val;
@@ -1206,12 +1295,16 @@ static int fat32_mount(vfs_superblock_t *sb, uint8_t blkdev_id, const char *opti
         return -1;
     }
 
+    sf_block_client_t reader;
+    int open_result = sf_block_client_open(dev_id, &reader);
+    if (open_result) return open_result;
+
     /* 从扇区 0 读取 BPB */
     void *sector_buf = alloc_page();
     if (!sector_buf)
         return -2;
 
-    int ret = blkdev_read(dev_id, 0, 1, sector_buf);
+    int ret = sf_block_client_read(&reader, 0, 1, sector_buf, PAGE_SIZE);
     if (ret != 0) {
         printf("[FAT32] Failed to read BPB (err=%d)\n", ret);
         free_page(sector_buf);
@@ -1241,6 +1334,26 @@ static int fat32_mount(vfs_superblock_t *sb, uint8_t blkdev_id, const char *opti
         return -6;
     }
 
+    /* Bound every later allocation and on-disk arithmetic before parsing dirs. */
+    uint32_t sectors = bpb->total_sectors_32 ? bpb->total_sectors_32 : bpb->total_sectors_16;
+    uint64_t data_start = (uint64_t)bpb->reserved_sectors +
+                          (uint64_t)bpb->num_fats * bpb->sectors_per_fat_32;
+    uint32_t cluster_bytes = (uint32_t)bpb->bytes_per_sector * bpb->sectors_per_cluster;
+    if (bpb->bytes_per_sector != reader.sector_size || reader.sector_size < 512 ||
+        !bpb->sectors_per_cluster || (bpb->sectors_per_cluster & (bpb->sectors_per_cluster - 1)) ||
+        cluster_bytes > SF_BLOCK_CLIENT_MAX_BYTES || !bpb->reserved_sectors ||
+        !bpb->num_fats || bpb->num_fats > 2 || bpb->root_entry_count ||
+        bpb->sectors_per_fat_16 || bpb->fs_version || bpb->ext_flags ||
+        data_start >= sectors || sectors > reader.sector_count) {
+        free_page(sector_buf); return -22;
+    }
+    uint32_t clusters = (sectors - data_start) / bpb->sectors_per_cluster;
+    if (!clusters || clusters > 0x0fffffee || bpb->root_dir_cluster < 2 ||
+        bpb->root_dir_cluster - 2 >= clusters ||
+        (uint64_t)bpb->sectors_per_fat_32 * bpb->bytes_per_sector / 4 < (uint64_t)clusters + 2) {
+        free_page(sector_buf); return -22;
+    }
+
     /* 检查 fs_type 字段中的 "FAT32" */
     if (memcmp(bpb->fs_type, "FAT32   ", 8) != 0) {
         printf("[FAT32] fs_type mismatch: %.8s\n", bpb->fs_type);
@@ -1255,6 +1368,7 @@ static int fat32_mount(vfs_superblock_t *sb, uint8_t blkdev_id, const char *opti
     }
     memset(sb_data, 0, PAGE_SIZE);
 
+    sb_data->reader = reader;
     sb_data->blkdev_id = dev_id;
     sb_data->bytes_per_sector = bpb->bytes_per_sector;
     sb_data->sectors_per_cluster = bpb->sectors_per_cluster;
@@ -1278,15 +1392,6 @@ static int fat32_mount(vfs_superblock_t *sb, uint8_t blkdev_id, const char *opti
     sb_data->total_clusters = data_sectors / sb_data->sectors_per_cluster;
     sb_data->total_data_clusters = sb_data->total_clusters;
     sb_data->next_free_cluster = 2;
-
-    sb->fs_data = sb_data;
-    sb->blkdev_id = dev_id;
-
-    printf("[FAT32] Mounted on blkdev %u, bytes/sector=%u, sectors/cluster=%u\n",
-           dev_id, sb_data->bytes_per_sector, sb_data->sectors_per_cluster);
-    printf("[FAT32] FAT start=%u, data start=%u, root cluster=%u, total clusters=%u\n",
-           sb_data->fat_start_sector, sb_data->data_start_sector,
-           sb_data->root_dir_cluster, sb_data->total_clusters);
 
     /* 创建根 inode */
     vfs_inode_t *root = (vfs_inode_t *)alloc_page();
@@ -1331,14 +1436,27 @@ static int fat32_mount(vfs_superblock_t *sb, uint8_t blkdev_id, const char *opti
     root_dentry->inode = root;
     root_dentry->parent = root_dentry;
 
+    sb->fs_data = sb_data;
+    sb->blkdev_id = dev_id;
     sb->root = root_dentry;
     sb->root_inode = root;
 
     free_page(sector_buf);
 
     /* 填充目录树 */
-    fat32_populate_recursive(sb, root_dentry, sb_data->root_dir_cluster);
-
+    ret = fat32_populate_recursive(sb, root_dentry, sb_data->root_dir_cluster, 0);
+    if (ret) {
+        fat32_discard_tree(root_dentry);
+        free_page(sb_data);
+        sb->root = NULL; sb->root_inode = NULL; sb->fs_data = NULL;
+        return ret;
+    }
+    printf("[FAT32] Mounted on blkdev %u, bytes/sector=%u, sectors/cluster=%u\n",
+           dev_id, sb_data->bytes_per_sector, sb_data->sectors_per_cluster);
+    printf("[FAT32] FAT start=%u, data start=%u, root cluster=%u, total clusters=%u\n",
+           sb_data->fat_start_sector, sb_data->data_start_sector,
+           sb_data->root_dir_cluster, sb_data->total_clusters);
+    sf_log("[FAT32] BPB and directories via dev.block READ\n");
     return 0;
 }
 

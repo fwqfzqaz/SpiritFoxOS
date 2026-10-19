@@ -3,6 +3,7 @@
 
 #include "vfs.h"
 #include <stdint.h>
+#include "block_client.h"
 
 /* ========================================================================
  * FAT32 Attribute Constants
@@ -82,6 +83,7 @@ typedef struct {
  * ======================================================================== */
 
 typedef struct {
+    sf_block_client_t reader;    /* Pinned sealed dev.block generation. */
     uint8_t  blkdev_id;          /* Block device ID */
     uint16_t bytes_per_sector;   /* Bytes per sector */
     uint8_t  sectors_per_cluster;/* Sectors per cluster */

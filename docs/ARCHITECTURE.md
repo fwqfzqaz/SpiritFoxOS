@@ -135,5 +135,9 @@ dev.registry 在 input/DRM 初始化后导入真实节点并冻结，公共 /dev
 [fault handlers](https://docs.sel4.systems/Tutorials/fault-handlers.html)，
 用于区分端点通信与故障隔离的责任；本项目未复制其实现，也不声称等同 seL4。
 
-每轮先读 [最新对接记录](integration/20261019-device-registry.md) 与
+FAT32 的 BPB、FAT 表、目录及文件读取已接入 dev.block READ。核心客户端固定已封存
+快照，最多 64 KiB 请求拆成 4 KiB 消息；失败清空输出，忙立即返回，不回退 raw 读。
+原 FAT32 写入仍走兼容驱动，尚未迁移写权限/事务与超时 DMA 生命周期。
+
+每轮先读 [最新对接记录](integration/20261019-fat32-read.md) 与
 [下一步交接](handoff/NEXT.md)，每次提交同时更新两处。

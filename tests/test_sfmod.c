@@ -19,6 +19,7 @@ void test_pci_client(void);
 void test_block_protocol(void);
 void test_block_fixture(unsigned);
 void test_block_publish(void);
+void test_block_client(void);
 
 void *sf_alloc(size_t size)
 {
@@ -317,6 +318,7 @@ int main(int argc, char **argv)
     }
     test_package(package, size, failure, fail_size);
     test_pci_client();
+    test_block_client();
     assert(!allocations);
     for (unsigned pass = 0; pass < 2; pass++) {
         pci_fixture_count = pass ? SFM_PCI_MAX : 0;

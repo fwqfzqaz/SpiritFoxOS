@@ -51,6 +51,7 @@ required = [b"[SpiritFoxOS] Enabling interrupts...", b"[SpiritFoxOS] shell_run..
             b"[AHCI] Port 0: SATA disk sda", b"[AHCI] Port 1: SATA disk sdb",
             b"[RAMDISK] Created ram0: 2048 sectors",
             b"[FAT32] Mounted on blkdev 0", b"[VFS] Mounted fat32 at /mnt",
+            b"[FAT32] BPB and directories via dev.block READ", b"[FAT32] file read via dev.block READ",
             b"[sfmod] filesystem services ready after VFS/process",
             b"[sfmod] sealed block inventory matches platform devices",
             b"[sfmod] read-only block messages match platform sectors",
