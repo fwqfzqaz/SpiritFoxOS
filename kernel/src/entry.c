@@ -12,6 +12,7 @@
 #include "autorun.h"
 #include "net.h"
 #include "net_icmp.h"
+#include "process.h"
 
 void kernel_panic(const char* msg)
 {
@@ -63,6 +64,7 @@ void kernel_main(BootInfo* boot_info)
 
     serial_puts("[SpiritFoxOS] Enabling interrupts...\n");
     hal_enable_interrupts();
+    if (process_allocation_selftest()) kernel_panic("reserved PID scheduled before initialization");
 
     printf("[SpiritFoxOS] All subsystems initialized.\n");
     printf("[SpiritFoxOS] Linux ABI compat | Registry | Packages | Sandbox\n");

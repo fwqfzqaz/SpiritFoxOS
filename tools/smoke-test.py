@@ -47,8 +47,10 @@ required = [b"[SpiritFoxOS] Enabling interrupts...", b"[SpiritFoxOS] shell_run..
             b"[sfmod-user] special devices passed",
             b"[sfmod] PCI snapshot matches platform inventory",
             b"[bochs_drm] VGA selected via dev.pci",
+            b"[process] reserved PID preemption passed",
             b"[client] Window created", b"[client] frame 10"]
 bad = [b"KERNEL PANIC", b"Triple fault", b"[EXCEPTION]", b"!!! EXCEPTION:", b"System Halted.",
+       b"[SCHED] PANIC:", b"[SCHED] HALT:",
        b"[sfmod] PCI snapshot self-test failed",
        b"[sfmod-user] redirect leaked",
        b"[client] ERROR:", b"[client] wl_display_dispatch error:", b"[sfmod-user] FAILED", b"[exit] BUG:", b"[sched] BUG:", b"[wait] BUG:", b"[sfmod] bridge release failed"]

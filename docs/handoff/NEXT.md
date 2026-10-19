@@ -14,6 +14,10 @@ BAR size=0 且 SIZE_KNOWN 未置位表示未知，不可当作可映射资源范
 工作区初版两套构建/启动通过；新增边界测试在干净导出源码上通过宿主 UBSan。
 最终提交仍由 pre-push 完整复测；远端结果以 PR 的 Actions 记录为准。
 
+3c5b51f 的远端 Ubuntu 暴露旧 PID 提前 READY 竞态，已改为 PROC_ALLOCATING，
+上下文完成才发布。新增启动预留槽抢占回归；最终修复必须通过两套完整检查。
+后续创建进程不得在 alloc_pid 与 process_enqueue 之间重置为 UNUSED 或 READY。
+
 ## 下一步：统一设备注册与目录视图
 
 先按 [设备注册提案](../DEVICE-REGISTRY.md) 评审布局、逻辑 owner、节点代数、

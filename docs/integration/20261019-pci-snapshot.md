@@ -65,3 +65,16 @@ Wayland 10 帧标记，收据 build_exit_code=0、exit_code=0。随后补充的�
 筛选及旧包边界测试在干净 Linux 导出源码上 make test-modules 通过（UBSan）。
 最终提交由 pre-push 再完整构建/启动；结果与远端 CI 以对应运行记录为准。
 Arch 为 Ubuntu VM 内独立 chroot，不是原生 Arch 内核；真机和长期负载未验证。
+
+### CI 捕获的进程发布竞态
+
+3c5b51f 的远端运行 39179022644：Arch 通过，Ubuntu 编译通过但启动失败。
+归档日志显示 kthread 分配 PID 后、初始化栈前，被定时器扫描为 READY；该槽
+pid/kernel_rsp 尚为零，调度器出现 PID0 -> PID0、kernel_rsp=0 并停机。
+此问题来自旧 alloc_pid 的提前 READY，不是 PCI 快照错误，也不能只重跑掩盖。
+
+修复：在 proc_table_lock 内清零并设为新增 PROC_ALLOCATING；kthread/fork/clone
+上下文完整后才由 process_enqueue 发布 READY。失败释放槽，process_get 不暴露
+初始化中的进程。启动回归主动保留一个无栈槽并调度 8 次，确认不会被运行，再
+回收槽；原 16 次 fork/wait 保留。smoke 同时立即拒绝 SCHED PANIC/HALT。
+修复提交由 pre-push 重新完整验证，最终结果以对应提交收据和 CI 为准。

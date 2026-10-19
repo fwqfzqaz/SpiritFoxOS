@@ -16,6 +16,7 @@ typedef struct vfs_file vfs_file_t;
 #define PROC_RUNNING     2
 #define PROC_BLOCKED     3
 #define PROC_ZOMBIE      4
+#define PROC_ALLOCATING  5 /* Reserved slot; never runnable or externally visible. */
 
 /* ========================================================================
  * Process flags
@@ -139,6 +140,7 @@ typedef struct process {
 
 /* Initialize process subsystem */
 void process_init(void);
+int process_allocation_selftest(void);
 
 /* Create a kernel thread */
 process_t *process_create_kthread(void (*entry)(void *), void *arg);
