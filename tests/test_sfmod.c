@@ -15,6 +15,7 @@ static int ready_messages;
 void test_fail_allocations(int budget) { fail_after = budget; }
 void test_registry(void);
 void test_registry_capacity(void);
+void test_pci_client(void);
 
 void *sf_alloc(size_t size)
 {
@@ -309,6 +310,8 @@ int main(int argc, char **argv)
         free(elf);
     }
     test_package(package, size, failure, fail_size);
+    test_pci_client();
+    assert(!allocations);
     for (unsigned pass = 0; pass < 2; pass++) {
         pci_fixture_count = pass ? SFM_PCI_MAX : 0;
         assert(!sfm_package_load(package, size) && !sfm_pci_selftest());

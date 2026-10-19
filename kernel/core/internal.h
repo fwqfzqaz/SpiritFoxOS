@@ -47,7 +47,6 @@ void sfm_owner_remove(uint32_t);
 void sfm_owner_enable(uint32_t, int);
 int sfm_package_load(const void *, size_t);
 int sfm_module_unload(const char *);
-void sfm_boot(void);
 int sfm_selftest(void);
 int sfm_device_selftest(void);
 

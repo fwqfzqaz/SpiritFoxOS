@@ -46,6 +46,11 @@ required = [b"[SpiritFoxOS] Enabling interrupts...", b"[SpiritFoxOS] shell_run..
             b"[sfmod] device service self-test passed", b"[sfmod] special devices attached:",
             b"[sfmod-user] special devices passed",
             b"[sfmod] PCI snapshot matches platform inventory",
+            b"[sfmod] early services ready before storage",
+            b"[AHCI] Controller selected via dev.pci BAR5=",
+            b"[AHCI] Port 0: SATA disk sda", b"[AHCI] Port 1: SATA disk sdb",
+            b"[FAT32] Mounted on blkdev 0", b"[VFS] Mounted fat32 at /mnt",
+            b"[sfmod] filesystem services ready after VFS/process",
             b"[bochs_drm] VGA selected via dev.pci",
             b"[process] reserved PID preemption passed",
             b"[sfmod] unified device registry matches public /dev",
@@ -65,6 +70,20 @@ with error.open("wb") as errors:
             if any(marker in data for marker in bad):
                 raise SystemExit(f"Kernel failed; inspect {log}")
             if all(marker in data for marker in required):
+                # Catch a double package load, allocator reset or late PCI service.
+                ordered = [b"[SpiritFoxOS] kmalloc_init...", b"[SpiritFoxOS] slab_init...",
+                    b"[sfmod] early services ready before storage",
+                    b"[AHCI] Controller selected via dev.pci BAR5=",
+                    b"[SpiritFoxOS] vfs_init...", b"[SpiritFoxOS] process_init...",
+                    b"[sfmod] self-test passed:", b"[sfmod] VFS bridge passed:",
+                    b"[sfmod] filesystem services ready after VFS/process",
+                    b"[sfmod] unified device registry matches public /dev",
+                    b"[SpiritFoxOS] Enabling interrupts..."]
+                positions = [data.find(marker) for marker in ordered]
+                modules = [b"fs.vfs", b"demo.hello", b"fs.tmpfs", b"dev.tmpfs", b"dev.pci", b"dev.registry"]
+                once = ordered + [b"[sfmod] ready: " + name + b"\n" for name in modules]
+                if any(data.count(marker) != 1 for marker in once) or positions != sorted(positions):
+                    raise SystemExit(f"Boot phase order/package single-load check failed; inspect {log}")
                 # Keep running briefly: a boot marker alone can precede a fault.
                 time.sleep(3)
                 data = log.read_bytes()

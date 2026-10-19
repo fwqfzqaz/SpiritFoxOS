@@ -94,7 +94,11 @@ memfs、FAT32、devfs、procfs 与驱动调用路径。
 
 ### 后续阶段
 
-本版仍是宏内核兼容路径加受信任插件；尚未迁移 PCI/AHCI/tty/进程/Linux ABI 为
+2026-10-19 增量：PCI 快照与统一设备目录已实现（ABI 1.4）；AHCI 设备选择现通过
+dev.pci，启动包在存储初始化前启动，文件/设备接入在各自依赖就绪后执行。
+驱动 DMA、IRQ、数据读写及 Ring 3 隔离仍未迁移。实测结果以最新 integration 文档为准。
+
+本版仍是宏内核兼容路径加受信任插件；AHCI 数据面、tty、进程/Linux ABI 尚未迁为
 独立模块，尚无 Ring 3 驱动隔离、超时/阻塞 IPC、完整能力模型和驱动监督重启。
 保留现有分配器/调度器，不宣称实现了新的 buddy/SMP 调度。BIOS、ext4、网络和
 真机未在本次验收覆盖。详见 ARCHITECTURE.md 和 SFMOD-ABI.md。

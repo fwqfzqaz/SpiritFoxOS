@@ -31,6 +31,21 @@
 
 ## 目标结构与迁移接口
 
+2026-10-19 启动顺序：`init_core`（页分配/MMU/原 PCI 缓存）→
+`init_hardware`（CPU/GS、APIC、时钟，尚未开中断）→ `init_allocators`
+（仅一次 kmalloc/slab）→ `sfm_boot_early`（内嵌包、端点、PCI 快照自测）→
+AHCI/ramdisk → 根 VFS/FAT32 → 进程/syscall/系统服务 →
+`sfm_boot_filesystems`（消息文件自测及 /modules、/tmp、/run 挂载）→
+目录/input/DRM → 统一设备登记/自测/封存 → 开中断及 PID 回归 → 用户程序。
+模块包来自链接进内核的只读数据，早期 init 只依赖内存、日志、消息和 PCI 缓存，
+不访问待初始化的磁盘、旧 VFS 或进程。后期不得再次初始化分配器或加载启动包。
+
+AHCI 控制器查找已走 `dev.pci` 的 FIND 消息；命令提交、DMA 和端口探测仍在原驱动。
+无可用控制器返回空结果；协议失败单独报负错误，不退回原始 PCI 扫描。
+平台启动阶段重复或乱序、包/自测/挂载失败会 panic，停止继续启动。
+包加载失败仍由 loader 逆序回收；挂载开始后尚无事务回滚，失败直接停机，不重试。
+细节和验证见 [早期 PCI/AHCI 对接](integration/20261019-early-pci-ahci.md)。
+
 ```text
 UEFI stub -> kernel/src 的现有硬件/内存/进程初始化
                     |

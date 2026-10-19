@@ -23,12 +23,28 @@ extern const uint8_t sfm_package_start[], sfm_package_end[];
 extern void kernel_panic(const char *message);
 extern int sfm_mount_compat(void);
 
-void sfm_boot(void)
+/* A failure is fatal: never retry with partially mounted VFS state. */
+enum { BOOT_NEW, BOOT_LOADING, BOOT_EARLY, BOOT_MOUNTING, BOOT_FILESYSTEMS };
+static unsigned boot_phase;
+
+void sfm_boot_early(void)
 {
+    if (boot_phase != BOOT_NEW) kernel_panic("sfmod early boot called twice/out of order");
+    boot_phase = BOOT_LOADING;
     int result = sfm_package_load(sfm_package_start, sfm_package_end - sfm_package_start);
     if (result) kernel_panic("sfmod package validation/init failed");
-    if (sfm_selftest()) kernel_panic("sfmod message/file self-test failed");
     if (sfm_pci_selftest()) kernel_panic("sfmod PCI snapshot self-test failed");
+    boot_phase = BOOT_EARLY;
+    sf_log("[sfmod] early services ready before storage\n");
+}
+
+void sfm_boot_filesystems(void)
+{
+    if (boot_phase != BOOT_EARLY) kernel_panic("sfmod filesystem boot called twice/out of order");
+    boot_phase = BOOT_MOUNTING;
+    if (sfm_selftest()) kernel_panic("sfmod message/file self-test failed");
     sf_log("[sfmod] self-test passed: IPC queue, RPC, VFS/tmpfs read/write\n");
     if (sfm_mount_compat()) kernel_panic("sfmod VFS bridge failed");
+    boot_phase = BOOT_FILESYSTEMS;
+    sf_log("[sfmod] filesystem services ready after VFS/process\n");
 }

@@ -149,8 +149,8 @@ build/modules/test.fail.sfmod: tests/modules/fail.c kernel/include/sfmod.h kerne
 
 test-modules: modules build/modules/test.fail.sfmod
 	$(HOST_CC) -std=gnu11 -O1 -g -Wall -Wextra -Werror -no-pie -fsanitize=undefined -fno-sanitize-recover=all -Ikernel/include \
-	    tests/test_sfmod.c tests/test_registry.c kernel/core/ipc/endpoint.c kernel/core/module/elf.c \
-	    kernel/core/module/loader.c kernel/core/selftest.c kernel/core/pci.c kernel/core/pci_test.c -o build/test_sfmod
+	    tests/test_sfmod.c tests/test_registry.c tests/test_pci_client.c kernel/core/ipc/endpoint.c kernel/core/module/elf.c \
+	    kernel/core/module/loader.c kernel/core/selftest.c kernel/core/pci.c kernel/core/pci_test.c kernel/core/pci_client.c -o build/test_sfmod
 	build/test_sfmod build/modules/init.sfpack build/modules/test.fail.sfmod $(SFM_FILES)
 
 $(KERNEL_BUILD)/kernel.elf: $(KERNEL_OBJS) $(KERNEL_SRC)/kernel.ld

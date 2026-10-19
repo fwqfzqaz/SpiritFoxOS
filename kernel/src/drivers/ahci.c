@@ -1,5 +1,6 @@
 #include "ahci.h"
-#include "pci.h"
+#include "../../core/pci.h"
+#include "serial.h"
 #include "hal.h"
 #include "memory.h"
 #include "string.h"
@@ -319,35 +320,18 @@ static uint64_t ahci_get_sector_count(ahci_port_t *port)
 
 void ahci_init(void)
 {
-    /* 在 PCI 总线上查找 AHCI 控制器 */
-    int dev_count = pci_get_device_count();
-    uintptr_t abar = 0;
-    int found = 0;
-
-    for (int i = 0; i < dev_count; i++) {
-        const pci_device_t *dev = pci_get_device(i);
-        if (!dev) continue;
-
-        /* 类 0x01 = 大容量存储，子类 0x06 = SATA，编程接口 0x01 = AHCI */
-        if (dev->class_code == 0x01 && dev->subclass == 0x06 && dev->prog_if == 0x01) {
-            /* 找到 AHCI 控制器 - 使用 BAR5（ABAR） */
-            abar = dev->bars[5] & ~0xF;  /* 清除 I/O 和内存类型位 */
-
-            /* 如果 BAR5 是内存映射的，确保已映射 */
-            if (abar) {
-                hal_ensure_mapped(abar, 0x1100);  /* 映射足够所有端口使用的空间 */
-                found = 1;
-                printf("[AHCI] Controller found at PCI %d:%d:%d, ABAR=%p\n",
-                       dev->bus, dev->device, dev->function, (void*)abar);
-            }
-            break;
-        }
-    }
-
-    if (!found) {
-        printf("[AHCI] No AHCI controller found\n");
+    sfm_pci_record_t controller;
+    int selected = sfm_pci_find_ahci(&controller);
+    if (selected <= 0) {
+        printf("[AHCI] No usable controller via dev.pci (result=%d)\n", selected);
         return;
     }
+    uintptr_t abar = (uintptr_t)controller.bars[5].address;
+    hal_ensure_mapped(abar, 0x1100);
+    serial_puts("[AHCI] Controller selected via dev.pci BAR5=");
+    serial_put_hex(abar); serial_puts("\n");
+    printf("[AHCI] Controller found at PCI %d:%d:%d, ABAR=%p\n",
+           controller.bus, controller.device, controller.function, (void *)abar);
 
     /* 使能 AHCI 模式 */
     uint32_t ghc = ahci_read(abar, AHCI_GHC);
