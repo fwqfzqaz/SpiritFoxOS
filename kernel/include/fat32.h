@@ -87,6 +87,9 @@ typedef struct {
     uint8_t  blkdev_id;          /* Block device ID */
     uint16_t bytes_per_sector;   /* Bytes per sector */
     uint8_t  sectors_per_cluster;/* Sectors per cluster */
+    uint8_t  num_fats;           /* Mirrored copies; active-FAT mode is rejected. */
+    uint8_t  write_fault;        /* Ambiguous mutation: refuse further writes. */
+    uint8_t  write_busy;         /* Serialize mutations; never spin or sleep. */
     uint32_t reserved_sectors;   /* Reserved sectors before FAT */
     uint32_t sectors_per_fat;    /* Sectors per FAT table */
     uint32_t root_dir_cluster;   /* Root directory starting cluster */

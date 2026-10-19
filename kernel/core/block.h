@@ -10,5 +10,6 @@ int sf_block_freeze(void);
 int sf_block_frozen(void);
 void *sf_block_dma_page(void);
 int sf_block_raw_read(uint32_t, uint64_t, uint32_t, void *);
+int sf_block_raw_write(uint32_t, uint64_t, uint32_t, const void *);
 int sfm_block_io_selftest(void);
 #endif

@@ -14,4 +14,9 @@ int sf_block_client_open(uint32_t index, sf_block_client_t *out);
  * Structurally invalid output extents are untouched. Check the return code. */
 int sf_block_client_read(const sf_block_client_t *, uint64_t lba, uint32_t count,
                          void *data, uint32_t capacity);
+/* Compatibility kernel writer only; NOT a module permission or WRITE RPC.
+ * Whole successful chunks are reported; a failing chunk may also have reached
+ * media. No atomicity, retries, rollback or durability guarantee is implied. */
+int sf_block_client_write_compat(const sf_block_client_t *, uint64_t lba, uint32_t count,
+                                const void *data, uint32_t capacity, uint32_t *completed);
 #endif

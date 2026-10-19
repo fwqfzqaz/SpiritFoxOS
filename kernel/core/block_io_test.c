@@ -1,6 +1,7 @@
 /* Boot-only comparison with the real AHCI/RAMDISK data path. */
 #include "block.h"
 #include "memory.h"
+#include "block_client.h"
 #define CHECK(x) do { if (!(x)) goto fail; } while (0)
 int sfm_block_io_selftest(void)
 {
@@ -40,6 +41,24 @@ int sfm_block_io_selftest(void)
         CHECK(sfm_call(endpoint, req, resp) == SFM_ENOENT);
         req->handle = endpoint; req->type = SFM_BLOCK_WRITE;
         CHECK(sfm_call(endpoint, req, resp) == -30);
+        /* Never probe writes on attached physical disks. Only exercise the
+         * kernel-created volatile ram0, preserving its previous contents. */
+        if (record.type == SFM_BLOCK_RAMDISK && record.geometry_source == SFM_BLOCK_GEOMETRY_SOFTWARE &&
+            sfm_name_equal(record.name, "ram0") && record.sector_count == 2048) {
+            sf_block_client_t disk;
+            uint32_t completed;
+            uint64_t lba = record.sector_count - 8;
+            CHECK(!sf_block_client_open(index, &disk));
+            CHECK(!sf_block_client_read(&disk, lba, 8, reference, SFM_PAYLOAD));
+            for (unsigned i = 0; i < SFM_PAYLOAD; i++) req->data[i] = (uint8_t)(i % 251 + 1);
+            CHECK(!sf_block_client_write_compat(&disk, lba, 8, req->data, SFM_PAYLOAD, &completed) && completed == 8);
+            CHECK(!sf_block_client_read(&disk, lba, 8, resp->data, SFM_PAYLOAD));
+            for (unsigned i = 0; i < SFM_PAYLOAD; i++) CHECK(resp->data[i] == req->data[i]);
+            CHECK(!sf_block_client_write_compat(&disk, lba, 8, reference, SFM_PAYLOAD, &completed) && completed == 8);
+            CHECK(!sf_block_client_read(&disk, lba, 8, resp->data, SFM_PAYLOAD));
+            for (unsigned i = 0; i < SFM_PAYLOAD; i++) CHECK(resp->data[i] == reference[i]);
+            sf_log("[sfmod] compatibility RAM writes use core-owned DMA buffers\n");
+        }
     }
     sf_free(req); sf_free(resp); free_page(reference);
     sf_log("[sfmod] read-only block messages match platform sectors\n");

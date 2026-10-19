@@ -3,16 +3,38 @@
 #include <stdlib.h>
 #include <string.h>
 #include "../kernel/core/block.h"
+#include "block_client.h"
 extern void test_fail_allocations(int);
 static uint32_t fixture_mask;
 static unsigned fixture_pass;
 static int frozen, fail_dma, fail_io, nested_io;
 static unsigned raw_calls, next_page;
-static _Alignas(4096) uint8_t dma_pages[SFM_BLOCK_MAX][4096];
+static _Alignas(4096) uint8_t dma_pages[SFM_BLOCK_MAX * 2][4096];
 void test_block_fixture(unsigned pass) { fixture_pass = pass; frozen = 0; fixture_mask = pass == 0 ? 0 : pass == 1 ? 0x8009 : 0xffff; }
 int sf_block_freeze(void) { if (frozen) return SFM_EBUSY; frozen = 1; return 0; }
 int sf_block_frozen(void) { return frozen; }
-void *sf_block_dma_page(void) { if (fail_dma) return NULL; assert(next_page < SFM_BLOCK_MAX); return dma_pages[next_page++]; }
+void *sf_block_dma_page(void) { if (fail_dma) return NULL; assert(next_page < SFM_BLOCK_MAX * 2); return dma_pages[next_page++]; }
+static unsigned writes, write_fail_at;
+static int write_error, nested_write;
+static uint64_t write_start;
+static uint8_t *write_source;
+static const void *retained_write_page;
+int sf_block_raw_write(uint32_t index, uint64_t lba, uint32_t count, const void *data)
+{
+    assert(frozen && index >= 8 && index <= 12 && count && count <= 8 && lba >= write_start);
+    assert(!((uintptr_t)data & 4095) && data != write_source);
+    retained_write_page = data; writes++;
+    assert(!memcmp(data, write_source + (lba - write_start) * 512, count * 512));
+    for (unsigned i = count * 512; i < 4096; i++) assert(!((const uint8_t *)data)[i]);
+    if (nested_write) {
+        uint8_t buffer[512]; uint32_t completed;
+        sf_block_client_t d = {sfm_lookup("dev.block"), 1024 + index, index, 512};
+        assert(sf_block_client_write_compat(&d, 0, 1, buffer, sizeof(buffer), &completed) == SFM_EBUSY && !completed);
+        assert(sf_block_read_sectors(index, 0, 1, buffer, sizeof(buffer)) == SFM_EBUSY);
+        assert(!sf_block_read_sectors(13, 0, 1, buffer, sizeof(buffer))); /* Independent device. */
+    }
+    return writes == write_fail_at ? write_error : 0;
+}
 int sf_block_raw_read(uint32_t index, uint64_t lba, uint32_t count, void *data)
 {
     raw_calls++;
@@ -211,6 +233,10 @@ void test_block_publish(void)
 {
     uint8_t byte;
     assert(sf_block_read_sectors(0, 0, 1, &byte, 1) == SFM_EAGAIN);
+    uint8_t source_before_seal[512] = {0}; uint32_t completed_before_seal = 99;
+    sf_block_client_t before_seal = {sfm_lookup("dev.block"), 1024, 0, 512};
+    assert(sf_block_client_write_compat(&before_seal, 0, 1, source_before_seal, 512,
+                                      &completed_before_seal) == SFM_EAGAIN && !completed_before_seal);
     for (int budget = 0; budget < 2; budget++) {
         test_fail_allocations(budget);
         assert(sfm_blocks_publish() == SFM_ENOMEM);
@@ -218,6 +244,53 @@ void test_block_publish(void)
     }
     assert(!sfm_blocks_publish());
     test_reads();
+    if (fixture_pass == 2) {
+        uint8_t source[65536];
+        for (unsigned i = 0; i < sizeof(source); i++) source[i] = (uint8_t)(i % 251);
+        write_source = source; write_start = 17;
+        sf_block_client_t d = {sfm_lookup("dev.block"), 1032, 8, 512};
+        uint32_t completed;
+        nested_write = 1; writes = 0;
+        assert(!sf_block_client_write_compat(&d, 17, 128, source, sizeof(source), &completed) && completed == 128 && writes == 16);
+        nested_write = 0;
+        unsigned before = writes;
+        assert(sf_block_client_write_compat(&d, 17, 0, source, sizeof(source), &completed) == SFM_EINVAL && !completed);
+        assert(sf_block_client_write_compat(&d, 17, 1, source, 511, &completed) == SFM_EINVAL && !completed);
+        assert(sf_block_client_write_compat(&d, 17, 1, source, 512, NULL) == SFM_EINVAL);
+        sf_block_client_t denied = {d.endpoint, 1027, 3, 512};
+        assert(sf_block_client_write_compat(&denied, 0, 1, source, 512, &completed) == -19 && !completed);
+        denied.index = 7; denied.sector_count = 1031;
+        assert(sf_block_client_write_compat(&denied, 0, 1, source, 512, &completed) == -5 && !completed);
+        assert(sf_block_client_write_compat(&d, 1032, 1, source, 512, &completed) == SFM_EINVAL && !completed);
+        assert(sf_block_client_write_compat(&d, UINT64_MAX, 1, source, 512, &completed) == SFM_EINVAL && !completed);
+        assert(sf_block_client_write_compat(&d, 0, 129, source, sizeof(source), &completed) == SFM_EINVAL);
+        d.endpoint ^= 1ull << 32;
+        assert(sf_block_client_write_compat(&d, 0, 1, source, 512, &completed) == SFM_ENOENT);
+        d.endpoint ^= 1ull << 32; d.sector_count++;
+        assert(sf_block_client_write_compat(&d, 0, 1, source, 512, &completed) == SFM_EINVAL && writes == before);
+        d.sector_count = 1033; d.index = 9; fail_dma = 1;
+        assert(sf_block_client_write_compat(&d, 17, 1, source, 512, &completed) == SFM_ENOMEM && writes == before);
+        fail_dma = 0;
+        assert(!sf_block_client_write_compat(&d, 17, 9, source, sizeof(source), &completed) && completed == 9);
+        for (unsigned pass = 0; pass < 3; pass++) {
+            d.index = 10 + pass; d.sector_count = 1024 + d.index;
+            writes = 0; write_fail_at = pass ? 2 : 1; write_error = pass == 2 ? -5 : SFM_EBUSY;
+            assert(sf_block_client_write_compat(&d, 17, 16, source, sizeof(source), &completed) == write_error);
+            assert(completed == (pass ? 8u : 0u));
+            if (pass == 2) {
+                uint8_t saved[4096]; memcpy(saved, retained_write_page, sizeof(saved));
+                memset(source, 0xee, sizeof(source)); before = writes;
+                assert(sf_block_client_write_compat(&d, 17, 1, source, 512, &completed) == -5 && !completed && writes == before);
+                uint8_t output[512]; unsigned raw_before = raw_calls;
+                assert(sf_block_read_sectors(12, 0, 1, output, sizeof(output)) == -5 && raw_calls == raw_before);
+                assert(!memcmp(saved, retained_write_page, sizeof(saved))); /* Late DMA still sees reserved memory. */
+            } else {
+                write_fail_at = 0;
+                assert(!sf_block_client_write_compat(&d, 17, 1, source, 512, &completed));
+            }
+        }
+        write_fail_at = 0; write_source = NULL;
+    }
     assert(sfm_blocks_publish() == (fixture_mask ? -30 : SFM_EBUSY));
     sfm_message_t *req = calloc(1, sizeof(*req)), *resp = calloc(1, sizeof(*resp));
     assert(req && resp);

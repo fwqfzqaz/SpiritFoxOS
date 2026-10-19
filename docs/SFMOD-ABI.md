@@ -139,6 +139,11 @@ FAT32 实际读已使用 kernel-only block_client（不改变 ABI）：固定快
 sfm_call 在 transport 拒绝时不保证清空 response，客户端必须先清空并先检查返回码。
 详见 [FAT32 读取对接](integration/20261019-fat32-read.md)。
 
+内核兼容写入器不扩充模块 API/消息：固定已封存卷，核心永久写页、按设备互斥，
+最多 64 KiB 拆分；completed 仅计完整成功段，失败段也可能部分写盘。非忙 I/O 错误
+隔离读写两向，不能以此声称事务/持久性。WRITE RPC 继续 EROFS，ABI 仍 1.5。
+详见 [兼容写入对接](integration/20261019-fat32-write-guard.md)。
+
 `make test-modules` 使用 HOST_CC 编译带 UBSan 的 Linux x86_64 宿主测试，模块保持
 目标编译器。测试用 MAP_32BIT 分配可执行内存，以匹配内核低地址重定位约束；这个
 测试适配不是生产加载器的内存保护实现。

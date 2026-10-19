@@ -55,6 +55,7 @@ required = [b"[SpiritFoxOS] Enabling interrupts...", b"[SpiritFoxOS] shell_run..
             b"[sfmod] filesystem services ready after VFS/process",
             b"[sfmod] sealed block inventory matches platform devices",
             b"[sfmod] read-only block messages match platform sectors",
+            b"[sfmod] compatibility RAM writes use core-owned DMA buffers",
             b"[sfmod] block READ verified FAT signature",
             b"[AHCI] verified LBA48/512 geometry registered",
             b"[bochs_drm] VGA selected via dev.pci",

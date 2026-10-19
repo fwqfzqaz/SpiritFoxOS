@@ -137,7 +137,9 @@ dev.registry 在 input/DRM 初始化后导入真实节点并冻结，公共 /dev
 
 FAT32 的 BPB、FAT 表、目录及文件读取已接入 dev.block READ。核心客户端固定已封存
 快照，最多 64 KiB 请求拆成 4 KiB 消息；失败清空输出，忙立即返回，不回退 raw 读。
-原 FAT32 写入仍走兼容驱动，尚未迁移写权限/事务与超时 DMA 生命周期。
+FAT32 写入经内核私有兼容写入器，固定卷快照，使用核心永久 DMA 页及失败隔离；
+修改失败不吞错，成功同步 FAT 镜像，失败后可能需要离线修复。WRITE RPC 仍拒绝，
+写权限/事务、flush 和持久化恢复尚未迁移。
 
-每轮先读 [最新对接记录](integration/20261019-fat32-read.md) 与
+每轮先读 [最新对接记录](integration/20261019-fat32-write-guard.md) 与
 [下一步交接](handoff/NEXT.md)，每次提交同时更新两处。

@@ -17,3 +17,8 @@ int sf_block_raw_read(uint32_t index, uint64_t lba, uint32_t count, void *buffer
     if (index >= SFM_BLOCK_MAX) return SFM_EINVAL;
     return blkdev_read((uint8_t)index, lba, count, buffer);
 }
+int sf_block_raw_write(uint32_t index, uint64_t lba, uint32_t count, const void *buffer)
+{
+    if (index >= SFM_BLOCK_MAX) return SFM_EINVAL;
+    return blkdev_write((uint8_t)index, lba, count, buffer);
+}
