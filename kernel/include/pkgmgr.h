@@ -2,6 +2,7 @@
 #define PKGMGR_H
 
 #include <stdint.h>
+#include <stddef.h>
 #include "registry.h"
 
 /* ========================================================================
@@ -43,8 +44,9 @@ typedef struct {
  * SFK package metadata (embedded in .sfk file)
  * ======================================================================== */
 
-#define SFK_MAGIC       0x53464B21  /* "SFK!" */
+#define SFK_MAGIC       0x53464B21  /* LE wire bytes: 21 4b 46 53 */
 #define SFK_VERSION     1
+#define SFK_V1_HEADER_SIZE 1084U
 
 typedef struct {
     uint32_t magic;             /* SFK_MAGIC */
@@ -158,7 +160,8 @@ int pkgmgr_verify(const char *pkg_id);
  * SFK format backend
  * ======================================================================== */
 
-/* Parse SFK header from a .sfk file */
+/* Validate the v1 header envelope; metadata records/payload are not validated.
+ * On failure returns -1 and leaves *header unchanged. See docs/SFK-V1.md. */
 int sfk_parse_header(const void *data, size_t size, sfk_header_t *header);
 
 /* Get SFK permission requests */

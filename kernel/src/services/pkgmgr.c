@@ -1208,31 +1208,6 @@ int pkgmgr_verify(const char *pkg_id)
 }
 
 /* ========================================================================
- * sfk_parse_header - Parse SFK header from a .sfk file
- * ======================================================================== */
-
-int sfk_parse_header(const void *data, size_t size, sfk_header_t *header)
-{
-    if (size < sizeof(sfk_header_t)) {
-        return -1;
-    }
-
-    memcpy(header, data, sizeof(sfk_header_t));
-
-    if (header->magic != SFK_MAGIC) {
-        printf("[pkgmgr] Invalid SFK magic: 0x%x\n", header->magic);
-        return -1;
-    }
-
-    if (header->version > SFK_VERSION) {
-        printf("[pkgmgr] Unsupported SFK version: %u\n", header->version);
-        return -1;
-    }
-
-    return 0;
-}
-
-/* ========================================================================
  * sfk_get_perm_requests - Parse permission requests from metadata section
  *
  * Metadata layout (starting at meta_offset):
