@@ -159,7 +159,13 @@ test-ramdisk:
 	    tests/test_ramdisk.c kernel/src/fs/ramdisk.c kernel/src/drivers/blkdev.c -o build/test_ramdisk
 	build/test_ramdisk
 
-.PHONY: test-ata test-fat32
+.PHONY: test-ata test-fat32 test-vfs-bounds
+test-vfs-bounds:
+	@mkdir -p build
+	$(HOST_CC) -std=gnu11 -O1 -g -Wall -Wextra -fno-builtin -ffunction-sections -fdata-sections -fsanitize=address,undefined -fno-sanitize-recover=all -Ikernel/include \
+	    tests/test_vfs_bounds.c kernel/src/fs/vfs.c -Wl,--gc-sections -o build/test_vfs_bounds
+	build/test_vfs_bounds
+
 test-fat32:
 	@mkdir -p build
 	$(HOST_CC) -std=gnu11 -O1 -g -Wall -Wextra -Werror -fno-builtin -fsanitize=address,undefined -fno-sanitize-recover=all -Ikernel/include \

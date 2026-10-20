@@ -928,6 +928,8 @@ int vfs_read(int fd, void *buf, size_t count)
 
     /* Default read for memfs-like files */
     if (file->inode->type == VFS_TYPE_FILE && file->inode->fs_data) {
+        if (file->offset >= file->inode->size)
+            return 0;
         uint64_t remaining = file->inode->size - file->offset;
         if ((size_t)remaining > count)
             remaining = count;
@@ -1035,11 +1037,12 @@ int vfs_write(int fd, const void *buf, size_t count)
 
     /* Default write for memfs-like files */
     if (file->inode->type == VFS_TYPE_FILE && file->inode->fs_data) {
-        uint64_t new_offset = file->offset + count;
-
-        /* Check if we need more space (limited to one page for now) */
-        if (new_offset > PAGE_SIZE)
-            count = PAGE_SIZE - file->offset;
+        /* Clamp before addition/subtraction: seek may position past capacity. */
+        if (file->offset >= PAGE_SIZE)
+            return 0;
+        size_t available = PAGE_SIZE - file->offset;
+        if (count > available)
+            count = available;
 
         if (count == 0)
             return 0;
