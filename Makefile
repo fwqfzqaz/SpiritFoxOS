@@ -159,7 +159,15 @@ test-ramdisk:
 	    tests/test_ramdisk.c kernel/src/fs/ramdisk.c kernel/src/drivers/blkdev.c -o build/test_ramdisk
 	build/test_ramdisk
 
-.PHONY: test-ata test-fat32
+.PHONY: test-ata test-fat32 test-shell-cat
+test-shell-cat: build/test_shell_cat
+	build/test_shell_cat $(SHELL_CAT_ARGS)
+
+build/test_shell_cat: tests/test_shell_cat.c kernel/src/services/shell.c | build
+	@mkdir -p build
+	$(HOST_CC) -std=gnu11 -O1 -g -Wall -Wextra -Werror -Wno-unused-function -Wno-unused-variable -fno-builtin -ffunction-sections -fdata-sections -fsanitize=undefined -fno-sanitize-recover=all -Ikernel/include \
+	    tests/test_shell_cat.c -Wl,--gc-sections -o build/test_shell_cat
+
 test-fat32:
 	@mkdir -p build
 	$(HOST_CC) -std=gnu11 -O1 -g -Wall -Wextra -Werror -fno-builtin -fsanitize=address,undefined -fno-sanitize-recover=all -Ikernel/include \

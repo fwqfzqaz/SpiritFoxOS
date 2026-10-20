@@ -161,12 +161,22 @@ static int cmd_cat(int argc, char** argv) {
         }
     }
 
-    while ((n = vfs_read(fd, buf, sizeof(buf))) > 0) {
+    int result = 0;
+    while (1) {
+        n = vfs_read(fd, buf, sizeof(buf));
+        if (n == 0)
+            break;
+        if (n < 0) {
+            printf("cat: error reading '%s'\n",
+                   use_stdin ? "standard input" : argv[1]);
+            result = -1;
+            break;
+        }
         shell_write(buf, n);
     }
     if (!use_stdin)
         vfs_close(fd);
-    return 0;
+    return result;
 }
 
 static int cmd_mkdir(int argc, char** argv) {
