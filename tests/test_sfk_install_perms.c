@@ -27,6 +27,7 @@ int registry_register_software(const reg_software_record_t *record)
 { ++side_effects; registered_perms = record->sfk_perms; return 0; }
 reg_key_t *registry_open_key(const char *path, int create)
 { (void)path; (void)create; ++side_effects; return NULL; }
+void registry_close_key(reg_key_t *key) { (void)key; }
 int registry_write_value(const char *path, const char *name, uint32_t type,
                          const void *data, uint32_t size)
 { (void)path; (void)name; (void)type; (void)data; (void)size; ++side_effects; return 0; }

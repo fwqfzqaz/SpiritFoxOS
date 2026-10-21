@@ -933,6 +933,8 @@ int pkgmgr_install_sfk(const char *path, uint32_t flags, uint32_t *granted_perms
     reg_software_record_t rec;
     char install_dir[256];
     uint32_t actual_perms;
+    sfk_reg_view_t *reg_entries = NULL;
+    int reg_count = 0;
 
     fd = vfs_open(path, VFS_O_RDONLY, 0);
     if (fd < 0) {
@@ -978,6 +980,11 @@ int pkgmgr_install_sfk(const char *path, uint32_t flags, uint32_t *granted_perms
         return -1;
     }
 
+    if (sfk_get_reg_views(data, file_size, &reg_entries, &reg_count) < 0) {
+        printf("[pkgmgr] Invalid SFK registry records\n");
+        goto registry_fail;
+    }
+
     /* Determine granted permissions */
     if (granted_perms != NULL) {
         actual_perms = *granted_perms;
@@ -986,10 +993,7 @@ int pkgmgr_install_sfk(const char *path, uint32_t flags, uint32_t *granted_perms
         actual_perms = 0;
         sfk_perm_request_t perms[SFK_V1_MAX_PERMS];
         int nperms = sfk_get_perm_requests(data, file_size, perms, SFK_V1_MAX_PERMS);
-        if (nperms < 0) {
-            kfree(data);
-            return -1;
-        }
+        if (nperms < 0) goto registry_fail;
         for (int i = 0; i < nperms; i++) {
             actual_perms |= perms[i].perm_flag;
         }
@@ -998,6 +1002,7 @@ int pkgmgr_install_sfk(const char *path, uint32_t flags, uint32_t *granted_perms
     if (flags & PKG_INSTALL_DRYRUN) {
         printf("[pkgmgr] DRYRUN: would install SFK package %s %s\n",
                hdr.pkg_id, hdr.pkg_version);
+        kfree(reg_entries);
         kfree(data);
         return 0;
     }
@@ -1023,28 +1028,19 @@ int pkgmgr_install_sfk(const char *path, uint32_t flags, uint32_t *granted_perms
 
     if (registry_register_software(&rec) < 0) {
         printf("[pkgmgr] Failed to register SFK package: %s\n", hdr.pkg_id);
-        kfree(data);
-        return -1;
+        goto registry_fail;
     }
 
-    /* Register declared registry entries */
-    {
-        sfk_reg_entry_t *entries = NULL;
-        int entry_count = 0;
-        if (sfk_get_reg_entries(data, file_size, &entries, &entry_count) == 0
-            && entries != NULL && entry_count > 0) {
-            for (int i = 0; i < entry_count; i++) {
-                /* Create the registry key and write the value */
-                registry_open_key(entries[i].key_path, 1);
-                /* value_data is packed right after the sfk_reg_entry_t struct */
-                const void *vdata = (const uint8_t *)&entries[i] + sizeof(sfk_reg_entry_t);
-                registry_write_value(entries[i].key_path,
-                                     entries[i].value_name,
-                                     entries[i].value_type,
-                                     vdata,
-                                     entries[i].value_size);
-            }
-        }
+    /* Values borrow data, not the separately allocated array of headers. */
+    for (int i = 0; i < reg_count; ++i) {
+        const sfk_reg_entry_t *entry = &reg_entries[i].entry;
+        reg_key_t *key = registry_open_key(entry->key_path, 1);
+        if (!key) goto registry_fail;
+        int result = registry_write_value(entry->key_path, entry->value_name,
+                                          entry->value_type, reg_entries[i].value_data,
+                                          entry->value_size);
+        registry_close_key(key);
+        if (result < 0) goto registry_fail;
     }
 
     /* Register declared file associations */
@@ -1083,8 +1079,14 @@ int pkgmgr_install_sfk(const char *path, uint32_t flags, uint32_t *granted_perms
     printf("[pkgmgr] Installed SFK package: %s %s -> %s (perms=0x%x)\n",
            hdr.pkg_id, hdr.pkg_version, install_dir, actual_perms);
 
+    kfree(reg_entries);
     kfree(data);
     return 0;
+
+registry_fail:
+    kfree(reg_entries);
+    kfree(data);
+    return -1;
 }
 
 /* ========================================================================
@@ -1215,55 +1217,6 @@ int pkgmgr_resolve_deps(const char *pkg_id, char missing[][64], int max_missing)
 int pkgmgr_verify(const char *pkg_id)
 {
     /* Stub: package verification not yet implemented */
-    return 0;
-}
-
-/* ========================================================================
- * sfk_get_reg_entries - Parse registry entries from metadata section
- *
- * After the permission requests, the registry entries follow.
- * Each sfk_reg_entry_t has value_data immediately following it.
- * ======================================================================== */
-
-int sfk_get_reg_entries(const void *data, size_t size,
-                        sfk_reg_entry_t **entries, int *count)
-{
-    sfk_header_t hdr;
-    const uint8_t *meta;
-    uint64_t offset;
-    int i;
-
-    if (sfk_parse_header(data, size, &hdr) < 0) {
-        return -1;
-    }
-
-    if (hdr.nreg_entries == 0 || hdr.meta_offset == 0) {
-        *count = 0;
-        *entries = NULL;
-        return 0;
-    }
-
-    meta = (const uint8_t *)data + hdr.meta_offset;
-
-    /* Skip past permission requests */
-    offset = hdr.nperms * sizeof(sfk_perm_request_t);
-
-    /* Allocate buffer for entries */
-    *count = (int)hdr.nreg_entries;
-    *entries = (sfk_reg_entry_t *)kcalloc(*count, sizeof(sfk_reg_entry_t));
-    if (!*entries) {
-        return -1;
-    }
-
-    for (i = 0; i < *count; i++) {
-        if (offset + sizeof(sfk_reg_entry_t) > hdr.meta_size) {
-            break;
-        }
-        memcpy(&(*entries)[i], meta + offset, sizeof(sfk_reg_entry_t));
-        offset += sizeof(sfk_reg_entry_t) + (*entries)[i].value_size;
-    }
-
-    *count = i;
     return 0;
 }
 

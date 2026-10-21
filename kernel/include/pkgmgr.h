@@ -49,6 +49,7 @@ typedef struct {
 #define SFK_V1_HEADER_SIZE 1084U
 /* Explicit quota matching the existing installer capacity, not a wire field. */
 #define SFK_V1_MAX_PERMS 32U
+#define SFK_V1_MAX_REG_ENTRIES 64U
 
 typedef struct {
     uint32_t magic;             /* SFK_MAGIC */
@@ -84,6 +85,13 @@ typedef struct {
     uint32_t value_size;        /* Size of value data */
     /* value_data follows immediately after this struct */
 } __attribute__((packed)) sfk_reg_entry_t;
+
+/* Internal result, not a wire layout: free the array once with kfree().
+ * value_data borrows the immutable input snapshot, which must remain alive. */
+typedef struct {
+    sfk_reg_entry_t entry;
+    const void *value_data;
+} sfk_reg_view_t;
 
 /* ========================================================================
  * DEB package control info (parsed from control.tar)
@@ -172,7 +180,13 @@ int sfk_parse_header(const void *data, size_t size, sfk_header_t *header);
 int sfk_get_perm_requests(const void *data, size_t size,
                           sfk_perm_request_t *perms, int max_perms);
 
-/* Get SFK registry declarations */
+/* Validate all permission/registry records and return owned views of values.
+ * Failure leaves both outputs unchanged; empty success returns NULL/0. */
+int sfk_get_reg_views(const void *data, size_t size,
+                      sfk_reg_view_t **entries, int *count);
+
+/* Compatibility: owned HEADERS ONLY. Values do not follow these headers.
+ * Free the returned array with kfree(); use views when values are needed. */
 int sfk_get_reg_entries(const void *data, size_t size,
                         sfk_reg_entry_t **entries, int *count);
 
