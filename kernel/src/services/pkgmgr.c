@@ -971,14 +971,25 @@ int pkgmgr_install_sfk(const char *path, uint32_t flags, uint32_t *granted_perms
         return -1;
     }
 
+    /* Validate declared permission records even when grants were supplied. */
+    if (sfk_get_perm_requests(data, file_size, NULL, 0) < 0) {
+        printf("[pkgmgr] Invalid SFK permission records\n");
+        kfree(data);
+        return -1;
+    }
+
     /* Determine granted permissions */
     if (granted_perms != NULL) {
         actual_perms = *granted_perms;
     } else {
         /* Use the package's requested permissions as granted */
         actual_perms = 0;
-        sfk_perm_request_t perms[32];
-        int nperms = sfk_get_perm_requests(data, file_size, perms, 32);
+        sfk_perm_request_t perms[SFK_V1_MAX_PERMS];
+        int nperms = sfk_get_perm_requests(data, file_size, perms, SFK_V1_MAX_PERMS);
+        if (nperms < 0) {
+            kfree(data);
+            return -1;
+        }
         for (int i = 0; i < nperms; i++) {
             actual_perms |= perms[i].perm_flag;
         }
@@ -1205,73 +1216,6 @@ int pkgmgr_verify(const char *pkg_id)
 {
     /* Stub: package verification not yet implemented */
     return 0;
-}
-
-/* ========================================================================
- * sfk_parse_header - Parse SFK header from a .sfk file
- * ======================================================================== */
-
-int sfk_parse_header(const void *data, size_t size, sfk_header_t *header)
-{
-    if (size < sizeof(sfk_header_t)) {
-        return -1;
-    }
-
-    memcpy(header, data, sizeof(sfk_header_t));
-
-    if (header->magic != SFK_MAGIC) {
-        printf("[pkgmgr] Invalid SFK magic: 0x%x\n", header->magic);
-        return -1;
-    }
-
-    if (header->version > SFK_VERSION) {
-        printf("[pkgmgr] Unsupported SFK version: %u\n", header->version);
-        return -1;
-    }
-
-    return 0;
-}
-
-/* ========================================================================
- * sfk_get_perm_requests - Parse permission requests from metadata section
- *
- * Metadata layout (starting at meta_offset):
- *   [0 .. nperms * sizeof(sfk_perm_request_t)]
- * ======================================================================== */
-
-int sfk_get_perm_requests(const void *data, size_t size,
-                          sfk_perm_request_t *perms, int max_perms)
-{
-    sfk_header_t hdr;
-    int i;
-
-    if (sfk_parse_header(data, size, &hdr) < 0) {
-        return -1;
-    }
-
-    if (hdr.nperms == 0 || hdr.meta_offset == 0) {
-        return 0;
-    }
-
-    int count = (int)hdr.nperms;
-    if (count > max_perms) {
-        count = max_perms;
-    }
-
-    const uint8_t *meta = (const uint8_t *)data + hdr.meta_offset;
-    size_t avail = size - hdr.meta_offset;
-    size_t needed = (size_t)count * sizeof(sfk_perm_request_t);
-
-    if (needed > avail) {
-        count = (int)(avail / sizeof(sfk_perm_request_t));
-    }
-
-    for (i = 0; i < count; i++) {
-        memcpy(&perms[i], meta + i * sizeof(sfk_perm_request_t),
-               sizeof(sfk_perm_request_t));
-    }
-
-    return count;
 }
 
 /* ========================================================================
