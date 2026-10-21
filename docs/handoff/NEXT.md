@@ -1,5 +1,28 @@
 # 下一步开发交接
 
+## 2026-10-21 10:51 轮次：SFK 权限记录边界（最新）
+
+文件头提交 `1071342` 已经通过最终 Ubuntu/Arch/UEFI、推 Fork，并创建
+[草稿 PR #6](https://github.com/fwqfzqaz/SpiritFoxOS/pull/6)；两套 PR CI 和 Fork CI 均已成功。
+恢复与清理记录在仓库外 `SpiritFoxOS调研/20261021-sfk-header-recovery/DELIVERY.md`。
+作者 main 仍为 `4a51969`；本轮以 1071342 建立 `codex/sfk-v1-perms-20261021`。
+
+本轮 M3 子目标是权限请求元数据：严格按 meta_size 校验全部声明记录、最多 32 条，
+检查记录字符串和 API 参数，失败保持输出；安装入口在 grants/DRYRUN 和副作用前拒绝
+畸形权限记录。接口/头布局、模块 ABI 与默认授权策略不变。
+见 [权限边界对接](../integration/20261021-sfk-permission-bounds.md) 和 [SFK-V1](../SFK-V1.md)。
+
+旧读取器和原安装入口的同组回归均按预期失败；修复工作区 Ubuntu ASan/UBSan 已通过
+头部 1142、权限读取 1591、安装入口 14 用例。最终提交仍须经原 hook 验证 Ubuntu/Arch
+完整构建/UEFI 后推 Fork/草稿 PR，实际 SHA、回执和 CI 写仓库外
+`SpiritFoxOS调研/20261021-sfk-perms-1051`。前置 PR #5/#6 未合并，需在新 PR 说明依赖。
+
+下一轮先核实本次交付和远端变化，再选注册表变长值/有界游标的单一目标，随后处理服务
+定位。不可信包安装、默认权限授予、整体元数据校验、签名和事务回滚仍未解决。
+VM 约 528MiB 可用，每轮按实际构建峰值检查，保留日志后及时定点回收本任务结束的导出，
+不删除共享缓存/工具链/其他会话目录，不在空间不足时反复构建。
+
+
 ## 2026-10-21 05:48 轮次：SFK v1 文件头（优先于下方旧入口）
 
 设计提交 `7710742` 已完成最终 Ubuntu/Arch 构建、宿主/UEFI 验证并推个人 Fork，

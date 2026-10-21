@@ -47,6 +47,8 @@ typedef struct {
 #define SFK_MAGIC       0x53464B21  /* LE wire bytes: 21 4b 46 53 */
 #define SFK_VERSION     1
 #define SFK_V1_HEADER_SIZE 1084U
+/* Explicit quota matching the existing installer capacity, not a wire field. */
+#define SFK_V1_MAX_PERMS 32U
 
 typedef struct {
     uint32_t magic;             /* SFK_MAGIC */
@@ -164,7 +166,9 @@ int pkgmgr_verify(const char *pkg_id);
  * On failure returns -1 and leaves *header unchanged. See docs/SFK-V1.md. */
 int sfk_parse_header(const void *data, size_t size, sfk_header_t *header);
 
-/* Get SFK permission requests */
+/* Validate all declared permission records, then copy up to max_perms.
+ * NULL/0 validates only. Bad input returns -1 without modifying output.
+ * The quota is SFK_V1_MAX_PERMS; this does not grant any permission. */
 int sfk_get_perm_requests(const void *data, size_t size,
                           sfk_perm_request_t *perms, int max_perms);
 

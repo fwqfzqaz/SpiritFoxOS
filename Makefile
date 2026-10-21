@@ -165,6 +165,12 @@ test-sfk:
 	$(HOST_CC) -std=gnu11 -O1 -g -Wall -Wextra -Werror -fno-builtin -fsanitize=address,undefined -fno-sanitize-recover=all -Ikernel/include \
 	    tests/test_sfk_header.c kernel/src/services/sfk_header.c -o build/test_sfk_header
 	build/test_sfk_header
+	$(HOST_CC) -std=gnu11 -O1 -g -Wall -Wextra -Werror -fno-builtin -fsanitize=address,undefined -fno-sanitize-recover=all -Ikernel/include \
+	    tests/test_sfk_perms.c kernel/src/services/sfk_header.c kernel/src/services/sfk_perms.c -o build/test_sfk_perms
+	build/test_sfk_perms
+	$(HOST_CC) -std=gnu11 -O1 -g -Wall -Wextra -Werror -Wno-unused-parameter -fno-builtin -ffunction-sections -fdata-sections -fsanitize=address,undefined -fno-sanitize-recover=all -Ikernel/include \
+	    tests/test_sfk_install_perms.c kernel/src/services/pkgmgr.c kernel/src/services/sfk_header.c kernel/src/services/sfk_perms.c -Wl,--gc-sections -o build/test_sfk_install_perms
+	build/test_sfk_install_perms
 
 .PHONY: test-ata test-fat32
 test-fat32:
