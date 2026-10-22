@@ -1,8 +1,0 @@
-# 模块名 相对源路径；故意把 VFS 放在 tmpfs 前，验证加载器的依赖排序。
-fs.vfs fs/vfs.c
-demo.hello demo/hello.c
-fs.tmpfs fs/tmpfs.c
-dev.tmpfs dev/tmpfs.c
-dev.pci dev/pci.c
-dev.registry dev/registry.c
-dev.block dev/block.c
