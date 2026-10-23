@@ -196,6 +196,12 @@ legacy/modern 各十二轮，每轮七种拒绝（含无参数、runat、runenv�
 
 最终源码构建后完整 python tools/test.py --skip-build 通过（736.3 秒、127 次启动），日志 build/echo-supervision-final-test.txt；全部原有回归及六项交付摘要一致。发布门要求 supervisor_host_checks=97101、supervisor_qemu=true、supervisor_qemu_boots=2，缺标记的旧结果拒绝发布。这里检测实际死亡，不宣称已检测存活但挂起的服务。
 
+## Echo 周期健康、挂起和认证回复协议
+
+新增 legacy/modern 两个 VM，通过 root 专用请求使当前 echo 真正进入可抢占自旋；100 ms 接收期限后，监督回收旧进程并按已有预算重启。另让同一认证实例的下一次应答返回 SF_DENIED 或错误操作码，即使发送者/请求 ID/载荷正确也触发失败。前三次故障恢复，第四次挂起进入 BLOCKED；显式重试后普通/PI 应用、笔记、六轮冷目录并发读和卸载/停止仍通过，磁盘保持原字节。
+
+最终源码构建后完整 python tools/test.py --skip-build 通过（761.42 秒、129 次启动），日志 build/echo-health-final-test.txt。原有死亡预算/稳定周期、97101 项策略、25080 项管理器和全部已有回归继续通过，六项交付摘要一致。发布门要求 echo_health_qemu=true、echo_health_qemu_boots=2，缺少标记的旧结果拒绝发布。覆盖内置 echo 的指定协议，不替代通用服务语义或硬件健康验证。
+
 ## 外部助手审查
 
 按用户授权调用已有 DeepSeek Harness。首次宽范围审查超时，没有采用其未完成输出；随后以低推理档审查一个文件写函数，11 秒完成且未使用工具。核实并修复空写返回错误，增加容量防御检查及对应宿主断言。审查回执在 `.cache/deepseek/runs/`，不包含提交或推送权限。

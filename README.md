@@ -13,7 +13,7 @@ python tools/bootstrap.py
 python tools/test.py
 ```
 
-第一步下载并校验 Zig 0.13.0、QEMU Windows 构建和 Monocypher 4.0.3。已提供的 Monocypher 源码在 `vendor/monocypher`。第二步执行基础服务、950 条内核 IPC/内存边界、8155 条参数与 12034 条环境检查、353 条文件 RPC 分发边界、108 条 openat、83 条截断、229 条 IOMMU 与 4069 条版本策略检查、28 组 Python 测试（含 3500 次变异）、783 个事务、3132 个更新及 3132 个截断故障场景，以及含真实越界 DMA、试运行、版本策略、目录授权、持久化截断、密钥轮换/撤销与旧密钥迁移、驱动死亡和恢复的 127 次 QEMU 启动。
+第一步下载并校验 Zig 0.13.0、QEMU Windows 构建和 Monocypher 4.0.3。已提供的 Monocypher 源码在 `vendor/monocypher`。第二步执行基础服务、950 条内核 IPC/内存边界、8155 条参数与 12034 条环境检查、353 条文件 RPC 分发边界、108 条 openat、83 条截断、229 条 IOMMU 与 4069 条版本策略检查、28 组 Python 测试（含 3500 次变异）、783 个事务、3132 个更新及 3132 个截断故障场景，以及含真实越界 DMA、试运行、版本策略、目录授权、持久化截断、密钥轮换/撤销与旧密钥迁移、驱动死亡和恢复的 129 次 QEMU 启动。
 
 只构建：`python tools/build.py`。只运行宿主测试：`python tools/test.py --host-only`。已有镜像测试：`python tools/test.py --skip-build`。
 
@@ -106,3 +106,5 @@ python tools/sfpack.py sign build/hello.sfk --seed .keys/application.seed
 模块依赖绑定提供者登记代次；槽复用必须显式重新登记消费者。全部依赖租约统一预检和记账，约束与尚未实现的生命周期功能见 [LIFECYCLE](docs/LIFECYCLE.md)。
 
 echo 进程死亡后按有界预算退避恢复；连续三次自动启动仍不稳定时等待显式 start echo。echo-status 查询状态，echo-crash 为 root 串口故障诊断。策略与范围见 [LIFECYCLE](docs/LIFECYCLE.md)。
+
+echo 还接受周期性有界 ping 检查：挂起或认证回复的状态/操作码错误会触发同一恢复预算。echo-hang、echo-bad-reply 和 echo-bad-op 为 root 诊断命令。

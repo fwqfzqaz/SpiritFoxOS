@@ -14,7 +14,11 @@ static int relative_open(const SfBootArgs*a,SfMessage*m,uint32_t root,const char
 long sf_main(const SfBootArgs*a,size_t bytes){
  if(sf_boot_arguments_validate(a,bytes))return SF_ABI_MISMATCH;
 #if ROLE == 1
- for(;;){SfMessage m;long sender=sf_recv(a->service,&m,0);if(sender<0)return sender;if(m.h.opcode!=OP_ECHO)continue;m.status=0;sf_send(a->manager,&m);}
+ unsigned bad_reply=0;
+ for(;;){SfMessage m;long sender=sf_recv(a->service,&m,0);if(sender<0)return sender;
+  if(m.h.opcode==OP_ECHO_DIAGNOSTIC){if(sender!=1)continue;if(m.mode==1)for(;;)__asm__ volatile("pause");if(m.mode==2||m.mode==3)bad_reply=m.mode;continue;}
+  if(m.h.opcode!=OP_ECHO)continue;m.status=bad_reply==2?SF_DENIED:0;if(bad_reply==3)m.h.opcode=OP_HELLO;bad_reply=0;sf_send(a->manager,&m);
+ }
 #elif ROLE == 2
  for(;;){SfMessage m;long status=sf_recv(a->service,&m,0);if(status<0)return status;if(status!=1){m.status=SF_DENIED;sf_send(a->manager,&m);continue;}
   if(m.h.opcode==OP_NATIVE_STAGE){status=0;if(!m.offset){native_have=0;native_expected=0;if(!m.handle||m.handle>sizeof(native_upload))status=SF_INVALID;else native_expected=m.handle;}
