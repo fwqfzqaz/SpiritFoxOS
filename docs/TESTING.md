@@ -210,6 +210,14 @@ native-drain-test 持有两个真实读取应用：忙显式停止保留 ACTIVE�
 
 最终源码构建后完整 python tools/test.py --skip-build 通过（778.66 秒、131 次启动），日志 build/native-lifecycle-final-test.txt；97101 项共享监督策略、25080 项管理器和全部原有回归继续通过，六项交付摘要一致。发布门要求 native_supervision_qemu=true、native_supervision_qemu_boots=2，旧结果缺失时拒绝发布。虚拟机不验证设备自动重启、通用服务状态迁移或生产硬件复位。
 
+## Core 创建路径的 PID 有符号边界
+
+宿主直接包含实际 kernel/core.c，替换页帧/页表与硬件调用，注入 next_pid=0x80000000。基线创建了 READY 任务却向调用方返回负值，记录 build/task-pid-baseline.txt。修复后 5022 项检查覆盖一千个固定种子状态、INT32_MAX-1/INT32_MAX 的正值成功和 BootArgs PID、后续永久拒绝且计数/整个任务表/页帧与地址空间调用均不变。另验证分配失败消耗旧标识、新创建不复用，以及非法计划、任务表满和 root-only 准入。
+
+宿主为 LLP64，仅执行创建路径。TASK_STATUS 的 guest LP64 哨兵在该宿主会触发常量收窄诊断；测试对包含的 Core 关闭这一项警告，并明确不执行或验证该分支。本测试不代替真实页表/调度验证，也未在 VM 重复二十亿次创建。实际 guest 的正常/失败创建、native 进程容量与全部硬件回归由完整 VM 套件覆盖。
+
+最终源码构建后完整 python tools/test.py --skip-build 通过（781.16 秒、131 次启动），日志 build/task-pid-final-test.txt；全部既有回归及六项摘要一致，发布门要求 task_pid_host_checks=5022，缺标记旧结果拒绝打包。
+
 ## 外部助手审查
 
 按用户授权调用已有 DeepSeek Harness。首次宽范围审查超时，没有采用其未完成输出；随后以低推理档审查一个文件写函数，11 秒完成且未使用工具。核实并修复空写返回错误，增加容量防御检查及对应宿主断言。审查回执在 `.cache/deepseek/runs/`，不包含提交或推送权限。

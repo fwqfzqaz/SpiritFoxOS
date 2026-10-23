@@ -22,6 +22,8 @@ build.run(['-target', 'x86_64-windows-gnu', '-g0', '-O2', '-Wall', '-Wextra', '-
 subprocess.run([str(ROOT / 'build/test_environment.exe')], check=True)
 build.run(['-target', 'x86_64-windows-gnu', '-g0', '-O2', '-Wall', '-Wextra', '-Werror', '-Iinclude', 'tests/test_file_rpc.c', 'services/file_rpc.c', 'services/namespace.c', '-o', 'build/test_file_rpc.exe'])
 subprocess.run([str(ROOT / 'build/test_file_rpc.exe')], check=True)
+build.run(['-target', 'x86_64-windows-gnu', '-g0', '-O2', '-Wall', '-Wextra', '-Werror', '-Wno-unused-parameter', '-Iinclude', 'tests/test_task_pid.c', 'kernel/pid.c', 'services/arguments.c', '-o', 'build/test_task_pid.exe'])
+subprocess.run([str(ROOT / 'build/test_task_pid.exe')], check=True)
 build.run(['-target', 'x86_64-windows-gnu', '-g0', '-O2', '-Wall', '-Wextra', '-Werror', '-Iinclude', 'tests/test_supervisor.c', 'services/supervisor.c', '-o', 'build/test_supervisor.exe'])
 subprocess.run([str(ROOT / 'build/test_supervisor.exe')], check=True)
 build.run(['-target', 'x86_64-windows-gnu', '-g0', '-O2', '-Wall', '-Wextra', '-Werror', '-Iinclude', 'tests/test_manager.c', 'services/manager.c', '-o', 'build/test_manager.exe'])
@@ -91,6 +93,7 @@ result['openat_qemu'] = not args.host_only
 result['truncate_host_assertions'] = 83
 result['resize_fault_scenarios'] = 4*261*3
 result['truncate_qemu'] = not args.host_only
+result['task_pid_host_checks'] = 5022
 result['native_supervision_qemu'] = not args.host_only
 result['native_supervision_qemu_boots'] = 0 if args.host_only else 2
 result['echo_health_qemu'] = not args.host_only

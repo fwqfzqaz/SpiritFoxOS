@@ -1,5 +1,6 @@
 #include "kernel.h"
 #include "arguments.h"
+#include "pid.h"
 Task tasks[SF_MAX_TASKS];int current=-1;uint64_t ticks;
 static uint32_t next_pid=1;static uint64_t bundle_phys,bundle_bytes,boot_cr3;
 typedef struct {uint64_t physical,virtual_address,pages,attribute;uint32_t type,reserved;} BootMemory;
@@ -25,8 +26,9 @@ int task_new(const SfLoadPlan*p,int bootstrap){
  Task*parent=bootstrap?0:&tasks[current];if(!valid_plan(p,parent)||(!parent&&p->image_base&&p->image_base!=SF_BASE))return SF_INVALID;uint64_t image_base=p->image_base?p->image_base:SF_BASE;
  int result=SF_NO_SPACE;
  int slot=-1;for(unsigned i=0;i<SF_MAX_TASKS;i++)if(tasks[i].state==T_EMPTY||tasks[i].state==T_DEAD){slot=i;break;}if(slot<0)return SF_NO_SPACE;
+ long pid=sf_pid_take(&next_pid);if(pid<0)return (int)pid;
  Task*t=&tasks[slot];/* Preserve capability generations across slot reuse. */
- for(unsigned i=0;i<32;i++)t->caps[i].endpoint=0;t->pid=next_pid++;t->state=T_EMPTY;t->device_io=0;t->device_bdf=0;t->device_fault=0;t->device_modern=0;t->cr3=space_new(t->pid);if(!t->cr3)goto fail;
+ for(unsigned i=0;i<32;i++)t->caps[i].endpoint=0;t->pid=(uint32_t)pid;t->state=T_EMPTY;t->device_io=0;t->device_bdf=0;t->device_fault=0;t->device_modern=0;t->cr3=space_new(t->pid);if(!t->cr3)goto fail;
  for(unsigned i=0;i<p->count;i++){const SfLoadSegment*s=&p->segments[i];for(uint64_t off=0;off<s->bytes;off+=4096){void*page=page_alloc(t->pid);if(!page||space_map(t,image_base+s->rva+off,(uint64_t)page,s->flags))goto fail;size_t n=s->bytes-off;if(n>4096)n=4096;if(parent){if(copy_in(parent,page,s->data+off,n))goto fail;}else memcpy(page,(void*)(s->data+off),n);}}
  for(uint64_t off=4096;off<=65536;off+=4096){void*page=page_alloc(t->pid);if(!page||space_map(t,SF_STACK-off,(uint64_t)page,3))goto fail;}
  void*arg_page=page_alloc(t->pid);if(!arg_page||space_map(t,SF_ARGS,(uint64_t)arg_page,1))goto fail;

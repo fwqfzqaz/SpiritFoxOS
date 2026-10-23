@@ -108,3 +108,5 @@ python tools/sfpack.py sign build/hello.sfk --seed .keys/application.seed
 echo 与 sf-native 按有界预算处理进程死亡、健康超时和协议错误：退避重试，最多三次连续自动启动，稳定运行后获得新预算。native 在故障时关闭新准入，已有私有映像应用完成文件请求并释放租约后才重建。设备 DMA 隔离和显式恢复策略保持。
 
 `stop echo` / `start echo`、`stop native` / `start native` 控制监督，`echo-status` / `native-status` 查询状态。root 故障诊断覆盖死亡、自旋、错误回复和实际能力/进程容量耗尽；操作和限制见 [LIFECYCLE](docs/LIFECYCLE.md)。
+
+进程标识保持正值并在每次启动内单调分配，耗尽后拒绝创建；边界机制与宿主验证范围见 [SECURITY](docs/SECURITY.md)。

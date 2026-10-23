@@ -66,3 +66,5 @@ VT-d 实现验证 ACPI/DMAR，发布一个 BDF 的固定 64 KiB DMA 域并执行
 包签名使用 [Monocypher 4.0.3](https://monocypher.org/download/)，许可保留在 `vendor/monocypher/LICENCE.md`。启动器、管理器、持久化与 native 运行时共用构建时固化的最多八个公钥，支持 module/app 用途、撤销拒绝与 shell 查询；默认模块与应用分别使用两个不同开发公钥，无交叉用途。格式、旧单密钥显式迁移、轮换顺序和已确认包撤销后的恢复限制见 `TRUST.md`。签名验证不是 UEFI Secure Boot，也不构成完整硬件信任链；在线策略更新与独立生产根保护仍未实现。
 
 模块登记依赖固定到提供者 generation，登记槽复用不会让旧消费者绑定新模块；启动/停止对全部依赖预检后统一记账，计数和代次耗尽失败关闭。管理器仍与 sf-init 合并，echo/native 已支持进程死亡和有界健康失败恢复，native 故障等待已有应用租约排空；完整生命周期 RPC、一般健康/挂起监督和状态迁移尚未提供，详见 LIFECYCLE.md。
+
+进程标识在每次启动内从 1 到 INT32_MAX 单调分配，保持 task_new/SYS_SPAWN 的正值成功约定。到达上限后在任何任务状态/地址空间修改前拒绝；后续分配失败已取出的标识也不再复用。当前没有代次化 PID 循环，耗尽需重启；普通应用仍不能创建进程。

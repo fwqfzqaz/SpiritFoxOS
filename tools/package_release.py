@@ -40,6 +40,8 @@ if result.get('echo_health_qemu') is not True or result.get('echo_health_qemu_bo
     raise SystemExit('Run authenticated echo health timeout and protocol failure regressions before packaging')
 if result.get('native_supervision_qemu') is not True or result.get('native_supervision_qemu_boots') != 2:
     raise SystemExit('Run native capacity, lease drain and bounded death/health recovery before packaging')
+if result.get('task_pid_host_checks') != 5022:
+    raise SystemExit('Run actual task_new PID exhaustion and publication regressions before packaging')
 for name in ['esp/EFI/BOOT/BOOTX64.EFI','storage.img','persistent.img','development.pub','application.pub','trust-policy.json']:
     actual = hashlib.sha256((BUILD/name).read_bytes()).hexdigest()
     if result.get('artifacts_sha256',{}).get(name) != actual:
@@ -48,7 +50,7 @@ items = [(BUILD/'esp/EFI/BOOT/BOOTX64.EFI','EFI/BOOT/BOOTX64.EFI'),(BUILD/'stora
 items.append((BUILD/'trust-policy.json','trust-policy.json'))
 items.append((BUILD/'application.pub','application.pub'))
 items += [(p,'docs/'+p.name) for p in sorted((ROOT/'docs').glob('*.md'))]
-manifest = {'files_sha256': {name: hashlib.sha256(path.read_bytes()).hexdigest() for path,name in items}, 'validation': 'tools/test.py: host + legacy storage + VT-d/modern DMA isolation + persistence/update-health/version-policy/fault/restart + kernel-boundary/storage-failure security + directory-capability openat + truncate/zero-extension fault/recovery + trust-policy/rotation/revocation + native-argv/explicit-environment/read-only/preflight + relative-native/private-image/reboot + file-RPC/local-bounds/IPC-rejection + block-reply/private-channel/restart + echo-reply/per-instance/capacity-recovery + authenticated-launch-kind/suffix-independent + dependency-generation/transactional-leases + echo-supervision/bounded-restart + echo-health/hang/protocol-failure + native-capacity/lease-drain/supervision VMs'}
+manifest = {'files_sha256': {name: hashlib.sha256(path.read_bytes()).hexdigest() for path,name in items}, 'validation': 'tools/test.py: host + legacy storage + VT-d/modern DMA isolation + persistence/update-health/version-policy/fault/restart + kernel-boundary/storage-failure security + directory-capability openat + truncate/zero-extension fault/recovery + trust-policy/rotation/revocation + native-argv/explicit-environment/read-only/preflight + relative-native/private-image/reboot + file-RPC/local-bounds/IPC-rejection + block-reply/private-channel/restart + echo-reply/per-instance/capacity-recovery + authenticated-launch-kind/suffix-independent + dependency-generation/transactional-leases + echo-supervision/bounded-restart + echo-health/hang/protocol-failure + native-capacity/lease-drain/supervision VMs + actual-task-PID exhaustion host checks'}
 archive = BUILD/'SpiritFoxOS-M6-Updates.zip'
 with zipfile.ZipFile(archive,'w',zipfile.ZIP_DEFLATED) as z:
     for path,name in items:
