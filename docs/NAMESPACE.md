@@ -70,5 +70,8 @@ OP_OPEN/OP_OPENAT 保持有界完整 NUL 字符串规则；合法读写最多 25
 | 应用文件对象 | 共享 manager_ep，应用只有 SEND | 每个 Child.reply，应用只有 RECV，进程回收时撤销 |
 | native 装载 | runtime_ep，root 发送 | 独立 runtime_reply，运行时重启时撤销重建 |
 | 块设备 RPC | driver_ep，root 发送 | 每个驱动实例的 driver_reply，启动失败或正常停止时撤销 |
+| Echo | 每个实例的服务端点，root 发送 | 每个 EchoPeer 的 reply，停止/替换/临时实例清理时撤销 |
 
 channel-test 同时启动两个有只读 /disk/etc 根的 readprobe，完成各自打开、列举、读取、关闭及进程回收。首次启动或重新挂载后缓存为空，此路径会实际等待块设备回复；应用请求留在 manager 队列，不会被块 RPC 等待误取。该命令用于开发验证，要求磁盘已挂载。没有新增跨服务能力传递或并发更新事务。
+
+echo-channel-test 在等待两个文件应用前同步调用 echo，用于验证两类请求均完成。echo-capacity-test 暂停 echo、实际耗尽并释放 root 的端点能力槽，验证两条启动分配失败路径与恢复。它们是当前单线程开发环境的诊断命令，要求正常回显服务及已挂载磁盘，不提供普通应用的特权接口。

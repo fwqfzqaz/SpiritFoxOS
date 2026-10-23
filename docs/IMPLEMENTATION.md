@@ -27,7 +27,7 @@ Core 0 校验 BootInfo 大小、版本、内存映射边界、引导对象的 Lo
 
 ## 用户态服务
 
-sf-init 在一个用户态二进制中组合模块管理、sf-process、sfexec、namespace、RAMFS、SFRFS1 文件服务和简化 stdio 策略。回显服务、sf-native 和 sf-virtio-blk 分别运行在独立地址空间。shell、磁盘解析和普通文件逻辑不在内核中。
+sf-init 在一个用户态二进制中组合模块管理、sf-process、sfexec、namespace、RAMFS、SFRFS1 文件服务和简化 stdio 策略。回显服务、sf-native 和 sf-virtio-blk 分别运行在独立地址空间。echo 每实例、native 和块设备的回复分别使用私有端点；echo 新旧代可以共存，停止和启动分配失败会回收对应回复能力。shell、磁盘解析和普通文件逻辑不在内核中。
 
 块设备回复使用每个驱动实例独立的端点，开始失败或停止完成后撤销；应用 namespace 请求不会被同步块 RPC 等待消费，冷缓存并发读和反复重启验证见 SECURITY.md。
 

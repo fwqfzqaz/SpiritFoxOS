@@ -168,6 +168,14 @@ rpcprobe.sfk 在 legacy/modern 各一个 VM 检查四种超长请求直接在发
 
 新增 legacy/modern 两个 VM，每种传输八次并发冷读、卸载、停止、启动、挂载，检验目录/文件/任务/端点引用回收、驱动回复代次与持久字节保持。完整 `python tools/test.py --skip-build` 通过（580.69 秒、121 次启动），日志 `build/block-channel-final-test.txt`，原有全部回归继续通过。结果和发布门新增 block_reply_channel_qemu=true、block_reply_channel_qemu_boots=2，六项镜像/公钥/策略摘要一致；旧结果缺标记时拒绝发布。
 
+## Echo 每实例回复与实际分配失败
+
+73108a7 基线的真实 echo-channel-test 复现 e=1/a=2/b=0，原共享 manager 队列消费应用请求；日志 build/qemu-persist-echo-channel-baseline.log。修复采用每实例私有回复端点并检查 PID、service、发送者及请求 ID，终止后撤销。
+
+新增 legacy/modern 两个 VM，各四十次并发冷目录读取与 echo 请求、停止/启动和重新挂载。echo-capacity-test 实际耗尽能力槽，分别触发服务端点及私有回复分配失败，确认状态退回 STOPPED、已分配对象回收、释放后重新启动成功。正常启动仍验证新旧代并存，磁盘字节与笔记保持。
+
+最终源码重建后完整 python tools/test.py --skip-build 通过（628.35 秒、123 次启动），日志 build/echo-final-resumed-test.txt；全部原有回归、28 组 Python 测试/3500 次变异和六项交付摘要通过。结果与发布门新增 echo_reply_channel_qemu=true、echo_reply_channel_qemu_boots=2。此前额度中断的批次不是完整通过结果。
+
 ## 外部助手审查
 
 按用户授权调用已有 DeepSeek Harness。首次宽范围审查超时，没有采用其未完成输出；随后以低推理档审查一个文件写函数，11 秒完成且未使用工具。核实并修复空写返回错误，增加容量防御检查及对应宿主断言。审查回执在 `.cache/deepseek/runs/`，不包含提交或推送权限。
