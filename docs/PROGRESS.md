@@ -4,12 +4,12 @@
 
 - 工作区：`E:\SpiritFoxOS`。指定源目录的三项顶层内容已移动到这里。
 - 本轮目标：按用户要求持续推进到任一额度剩余 10%；native argv/显式环境/PI、文件分发防御已交付，块设备及 echo 的私有回复与失败回滚现已验证，APP/MODULE 入口检查已交付，当前补齐 M2 依赖代次和故障监督。
-- status: manager_dependencies_verified_continuing
+- status: echo_supervision_verified_continuing
 - round_complete: true
 - continuous_work: true
 - quota_paused: false
 - 分支：`codex/trust-policy-20261023`，基于已合并的 `origin/main`（`ca9e1a3`）；远端：`origin`，读取和推送地址均为 `https://github.com/fwqfzqaz/SpiritFoxOS.git`。
-- 额度已实际刷新并恢复，quota_paused=false；健康期间保持五分钟接续，活跃实现只在任一剩余小于等于 10% 时保存暂停。最近完整 echo 回归已通过并推送 a5f430c（628.35 秒、123 VM）；APP/MODULE 启动意图已通过完整回归并推送 352f565（687.44 秒、125 VM）。M2 依赖代次与租约事务完整验证已通过（678.98 秒、125 VM），交付以 HEAD/origin 实际 SHA 为准。
+- 额度已实际刷新并恢复，quota_paused=false；健康期间保持五分钟接续，活跃实现只在任一剩余小于等于 10% 时保存暂停。最近完整 echo 回归已通过并推送 a5f430c（628.35 秒、123 VM）；APP/MODULE 启动意图已通过完整回归并推送 352f565（687.44 秒、125 VM）。M2 依赖代次与租约事务已完整验证并推送 79a2262（678.98 秒、125 VM）。echo 死亡监督完整回归通过（736.3 秒、127 VM），交付以 HEAD/origin 的实际 SHA 对照为准。
 
 ## 已完成
 
@@ -68,9 +68,12 @@
 46. M2 登记时固定依赖提供者 generation，拒绝空/卸载槽和高位依赖。提供者槽位即使以相同 ID 复用，旧消费者也不能自动绑定；同一登记停止/启动仍可恢复，需迁移时显式重新登记消费者。代次耗尽返回 SF_NO_SPACE，不回绕。
 47. 启动和停止先检查全部依赖，再统一增加/扣除租约，容量/代次/不平衡失败不留下部分状态。25080 项产品 C 宿主检查含一千次替换回收；正常 VM 启动增加真实管理器图的代次替换检查。最终源码构建后完整回归通过（678.98 秒、125 VM），日志 build/manager-dependencies-final-test.txt，全部旧回归及六项交付摘要通过，发布门要求新增 manager_dependency 标记。语义和当前内部 API 边界见 LIFECYCLE.md。
 
+48. M2 echo 进程死亡监督：按任务状态识别实际死亡，回收服务/私有回复端点，25 tick 退避、最多三次连续自动启动，运行满 1000 tick 后下一次故障重置预算。手动停止禁用恢复，显式成功启动重置预算；清理不确定时阻塞，启动失败消耗预算。仅 echo 死亡，不覆盖挂起、native/设备或持久监督状态。
+49. 97101 项策略 C 检查含一千条固定种子轨迹、稳定边界、时钟回退与饱和期限；两个 legacy/modern VM 实际终止 echo，三次恢复后第四次阻塞，应用/磁盘/shell 保持、显式重试、保持手停、十秒稳定后预算恢复及端点/任务回收通过。最终完整回归通过（736.3 秒、127 VM），日志 build/echo-supervision-final-test.txt，全部既有回归、六项摘要和发布门验证通过。
+
 ## 交付与续做
 
-本轮 echo 实现已完成完整回归；当前交付以 Git HEAD 及 origin 同名分支的实际 SHA 对照为准，不强制推送。开放 PR #10 沿用当前工作分支；若外部合并则由交付工具建立后继请求。额度仍充足，M2 依赖代次交付后直接执行 .cache/next-supervision-plan.txt：echo 死亡检测、有界退避重启和显式停止/重试，不改变设备隔离恢复策略。旧共用 echo 队列在 73108a7 的真实失败证据保留于 build/qemu-persist-echo-channel-baseline.log；恢复后的完整结果取代不完整的额度中断批次。
+本轮 echo 实现已完成完整回归；当前交付以 Git HEAD 及 origin 同名分支的实际 SHA 对照为准，不强制推送。开放 PR #10 沿用当前工作分支；若外部合并则由交付工具建立后继请求。额度仍充足，echo 死亡监督交付后继续有界的 echo 健康期限与实际挂起检测；不改变设备隔离恢复策略。未提供一般生命周期 RPC、native/设备自动重启或状态迁移。旧共用 echo 队列在 73108a7 的真实失败证据保留于 build/qemu-persist-echo-channel-baseline.log；恢复后的完整结果取代不完整的额度中断批次。
 
 
 当前 native 参数轮次已完成全套验证，日志 `build/arguments-final-test.txt`。额度检查短期剩余 73%、长期 52%，普通使用可用；因此提交推送并继续下一项显式环境变量传递，不因本轮交付停止。已有 109 VM 结果属于签名角色分离基线，111 VM 为当前源码结果。

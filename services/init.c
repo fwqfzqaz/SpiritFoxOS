@@ -1,6 +1,7 @@
 #include "libsf.h"
 #include "package.h"
 #include "manager.h"
+#include "supervisor.h"
 #include "namespace.h"
 #include "storage.h"
 #include "persistence.h"
@@ -17,7 +18,7 @@ static uint8_t package_snapshot[SF_READFS_FILE_MAX];
 typedef struct {uint32_t pid,reply,root;int lease;} Child;
 static Child children[16];static uint64_t requests;
 typedef struct {uint32_t pid,service,reply;} EchoPeer;
-static EchoPeer echo_peers[16];
+static EchoPeer echo_peers[16];static SfSupervisor echo_watch;
 static long console_write(const void*p,size_t n){return sf_sys(SYS_LOG,(uint64_t)p,n,0);}
 static int package_get(const char*name,SfPackage*p){const uint8_t*d;uint64_t n;if(name[0]=='/'){long r=!strcmp(name,"/installed.sfk")?sf_persist_package(package_snapshot,sizeof(package_snapshot)):sf_storage_load(name,package_snapshot,sizeof(package_snapshot));return r<0?r:sf_package_open_trusted(p,package_snapshot,r,&sf_trust_store);}int r=sf_bundle_find((void*)boot->bundle,boot->bundle_bytes,name,&d,&n);return r?r:sf_package_open_trusted(p,d,n,&sf_trust_store);}
 static int native_upload(const SfPackage*p){for(uint64_t off=0;off<p->bytes;){SfMessage m;sf_message(&m,OP_NATIVE_STAGE,++requests);m.handle=p->bytes;m.offset=off;m.length=p->bytes-off;if(m.length>sizeof(m.data))m.length=sizeof(m.data);uint32_t sent=m.length;memcpy(m.data,p->data+off,sent);int rc=sf_send(runtime_ep,&m);if(rc)return rc;long from=sf_recv(runtime_reply,&m,sf_deadline(1000));if(from!=(long)runtime_pid||m.h.request_id!=requests)return from<0?from:SF_STALE_HANDLE;if(m.status)return m.status;off+=sent;if(m.offset!=off)return SF_BAD_FORMAT;}return 0;}
@@ -58,6 +59,23 @@ fail:sfmod_prepare(&manager,echo_slot);sfmod_stop(&manager,echo_slot);echo_ep=ec
 static int echo_stop_service(void){
  int r=sfmod_prepare(&manager,echo_slot);if(!r)r=sfmod_stop(&manager,echo_slot);if(r){sfmod_cancel(&manager,echo_slot);return r;}
  sf_sys(SYS_KILL,echo_pid,0,0);echo_forget(echo_pid);sf_sys(SYS_CAP_REVOKE,echo_ep,0,0);echo_ep=echo_pid=0;return 0;
+}
+static void echo_supervise(void){
+ uint64_t now=sf_ticks();
+ if(echo_watch.state==SF_SUP_RUNNING&&sf_sys(SYS_TASK_STATUS,echo_pid,0,0)!=SF_TASK_RUNNING){
+  if(echo_stop_service()){echo_watch.state=SF_SUP_BLOCKED;echo_watch.next_tick=0;sf_log("echo: recovery blocked by cleanup\n");return;}
+  sf_supervisor_failure(&echo_watch,now);sf_log(echo_watch.state==SF_SUP_BLOCKED?"echo: recovery blocked\n":"echo: recovery scheduled\n");
+ }
+ if(echo_watch.state==SF_SUP_WAITING&&!sf_supervisor_begin(&echo_watch,now)){
+  int r=echo_start_service();now=sf_ticks();
+  if(r){sf_supervisor_failure(&echo_watch,now);sf_log(echo_watch.state==SF_SUP_BLOCKED?"echo: recovery blocked\n":"echo: recovery retry scheduled\n");}
+  else{sf_supervisor_started(&echo_watch,now);sf_log("echo: recovered\n");}
+ }
+}
+static void echo_status(void){
+ static const char*names[]={"STOPPED","WAITING","STARTING","RUNNING","BLOCKED"};uint64_t now=sf_ticks();
+ sf_log("echo: state=");sf_log(echo_watch.state<5?names[echo_watch.state]:"UNKNOWN");sf_log(" attempts=");sf_number(echo_watch.attempts);
+ sf_log(echo_watch.state==SF_SUP_RUNNING&&now>=echo_watch.running_since&&now-echo_watch.running_since>=echo_watch.stable_ticks?" stable=1\n":" stable=0\n");
 }
 static Child*child(uint32_t pid){for(unsigned i=0;i<16;i++)if(children[i].pid==pid)return&children[i];return 0;}
 static int launch_app_root_args(const char*name,const char*root,const SfArguments*arguments){
@@ -201,7 +219,7 @@ static void command(char*line){
  if(!strcmp(line,"help")){
   sf_log("help | ls [path] | cat <path> | write <path> <text> | truncate <path> <bytes> | modules | trust | echo\n");
   sf_log("run <app or installed> [args] | runat <read-only-dir> <app> [args]\nrunenv [NAME=VALUE ...] -- <app> [args] | runenvat <dir> [NAME=VALUE ...] -- <app> [args]\n");
-  sf_log("install /disk/bin/app.sfk | persist | stop echo | start echo | mount /disk | unmount /disk | stop disk | start disk | selftest | shutdown\n");}
+  sf_log("install /disk/bin/app.sfk | persist | stop echo | start echo | echo-status | echo-crash | mount /disk | unmount /disk | stop disk | start disk | selftest | shutdown\n");}
  else if(!strcmp(line,"persist"))sf_persist_status();
  else if(!strcmp(line,"dma-test write"))sf_storage_dma_probe(0);
  else if(!strcmp(line,"dma-test read"))sf_storage_dma_probe(1);
@@ -224,8 +242,10 @@ static void command(char*line){
  else if(!strcmp(line,"channel-test")){channel_test(0);}
  else if(!strcmp(line,"echo-channel-test")){channel_test(1);}
  else if(!strcmp(line,"echo-capacity-test")){echo_capacity_test();}
- else if(!strcmp(line,"stop echo")){sf_log(!echo_stop_service()?"echo: STOPPED\n":"echo: BUSY\n");}
- else if(!strcmp(line,"start echo")){int r=echo_start_service();sf_log(!r?"echo: ACTIVE\n":r==SF_INVALID?"echo: already active\n":"echo: spawn failed\n");}
+ else if(!strcmp(line,"echo-status"))echo_status();
+ else if(!strcmp(line,"echo-crash")){int r=echo_pid&&echo_peer(echo_pid)?sf_sys(SYS_KILL,echo_pid,SF_DEVICE_GONE,0):SF_STALE_HANDLE;sf_log(!r?"echo: crash injected\n":"echo: crash refused\n");}
+ else if(!strcmp(line,"stop echo")){int r=manager.modules[echo_slot].state==MOD_STOPPED?0:echo_stop_service();if(!r)sf_supervisor_disable(&echo_watch);sf_log(!r?"echo: STOPPED\n":"echo: BUSY\n");}
+ else if(!strcmp(line,"start echo")){int r=echo_start_service();if(!r)sf_supervisor_enable(&echo_watch,sf_ticks(),1);else if(r!=SF_INVALID)sf_supervisor_disable(&echo_watch);sf_log(!r?"echo: ACTIVE\n":r==SF_INVALID?"echo: already active\n":"echo: spawn failed\n");}
  else if(!strcmp(line,"ls")||!memcmp(line,"ls ",3)){const char*p=line[2]?line+3:"/";int h=sf_ns_open(&ns,1,"/",p,1);char out[256];long n=h<0?h:sf_ns_enumerate(&ns,1,h,out,sizeof(out));if(n>=0)console_write(out,n);else sf_log("ls: error\n");if(h>=0)sf_ns_close(&ns,1,h);}
  else if(!memcmp(line,"cat ",4)){int h=sf_ns_open(&ns,1,"/",line+4,1);char out[256];long n=h<0?h:sf_ns_read(&ns,1,h,out,sizeof(out));if(n>=0)console_write(out,n);else sf_log("cat: error\n");if(h>=0)sf_ns_close(&ns,1,h);}
  else if(!memcmp(line,"write ",6)){char*p=line+6,*text=p;while(*text&&*text!=' ')text++;if(*text){*text++=0;int h=sf_ns_open(&ns,1,"/",p,2);if(h==SF_NOT_FOUND){sf_ns_create(&ns,p,NODE_FILE,0);h=sf_ns_open(&ns,1,"/",p,2);}long n=h<0?h:sf_ns_write(&ns,1,h,text,strlen(text));sf_log(n>=0?"write: OK\n":"write: error\n");if(h>=0)sf_ns_close(&ns,1,h);}else sf_log("write: expected path and text\n");}
@@ -244,6 +264,7 @@ long sf_main(const SfBootArgs*a,size_t size){
  else{sf_storage_tests();if(sf_storage_writable()){int r=sf_persist_mount(&ns);if(r){sf_log("PERSIST UNAVAILABLE code=");sf_number(-r);sf_log("\n");}}int ep=sf_sys(SYS_EP_CREATE,0,0,0);int disk_module=spawn_echo("/disk/modules/disk-echo.sfmod",ep,RIGHT_RECV);
   if(disk_module>0){int slot=sfmod_add(&manager,"org.spiritfox.disk-echo",0,0);sf_assert(slot>=0&&!sfmod_start(&manager,slot)&&!echo_call(ep,disk_module),"signed sfmod loaded from disk without bundle fallback");sfmod_prepare(&manager,slot);sfmod_stop(&manager,slot);sf_sys(SYS_KILL,disk_module,0,0);echo_forget(disk_module);sfmod_unload(&manager,slot);}else{sf_log("DISK PACKAGE REJECTED module code=");sf_number(-disk_module);sf_log("\n");}sf_sys(SYS_CAP_REVOKE,ep,0,0);
   int app=launch_app("/disk/bin/diskhello.sfk");if(app>0)sf_assert(wait_app(app)==0,"signed disk application runs through native runtime");else{sf_log("DISK PACKAGE REJECTED app code=");sf_number(-app);sf_log("\n");}}
+ sf_assert(!sf_supervisor_init(&echo_watch,3,25,1000),"echo restart policy configured");sf_supervisor_enable(&echo_watch,sf_ticks(),1);
  sf_log("BOOT TESTS PASSED\nSpiritFoxOS ready. Type help.\nfox> ");char line[192]={0};unsigned used=0;
- for(;;){long c=sf_sys(SYS_CONSOLE_READ,0,0,0);if(c>=0){if(c=='\r'||c=='\n'){sf_log("\n");line[used]=0;command(line);used=0;memset(line,0,sizeof(line));sf_log("fox> ");}else if(c==8||c==127){if(used){used--;sf_log("\b \b");}}else if(c>=32&&c<127&&used+1<sizeof(line)){line[used++]=c;char s[2]={(char)c,0};sf_log(s);}}else if(c==SF_EVENT_OVERFLOW){used=0;memset(line,0,sizeof(line));sf_log("\nconsole input overflow; line discarded\nfox> ");}else{serve_once(10);sf_yield();}}
+ for(;;){echo_supervise();long c=sf_sys(SYS_CONSOLE_READ,0,0,0);if(c>=0){if(c=='\r'||c=='\n'){sf_log("\n");line[used]=0;command(line);used=0;memset(line,0,sizeof(line));sf_log("fox> ");}else if(c==8||c==127){if(used){used--;sf_log("\b \b");}}else if(c>=32&&c<127&&used+1<sizeof(line)){line[used++]=c;char s[2]={(char)c,0};sf_log(s);}}else if(c==SF_EVENT_OVERFLOW){used=0;memset(line,0,sizeof(line));sf_log("\nconsole input overflow; line discarded\nfox> ");}else{serve_once(10);sf_yield();}}
 }

@@ -188,6 +188,14 @@ legacy/modern 各十二轮，每轮七种拒绝（含无参数、runat、runenv�
 
 每次正常 VM 启动执行独立管理器图的真实替换测试，输出 DEPENDENCY GENERATION TESTS PASSED，再继续系统服务与设备/应用测试。最终源码构建后完整 python tools/test.py --skip-build 通过（678.98 秒、125 次启动），日志 build/manager-dependencies-final-test.txt；全部原有回归及六项交付摘要一致。发布门要求 manager_dependency_host_checks=25080、manager_dependency_qemu=true，旧结果拒绝测试通过。协议边界见 LIFECYCLE.md。
 
+## Echo 死亡与有界自动恢复
+
+97101 项 C 策略检查直接链接产品 supervisor.c，覆盖一千条固定种子重启轨迹、退避前拒绝/期限到达、最多十六次配置边界、重复 begin、启动失败、显式停止/重试、稳定时间的前一 tick/精确边界、时钟回退以及 UINT64_MAX 饱和。
+
+新增 legacy/modern 两个 VM，通过 root 诊断实际终止 echo PID。前三次自动重启且继续 ping，第四次不稳定死亡进入 BLOCKED；shell、普通和 PI 应用、持久笔记继续工作。显式启动重置预算，手停后等待也不会复活，连续运行到稳定标志后再次故障获得新预算；重复十二次手动停启验证资源回收，持久字节保持。
+
+最终源码构建后完整 python tools/test.py --skip-build 通过（736.3 秒、127 次启动），日志 build/echo-supervision-final-test.txt；全部原有回归及六项交付摘要一致。发布门要求 supervisor_host_checks=97101、supervisor_qemu=true、supervisor_qemu_boots=2，缺标记的旧结果拒绝发布。这里检测实际死亡，不宣称已检测存活但挂起的服务。
+
 ## 外部助手审查
 
 按用户授权调用已有 DeepSeek Harness。首次宽范围审查超时，没有采用其未完成输出；随后以低推理档审查一个文件写函数，11 秒完成且未使用工具。核实并修复空写返回错误，增加容量防御检查及对应宿主断言。审查回执在 `.cache/deepseek/runs/`，不包含提交或推送权限。
