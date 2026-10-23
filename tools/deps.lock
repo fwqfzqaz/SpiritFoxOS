@@ -1,4 +1,0 @@
-# name version sha256 source_url
-musl 1.2.5 a9a118bbe84d8764da0ea0d28b3ab3fae8477fc7e4085d90102b8596fc7c75e4 https://musl.libc.org/releases/musl-1.2.5.tar.gz
-libffi 3.4.6 b0dea9df23c863a7a50e825440f3ebffabd65df1497108e5d437747843895a4e https://github.com/libffi/libffi/releases/download/v3.4.6/libffi-3.4.6.tar.gz
-wayland 1.23.1 864fb2a8399e2d0ec39d56e9d9b753c093775beadc6022ce81f441929a81e5ed https://gitlab.freedesktop.org/wayland/wayland/-/releases/1.23.1/downloads/wayland-1.23.1.tar.xz

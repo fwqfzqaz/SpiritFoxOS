@@ -4,14 +4,15 @@
 /*
  * SpiritFoxOS EFI Stub - 类型定义
  *
- * BootInfo 布局必须与 kernel/include/boot.h 完全一致，以便 stub 构造的
+ * BootInfo 布局由 include/sf.h 统一定义，以便 stub 构造的
  * 启动信息能被内核直接消费。
  */
 
 #include <stdint.h>
+#include "sf.h"
 
 /* =========================================
- * Boot Info (必须与 kernel/include/boot.h 一致)
+ * Boot Info (与 Core 0 共用 include/sf.h)
  * ========================================= */
 #define BOOT_INFO_MAGIC  0x5F1F0F05
 #define BOOT_TYPE_LEGACY 0
@@ -26,38 +27,15 @@ typedef struct MemoryMapEntry {
     uint32_t    reserved;
 } MemoryMapEntry;
 
-typedef struct BootInfo {
-    uint32_t    magic;
-    uint32_t    boot_type;
-
-    uint64_t    framebuffer_base;
-    uint64_t    framebuffer_size;
-    uint32_t    width;
-    uint32_t    height;
-    uint32_t    pitch;
-    uint32_t    bpp;
-
-    uint64_t    memory_map;
-    uint64_t    memory_map_size;
-    uint64_t    memory_map_descriptor_size;
-    uint64_t    memory_map_entry_count;
-
-    uint64_t    acpi_rsdp;
-    uint64_t    efi_runtime_services;
-    uint64_t    total_memory;
-
-    /* initrd - EFI stub 路径不使用，置 0 */
-    uint64_t    initrd_addr;
-    uint64_t    initrd_size;
-} BootInfo;
+typedef SfBootInfo BootInfo;
 
 /* =========================================
  * EFI Type Definitions (self-contained, 无 gnu-efi 依赖)
  * ========================================= */
 typedef void *EFI_HANDLE;
-typedef unsigned long EFI_STATUS;
+typedef uint64_t EFI_STATUS;
 typedef uint16_t CHAR16;
-typedef unsigned long UINTN;
+typedef uint64_t UINTN;
 typedef uint64_t EFI_PHYSICAL_ADDRESS;
 typedef uint64_t UINT64;
 typedef uint32_t UINT32;
