@@ -85,7 +85,7 @@ def main(policy_path=None):
     Path('build/trust-policy.json').write_text(json.dumps(policy, indent=2)+'\n')
     print('Building userspace packages', flush=True)
     shared = objects('user-common', ['services/start.S', 'services/memory.c', 'services/libsf.c', 'services/arguments.c'])
-    init = shared + objects('init', ['services/init.c', 'services/native_image.c', 'services/argparse.c', 'services/storage.c', 'services/readfs.c', 'services/txn.c', 'services/update.c', 'services/version.c', 'services/persistence.c', 'services/manager.c', 'services/namespace.c', *CRYPTO])
+    init = shared + objects('init', ['services/init.c', 'services/file_rpc.c', 'services/native_image.c', 'services/argparse.c', 'services/storage.c', 'services/readfs.c', 'services/txn.c', 'services/update.c', 'services/version.c', 'services/persistence.c', 'services/manager.c', 'services/namespace.c', *CRYPTO])
     packages = []
     image = link_elf('sf-init', init, 'services/user.ld')
     manifest = {'module_id': 'org.spiritfox.init', 'version': '0.1.0', 'category': 'bootstrap', 'requested_caps': ['bootstrap'], 'resource_limits': {'memory': 2097152}}
@@ -115,6 +115,9 @@ def main(policy_path=None):
             Path('build/'+package_name).write_bytes(package_bytes)
         else:
             packages.append((package_name, package_bytes))
+    rpc_image = link_elf('rpcprobe',shared+objects('rpcprobe',['services/rpcprobe.c']),'services/user.ld')
+    rpc_manifest = {'app_id':'org.spiritfox.rpcprobe','version':'0.1.0','runtime_id':'org.spiritfox.native','app_abi':1,'requested_caps':['stdio','namespace.read']}
+    packages.append(('rpcprobe.sfk',pack(rpc_manifest,rpc_image,2,application_seed)))
     pie_shared = objects('pie-common', ['services/start.S','services/memory.c','services/libsf.c','services/arguments.c'], defines=['-fpie'])
     pie_objs = pie_shared + objects('pieprobe',['services/pieprobe.c'],defines=['-fpie'])
     run(['-target','x86_64-freestanding-none','-nostdlib','-fpie','-pie','-Wl,-Bsymbolic','-Wl,-e,_sf_start','-Wl,-T,services/user-pie.ld','-Wl,--build-id=none',*pie_objs,'-o','build/pieprobe.elf'])

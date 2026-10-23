@@ -4,12 +4,12 @@
 
 - 工作区：`E:\SpiritFoxOS`。指定源目录的三项顶层内容已移动到这里。
 - 本轮目标：按用户要求持续推进到任一额度剩余 10%；native argv 与显式环境已完成，接续有界位置无关 native 装载与相对重定位。
-- status: native_relative_tested_delivery
+- status: file_rpc_tested_delivery
 - round_complete: true
 - continuous_work: true
 - quota_paused: false
 - 分支：`codex/trust-policy-20261023`，基于已合并的 `origin/main`（`ca9e1a3`）；远端：`origin`，读取和推送地址均为 `https://github.com/fwqfzqaz/SpiritFoxOS.git`。
-- 当前 native relative 最终源码完整测试通过（550.52 秒、117 VM），日志 `build/native-final-test.txt`。六组新增宿主/500 次签名变异与四次 native VM、全部原有回归通过，六项交付摘要一致。根测试已完成，无测试进程；交付后继续文件 RPC 长度边界修复，当前新建但尚未接入的 file_rpc 源码/343 项宿主检查属于下一轮。
+- 当前文件 RPC 分发防御完整测试通过（562.15 秒、119 VM），353 项新增宿主和两个 VM、全部原有回归与六项交付摘要一致，日志 `build/file-rpc-final-test.txt`，根测试 PID 34108 已完成。现有 SYS_SEND 原已拒绝超长发送，本轮提供服务独立检查。提交后继续磁盘回复队列隔离的并发复现。
 
 ## 已完成
 
@@ -53,9 +53,12 @@
 36. M4：relative-v1 APP 的位置无关代码、签名清单整段 RELOC 子表、最多 256 个相对项，只写 RW 完整八字节槽、非负映像内加数。用户态认证同一快照后准备，Core 0 校验隔离基址并复制私有页，不增加 ELF/重定位解析器。确定性交替两个基址，不宣称安全随机化；导入/TLS/动态库未实现。
 37. 完整验证通过（550.52 秒、117 VM）：新增六组宿主/500 次已签名记录变异及四次 legacy/modern 装载、安装确认和重启 VM。每次正常启动同时运行两个 PI 应用，验证函数/数据/BSS 指针和独立数据。另复现并修复 native 回复与已有应用请求串扰，使用独立回复端点且重启撤销重建；全部原有回归通过。协议与内部装载 ABI 变化见 NATIVE.md。
 
+38. 文件 RPC 分发逻辑提取为共享 file_rpc.c，READ/WRITE/ENUMERATE 在访问后端前独立拒绝超过 256 字节的数据长度；有界路径、权限、目录根和回收语义保持。内核原 SYS_SEND 已有相同上限，此项是分层防御，不宣称之前能经正常 IPC 越界。
+39. 完整验证通过（562.15 秒、119 VM）：353 项宿主检查验证保护字节、256 字节边界、大目录、无副作用和原权限；两个真实 VM 验证内核拒绝超长发送后仍可正常处理大文件、控制台和持久笔记，连续回收不泄漏挂载引用。全部原有回归和六项摘要一致，打包门新增 file_rpc 标记并拒绝旧结果。
+
 ## 交付与续做
 
-native relative 完整验证通过（550.52 秒、117 VM）；六项镜像/公钥/策略摘要一致，测试根 PID 43584 已完成。当前提交推送此轮 PI/相对重定位和 native 回复隔离，再接续审查发现的文件 RPC 长度边界问题。环境基线为 `eb1bf08`。file_rpc 新文件已完成 343 项宿主检查，旧实际 dispatcher 提取基线在枚举越界长度拒绝处失败，但尚未接入产品或 VM，不能称为该修复已交付。
+文件 RPC 分发层独立长度校验完整通过（562.15 秒、119 VM），日志 `build/file-rpc-final-test.txt`；无运行中的测试，六个交付摘要一致。旧分发器的直接宿主基线绕过传输条件，失败仅表明本地缺少防御，现有 SYS_SEND 早已拒绝 length>256，不称为可利用漏洞。当前提交推送并更新 PR #10，随后按 `.cache/next-round-plan.txt` 复现并处理磁盘服务回复与应用消息的潜在串扰。native 基线为 `f5b7021`。
 
 当前 native 参数轮次已完成全套验证，日志 `build/arguments-final-test.txt`。额度检查短期剩余 73%、长期 52%，普通使用可用；因此提交推送并继续下一项显式环境变量传递，不因本轮交付停止。已有 109 VM 结果属于签名角色分离基线，111 VM 为当前源码结果。
 

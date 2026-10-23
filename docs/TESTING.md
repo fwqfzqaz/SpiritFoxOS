@@ -152,6 +152,16 @@ legacy/modern 各增加首次启动及重启，共四次 native VM：两种实�
 
 最终源码构建后完整 `python tools/test.py --skip-build` 通过（550.52 秒、117 次启动），日志 `build/native-final-test.txt`，包含 28 组 Python 测试/3500 次变异和全部旧回归。六项交付摘要一致；发布门增加 native_relative_host_groups=6、native_relative_mutations=500、native_relative_qemu=true、native_relative_qemu_boots=4，并验证旧结果缺标记时拒绝打包。完整范围见 NATIVE.md。
 
+## 文件 RPC 的独立长度边界
+
+新增 353 项 C 检查直接链接产品 file_rpc.c 和 namespace.c，包括数据区前后保护字节、合法 256 字节读取/写入、大目录的有界枚举、257/512/2^31/UINT32_MAX 拒绝、不触及后端/控制台、不改变偏移或节点，以及只读子句柄和根关闭后子文件保持。
+
+旧产品分发器提取基线在 257 字节枚举应拒绝处失败，日志 build/file-rpc-baseline-test.txt。宿主绕过了内核传输前置条件；现有 SYS_SEND 已拒绝 length>256，这不是曾能通过正常 IPC 触发的系统漏洞。
+
+rpcprobe.sfk 在 legacy/modern 各一个 VM 检查四种超长请求直接在发送处返回 SF_INVALID；之后完整读取大于 256 字节的磁盘文件、正常写控制台、以只读权限访问持久笔记，连续十二次调用后仍可卸载和停止驱动。VM 并不声称超长请求进入服务后才拒绝；服务自身的边界由上述独立宿主检查覆盖。
+
+最终源码构建后完整 `python tools/test.py --skip-build` 通过（562.15 秒、119 次启动），日志 `build/file-rpc-final-test.txt`。全部既有回归、28 组 Python 测试/3500 次变异和六个交付摘要一致。发布门增加 file_rpc_host_checks=353、file_rpc_qemu=true、file_rpc_qemu_boots=2，缺少标记的旧结果拒绝打包。
+
 ## 外部助手审查
 
 按用户授权调用已有 DeepSeek Harness。首次宽范围审查超时，没有采用其未完成输出；随后以低推理档审查一个文件写函数，11 秒完成且未使用工具。核实并修复空写返回错误，增加容量防御检查及对应宿主断言。审查回执在 `.cache/deepseek/runs/`，不包含提交或推送权限。

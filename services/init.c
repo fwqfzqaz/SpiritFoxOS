@@ -7,6 +7,7 @@
 #include "trust.h"
 #include "arguments.h"
 #include "native_image.h"
+#include "file_rpc.h"
 static const SfBootArgs*boot;
 static uint32_t manager_ep;static SfManager manager;static SfNamespace ns;
 static int runtime_slot,echo_slot;static uint32_t runtime_pid,runtime_ep,runtime_reply,echo_pid,echo_ep;
@@ -58,26 +59,7 @@ static void app_reap(uint32_t pid){Child*c=child(pid);if(!c)return;sf_ns_reap(&n
 static int serve_once(unsigned timeout_ms){
  SfMessage m;long sender=sf_recv(manager_ep,&m,sf_deadline(timeout_ms));if(sender<0)return sender;Child*c=child(sender);if(!c)return SF_INVALID;
  if(m.h.opcode==OP_HELLO)return m.status;
- int status=SF_INVALID;
- switch(m.h.opcode){
- case OP_ROOT:status=c->root?0:SF_DENIED;m.handle=c->root;break;
- case OP_OPENAT:
-  if(!m.length||m.length>SF_MSG_BYTES||m.data[m.length-1]||strlen((char*)m.data)+1!=m.length){status=SF_INVALID;break;}
-  status=sf_ns_openat(&ns,sender,m.handle,(char*)m.data,m.mode);if(status>=0){m.handle=status;status=0;}break;
- case OP_OPEN:
-  if(!m.length||m.length>SF_MSG_BYTES||m.data[m.length-1]||strlen((char*)m.data)+1!=m.length){status=SF_INVALID;break;}
-  /* Absolute application opens delegate stdout; files use directory handles. */
-  if(strcmp((char*)m.data,"/dev/console")||m.mode!=OPEN_WRITE){status=SF_DENIED;break;}
-  status=sf_ns_open(&ns,sender,"/",(char*)m.data,m.mode);if(status>=0){m.handle=status;status=0;}break;
- case OP_WRITE:status=sf_ns_write(&ns,sender,m.handle,m.data,m.length);break;
- case OP_TRUNCATE:status=sf_ns_truncate(&ns,sender,m.handle,m.offset);break;
- case OP_READ:status=sf_ns_read(&ns,sender,m.handle,m.data,m.length);if(status>=0)m.length=status;break;
- case OP_CLOSE:status=sf_ns_close(&ns,sender,m.handle);if(!status&&m.handle==c->root)c->root=0;break;
- case OP_SEEK:status=sf_ns_seek(&ns,sender,m.handle,m.offset);break;
- case OP_POLL:status=sf_ns_poll(&ns,sender,m.handle);break;
- case OP_ENUMERATE:status=sf_ns_enumerate(&ns,sender,m.handle,(char*)m.data,m.length);if(status>=0)m.length=status;break;
- }
- m.status=status;return sf_send(c->reply,&m);
+ sf_file_dispatch(&ns,sender,&c->root,&m);return sf_send(c->reply,&m);
 }
 static int wait_app(uint32_t pid){uint64_t end=sf_ticks()+300;for(;;){long status=sf_sys(SYS_TASK_STATUS,pid,0,0);if(status!=SF_TASK_RUNNING){app_reap(pid);return status;}if(sf_ticks()>end){sf_sys(SYS_KILL,pid,SF_TIMEOUT,0);app_reap(pid);return SF_TIMEOUT;}serve_once(10);sf_yield();}}
 static int echo_call(uint32_t ep,uint32_t pid){if(manager.modules[echo_slot].state!=MOD_ACTIVE)return SF_DRAINING;SfMessage m;sf_message(&m,OP_ECHO,++requests);memcpy(m.data,"ping",4);m.length=4;int r=sf_send(ep,&m);if(r)return r;long from=sf_recv(manager_ep,&m,sf_deadline(1000));return from==pid&&m.h.request_id==requests&&m.length==4&&!memcmp(m.data,"ping",4)?0:SF_INVALID;}

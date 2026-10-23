@@ -20,6 +20,8 @@ build.run(['-target', 'x86_64-windows-gnu', '-g0', '-O2', '-Wall', '-Wextra', '-
 subprocess.run([str(ROOT / 'build/test_arguments.exe')], check=True)
 build.run(['-target', 'x86_64-windows-gnu', '-g0', '-O2', '-Wall', '-Wextra', '-Werror', '-Iinclude', 'tests/test_environment.c', 'services/arguments.c', 'services/argparse.c', '-o', 'build/test_environment.exe'])
 subprocess.run([str(ROOT / 'build/test_environment.exe')], check=True)
+build.run(['-target', 'x86_64-windows-gnu', '-g0', '-O2', '-Wall', '-Wextra', '-Werror', '-Iinclude', 'tests/test_file_rpc.c', 'services/file_rpc.c', 'services/namespace.c', '-o', 'build/test_file_rpc.exe'])
+subprocess.run([str(ROOT / 'build/test_file_rpc.exe')], check=True)
 build.run(['-target', 'x86_64-windows-gnu', '-g0', '-O2', '-Wall', '-Wextra', '-Werror', '-Iinclude', 'tests/test_services.c', 'services/manager.c', 'services/namespace.c', '-o', 'build/test_services.exe'])
 subprocess.run([str(ROOT / 'build/test_services.exe')], check=True)
 build.run(['-target', 'x86_64-windows-gnu', '-g0', '-O2', '-Wall', '-Wextra', '-Werror', '-Iinclude', 'tests/test_openat.c', 'services/namespace.c', '-o', 'build/test_openat.exe'])
@@ -46,6 +48,7 @@ subprocess.run([sys.executable, 'tests/test_trust.py'], check=True)
 subprocess.run([sys.executable, 'tests/test_readfs.py'], check=True)
 subprocess.run([sys.executable, 'tests/test_native.py'], check=True)
 if not args.host_only:
+    subprocess.run([sys.executable, 'tools/qemu_file_rpc_test.py'], check=True)
     subprocess.run([sys.executable, 'tools/qemu_native_test.py'], check=True)
     subprocess.run([sys.executable, 'tools/qemu_environment_test.py'], check=True)
     subprocess.run([sys.executable, 'tools/qemu_arguments_test.py'], check=True)
@@ -89,6 +92,9 @@ result['native_relative_host_groups'] = 6
 result['native_relative_mutations'] = 500
 result['native_relative_qemu'] = not args.host_only
 result['native_relative_qemu_boots'] = 0 if args.host_only else 4
+result['file_rpc_host_checks'] = 353
+result['file_rpc_qemu'] = not args.host_only
+result['file_rpc_qemu_boots'] = 0 if args.host_only else 2
 result['trust_policy_qemu'] = not args.host_only
 result['trust_policy_qemu_boots'] = 0 if args.host_only else 14
 result['artifacts_sha256'] = {name: hashlib.sha256((ROOT/'build'/name).read_bytes()).hexdigest() for name in ['esp/EFI/BOOT/BOOTX64.EFI', 'storage.img', 'persistent.img', 'development.pub', 'application.pub', 'trust-policy.json']}
