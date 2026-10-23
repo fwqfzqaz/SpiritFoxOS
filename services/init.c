@@ -107,7 +107,7 @@ static void command(char*line){
  else if(!strcmp(line,"persist"))sf_persist_status();
  else if(!strcmp(line,"dma-test write"))sf_storage_dma_probe(0);
  else if(!strcmp(line,"dma-test read"))sf_storage_dma_probe(1);
- else if(!memcmp(line,"install ",8)){int r=sf_persist_install(line+8);if(!r)sf_log("install: COMMITTED\n");else{sf_log("install: failed code=");sf_number(-r);sf_log("\n");}}
+ else if(!memcmp(line,"install ",8)){int r=sf_persist_install(line+8);if(!r)sf_log("install: COMMITTED\n");else if(r==1)sf_log("install: UNCHANGED\n");else{sf_log("install: failed code=");sf_number(-r);sf_log("\n");}}
  else if(!strcmp(line,"modules")){sf_log("sf-init ACTIVE pinned; sf-native ");sf_log(manager.modules[runtime_slot].state==MOD_ACTIVE?"ACTIVE":"STOPPED");sf_log("; echo ");sf_log(manager.modules[echo_slot].state==MOD_ACTIVE?"ACTIVE\n":"STOPPED\n");}
  else if(!strcmp(line,"echo")){sf_log(echo_call(echo_ep,echo_pid)==0?"echo: ping\n":"echo: service unavailable\n");}
  else if(!memcmp(line,"run ",4)){

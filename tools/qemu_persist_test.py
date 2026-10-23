@@ -10,6 +10,7 @@ import subprocess
 import threading
 import time
 import qemu_test
+from mkreadfs import create as create_readfs
 
 ROOT = qemu_test.ROOT
 
@@ -164,6 +165,96 @@ def rewrite(data, changes):
     return bytes(data)
 
 
+def replace_base(data, changes):
+    """Create an offline signed-policy fixture; leave its transaction tail intact."""
+    files = {}
+    for i in range(struct.unpack_from('<I',data,24)[0]):
+        entry = 512+i*128
+        name = data[entry:entry+64].split(b'\0',1)[0].decode()
+        offset,size = struct.unpack_from('<QQ',data,entry+64)
+        files[name] = data[offset:offset+size]
+    files.update(changes)
+    return create_readfs(files,len(data))[:2048*512]+data[2048*512:]
+
+
+def version_policy(machine,disk,committed):
+    disk.write_bytes(committed)
+    vm = machine('version-reject')
+    try:
+        vm.boot('PERSIST READY generation=8')
+        vm.command('persist','update: confirmed-version=0.2.0 policy=monotonic')
+        vm.command('install /disk/bin/diskhello.sfk','install: failed code=21')
+        vm.command('install /disk/bin/diskupdate.sfk','install: UNCHANGED')
+        vm.command('persist','persist: ACTIVE generation=8')
+    finally:
+        vm.close()
+    assert disk.read_bytes()==committed, 'Rejected or identical install wrote the disk'
+    vm = machine('version-confirm')
+    try:
+        vm.boot()
+        vm.command('install /disk/bin/diskfault.sfk','install: COMMITTED')
+        vm.command('run installed','sfexec: failed code=114')
+        vm.command('persist','update: confirmed-version=0.2.0 policy=monotonic')
+        vm.command('install /disk/bin/disknext.sfk','install: COMMITTED')
+        vm.command('run installed','sfexec: exit 0')
+        vm.command('persist','update: confirmed-version=0.3.0 policy=monotonic')
+        vm.command('install /disk/bin/disknext.sfk','install: UNCHANGED')
+        vm.command('install /disk/bin/diskupdate.sfk','install: failed code=21')
+        vm.command('install /disk/bin/diskfault.sfk','install: failed code=21')
+        vm.command('cat /persist/notes','durable-note')
+    finally:
+        vm.close()
+    assert generation(disk)==14
+    confirmed = disk.read_bytes()
+    vm = machine('version-reboot')
+    try:
+        vm.boot('PERSIST READY generation=14')
+        vm.command('persist','update: confirmed-version=0.3.0 policy=monotonic')
+        vm.command('run installed','sfexec: exit 0')
+        vm.command('install /disk/bin/diskupdate.sfk','install: failed code=21')
+    finally:
+        vm.close()
+    assert disk.read_bytes()==confirmed
+    malformed = replace_base(committed,{
+        '/bin/'+name+'.sfk':(ROOT/'build'/('version-'+label+'.sfk')).read_bytes()
+        for name,label in [('diskfault','short'),('diskexit','leading'),('diskspin','overflow'),('disknext','suffix')]})
+    disk.write_bytes(malformed)
+    vm = machine('version-signed-malformed')
+    try:
+        vm.boot()
+        for name in ['diskfault','diskexit','diskspin','disknext']:
+            vm.command('install /disk/bin/'+name+'.sfk','install: failed code=3')
+        vm.command('persist','update: confirmed-version=0.2.0 policy=monotonic')
+    finally:
+        vm.close()
+    assert disk.read_bytes()==malformed
+    # Old implementations could stage these records. Recheck at actual launch,
+    # after TRYING is durable, and roll back without executing the candidate.
+    for name,base,package,code in [
+        ('downgrade',committed,(ROOT/'build/diskhello.sfk').read_bytes(),21),
+        ('same-version',confirmed,(ROOT/'build/diskfault.sfk').read_bytes(),21),
+        ('malformed',committed,(ROOT/'build/version-suffix.sfk').read_bytes(),3)]:
+        _,_,files = snapshot(base)
+        selector = bytearray(files['/boot/current'])
+        slot = ord('a') if selector[9]==ord('b') else ord('b')
+        selector[8]=1;selector[10]=slot
+        selector[64:96]=hashlib.sha256(package).digest()
+        disk.write_bytes(rewrite(base,{'/boot/current':selector,'/slots/'+chr(slot)+'.sfk':package}))
+        vm = machine('version-pending-'+name)
+        try:
+            vm.boot()
+            start = vm.send('run installed')
+            vm.expect('sfexec: failed code='+str(code),start)
+            assert b'update: ROLLED BACK' in vm.output[start:]
+            assert b'Hello from diskhello.sfk!' not in vm.output[start:]
+            assert b'update: CONFIRMED' not in vm.output[start:]
+            vm.command('persist','update: confirmed-version='+('0.3.0' if name=='same-version' else '0.2.0')+' policy=monotonic')
+            vm.command('run installed','sfexec: exit 0')
+        finally:
+            vm.close()
+    disk.write_bytes(committed)
+
+
 def update_health(machine,disk,pristine,committed):
     disk.write_bytes(pristine)
     vm = machine('update-first-failure')
@@ -190,6 +281,7 @@ def update_health(machine,disk,pristine,committed):
             vm.expect('sfexec: failed code='+str(code),start)
             assert b'update: ROLLED BACK' in vm.output[start:]
             vm.command('persist','update: STABLE good=b candidate=-')
+            vm.command('persist','update: confirmed-version=0.2.0 policy=monotonic')
             vm.command('run installed','sfexec: exit 0')
         vm.command('cat /persist/notes','durable-note')
     finally:
@@ -264,7 +356,7 @@ def update_health(machine,disk,pristine,committed):
     vm = machine('update-confirm-stage')
     try:
         vm.boot()
-        vm.command('install /disk/bin/diskhello.sfk','install: COMMITTED')
+        vm.command('install /disk/bin/disknext.sfk','install: COMMITTED')
     finally:
         vm.close()
     conf = ROOT/'build/update-confirm-eio.conf'
@@ -294,7 +386,7 @@ def update_health(machine,disk,pristine,committed):
     try:
         vm.boot()
         vm.command('run installed','sfexec: exit 0')
-        vm.command('install /disk/bin/diskhello.sfk','install: COMMITTED')
+        vm.command('install /disk/bin/disknext.sfk','install: COMMITTED')
         vm.command('run installed','sfexec: exit 0')
         vm.command('persist','update: STABLE good=a candidate=-')
     finally:
@@ -331,7 +423,7 @@ def run(iommu=False):
         vm.command('install /disk/bin/diskhello.sfk','install: failed code=7')
         vm.command('run installed','sfexec: exit 0')
         assert b'update: CONFIRMED' in vm.output
-        vm.command('install /disk/bin/diskhello.sfk','install: COMMITTED')
+        vm.command('install /disk/bin/diskupdate.sfk','install: COMMITTED')
         vm.command('run /installed.sfk','sfexec: exit 0')
         vm.command('persist','persist: ACTIVE generation=8')
         vm.command('persist','update: STABLE good=b candidate=-')
@@ -433,9 +525,10 @@ def run(iommu=False):
         vm.close()
     assert (ROOT/'build/persistent.img').read_bytes()==pristine
     update_health(machine,disk,pristine,committed)
+    version_policy(machine,disk,committed)
     assert (ROOT/'build/persistent.img').read_bytes()==pristine
     assert disk.read_bytes()[:2048*512]==pristine[:2048*512]
-    print('PERSIST QEMU PASS: durable file, trial confirmation, fault/nonzero/timeout rollback, interrupted trial, identity/digest/signature, legacy selector, invalid state, write/flush/health EIO and interrupted commit',flush=True)
+    print('PERSIST QEMU PASS: durable file, trial confirmation, fault/nonzero/timeout rollback, interrupted trial, identity/digest/signature/version, idempotent reinstall, pending policy recheck, legacy selector, invalid state, write/flush/health EIO and interrupted commit',flush=True)
 
 
 if __name__=='__main__':

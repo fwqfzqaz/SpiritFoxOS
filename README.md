@@ -13,7 +13,7 @@ python tools/bootstrap.py
 python tools/test.py
 ```
 
-第一步下载并校验 Zig 0.13.0、QEMU Windows 构建和 Monocypher 4.0.3。已提供的 Monocypher 源码在 `vendor/monocypher`。第二步执行基础服务与 229 条 IOMMU 检查、14 组 Python 测试（含 2000 次变异）、783 个事务及 3132 个更新故障场景，以及含真实越界 DMA、试运行和恢复的六十一次 QEMU 启动。
+第一步下载并校验 Zig 0.13.0、QEMU Windows 构建和 Monocypher 4.0.3。已提供的 Monocypher 源码在 `vendor/monocypher`。第二步执行基础服务、229 条 IOMMU 与 4069 条版本策略检查、14 组 Python 测试（含 2000 次变异）、783 个事务及 3132 个更新故障场景，以及含真实越界 DMA、试运行、版本策略和恢复的七十五次 QEMU 启动。
 
 只构建：`python tools/build.py`。只运行宿主测试：`python tools/test.py --host-only`。已有镜像测试：`python tools/test.py --skip-build`。
 
@@ -65,6 +65,8 @@ persist
 成功写入与安装均等待设备 flush。任何写/flush 错误会停止卷的后续读写，需重新挂载或重启恢复；错误时不能假定新版本一定没有落盘。当前配额为四个 16 KiB 文件，只对笔记与一个应用提供入口。
 
 安装提交候选包，第一次运行前持久记录试运行，按时退出 0 才确认。失败或未确认时重启回退已确认包；待更新期间拒绝覆盖安装。此回退只改变应用选择器，不能撤销外部副作用；格式、旧版兼容与健康标准见 [应用更新](docs/UPDATES.md)。
+
+已确认版本形成软件下限：拒绝降级及同版本换包，精确重装返回 `UNCHANGED` 且不写盘；`persist` 可查询实际已确认版本。下限在健康确认时才随已确认包更新，不防止离线回放旧磁盘镜像。
 
 隔离模式交互：`python tools/qemu_test.py --interactive --persistent --iommu`；专项验证：`python tools/qemu_iommu_test.py`。诊断 `dma-test read/write` 会刻意触发设备隔离故障并使该 VM 的磁盘驱动停止至重启，请只在测试 VM 使用。
 
