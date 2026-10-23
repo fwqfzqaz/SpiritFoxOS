@@ -176,6 +176,12 @@ rpcprobe.sfk 在 legacy/modern 各一个 VM 检查四种超长请求直接在发
 
 最终源码重建后完整 python tools/test.py --skip-build 通过（628.35 秒、123 次启动），日志 build/echo-final-resumed-test.txt；全部原有回归、28 组 Python 测试/3500 次变异和六项交付摘要通过。结果与发布门新增 echo_reply_channel_qemu=true、echo_reply_channel_qemu_boots=2。此前额度中断的批次不是完整通过结果。
 
+## 认证包类型与启动意图
+
+基线 run echo.sfmod 无附加参数会等待应用期限后返回 SF_TIMEOUT=9，原始日志 build/qemu-persist-launch-kind-baseline.log。专项使用正确密钥签署的两种有效包：把 APP 放入启动模块位置时拒绝 code=2 并继续启动；把 MODULE 改名 .sfk 仍拒绝应用运行；有效 APP 使用 .sfmod 后缀仍由 native 成功运行。
+
+legacy/modern 各十二轮，每轮七种拒绝（含无参数、runat、runenv、runenvat、native 与设备模块），随后正常运行普通和 PI 应用、echo；错误安装仍由既有策略拒绝，盘字节保持并能卸载/停止。最终源码构建后完整 python tools/test.py --skip-build 通过（687.44 秒、125 次启动），日志 build/launch-kind-final-test.txt；全部原有回归和六项交付摘要一致。发布门要求 launch_kind_qemu=true、launch_kind_qemu_boots=2，旧结果缺失时拒绝发布。
+
 ## 外部助手审查
 
 按用户授权调用已有 DeepSeek Harness。首次宽范围审查超时，没有采用其未完成输出；随后以低推理档审查一个文件写函数，11 秒完成且未使用工具。核实并修复空写返回错误，增加容量防御检查及对应宿主断言。审查回执在 `.cache/deepseek/runs/`，不包含提交或推送权限。

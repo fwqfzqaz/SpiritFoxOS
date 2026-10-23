@@ -21,8 +21,9 @@ static EchoPeer echo_peers[16];
 static long console_write(const void*p,size_t n){return sf_sys(SYS_LOG,(uint64_t)p,n,0);}
 static int package_get(const char*name,SfPackage*p){const uint8_t*d;uint64_t n;if(name[0]=='/'){long r=!strcmp(name,"/installed.sfk")?sf_persist_package(package_snapshot,sizeof(package_snapshot)):sf_storage_load(name,package_snapshot,sizeof(package_snapshot));return r<0?r:sf_package_open_trusted(p,package_snapshot,r,&sf_trust_store);}int r=sf_bundle_find((void*)boot->bundle,boot->bundle_bytes,name,&d,&n);return r?r:sf_package_open_trusted(p,d,n,&sf_trust_store);}
 static int native_upload(const SfPackage*p){for(uint64_t off=0;off<p->bytes;){SfMessage m;sf_message(&m,OP_NATIVE_STAGE,++requests);m.handle=p->bytes;m.offset=off;m.length=p->bytes-off;if(m.length>sizeof(m.data))m.length=sizeof(m.data);uint32_t sent=m.length;memcpy(m.data,p->data+off,sent);int rc=sf_send(runtime_ep,&m);if(rc)return rc;long from=sf_recv(runtime_reply,&m,sf_deadline(1000));if(from!=(long)runtime_pid||m.h.request_id!=requests)return from<0?from:SF_STALE_HANDLE;if(m.status)return m.status;off+=sent;if(m.offset!=off)return SF_BAD_FORMAT;}return 0;}
-static int spawn_package_policy(const char*name,uint32_t service,uint32_t rights,uint32_t device,uint32_t device_rights,int directory,const SfArguments*arguments,uint32_t reply){
- SfPackage p;int r=package_get(name,&p);if(r)return r;
+static int spawn_package_policy(const char*name,uint32_t service,uint32_t rights,uint32_t device,uint32_t device_rights,int directory,const SfArguments*arguments,uint32_t reply,uint16_t expected_kind){
+ SfPackage p;int r=package_get(name,&p);if(r)return r;if(p.kind!=expected_kind)return SF_DENIED;
+ int native_module=p.kind==1&&!strcmp(name,"sf-native.sfmod");
  if(arguments&&(arguments->count||arguments->env_count)&&p.kind!=2)return SF_DENIED;
  uint64_t image_base=p.native_profile?SF_PIE_MIN+((pie_sequence++&1)*0x2000000ull):SF_BASE;
  if(directory){r=sf_manifest_capability(&p,"namespace.read");if(r<0)return r;if(p.kind!=2||r!=1)return SF_DENIED;}
@@ -32,19 +33,19 @@ static int spawn_package_policy(const char*name,uint32_t service,uint32_t rights
   SfMessage request;sf_message(&request,OP_NATIVE_PREPARE,++requests);request.length=strlen(name)+1;if(request.length>sizeof(request.data))return SF_INVALID;request.mode=external;request.offset=image_base;memcpy(request.data,name,request.length);int rc=sf_send(runtime_ep,&request);if(rc)return rc;long from=sf_recv(runtime_reply,&request,sf_deadline(1000));if(from!=(long)runtime_pid||request.h.request_id!=requests)return from<0?from:SF_INVALID;if(request.status)return request.status;
   if(request.length!=sizeof(SfNativePlan))return SF_BAD_FORMAT;SfNativePlan native;memcpy(&native,request.data,sizeof(native));if(native.entry!=p.entry||native.image_base!=image_base||native.profile!=p.native_profile||native.relocation_offset!=p.relocation_offset||native.relocation_count!=p.relocation_count||native.reserved||native.count>5)return SF_BAD_FORMAT;unsigned j=0;for(unsigned i=0;i<p.count;i++){SfSection*s=&p.sections[i];if(s->type>3)continue;if(j>=native.count)return SF_BAD_FORMAT;SfNativeSegment*t=&native.segments[j++];if(t->rva!=s->rva||t->memory!=s->memory||t->offset!=s->offset||t->bytes!=s->bytes||t->flags!=s->flags||t->reserved)return SF_BAD_FORMAT;}if(j!=native.count)return SF_BAD_FORMAT;
  }
- SfLoadPlan plan={0};plan.size=sizeof(plan);plan.entry=p.entry;plan.grant_manager=reply?reply:!strcmp(name,"sf-native.sfmod")?runtime_reply:manager_ep;plan.grant_service=service;plan.service_rights=rights;plan.grant_bundle=!strcmp(name,"sf-native.sfmod");
+ SfLoadPlan plan={0};plan.size=sizeof(plan);plan.entry=p.entry;plan.grant_manager=reply?reply:native_module?runtime_reply:manager_ep;plan.grant_service=service;plan.service_rights=rights;plan.grant_bundle=native_module;
  plan.grant_device=device;plan.device_rights=device_rights;
  if(arguments)plan.arguments=*arguments;
  r=sf_native_image(&p,image_base,staging,sizeof(staging),&plan);if(r)return r;
  return sf_sys(SYS_SPAWN,(uint64_t)&plan,0,0);
 }
-static int spawn_package_device(const char*name,uint32_t service,uint32_t rights,uint32_t device,uint32_t device_rights){return spawn_package_policy(name,service,rights,device,device_rights,0,0,0);}
-static int spawn_storage_package(const char*name,uint32_t service,uint32_t rights,uint32_t device,uint32_t device_rights,uint32_t reply){return spawn_package_policy(name,service,rights,device,device_rights,0,0,reply);}
+static int spawn_package_device(const char*name,uint32_t service,uint32_t rights,uint32_t device,uint32_t device_rights){return spawn_package_policy(name,service,rights,device,device_rights,0,0,0,1);}
+static int spawn_storage_package(const char*name,uint32_t service,uint32_t rights,uint32_t device,uint32_t device_rights,uint32_t reply){return spawn_package_policy(name,service,rights,device,device_rights,0,0,reply,1);}
 static int spawn_package(const char*name,uint32_t service,uint32_t rights){return spawn_package_device(name,service,rights,0,0);}
 static EchoPeer*echo_peer(uint32_t pid){for(unsigned i=0;i<16;i++)if(echo_peers[i].pid==pid)return &echo_peers[i];return 0;}
 static int spawn_echo(const char*name,uint32_t service,uint32_t rights){
  unsigned slot;for(slot=0;slot<16;slot++)if(!echo_peers[slot].pid)break;if(slot==16)return SF_NO_SPACE;
- int reply=sf_sys(SYS_EP_CREATE,0,0,0);if(reply<0)return reply;int pid=spawn_package_policy(name,service,rights,0,0,0,0,reply);
+ int reply=sf_sys(SYS_EP_CREATE,0,0,0);if(reply<0)return reply;int pid=spawn_package_policy(name,service,rights,0,0,0,0,reply,1);
  if(pid<0){sf_sys(SYS_CAP_REVOKE,reply,0,0);return pid;}echo_peers[slot]=(EchoPeer){pid,service,reply};return pid;
 }
 static void echo_forget(uint32_t pid){EchoPeer*p=echo_peer(pid);if(p){sf_sys(SYS_CAP_REVOKE,p->reply,0,0);memset(p,0,sizeof(*p));}}
@@ -67,7 +68,7 @@ static int launch_app_root_args(const char*name,const char*root,const SfArgument
  int directory=root?sf_ns_open(&ns,1,"/",root,OPEN_READ|OPEN_DIRECTORY):0;if(directory<0)return directory;
  int ep=0,r=sfmod_acquire(&manager,runtime_slot,RES_LEASE);if(r)goto fail_root;
  ep=sf_sys(SYS_EP_CREATE,0,0,0);if(ep<0){r=ep;goto fail_lease;}
- int pid=spawn_package_policy(name,ep,RIGHT_RECV,0,0,directory!=0,arguments,0);if(pid<0){r=pid;goto fail_lease;}
+ int pid=spawn_package_policy(name,ep,RIGHT_RECV,0,0,directory!=0,arguments,0,2);if(pid<0){r=pid;goto fail_lease;}
  if(directory)ns.handles[(directory&255)-1].owner=pid;
  children[slot]=(Child){pid,ep,directory,1};return pid;
 fail_lease:if(ep>0)sf_sys(SYS_CAP_REVOKE,ep,0,0);sfmod_release(&manager,runtime_slot,RES_LEASE);

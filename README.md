@@ -13,7 +13,7 @@ python tools/bootstrap.py
 python tools/test.py
 ```
 
-第一步下载并校验 Zig 0.13.0、QEMU Windows 构建和 Monocypher 4.0.3。已提供的 Monocypher 源码在 `vendor/monocypher`。第二步执行基础服务、950 条内核 IPC/内存边界、8155 条参数与 12034 条环境检查、353 条文件 RPC 分发边界、108 条 openat、83 条截断、229 条 IOMMU 与 4069 条版本策略检查、28 组 Python 测试（含 3500 次变异）、783 个事务、3132 个更新及 3132 个截断故障场景，以及含真实越界 DMA、试运行、版本策略、目录授权、持久化截断、密钥轮换/撤销与旧密钥迁移、驱动死亡和恢复的 123 次 QEMU 启动。
+第一步下载并校验 Zig 0.13.0、QEMU Windows 构建和 Monocypher 4.0.3。已提供的 Monocypher 源码在 `vendor/monocypher`。第二步执行基础服务、950 条内核 IPC/内存边界、8155 条参数与 12034 条环境检查、353 条文件 RPC 分发边界、108 条 openat、83 条截断、229 条 IOMMU 与 4069 条版本策略检查、28 组 Python 测试（含 3500 次变异）、783 个事务、3132 个更新及 3132 个截断故障场景，以及含真实越界 DMA、试运行、版本策略、目录授权、持久化截断、密钥轮换/撤销与旧密钥迁移、驱动死亡和恢复的 125 次 QEMU 启动。
 
 只构建：`python tools/build.py`。只运行宿主测试：`python tools/test.py --host-only`。已有镜像测试：`python tools/test.py --skip-build`。
 
@@ -100,3 +100,5 @@ python tools/sfpack.py sign build/hello.sfk --seed .keys/application.seed
 开发诊断 `channel-test` 在已挂载磁盘上并发启动两个只读应用，覆盖冷缓存块 RPC 与 namespace 请求隔离。驱动回复端点按实例创建和撤销，协议边界见 [命名空间](docs/NAMESPACE.md)。
 
 `echo-channel-test` 同时验证回显回复与两个冷缓存只读应用，`echo-capacity-test` 验证实际端点能力耗尽后的启动回滚和恢复。echo 回复按实例隔离，新旧代并存时各自持有回复队列。
+
+启动按认证后的包类型区分 MODULE 与 APP；run/runat/runenv 只接受 APP，模块启动只接受 MODULE，后缀不决定授权。

@@ -48,6 +48,7 @@ subprocess.run([sys.executable, 'tests/test_trust.py'], check=True)
 subprocess.run([sys.executable, 'tests/test_readfs.py'], check=True)
 subprocess.run([sys.executable, 'tests/test_native.py'], check=True)
 if not args.host_only:
+    subprocess.run([sys.executable, 'tools/qemu_launch_kind_test.py'], check=True)
     subprocess.run([sys.executable, 'tools/qemu_echo_channel_test.py'], check=True)
     subprocess.run([sys.executable, 'tools/qemu_block_channel_test.py'], check=True)
     subprocess.run([sys.executable, 'tools/qemu_file_rpc_test.py'], check=True)
@@ -99,6 +100,8 @@ result['file_rpc_qemu'] = not args.host_only
 result['file_rpc_qemu_boots'] = 0 if args.host_only else 2
 result['block_reply_channel_qemu'] = not args.host_only
 result['block_reply_channel_qemu_boots'] = 0 if args.host_only else 2
+result['launch_kind_qemu'] = not args.host_only
+result['launch_kind_qemu_boots'] = 0 if args.host_only else 2
 result['echo_reply_channel_qemu'] = not args.host_only
 result['echo_reply_channel_qemu_boots'] = 0 if args.host_only else 2
 result['trust_policy_qemu'] = not args.host_only
