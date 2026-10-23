@@ -42,10 +42,14 @@ long sf_main(const SfBootArgs*a,size_t bytes){
  m.length=strlen(text);memcpy(m.data,text,m.length);status=rpc(a,&m);if(status<0)return 2;
  sf_message(&m,OP_CLOSE,3);m.handle=h;return rpc(a,&m)<0?3:0;
 #elif ROLE == 16
+ if(a->argc>1&&!strcmp(sf_argument(a,bytes,1),"--require-mode")&&!sf_environment_value(a,bytes,"MODE"))return 42;
  if(a->argc>1&&!strcmp(sf_argument(a,bytes,1),"--write-bootargs")){*(volatile char*)sf_argument(a,bytes,0)='x';return 99;}
+ if(a->argc>1&&a->envc&&!strcmp(sf_argument(a,bytes,1),"--write-environment")){*(volatile char*)sf_environment(a,bytes,0)='x';return 99;}
  SfMessage m;sf_message(&m,OP_OPEN,1);memcpy(m.data,"/dev/console",13);m.length=13;m.mode=OPEN_WRITE;if(rpc(a,&m))return 1;uint32_t output=m.handle;
  char text[SF_ARGUMENT_BYTES+160];unsigned used=0;const char*prefix="ARGC=";while(*prefix)text[used++]=*prefix++;text[used++]='0'+a->argc;text[used++]='\n';
+ memcpy(text+used,"ENVC=",5);used+=5;text[used++]='0'+a->envc;text[used++]='\n';
  for(unsigned i=0;i<a->argc;i++){const char*s=sf_argument(a,bytes,i);if(!s)return 2;memcpy(text+used,"ARGV[",5);used+=5;text[used++]='0'+i;text[used++]=']';text[used++]='=';while(*s)text[used++]=*s++;text[used++]='\n';}
+ for(unsigned i=0;i<a->envc;i++){const char*s=sf_environment(a,bytes,i);if(!s)return 2;memcpy(text+used,"ENV[",4);used+=4;text[used++]='0'+i;text[used++]=']';text[used++]='=';while(*s)text[used++]=*s++;text[used++]='\n';}
  for(unsigned off=0;off<used;){sf_message(&m,OP_WRITE,2);m.handle=output;m.length=used-off;if(m.length>sizeof(m.data))m.length=sizeof(m.data);unsigned sent=m.length;memcpy(m.data,text+off,sent);if(rpc(a,&m)!=(int)sent)return 3;off+=sent;}
  sf_message(&m,OP_CLOSE,3);m.handle=output;return rpc(a,&m);
 #elif ROLE == 4

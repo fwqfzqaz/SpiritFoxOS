@@ -1,15 +1,15 @@
 # SpiritFoxOS 实施进度
 
-更新日期：2026-10-23（北京时间）。
+更新日期：2026-10-24（北京时间）。
 
 - 工作区：`E:\SpiritFoxOS`。指定源目录的三项顶层内容已移动到这里。
-- 本轮目标：按用户最新要求持续推进到任一额度剩余 10%；首先在已测试推送的 `ca8b7cd` 上实现有界 native 命令行参数传递、只读 BootArgs 校验和真实应用回归，测试后推送并继续下一项。
-- status: native_arguments_tested
+- 本轮目标：按用户要求持续推进到任一额度剩余 10%；native argv 与显式环境已完成，接续有界位置无关 native 装载与相对重定位。
+- status: native_environment_tested_delivery
 - round_complete: true
 - continuous_work: true
 - quota_paused: false
 - 分支：`codex/trust-policy-20261023`，基于已合并的 `origin/main`（`ca9e1a3`）；远端：`origin`，读取和推送地址均为 `https://github.com/fwqfzqaz/SpiritFoxOS.git`。
-- 本轮 native argv 最终源码已构建，`python tools/test.py --skip-build` 完整通过（547.21 秒、111 VM），日志 `build/arguments-final-test.txt`。8155 项新增参数检查、22 组 Python 测试/3000 次变异和全部原有回归通过，六个交付文件摘要一致；当前没有未完成的测试进程。本轮未调用 DeepSeek。提交与推送以当前分支 HEAD 与 origin 同名分支实际对照为准；交付后立即继续环境变量传递，不等待下次 heartbeat。
+- 当前最终源码完整测试通过（602.82 秒、113 次实际 VM），日志 `build/environment-final-test.txt`。包含 8155 项参数、12034 项环境检查、22 组 Python 测试/3000 次变异及全部既有回归；六项交付摘要一致，无运行中的测试。本轮未调用 DeepSeek。交付后直接继续下一项。
 
 ## 已完成
 
@@ -47,7 +47,12 @@
 32. M4：native argv 有界传递，最多八项、512 字节规范载荷，96 字节 BootArgs 头保持不变。显式参数复制到私有只读页，内核与 SDK 独立检查规范偏移、数量、长度和终止符；无额外参数保持旧 96 字节/argc=0 布局。run/runat 引号、空串和转义在启动及试运行事务前解析，模块拒绝额外参数，调用参数不写入安装状态。
 33. 完整验证通过（547.21 秒、111 VM）：8155 项 C 检查含 1000 次往返，真实 syscall 拒绝头部偏移/数量溢出，两个新增 legacy/modern VM 验证 argv、只读页写故障、最大数量、进程重用、runat、installed 健康确认及非法参数不改盘；全部既有回归通过。SDK 及兼容边界见 docs/ARGUMENTS.md，发布门新增 arguments_host_checks=8155 和 arguments_qemu=true。
 
+34. M4：显式 runenv/runenvat 环境，最多八个 NAME=VALUE 与八个 argv 共用 512 字节规范载荷；环境不继承，标识符/重复名/数量和词法在启动及持久化试运行前拒绝。BootArgs 固定头保持 96 字节，环境和参数同属子进程私有只读页，提供完整字符串与按名称查值 SDK。
+35. 完整验证通过（602.82 秒、113 VM）：12034 项环境检查含 1000 次往返，两个新增 VM 验证 legacy/modern、空值/缺失/字面量、目录委派、8+8 上限、只读环境写故障、进程复用与已安装更新确认。全部原有测试通过，发布门要求 environment_host_checks=12034、environment_qemu=true；六个交付摘要一致。
+
 ## 交付与续做
+
+显式环境完整验证已通过（602.82 秒、113 VM）。`.cache/active-work.json` 标记测试完成，原始镜像和有效策略摘要一致；当前提交推送此轮成果并接续位置无关 native 装载，相对重定位仍未实现。上一轮 argv 基线为 `b4d0bde`（111 VM）。当前额度短期剩余 57%、长期 50%，ordinaryUsageAllowed=true，持续工作规则保持生效。
 
 当前 native 参数轮次已完成全套验证，日志 `build/arguments-final-test.txt`。额度检查短期剩余 73%、长期 52%，普通使用可用；因此提交推送并继续下一项显式环境变量传递，不因本轮交付停止。已有 109 VM 结果属于签名角色分离基线，111 VM 为当前源码结果。
 

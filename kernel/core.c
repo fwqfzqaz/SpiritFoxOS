@@ -31,7 +31,9 @@ int task_new(const SfLoadPlan*p,int bootstrap){
  for(uint64_t off=4096;off<=65536;off+=4096){void*page=page_alloc(t->pid);if(!page||space_map(t,SF_STACK-off,(uint64_t)page,3))goto fail;}
  void*arg_page=page_alloc(t->pid);if(!arg_page||space_map(t,SF_ARGS,(uint64_t)arg_page,1))goto fail;
  SfBootArgs*args=arg_page;args->size=sizeof(*args)+p->arguments.bytes;args->abi_major=1;args->pid=t->pid;args->stdout_cap=1;args->stderr_cap=1;
- if(p->arguments.count){args->argc=p->arguments.count;args->argv_offset=sizeof(*args);memcpy((uint8_t*)args+sizeof(*args),p->arguments.data,p->arguments.bytes);}
+ args->argc=p->arguments.count;args->envc=p->arguments.env_count;
+ if(args->argc)args->argv_offset=sizeof(*args);if(args->envc)args->env_offset=sizeof(*args)+args->argc*4;
+ if(p->arguments.bytes)memcpy((uint8_t*)args+sizeof(*args),p->arguments.data,p->arguments.bytes);
  if(bootstrap||p->grant_bundle){for(uint64_t off=0;off<bundle_bytes;off+=4096)if(space_map(t,SF_BUNDLE+off,bundle_phys+off,1))goto fail;args->bundle=SF_BUNDLE;args->bundle_bytes=bundle_bytes;}
  if(parent){int h;if(p->grant_manager){h=ipc_grant(parent,t,p->grant_manager,RIGHT_SEND);if(h<0)goto fail;args->manager=h;}if(p->grant_service){if(p->service_rights&~7)goto fail;h=ipc_grant(parent,t,p->grant_service,p->service_rights);if(h<0)goto fail;args->service=h;}}
  if(p->grant_device){int r=device_grant(t,p->grant_device,p->device_rights,args);if(r){result=r;goto fail;}}

@@ -14,6 +14,7 @@
 #define SF_MAX_TASKS 12
 #define SF_MSG_BYTES 256
 #define SF_ARGUMENT_MAX 8u
+#define SF_ENVIRONMENT_MAX 8u
 #define SF_ARGUMENT_BYTES 512u
 /* SYS_TASK_STATUS must not confuse a live task with any int32_t exit code. */
 #define SF_TASK_RUNNING 0x100000000ll
@@ -72,7 +73,7 @@ typedef struct {
  SfBootSegment init_segments[8];
 } SfBootInfo;
 typedef struct { uint64_t rva,bytes,data; uint32_t flags,reserved; } SfLoadSegment;
-typedef struct { uint32_t count,bytes; uint8_t data[SF_ARGUMENT_BYTES]; } SfArguments;
+typedef struct { uint32_t count,bytes,env_count,reserved; uint8_t data[SF_ARGUMENT_BYTES]; } SfArguments;
 typedef struct {
  uint32_t size,count; uint64_t entry;
  uint32_t grant_manager,grant_service,service_rights,grant_bundle;

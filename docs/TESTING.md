@@ -136,6 +136,14 @@ legacy 与 modern 各新增一个参数 VM：带参数的普通、目录委派�
 
 最终源码构建后完整 `python tools/test.py --skip-build` 通过，547.21 秒、111 次实际启动，日志 `build/arguments-final-test.txt`。全部已有签名、设备、内核、命名空间与事务/故障回归通过，交付六个摘要一致。结果和发布门增加 arguments_host_checks=8155、arguments_qemu=true；协议与尚未冻结的装载计划 ABI 见 `ARGUMENTS.md`。
 
+## 显式环境与调用隔离
+
+新增 12034 项 C 环境检查，覆盖 1000 次规范往返、8+8 数量/512 字节总界限、名称与重复项、空值/缺失、偏移/保留字段和失败时输出不变。旧 8155 项参数检查保留。
+
+legacy/modern 各新增一个 VM：runenv/runenvat、引号空串与字面量、环境查值、无环境继承、私有只读页写故障后的隔离与回收、installed 健康确认、非法环境在 TRYING 之前拒绝且磁盘不变。环境字符串不写入持久化记录；内核复制规范字节，SDK 另校验环境名称和重复项。
+
+最终源码构建后完整 `python tools/test.py --skip-build` 通过（602.82 秒、113 次启动），日志 `build/environment-final-test.txt`。原有签名、内核、设备、存储及全部故障回归通过；六项交付摘要一致。结果和发布门增加 environment_host_checks=12034、environment_qemu=true。
+
 ## 外部助手审查
 
 按用户授权调用已有 DeepSeek Harness。首次宽范围审查超时，没有采用其未完成输出；随后以低推理档审查一个文件写函数，11 秒完成且未使用工具。核实并修复空写返回错误，增加容量防御检查及对应宿主断言。审查回执在 `.cache/deepseek/runs/`，不包含提交或推送权限。
