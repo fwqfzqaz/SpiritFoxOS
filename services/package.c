@@ -40,6 +40,15 @@ int sf_manifest_text(const SfPackage*p,const char*key,char*out,size_t size){
   if(!item(&c,1))return SF_BAD_FORMAT;
  }return SF_NOT_FOUND;
 }
+static int app_abi(const SfPackage*p){
+ Cbor c={p->manifest,p->manifest+p->manifest_bytes};uint8_t t;uint64_t n;
+ if(!head(&c,&t,&n)||t!=5)return 0;
+ for(uint64_t i=0;i<n;i++){uint64_t len;if(!head(&c,&t,&len)||t!=3||!span(0,len,c.end-c.p))return 0;
+  int match=len==7&&!memcmp(c.p,"app_abi",7);c.p+=len;
+  if(match){uint64_t abi;return head(&c,&t,&abi)&&t==0&&abi==SF_ABI;}
+  if(!item(&c,1))return 0;
+ }return 0;
+}
 int sf_package_open(SfPackage*p,const void*data,uint64_t bytes,const uint8_t pub[32]){
  const uint8_t*d=data;memset(p,0,sizeof(*p));
  if(bytes<264||bytes>SF_PACKAGE_MAX)return SF_BAD_FORMAT;
@@ -71,6 +80,7 @@ int sf_package_open(SfPackage*p,const void*data,uint64_t bytes,const uint8_t pub
  Cbor c={p->manifest,p->manifest+mlen};if((*c.p>>5)!=5||!item(&c,0)||c.p!=c.end)return SF_BAD_FORMAT;
  char text[96];if(sf_manifest_text(p,mod?"module_id":"app_id",text,sizeof(text))||!text[0]||sf_manifest_text(p,"version",text,sizeof(text)))return SF_BAD_FORMAT;
  if(app&&sf_manifest_text(p,"runtime_id",text,sizeof(text)))return SF_BAD_FORMAT;
+ if(app&&!app_abi(p))return SF_ABI_MISMATCH;
  /* This static native profile intentionally has no relocation/import tables. */
  for(unsigned i=0;i<count;i++)if(p->sections[i].type==4&&p->sections[i].bytes)return SF_BAD_FORMAT;
  if(sf_u16(d+sig+32)!=1||sf_u16(d+sig+34)||sf_u32(d+sig+36)!=64)return SF_BAD_FORMAT;

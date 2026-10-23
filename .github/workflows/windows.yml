@@ -21,4 +21,5 @@ jobs:
             build/test-results.json
             build/esp/EFI/BOOT/BOOTX64.EFI
             build/storage.img
-            build/SpiritFoxOS-M5.zip
+            build/persistent.img
+            build/SpiritFoxOS-M6.zip

@@ -101,6 +101,15 @@ class Packages(unittest.TestCase):
             accepted += self.crypto.verify(bytes(data), self.pub) == 0
         self.assertEqual(accepted, 0)
 
+    def test_application_abi(self):
+        manifest = {'app_id': 'org.spiritfox.test', 'version': '0.1.0', 'runtime_id': 'org.spiritfox.native'}
+        for abi in [None, 0, 2, '1', True]:
+            current = dict(manifest)
+            if abi is not None:
+                current['app_abi'] = abi
+            with self.assertRaisesRegex(ValueError, 'C loader rejected generated package: -5'):
+                pack(current, (ROOT/'build/hello.elf').read_bytes(), 2, self.seed)
+
 
 if __name__ == '__main__':
     unittest.main(verbosity=2)

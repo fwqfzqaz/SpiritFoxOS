@@ -21,10 +21,17 @@ def command(memory=256, disk=None, writable=False, ioerror=False):
     return args
 
 
-def run(memory=256, interactive=False, storage='normal'):
+def run(memory=256, interactive=False, storage='normal', persistent=False):
     os.chdir(ROOT)
     os.environ['TEMP'] = os.environ['TMP'] = str(ROOT / '.cache')
     shutil.copyfile(ROOT / '.tools/qemu/share/edk2-i386-vars.fd', ROOT / 'build/OVMF_VARS.fd')
+    if persistent:
+        if not interactive:
+            raise ValueError('Use --interactive with --persistent')
+        disk = ROOT/'build/user-persistent.img'
+        if not disk.exists():
+            shutil.copyfile(ROOT/'build/persistent.img', disk)
+        return subprocess.call(command(memory, disk, writable=True))
     disk = None if storage == 'missing' else ROOT / 'build/storage.img'
     if storage in ('badheader', 'badhash', 'badsignature'):
         data = bytearray(disk.read_bytes())
@@ -126,6 +133,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--memory', type=int, default=256, choices=[128, 256, 512])
     parser.add_argument('--interactive', action='store_true')
+    parser.add_argument('--persistent', action='store_true', help='Interactive writable copy, build/user-persistent.img; kept across runs')
     parser.add_argument('--storage', choices=['normal', 'missing', 'badheader', 'badhash', 'badsignature', 'writable', 'ioerror'], default='normal')
     args = parser.parse_args()
-    run(args.memory, args.interactive, args.storage)
+    run(args.memory, args.interactive, args.storage, args.persistent)

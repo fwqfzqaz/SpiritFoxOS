@@ -1,6 +1,7 @@
 #include "libsf.h"
 #include "storage.h"
 #include "virtio.h"
+#include "txn.h"
 static SfManager*manager;
 static SfNamespace*ns;
 static SfModuleSpawn spawn;
@@ -9,6 +10,7 @@ static int driver_slot=-1,fs_slot=-1,cache_index=-1;
 static uint64_t capacity,sequence=0x100000000ull;
 static SfReadFs fs;
 static uint8_t verified[SF_READFS_FILE_MAX];
+static int writable,write_grant;
 static int call(SfMessage*m){
  if(!driver_pid||sf_sys(SYS_TASK_STATUS,driver_pid,0,0)!=SF_BUSY)return SF_DEVICE_GONE;
  uint64_t id=++sequence;m->h.request_id=id;int r=sf_send(driver_ep,m);if(r)return r;
@@ -18,6 +20,18 @@ static int call(SfMessage*m){
 static int sector(void*context,uint64_t lba,uint8_t out[512]){
  if(lba>=capacity/512)return SF_INVALID;
  for(unsigned half=0;half<512;half+=256){SfMessage m;sf_message(&m,OP_BLOCK_READ,0);m.offset=lba*512;m.mode=half;m.length=256;int r=call(&m);if(r)return r;if(m.length!=256)return SF_BAD_FORMAT;memcpy(out+half,m.data,256);}return 0;
+}
+int sf_storage_sector_read(void*c,uint64_t lba,uint8_t out[512]){return sector(c,lba,out);}
+int sf_storage_writable(void){return writable&&fs.mounted;}
+int sf_storage_sector_write(void*c,uint64_t lba,const uint8_t data[512]){
+ if(!sf_storage_writable())return SF_READ_ONLY;
+ for(unsigned half=0;half<512;half+=256){SfMessage m;sf_message(&m,OP_BLOCK_WRITE,0);m.offset=lba*512;m.mode=half;m.length=256;memcpy(m.data,data+half,256);int r=call(&m);if(r)return r;}return 0;
+}
+int sf_storage_flush(void*c){SfMessage m;sf_message(&m,OP_BLOCK_FLUSH,0);return call(&m);}
+int sf_storage_write_range(uint64_t first,uint64_t end){SfMessage m;sf_message(&m,OP_BLOCK_WRITE_RANGE,0);m.offset=first;m.handle=end;return call(&m);}
+int sf_storage_transaction(int begin){
+ if(!sf_storage_writable())return SF_READ_ONLY;
+ return begin?sfmod_acquire(manager,fs_slot,RES_DIRTY):sfmod_release(manager,fs_slot,RES_DIRTY);
 }
 static int mount_open(unsigned tag){return tag==1&&fs_slot>=0?sfmod_acquire(manager,fs_slot,RES_OPEN):SF_STALE_HANDLE;}
 static void mount_close(unsigned tag){if(tag==1&&fs_slot>=0)sfmod_release(manager,fs_slot,RES_OPEN);}
@@ -34,25 +48,31 @@ static int namespace_node(const char*path,unsigned type,unsigned external,uint32
  return SF_NO_SPACE;
 }
 void sf_storage_init(SfManager*m,SfNamespace*n,uint32_t ep,SfModuleSpawn callback){manager=m;ns=n;manager_ep=ep;spawn=callback;ns->external_read=external_read;ns->mount_open=mount_open;ns->mount_close=mount_close;}
-int sf_storage_start(void){
+static int start_driver(unsigned rights){
  if(driver_pid&&sf_sys(SYS_TASK_STATUS,driver_pid,0,0)==SF_BUSY)return SF_BUSY;
  uint32_t device=0;for(unsigned d=0;d<32&&!device;d++)for(unsigned f=0;f<8;f++){uint32_t bdf=d*8+f;if(sf_sys(SYS_PCI_READ,bdf,0,0)==0x10011af4u){device=bdf+1;break;}}
  if(!device)return SF_NOT_FOUND;
  if(driver_slot<0){driver_slot=sfmod_add(manager,"org.spiritfox.virtio.blk",0,0);if(driver_slot<0)return driver_slot;}
  int r=sfmod_start(manager,driver_slot);if(r)return r;driver_ep=sf_sys(SYS_EP_CREATE,0,0,0);if((int)driver_ep<0){r=(int)driver_ep;goto fail;}
- int pid=spawn("sf-virtio-blk.sfmod",driver_ep,RIGHT_RECV,device);if(pid<0){r=pid;goto fail;}driver_pid=pid;granted_device=device;
+ int pid=spawn("sf-virtio-blk.sfmod",driver_ep,RIGHT_RECV,device,rights);if(pid<0){r=pid;goto fail;}driver_pid=pid;granted_device=device;
  SfMessage message;sf_message(&message,OP_BLOCK_INFO,0);r=call(&message);if(r)goto fail;
- if(message.length!=sizeof(SfBlockInfo)){r=SF_BAD_FORMAT;goto fail;}SfBlockInfo info;memcpy(&info,message.data,sizeof(info));if(info.sector_bytes!=512||!info.readonly||!info.sectors||info.sectors>UINT64_MAX/512){r=SF_BAD_FORMAT;goto fail;}capacity=info.sectors*512;
+ if(message.length!=sizeof(SfBlockInfo)){r=SF_BAD_FORMAT;goto fail;}SfBlockInfo info;memcpy(&info,message.data,sizeof(info));if(info.sector_bytes!=512||info.readonly!=(rights?0u:1u)||!info.sectors||info.sectors>UINT64_MAX/512){r=SF_BAD_FORMAT;goto fail;}capacity=info.sectors*512;write_grant=rights!=0;writable=0;
  sfmod_acquire(manager,driver_slot,RES_DMA);return 0;
 fail:
  if(driver_pid)sf_sys(SYS_KILL,driver_pid,SF_DEVICE_GONE,0);driver_pid=0;if((int)driver_ep>0)sf_sys(SYS_CAP_REVOKE,driver_ep,0,0);driver_ep=0;
  sfmod_prepare(manager,driver_slot);sfmod_stop(manager,driver_slot);return r;
 }
+int sf_storage_start(void){int r=start_driver(0);return r==SF_READ_ONLY?start_driver(SF_DEVICE_WRITE):r;}
 int sf_storage_mount(void){
  if(fs.mounted)return SF_BUSY;if(!driver_pid)return SF_DEVICE_GONE;
  for(unsigned i=0;i<32;i++)if(ns->nodes[i].type&&strlen(ns->nodes[i].path)>5&&!memcmp(ns->nodes[i].path,"/disk/",6))return SF_BUSY;
  for(unsigned i=0;i<32;i++)if(ns->descriptions[i].refs){const char*p=ns->nodes[ns->descriptions[i].node].path;if(!strcmp(p,"/disk")||(strlen(p)>5&&!memcmp(p,"/disk/",6)))return SF_BUSY;}
  int r=sf_readfs_mount(&fs,sector,0,capacity);if(r)return r;cache_index=-1;
+ if(write_grant){
+  uint8_t header[512],hash[32];r=sector(0,SF_TXN_HEADER,header);if(r){fs.mounted=0;return r;}sf_sha256(hash,header,480);
+  if(capacity!=SF_TXN_SECTORS*512ull||memcmp(header,"SFTXN1\0",8)||sf_u32(header+8)!=1||sf_u32(header+12)!=SF_TXN_SECTORS||memcmp(hash,header+480,32)){fs.mounted=0;return SF_BAD_FORMAT;}
+  for(unsigned i=0;i<fs.count;i++)if(fs.files[i].offset+fs.files[i].bytes>SF_TXN_HEADER*512ull){fs.mounted=0;return SF_BAD_FORMAT;}
+ }
  for(unsigned i=0;i<fs.count;i++){long n=sf_readfs_load(&fs,i,verified,sizeof(verified));if(n<0){fs.mounted=0;return n;}}
  if(fs_slot<0){fs_slot=sfmod_add(manager,"org.spiritfox.fs.read",1u<<driver_slot,0);if(fs_slot<0){fs.mounted=0;return fs_slot;}}
  r=sfmod_start(manager,fs_slot);if(r){fs.mounted=0;return r;}
@@ -63,13 +83,14 @@ int sf_storage_mount(void){
   r=namespace_node(path,NODE_DISK,i,fs.files[i].bytes);if(r)goto fail;
  }
  for(unsigned i=0;i<32;i++)if(ns->nodes[i].mount_tag==1)ns->nodes[i].readonly=1;
+ writable=write_grant;
  return 0;
 fail:
  sf_ns_unmount(ns,1);sfmod_prepare(manager,fs_slot);sfmod_stop(manager,fs_slot);fs.mounted=0;return r;
 }
 int sf_storage_unmount(void){
  if(!fs.mounted||fs_slot<0)return SF_NOT_FOUND;int r=sfmod_prepare(manager,fs_slot);if(r)return r;
- if(manager->modules[fs_slot].resources[RES_OPEN]){sfmod_cancel(manager,fs_slot);return SF_BUSY;}
+ if(manager->modules[fs_slot].resources[RES_OPEN]||manager->modules[fs_slot].resources[RES_DIRTY]){sfmod_cancel(manager,fs_slot);return SF_BUSY;}
  r=sf_ns_unmount(ns,1);if(r){sfmod_cancel(manager,fs_slot);return r;}r=sfmod_stop(manager,fs_slot);if(r)return r;fs.mounted=0;cache_index=-1;return 0;
 }
 int sf_storage_stop(void){
@@ -85,13 +106,18 @@ long sf_storage_load(const char*path,void*out,size_t capacity_bytes){
  int r=sfmod_acquire(manager,fs_slot,RES_OPEN);if(r)return r;int index=sf_readfs_find(&fs,path+5);long result=index<0?index:sf_readfs_load(&fs,index,out,capacity_bytes);sfmod_release(manager,fs_slot,RES_OPEN);return result;
 }
 int sf_storage_ready(void){return fs.mounted;}
+void sf_storage_write_tests(void){
+ uint8_t zero[512]={0};sf_assert(sf_storage_sector_write(0,0,zero)==SF_INVALID,"write grant cannot overwrite immutable disk region");
+ SfMessage m;sf_message(&m,OP_BLOCK_WRITE,0);m.offset=SF_TXN_BANK*512ull;m.mode=256;m.length=256;sf_assert(call(&m)==SF_INVALID,"write service rejects missing first fragment");
+ sf_assert(!sf_storage_transaction(1),"transaction acquires dirty resource");sf_assert(sf_storage_unmount()==SF_BUSY,"dirty transaction prevents unmount and restores admission");sf_assert(!sf_storage_transaction(0),"transaction releases dirty resource");
+}
 void sf_storage_tests(void){
- if(!fs.mounted)return;SfMessage m;sf_message(&m,OP_BLOCK_READ,0);m.offset=capacity;m.length=256;sf_assert(call(&m)==SF_INVALID,"block read rejects capacity boundary");
+ if(!fs.mounted||writable)return;SfMessage m;sf_message(&m,OP_BLOCK_READ,0);m.offset=capacity;m.length=256;sf_assert(call(&m)==SF_INVALID,"block read rejects capacity boundary");
  sf_message(&m,OP_BLOCK_READ,0);m.offset=1;m.length=256;sf_assert(call(&m)==SF_INVALID,"block read rejects unaligned offset");sf_message(&m,OP_BLOCK_WRITE,0);sf_assert(call(&m)==SF_READ_ONLY,"block service rejects every write");
  sf_assert(sf_storage_stop()==SF_DEPENDENCY,"mounted filesystem pins block driver");int h=sf_ns_open(ns,1,"/","/disk/etc/readme.txt",1);sf_assert(h>0&&sf_storage_unmount()==SF_BUSY,"open disk file prevents unmount and restores admission");int dup=sf_ns_dup(ns,1,h);sf_ns_close(ns,1,h);sf_assert(sf_storage_unmount()==SF_BUSY,"duplicated disk description retains mount lease");sf_ns_close(ns,1,dup);
  sf_assert(sf_ns_open(ns,1,"/","/disk/etc/readme.txt",2)==SF_READ_ONLY&&sf_ns_create(ns,"/disk/etc/new",NODE_FILE,0)==SF_READ_ONLY,"read-only mount rejects writes and creation");
  sf_assert(!sf_storage_unmount(),"unmount drains file references");sf_message(&m,OP_BLOCK_STOP,0);sf_assert(!call(&m),"driver quiesces before process teardown");
- int candidate_ep=sf_sys(SYS_EP_CREATE,0,0,0);sf_assert(candidate_ep>0,"replacement endpoint allocated");int replacement=spawn("sf-virtio-blk.sfmod",candidate_ep,RIGHT_RECV,granted_device);sf_assert(replacement==SF_BUSY,"live stopped driver cannot share DMA arena with replacement");sf_sys(SYS_CAP_REVOKE,candidate_ep,0,0);
+ int candidate_ep=sf_sys(SYS_EP_CREATE,0,0,0);sf_assert(candidate_ep>0,"replacement endpoint allocated");int replacement=spawn("sf-virtio-blk.sfmod",candidate_ep,RIGHT_RECV,granted_device,0);sf_assert(replacement==SF_BUSY,"live stopped driver cannot share DMA arena with replacement");sf_sys(SYS_CAP_REVOKE,candidate_ep,0,0);
  sf_assert(!sf_storage_stop(),"device ownership releases after old address space teardown");sf_assert(!sf_storage_start()&&!sf_storage_mount(),"block driver and filesystem restart cleanly");
  int held=sf_ns_open(ns,1,"/","/disk/etc/readme.txt",1);sf_assert(held>0&&!sf_sys(SYS_KILL,driver_pid,SF_DEVICE_GONE,0),"driver death invokes kernel device reset");char text[64];sf_assert(sf_ns_read(ns,1,held,text,sizeof(text))==SF_DEVICE_GONE,"dead driver invalidates cached file access");sf_ns_close(ns,1,held);sf_assert(!sf_storage_unmount()&&!sf_storage_stop()&&!sf_storage_start()&&!sf_storage_mount(),"confirmed reset allows isolated driver recovery");sf_log("STORAGE READY\n");
 }

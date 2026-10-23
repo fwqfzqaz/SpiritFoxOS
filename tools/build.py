@@ -7,6 +7,7 @@ import subprocess
 import sys
 from sfpack import Crypto, pack, bundle
 from mkreadfs import create as create_readfs
+from mkpersist import create as create_persist
 
 ROOT = Path(__file__).resolve().parents[1]
 os.chdir(ROOT)
@@ -63,7 +64,7 @@ def main():
     Path('build/trust.h').write_text('static const unsigned char sf_trust_key[32]={' + ','.join(map(str, pub)) + '};\n')
     print('Building userspace packages', flush=True)
     shared = objects('user-common', ['services/start.S', 'services/memory.c', 'services/libsf.c'])
-    init = shared + objects('init', ['services/init.c', 'services/storage.c', 'services/readfs.c', 'services/manager.c', 'services/namespace.c', *CRYPTO])
+    init = shared + objects('init', ['services/init.c', 'services/storage.c', 'services/readfs.c', 'services/txn.c', 'services/persistence.c', 'services/manager.c', 'services/namespace.c', *CRYPTO])
     packages = []
     image = link_elf('sf-init', init, 'services/user.ld')
     manifest = {'module_id': 'org.spiritfox.init', 'version': '0.1.0', 'category': 'bootstrap', 'requested_caps': ['bootstrap'], 'resource_limits': {'memory': 2097152}}
@@ -88,6 +89,7 @@ def main():
     image = link_elf('sf-virtio-blk', shared + objects('virtio-blk', ['services/virtio_blk.c']), 'services/user.ld')
     packages.append(('sf-virtio-blk.sfmod', pack({'module_id': 'org.spiritfox.virtio.blk', 'version': '0.1.0', 'category': 'driver', 'requested_caps': ['device.virtio-blk.trusted'], 'resource_limits': {'memory': 131072}}, image, 1, seed)))
     Path('build/storage.img').write_bytes(create_readfs(disk_files))
+    Path('build/persistent.img').write_bytes(create_persist(disk_files))
     for name, data in packages:
         Path('build/'+name).write_bytes(data)
     Path('build/bundle.bin').write_bytes(bundle(packages))

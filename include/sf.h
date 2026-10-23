@@ -18,7 +18,8 @@ enum { SF_OK=0, SF_INVALID=-1, SF_DENIED=-2, SF_BAD_FORMAT=-3,
  SF_BUSY=-7, SF_DRAINING=-8, SF_TIMEOUT=-9, SF_DEVICE_GONE=-10,
  SF_NOT_SEEKABLE=-11, SF_STALE_HANDLE=-12, SF_REVOKED=-13,
  SF_RESTART_REQUIRED=-14, SF_WOULD_BLOCK=-15, SF_NOT_FOUND=-16,
- SF_READ_ONLY=-17, SF_NO_SPACE=-18, SF_EVENT_OVERFLOW=-19 };
+ SF_READ_ONLY=-17, SF_NO_SPACE=-18, SF_EVENT_OVERFLOW=-19, SF_COMMIT_UNCERTAIN=-20 };
+#define SF_DEVICE_WRITE 1u
 enum { SYS_EXIT, SYS_YIELD, SYS_LOG, SYS_TICKS, SYS_EP_CREATE,
  SYS_SEND, SYS_RECV, SYS_SPAWN, SYS_KILL, SYS_TASK_STATUS,
  SYS_CONSOLE_READ, SYS_SHUTDOWN, SYS_CAP_DERIVE, SYS_CAP_CLOSE,
@@ -26,7 +27,8 @@ enum { SYS_EXIT, SYS_YIELD, SYS_LOG, SYS_TICKS, SYS_EP_CREATE,
 enum { RIGHT_SEND=1, RIGHT_RECV=2, RIGHT_DELEGATE=4 };
 enum { OP_ECHO=1, OP_OPEN=10, OP_READ, OP_WRITE, OP_CLOSE, OP_SEEK,
  OP_POLL, OP_CREATE, OP_DESCRIBE, OP_ENUMERATE, OP_HELLO=30, OP_NATIVE_PREPARE=40,
- OP_NATIVE_STAGE, OP_BLOCK_INFO=50, OP_BLOCK_READ, OP_BLOCK_WRITE, OP_BLOCK_STOP };
+ OP_NATIVE_STAGE, OP_BLOCK_INFO=50, OP_BLOCK_READ, OP_BLOCK_WRITE, OP_BLOCK_STOP,
+ OP_BLOCK_FLUSH, OP_BLOCK_WRITE_RANGE };
 typedef struct {
  uint32_t size; uint16_t protocol_major,protocol_minor;
  uint32_t opcode,flags; uint64_t request_id;
@@ -42,7 +44,7 @@ typedef struct {
  uint32_t stdin_cap,stdout_cap,stderr_cap,root_cap;
  uint32_t argc,argv_offset,envc,env_offset;
  uint64_t dma_virtual,dma_physical;
- uint32_t device_io,device_bdf;
+ uint32_t device_io; uint16_t device_bdf,device_rights;
 } SfBootArgs;
 _Static_assert(sizeof(SfBootArgs)==96,"BootArgs ABI");
 typedef struct { uint64_t physical,rva,file_bytes,memory_bytes; uint32_t flags,reserved; } SfBootSegment;
@@ -60,7 +62,7 @@ typedef struct { uint64_t rva,bytes,data; uint32_t flags,reserved; } SfLoadSegme
 typedef struct {
  uint32_t size,count; uint64_t entry;
  uint32_t grant_manager,grant_service,service_rights,grant_bundle;
- uint32_t grant_device,reserved;
+ uint32_t grant_device,device_rights;
  SfLoadSegment segments[8];
 } SfLoadPlan;
 typedef struct {uint64_t rva,memory,offset,bytes;uint32_t flags,reserved;} SfNativeSegment;

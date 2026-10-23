@@ -8,7 +8,7 @@ static int boot_memory(SfBootInfo*b,uint64_t start,uint64_t bytes){
  BootMemory*map=(void*)b->memory_map;for(uint64_t i=0;i<b->memory_map_entry_count;i++){BootMemory*m=&map[i];if(m->pages>UINT64_MAX/4096)continue;uint64_t n=m->pages*4096;if((m->type==1||m->type==2)&&start>=m->physical&&start-m->physical<=n&&bytes<=n-(start-m->physical))return 1;}return 0;
 }
 static int valid_plan(const SfLoadPlan*p,Task*parent){
- if(p->size!=sizeof(*p)||!p->count||p->count>8||p->reserved||p->grant_device>65536)return 0;int entry=0;
+ if(p->size!=sizeof(*p)||!p->count||p->count>8||p->grant_device>65536||(p->device_rights&~SF_DEVICE_WRITE)||(!p->grant_device&&p->device_rights))return 0;int entry=0;
  for(unsigned i=0;i<p->count;i++){const SfLoadSegment*s=&p->segments[i];
   if((s->rva&4095)||s->data>UINT64_MAX-s->bytes||!s->bytes||s->bytes>SF_IMAGE_MAX||s->reserved)return 0;
   /* bytes is the complete zero-extended segment, supplied by the loader. */
@@ -32,7 +32,7 @@ int task_new(const SfLoadPlan*p,int bootstrap){
  SfBootArgs*args=arg_page;args->size=sizeof(*args);args->abi_major=1;args->pid=t->pid;args->stdout_cap=1;args->stderr_cap=1;
  if(bootstrap||p->grant_bundle){for(uint64_t off=0;off<bundle_bytes;off+=4096)if(space_map(t,SF_BUNDLE+off,bundle_phys+off,1))goto fail;args->bundle=SF_BUNDLE;args->bundle_bytes=bundle_bytes;}
  if(parent){int h;if(p->grant_manager){h=ipc_grant(parent,t,p->grant_manager,RIGHT_SEND);if(h<0)goto fail;args->manager=h;}if(p->grant_service){if(p->service_rights&~7)goto fail;h=ipc_grant(parent,t,p->grant_service,p->service_rights);if(h<0)goto fail;args->service=h;}}
- if(p->grant_device){int r=device_grant(t,p->grant_device,args);if(r){result=r;goto fail;}}
+ if(p->grant_device){int r=device_grant(t,p->grant_device,p->device_rights,args);if(r){result=r;goto fail;}}
  t->frame=(Frame*)(t->kstack+sizeof(t->kstack)-sizeof(Frame));memset(t->frame,0,sizeof(Frame));t->frame->rip=SF_BASE+p->entry;t->frame->cs=0x1b;t->frame->ss=0x23;t->frame->rflags=0x202;t->frame->rsp=SF_STACK-8;t->frame->rdi=SF_ARGS;t->frame->rsi=sizeof(*args);t->state=T_READY;t->exit_status=0;return t->pid;
 fail: device_release(t);ipc_cleanup(t);pages_free(t->pid);device_forget(t);t->state=T_DEAD;t->exit_status=result;return result;
 }

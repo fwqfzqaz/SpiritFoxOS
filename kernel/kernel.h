@@ -22,7 +22,7 @@ int task_new(const SfLoadPlan*,int);void task_dead(Task*,int);Frame *schedule(vo
 long ipc_syscall(uint64_t,uint64_t,uint64_t,uint64_t);void ipc_cleanup(Task*);
 int ipc_grant(Task*,Task*,uint32_t,uint32_t);void ipc_deadlines(void);
 long pci_read(uint64_t,uint64_t);long device_io(Task*,uint64_t,uint64_t,uint64_t);
-int device_grant(Task*,uint32_t,SfBootArgs*);int device_release(Task*);
+int device_grant(Task*,uint32_t,uint32_t,SfBootArgs*);int device_release(Task*);
 void device_forget(Task*);
 static inline void outb(uint16_t p,uint8_t v){__asm__ volatile("outb %0,%1"::"a"(v),"Nd"(p));}
 static inline uint8_t inb(uint16_t p){uint8_t v;__asm__ volatile("inb %1,%0":"=a"(v):"Nd"(p));return v;}

@@ -22,7 +22,7 @@ int device_release(Task*t){
 /* A released live driver still maps the pinned DMA arena. Only allow another
  * owner after the old address space has been destroyed, including failure paths. */
 void device_forget(Task*t){if(device_owner==t->pid)device_owner=0;}
-int device_grant(Task*t,uint32_t bdf_plus_one,SfBootArgs*args){
+int device_grant(Task*t,uint32_t bdf_plus_one,uint32_t rights,SfBootArgs*args){
  if(!bdf_plus_one||bdf_plus_one>65536)return SF_INVALID;
  if(device_owner||quarantined)return SF_BUSY;
  uint32_t bdf=bdf_plus_one-1;if(config_read(bdf,0)!=0x10011af4u)return SF_DENIED;
@@ -33,7 +33,7 @@ int device_grant(Task*t,uint32_t bdf_plus_one,SfBootArgs*args){
  for(unsigned off=0;off<sizeof(dma);off+=4096)if(space_map(t,SF_DMA+off,(uint64_t)(dma+off),3)){device_release(t);return SF_NO_SPACE;}
  uint16_t command=config_read(bdf,4)&0xffff;config_write_command(bdf,command|5);
  if((config_read(bdf,4)&5)!=5){device_release(t);return SF_DEVICE_GONE;}
- args->dma_virtual=SF_DMA;args->dma_physical=(uint64_t)dma;args->device_io=t->device_io;args->device_bdf=bdf;
+ args->dma_virtual=SF_DMA;args->dma_physical=(uint64_t)dma;args->device_io=t->device_io;args->device_bdf=bdf;args->device_rights=rights;
  return 0;
 }
 long device_io(Task*t,uint64_t port,uint64_t operation,uint64_t value){
