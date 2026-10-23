@@ -13,7 +13,7 @@ python tools/bootstrap.py
 python tools/test.py
 ```
 
-第一步下载并校验 Zig 0.13.0、QEMU Windows 构建和 Monocypher 4.0.3。已提供的 Monocypher 源码在 `vendor/monocypher`。第二步执行基础服务、950 条内核 IPC/内存边界、8155 条参数与 12034 条环境检查、108 条 openat、83 条截断、229 条 IOMMU 与 4069 条版本策略检查、22 组 Python 测试（含 3000 次变异）、783 个事务、3132 个更新及 3132 个截断故障场景，以及含真实越界 DMA、试运行、版本策略、目录授权、持久化截断、密钥轮换/撤销与旧密钥迁移、驱动死亡和恢复的 113 次 QEMU 启动。
+第一步下载并校验 Zig 0.13.0、QEMU Windows 构建和 Monocypher 4.0.3。已提供的 Monocypher 源码在 `vendor/monocypher`。第二步执行基础服务、950 条内核 IPC/内存边界、8155 条参数与 12034 条环境检查、108 条 openat、83 条截断、229 条 IOMMU 与 4069 条版本策略检查、28 组 Python 测试（含 3500 次变异）、783 个事务、3132 个更新及 3132 个截断故障场景，以及含真实越界 DMA、试运行、版本策略、目录授权、持久化截断、密钥轮换/撤销与旧密钥迁移、驱动死亡和恢复的 117 次 QEMU 启动。
 
 只构建：`python tools/build.py`。只运行宿主测试：`python tools/test.py --host-only`。已有镜像测试：`python tools/test.py --skip-build`。
 
@@ -21,7 +21,7 @@ python tools/test.py
 
 - `build/esp/EFI/BOOT/BOOTX64.EFI`：包含内核和已签名启动包的 UEFI 应用。
 - `build/*.sfmod`、`build/*.sfk`：实际构建出的模块与应用。
-- `build/storage.img`：1 MiB 的只读测试盘，含 `diskhello.sfk`、`disk-echo.sfmod`、更新故障测试包和说明文件；磁盘应用与模块不在启动包中。
+- `build/storage.img`：1 MiB 的只读测试盘，含 `diskhello.sfk`、`disk-echo.sfmod`、更新故障测试包和说明文件；diskhello 与 disk-echo 不在启动包中，pieprobe 同时在 bundle 与盘上提供。
 - `build/persistent.img`：2 MiB 新格式事务盘，具有相同只读包区；请复制后作为可写盘使用，重新构建会覆盖原始构建镜像。
 - `build/development.pub`、`build/application.pub`：分别用于模块与应用的开发公钥；两个私钥种子位于忽略提交的 `.keys/development.seed`、`.keys/application.seed`。
 - `build/trust-policy.json`：镜像中实际生效的公开包信任策略，包含用途和撤销规则。
@@ -94,3 +94,5 @@ python tools/sfpack.py sign build/hello.sfk --seed .keys/application.seed
 `run`/`runat` 可显式传递最多八个参数（含 argv[0]），支持引号、空字符串和转义。参数位于只读 BootArgs 页，解析错误不启动更新试运行；无额外参数保留空 argv 布局。SDK 和兼容边界见 [命令行参数](docs/ARGUMENTS.md)。
 
 显式环境示例：`runenv MODE=demo "NOTE=two words" EMPTY= -- argprobe.sfk alpha`；目录委派用 `runenvat <只读目录> NAME=VALUE -- <app> [args]`。最多八条唯一合法名字，不继承宿主环境；参数与环境共同受 512 字节限制，均为私有只读调用数据。
+
+位置无关 native 应用支持有界 `relative-v1` 相对重定位，代码/数据页保持私有且拒绝代码写修正。示例 `run pieprobe.sfk` 会在两个固定基址交替运行；这不提供安全随机化。格式、256 项上限及尚未实现的导入边界见 [native 配置](docs/NATIVE.md)。

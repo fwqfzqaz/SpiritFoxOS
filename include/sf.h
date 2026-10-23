@@ -6,11 +6,17 @@
 #define SF_PAGE 4096ull
 #define SF_BASE 0x40000000ull
 #define SF_IMAGE_MAX 0x200000ull
+#define SF_PIE_MIN 0x44000000ull
+#define SF_NATIVE_STATIC 0u
+#define SF_NATIVE_RELATIVE 1u
+#define SF_RELOCATION_MAX 256u
 #define SF_STACK 0x41010000ull
 #define SF_ARGS 0x42000000ull
 #define SF_BUNDLE 0x60000000ull
 #define SF_DMA 0x50000000ull
 #define SF_DMA_BYTES 65536u
+/* Relocatable images occupy a separate, 2 MiB aligned arena below DMA. */
+static inline int sf_image_base_valid(uint64_t base){return !base||base==SF_BASE||(base>=SF_PIE_MIN&&base<=SF_DMA-SF_IMAGE_MAX&&!(base&(SF_IMAGE_MAX-1)));}
 #define SF_MAX_TASKS 12
 #define SF_MSG_BYTES 256
 #define SF_ARGUMENT_MAX 8u
@@ -75,14 +81,15 @@ typedef struct {
 typedef struct { uint64_t rva,bytes,data; uint32_t flags,reserved; } SfLoadSegment;
 typedef struct { uint32_t count,bytes,env_count,reserved; uint8_t data[SF_ARGUMENT_BYTES]; } SfArguments;
 typedef struct {
- uint32_t size,count; uint64_t entry;
+ uint32_t size,count; uint64_t entry,image_base;
  uint32_t grant_manager,grant_service,service_rights,grant_bundle;
  uint32_t grant_device,device_rights;
  SfLoadSegment segments[8];
  SfArguments arguments;
 } SfLoadPlan;
 typedef struct {uint64_t rva,memory,offset,bytes;uint32_t flags,reserved;} SfNativeSegment;
-typedef struct {uint64_t entry;uint32_t count,reserved;SfNativeSegment segments[5];} SfNativePlan;
+typedef struct {uint64_t entry,image_base,relocation_offset;uint32_t count,profile,relocation_count,reserved;SfNativeSegment segments[5];} SfNativePlan;
+_Static_assert(sizeof(SfNativePlan)<=SF_MSG_BYTES,"native plan fits copied IPC");
 void *memcpy(void *,const void *,size_t);
 void *memset(void *,int,size_t);
 int memcmp(const void *,const void *,size_t);

@@ -144,6 +144,14 @@ legacy/modern 各新增一个 VM：runenv/runenvat、引号空串与字面量、
 
 最终源码构建后完整 `python tools/test.py --skip-build` 通过（602.82 秒、113 次启动），日志 `build/environment-final-test.txt`。原有签名、内核、设备、存储及全部故障回归通过；六项交付摘要一致。结果和发布门增加 environment_host_checks=12034、environment_qemu=true。
 
+## 位置无关 native 与相对重定位
+
+新增六组宿主测试，直接调用真实包解析器和用户态映像准备器，验证精确页字节、容量失败不改输出、三个合法基址、0/1/256 项、非法目标/加数/子表、ELF 导入/REL/RELR 拒绝及 500 次已签名记录变异。每个正常启动实际并发两个独立 PI 进程；复现的共享 native 回复端点串扰改为独立端点并在重启时撤销重建。
+
+legacy/modern 各增加首次启动及重启，共四次 native VM：两种实际基址，数据/函数/BSS 修正、代码页写故障、argv/env、签名正确的非法重定位拒绝且不改盘、PI 安装健康确认、重复运行回收与重启继续运行。
+
+最终源码构建后完整 `python tools/test.py --skip-build` 通过（550.52 秒、117 次启动），日志 `build/native-final-test.txt`，包含 28 组 Python 测试/3500 次变异和全部旧回归。六项交付摘要一致；发布门增加 native_relative_host_groups=6、native_relative_mutations=500、native_relative_qemu=true、native_relative_qemu_boots=4，并验证旧结果缺标记时拒绝打包。完整范围见 NATIVE.md。
+
 ## 外部助手审查
 
 按用户授权调用已有 DeepSeek Harness。首次宽范围审查超时，没有采用其未完成输出；随后以低推理档审查一个文件写函数，11 秒完成且未使用工具。核实并修复空写返回错误，增加容量防御检查及对应宿主断言。审查回执在 `.cache/deepseek/runs/`，不包含提交或推送权限。

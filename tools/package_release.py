@@ -22,6 +22,8 @@ if result.get('arguments_host_checks') != 8155 or result.get('arguments_qemu') i
     raise SystemExit('Run native argv bounds and read-only/preflight VM regressions before packaging')
 if result.get('environment_host_checks') != 12034 or result.get('environment_qemu') is not True:
     raise SystemExit('Run explicit environment bounds and isolation/preflight VM regressions before packaging')
+if result.get('native_relative_host_groups') != 6 or result.get('native_relative_mutations') != 500 or result.get('native_relative_qemu') is not True or result.get('native_relative_qemu_boots') != 4:
+    raise SystemExit('Run relative native validation/private-image/isolation/reboot regressions before packaging')
 for name in ['esp/EFI/BOOT/BOOTX64.EFI','storage.img','persistent.img','development.pub','application.pub','trust-policy.json']:
     actual = hashlib.sha256((BUILD/name).read_bytes()).hexdigest()
     if result.get('artifacts_sha256',{}).get(name) != actual:
@@ -30,7 +32,7 @@ items = [(BUILD/'esp/EFI/BOOT/BOOTX64.EFI','EFI/BOOT/BOOTX64.EFI'),(BUILD/'stora
 items.append((BUILD/'trust-policy.json','trust-policy.json'))
 items.append((BUILD/'application.pub','application.pub'))
 items += [(p,'docs/'+p.name) for p in sorted((ROOT/'docs').glob('*.md'))]
-manifest = {'files_sha256': {name: hashlib.sha256(path.read_bytes()).hexdigest() for path,name in items}, 'validation': 'tools/test.py: host + legacy storage + VT-d/modern DMA isolation + persistence/update-health/version-policy/fault/restart + kernel-boundary/storage-failure security + directory-capability openat + truncate/zero-extension fault/recovery + trust-policy/rotation/revocation + native-argv/explicit-environment/read-only/preflight VMs'}
+manifest = {'files_sha256': {name: hashlib.sha256(path.read_bytes()).hexdigest() for path,name in items}, 'validation': 'tools/test.py: host + legacy storage + VT-d/modern DMA isolation + persistence/update-health/version-policy/fault/restart + kernel-boundary/storage-failure security + directory-capability openat + truncate/zero-extension fault/recovery + trust-policy/rotation/revocation + native-argv/explicit-environment/read-only/preflight + relative-native/private-image/reboot VMs'}
 archive = BUILD/'SpiritFoxOS-M6-Updates.zip'
 with zipfile.ZipFile(archive,'w',zipfile.ZIP_DEFLATED) as z:
     for path,name in items:

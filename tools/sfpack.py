@@ -1,4 +1,4 @@
-"""SFMOD1/SFK1 authoring. Native static-address subset of design v0.2."""
+"""SFMOD1/SFK1 authoring. Native static and relative-only subset of design v0.2."""
 import argparse
 import ctypes as C
 import hashlib
@@ -78,24 +78,71 @@ def cbor(value):
     raise ValueError('Unsupported CBOR type')
 
 
-def elf_segments(image):
+def elf_segments(image, relative=False):
     if len(image) < 64 or image[:7] != b'\x7fELF\x02\x01\x01':
         raise ValueError('Expected little-endian ELF64')
     fields = struct.unpack_from('<HHIQQQIHHHHHH', image, 16)
-    if fields[0] != 2 or fields[1] != 62 or fields[8] != 56:
-        raise ValueError('Expected x86_64 static executable')
+    if fields[0] != (3 if relative else 2) or fields[1] != 62 or fields[2] != 1 or fields[8] != 56:
+        raise ValueError('Expected x86_64 '+('PIE' if relative else 'static executable'))
+    if fields[4] > len(image) or fields[9]*56 > len(image)-fields[4]:
+        raise ValueError('ELF program table out of bounds')
+    origin = 0 if relative else BASE
     segments = []
     for i in range(fields[9]):
         typ, flags, off, va, pa, size, memory, align = struct.unpack_from('<IIQQQQQQ', image, fields[4]+i*56)
+        if typ in (3,7):
+            raise ValueError('ELF interpreter/TLS is unsupported')
+        if typ == 2 and relative:
+            if off > len(image) or size > len(image)-off or size % 16:
+                raise ValueError('ELF dynamic table out of bounds')
+            for pos in range(off,off+size,16):
+                tag,value = struct.unpack_from('<qQ',image,pos)
+                if tag == 0:
+                    break
+                if tag in (1,17,18,19,22,23,35,36,37) or (tag == 2 and value) or (tag == 30 and value & 4):
+                    raise ValueError('ELF imports or non-relative linking is unsupported')
         if typ != 1 or not memory:
             continue
-        if flags not in (4, 5, 6) or va < BASE or va + memory > BASE+0x200000 or size > memory or off+size > len(image) or va % 4096:
+        if flags not in (4,5,6) or va < origin or memory > 0x200000 or va-origin > 0x200000-memory or size > memory or off > len(image) or size > len(image)-off or va % 4096:
             raise ValueError('ELF segment outside native profile')
-        kind = {5: 1, 4: 2, 6: 3}[flags]
-        segments.append((kind, {5: 5, 4: 1, 6: 3}[flags], va-BASE, memory, image[off:off+size]))
-    if not segments or len(segments) > 8:
+        kind = {5:1,4:2,6:3}[flags]
+        segments.append((kind,{5:5,4:1,6:3}[flags],va-origin,memory,image[off:off+size]))
+    if not segments or len(segments)>8:
         raise ValueError('Expected 1..8 mapped segments')
-    return fields[3]-BASE, segments
+    return fields[3]-origin,segments
+
+
+def elf_relative_records(image):
+    fields = struct.unpack_from('<HHIQQQIHHHHHH',image,16)
+    shoff,entsize,count = fields[5],fields[10],fields[11]
+    if entsize != 64 or not count or shoff > len(image) or count*64 > len(image)-shoff:
+        raise ValueError('Expected bounded ELF section table')
+    records = []
+    for i in range(count):
+        section = struct.unpack_from('<IIQQQQIIQQ',image,shoff+i*64)
+        typ,off,size,stride = section[1],section[4],section[5],section[9]
+        if typ in (9,19):
+            raise ValueError('Only explicit RELA relocations are supported')
+        if typ not in (4,11):
+            continue
+        if off > len(image) or size > len(image)-off or stride != 24 or size % 24:
+            raise ValueError('ELF relocation/symbol table out of bounds')
+        for pos in range(off,off+size,24):
+            if typ == 11:
+                name,info,other,shndx,value,symbol_size = struct.unpack_from('<IBBHQQ',image,pos)
+                if shndx == 0 and (name or info or other or value or symbol_size):
+                    raise ValueError('ELF imports are unsupported')
+                continue
+            target,info,addend = struct.unpack_from('<QQq',image,pos)
+            if info != 8:
+                raise ValueError('Only symbol-free R_X86_64_RELATIVE is supported')
+            records.append((target,addend))
+            if len(records)>256:
+                raise ValueError('Relative relocation limit is 256')
+    records.sort()
+    if len({target for target,_ in records}) != len(records):
+        raise ValueError('Duplicate relative relocation targets')
+    return b''.join(struct.pack('<Qq',target,addend) for target,addend in records)
 
 
 def seal(blob, seed, crypto=None):
@@ -109,16 +156,27 @@ def seal(blob, seed, crypto=None):
 
 
 def pack(manifest, image, kind, seed):
-    entry, segments = elf_segments(image)
+    relative = manifest.get('native_profile') == 'relative-v1'
+    if relative and kind != 2:
+        raise ValueError('PIE profile is for native applications only')
+    entry, segments = elf_segments(image,relative)
+    if relative:
+        records = elf_relative_records(image)
+        manifest = dict(manifest)
+        if 'relative_relocations' in manifest:
+            raise ValueError('sfpack owns the generated relative relocation subtable')
+        manifest['relative_relocations'] = {'section':len(segments),'offset':0,'bytes':len(records)}
+        segments.append((4,0,0,len(records),records))
     encoded = cbor(manifest)
     result = bytearray(96+64*len(segments))
     moff = len(result)
     result.extend(encoded)
     for i, (typ, flags, rva, memory, data) in enumerate(segments):
-        result.extend(b'\0' * (-len(result) % 4096))
+        alignment = 4096 if typ<=3 else 8
+        result.extend(b'\0' * (-len(result) % alignment))
         off = len(result)
         result.extend(data)
-        struct.pack_into('<IIQQQQQ16s', result, 96+64*i, typ, flags, off, len(data), memory, rva, 4096, bytes(16))
+        struct.pack_into('<IIQQQQQ16s', result, 96+64*i, typ, flags, off, len(data), memory, rva, alignment, bytes(16))
     result.extend(b'\0' * (-len(result) % 8))
     sig = len(result)
     result.extend(bytes(104))

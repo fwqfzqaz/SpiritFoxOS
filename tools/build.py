@@ -55,7 +55,7 @@ def link_elf(name, objs, script):
 
 def main(policy_path=None):
     print('Building host package verifier', flush=True)
-    run(['-target', 'x86_64-windows-gnu', '-shared', '-O2', '-Iinclude', '-Ivendor/monocypher', 'tools/crypto_host.c', 'services/readfs.c', *CRYPTO, '-o', 'build/sfcrypto.dll'])
+    run(['-target', 'x86_64-windows-gnu', '-shared', '-O2', '-Iinclude', '-Ivendor/monocypher', 'tools/crypto_host.c', 'services/readfs.c', 'services/native_image.c', *CRYPTO, '-o', 'build/sfcrypto.dll'])
     keys = ROOT / '.keys'
     keys.mkdir(exist_ok=True)
     seedfile = keys / 'development.seed'
@@ -85,7 +85,7 @@ def main(policy_path=None):
     Path('build/trust-policy.json').write_text(json.dumps(policy, indent=2)+'\n')
     print('Building userspace packages', flush=True)
     shared = objects('user-common', ['services/start.S', 'services/memory.c', 'services/libsf.c', 'services/arguments.c'])
-    init = shared + objects('init', ['services/init.c', 'services/argparse.c', 'services/storage.c', 'services/readfs.c', 'services/txn.c', 'services/update.c', 'services/version.c', 'services/persistence.c', 'services/manager.c', 'services/namespace.c', *CRYPTO])
+    init = shared + objects('init', ['services/init.c', 'services/native_image.c', 'services/argparse.c', 'services/storage.c', 'services/readfs.c', 'services/txn.c', 'services/update.c', 'services/version.c', 'services/persistence.c', 'services/manager.c', 'services/namespace.c', *CRYPTO])
     packages = []
     image = link_elf('sf-init', init, 'services/user.ld')
     manifest = {'module_id': 'org.spiritfox.init', 'version': '0.1.0', 'category': 'bootstrap', 'requested_caps': ['bootstrap'], 'resource_limits': {'memory': 2097152}}
@@ -115,6 +115,13 @@ def main(policy_path=None):
             Path('build/'+package_name).write_bytes(package_bytes)
         else:
             packages.append((package_name, package_bytes))
+    pie_shared = objects('pie-common', ['services/start.S','services/memory.c','services/libsf.c','services/arguments.c'], defines=['-fpie'])
+    pie_objs = pie_shared + objects('pieprobe',['services/pieprobe.c'],defines=['-fpie'])
+    run(['-target','x86_64-freestanding-none','-nostdlib','-fpie','-pie','-Wl,-Bsymbolic','-Wl,-e,_sf_start','-Wl,-T,services/user-pie.ld','-Wl,--build-id=none',*pie_objs,'-o','build/pieprobe.elf'])
+    pie_manifest = {'app_id':'org.spiritfox.pieprobe','version':'0.1.0','runtime_id':'org.spiritfox.native','app_abi':1,'native_profile':'relative-v1','requested_caps':['stdio','namespace.read']}
+    pie_package = pack(pie_manifest,Path('build/pieprobe.elf').read_bytes(),2,application_seed)
+    packages.append(('pieprobe.sfk',pie_package))
+    disk_files['/bin/pieprobe.sfk'] = pie_package
     image = link_elf('sf-virtio-blk', shared + objects('virtio-blk', ['services/virtio_blk.c']), 'services/user.ld')
     packages.append(('sf-virtio-blk.sfmod', pack({'module_id': 'org.spiritfox.virtio.blk', 'version': '0.1.0', 'category': 'driver', 'requested_caps': ['device.virtio-blk.trusted'], 'resource_limits': {'memory': 131072}}, image, 1, seed)))
     Path('build/storage.img').write_bytes(create_readfs(disk_files))

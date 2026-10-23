@@ -60,6 +60,48 @@ static int app_abi(const SfPackage*p){
   if(!item(&c,1))return 0;
  }return 0;
 }
+static int manifest_value(const SfPackage*p,const char*key,Cbor*out){
+ Cbor c={p->manifest,p->manifest+p->manifest_bytes};uint8_t t;uint64_t n;
+ if(!head(&c,&t,&n)||t!=5)return SF_BAD_FORMAT;
+ for(uint64_t i=0;i<n;i++){uint64_t len;if(!head(&c,&t,&len)||t!=3||!span(0,len,c.end-c.p))return SF_BAD_FORMAT;
+  int match=len==strlen(key)&&!memcmp(c.p,key,len);c.p+=len;if(match){*out=c;return 0;}if(!item(&c,1))return SF_BAD_FORMAT;
+ }return SF_NOT_FOUND;
+}
+int sf_native_relocations_validate(const SfPackage*p){
+ if(!p||p->count>64||p->native_profile>SF_NATIVE_RELATIVE||p->relocation_count>SF_RELOCATION_MAX)return SF_BAD_FORMAT;
+ if(p->native_profile==SF_NATIVE_STATIC)return p->relocation_count||p->relocation_offset?SF_BAD_FORMAT:0;
+ if(p->kind!=2||!span(p->relocation_offset,p->relocation_count*16ull,p->bytes))return SF_BAD_FORMAT;
+ uint64_t previous=0;
+ for(unsigned i=0;i<p->relocation_count;i++){
+  const uint8_t*r=p->data+p->relocation_offset+i*16;uint64_t target=sf_u64(r),addend=sf_u64(r+8);int write=0,value=0;
+  if((target&7)||(i&&target<=previous)||addend>=SF_IMAGE_MAX)return SF_BAD_FORMAT;previous=target;
+  for(unsigned j=0;j<p->count;j++){const SfSection*s=&p->sections[j];if(s->type>3)continue;
+   if(s->type==3&&target>=s->rva&&span(target-s->rva,8,s->memory))write=1;
+   if(addend>=s->rva&&addend-s->rva<s->memory)value=1;
+  }
+  if(!write||!value)return SF_BAD_FORMAT;
+ }return 0;
+}
+static int native_profile(SfPackage*p){
+ char profile[32];int r=sf_manifest_text(p,"native_profile",profile,sizeof(profile));Cbor c;
+ if(r!=SF_NOT_FOUND&&(r||strcmp(profile,"static-v1"))){
+  if(r||strcmp(profile,"relative-v1")||p->kind!=2)return SF_BAD_FORMAT;p->native_profile=SF_NATIVE_RELATIVE;
+ }
+ /* Recognized import metadata cannot silently become a relative-only image. */
+ if(manifest_value(p,"import_relocations",&c)!=SF_NOT_FOUND||manifest_value(p,"native_imports",&c)!=SF_NOT_FOUND)return SF_BAD_FORMAT;
+ r=manifest_value(p,"relative_relocations",&c);
+ if(!p->native_profile){if(r!=SF_NOT_FOUND)return SF_BAD_FORMAT;for(unsigned i=0;i<p->count;i++)if(p->sections[i].type==4&&p->sections[i].bytes)return SF_BAD_FORMAT;return 0;}
+ uint8_t t;uint64_t n,section=UINT64_MAX,offset=UINT64_MAX,bytes=UINT64_MAX;
+ if(r||!head(&c,&t,&n)||t!=5||n!=3)return SF_BAD_FORMAT;
+ for(unsigned i=0;i<3;i++){uint64_t len,v;if(!head(&c,&t,&len)||t!=3||!span(0,len,c.end-c.p))return SF_BAD_FORMAT;
+  const uint8_t*key=c.p;c.p+=len;if(!head(&c,&t,&v)||t!=0)return SF_BAD_FORMAT;
+  if(len==7&&!memcmp(key,"section",7))section=v;else if(len==6&&!memcmp(key,"offset",6))offset=v;else if(len==5&&!memcmp(key,"bytes",5))bytes=v;else return SF_BAD_FORMAT;
+ }
+ if(section>=p->count||offset||bytes>SF_RELOCATION_MAX*16ull||(bytes&15))return SF_BAD_FORMAT;
+ const SfSection*s=&p->sections[section];if(s->type!=4||bytes!=s->bytes)return SF_BAD_FORMAT;
+ for(unsigned i=0;i<p->count;i++)if(i!=section&&p->sections[i].type==4)return SF_BAD_FORMAT;
+ p->relocation_offset=s->offset;p->relocation_count=bytes/16;return sf_native_relocations_validate(p);
+}
 int sf_trust_validate(const SfTrustStore*trust){
  if(!trust||!trust->keys||!trust->count||trust->count>SF_TRUST_MAX)return SF_BAD_FORMAT;
  for(unsigned i=0;i<trust->count;i++){
@@ -102,8 +144,6 @@ int sf_package_open_trusted(SfPackage*p,const void*data,uint64_t bytes,const SfT
  char text[96];if(sf_manifest_text(p,mod?"module_id":"app_id",text,sizeof(text))||!text[0]||sf_manifest_text(p,"version",text,sizeof(text)))return SF_BAD_FORMAT;
  if(app&&sf_manifest_text(p,"runtime_id",text,sizeof(text)))return SF_BAD_FORMAT;
  if(app&&!app_abi(p))return SF_ABI_MISMATCH;
- /* This static native profile intentionally has no relocation/import tables. */
- for(unsigned i=0;i<count;i++)if(p->sections[i].type==4&&p->sections[i].bytes)return SF_BAD_FORMAT;
  if(sf_u16(d+sig+32)!=1||sf_u16(d+sig+34)||sf_u32(d+sig+36)!=64)return SF_BAD_FORMAT;
  const SfTrustKey*key=0;uint8_t hash[32],message[55];
  for(unsigned i=0;i<trust->count;i++){sf_sha256(hash,trust->keys[i].public_key,32);if(!memcmp(hash,d+sig,32))key=&trust->keys[i];}
@@ -112,7 +152,8 @@ int sf_package_open_trusted(SfPackage*p,const void*data,uint64_t bytes,const SfT
  if(!(key->usage&(mod?SF_TRUST_MODULE:SF_TRUST_APP)))return SF_DENIED;
  static const uint8_t domain[]="SpiritFoxOS-Package-v1";
  _Static_assert(sizeof(domain)==23,"signature domain");memcpy(message,domain,sizeof(domain));sf_sha256(message+sizeof(domain),d,bytes-64);
- return crypto_ed25519_check(d+bytes-64,key->public_key,message,sizeof(message))?SF_BAD_SIGNATURE:SF_OK;
+ if(crypto_ed25519_check(d+bytes-64,key->public_key,message,sizeof(message)))return SF_BAD_SIGNATURE;
+ return native_profile(p);
 }
 /* Explicit-key verification is retained for offline authoring tools. Runtime
  * consumers use the complete policy and must never fall back to this API. */
