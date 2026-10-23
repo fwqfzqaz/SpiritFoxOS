@@ -120,6 +120,14 @@ M5 回归为 151 条 C 断言、14 组 Python 测试中的包/只读格式部分
 
 最终源码已构建后，`python tools/test.py --skip-build` 完整通过，耗时 461.53 秒，实际 105 次启动，输出 `build/trust-final-test.txt`。包含全部原有 C 边界/故障测试和 21 组 Python 测试（3000 次变异）。结果 `build/test-results.json` 新增 trust_policy_host=true、trust_policy_host_groups=6、trust_policy_qemu=true、trust_policy_qemu_boots=10，发布门同时要求新增标记及 `trust-policy.json` 的精确摘要。规范化后的 EFI 时间戳/可选校验和亦已通过完整启动回归；生产信任链与在线策略更新仍未实现。
 
+## 默认签名角色分离与旧应用迁移
+
+默认模块与应用签名者改为两个不同开发公钥，实际构建的模块与应用分别按对应公钥验签。第七组信任宿主测试检查实际包、反向签名的用途拒绝及相同公钥配置拒绝；签名私钥均不进入交付文件。
+
+信任专项现在先执行并恢复原策略，再运行全部标准 VM。legacy 与 modern 各增加两次迁移测试：显式过渡策略允许旧模块公钥的应用用途，先安装确认旧应用，再确认独立应用公钥的更高版本；严格策略重启后已确认新包继续运行，旧签名直接运行/安装被拒绝且整盘字节不变。原有应用用途/撤销 bootstrap 拒绝改用当前真实应用签名者，模块用途应用拒绝改用当前真实模块签名者，外部密钥轮换和撤销回归保留。
+
+最终源码构建后，完整 `python tools/test.py --skip-build` 通过，耗时 486.45 秒，共 109 次实际启动、22 组 Python 测试与 3000 次变异，日志 `build/separate-keys-final-test.txt`。结果为 trust_policy_host_groups=7、trust_policy_qemu_boots=14、separate_signing_keys=true，并绑定 EFI、两种盘、两个公钥与公开策略六个摘要；发布门拒绝旧标记或文件摘要不一致。原始模块公钥不变，四轮策略构建保持两份现有种子，最终交付恢复为原有效策略，未遗留测试 VM。
+
 ## 外部助手审查
 
 按用户授权调用已有 DeepSeek Harness。首次宽范围审查超时，没有采用其未完成输出；随后以低推理档审查一个文件写函数，11 秒完成且未使用工具。核实并修复空写返回错误，增加容量防御检查及对应宿主断言。审查回执在 `.cache/deepseek/runs/`，不包含提交或推送权限。

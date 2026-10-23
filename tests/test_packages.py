@@ -15,7 +15,7 @@ class Packages(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.crypto = Crypto()
-        cls.seed = (ROOT / '.keys/development.seed').read_bytes()
+        cls.seed = (ROOT / '.keys/application.seed').read_bytes()
         cls.pub = cls.crypto.key(cls.seed)[1]
         cls.good = (ROOT / 'build/hello.sfk').read_bytes()
 
@@ -30,7 +30,8 @@ class Packages(unittest.TestCase):
     def test_valid_every_built_package(self):
         for path in list((ROOT / 'build').glob('*.sfmod')) + list((ROOT / 'build').glob('*.sfk')):
             with self.subTest(package=path.name):
-                self.assertEqual(self.crypto.verify(path.read_bytes(), self.pub), 0)
+                public = (ROOT/'build/development.pub').read_bytes() if path.suffix == '.sfmod' else self.pub
+                self.assertEqual(self.crypto.verify(path.read_bytes(), public), 0)
 
     def test_sha256_vectors(self):
         for data in [b'', b'abc', b'a'*55, b'a'*56, b'a'*64, b'a'*1000000]:

@@ -38,6 +38,19 @@ class Trust(unittest.TestCase):
                 with self.subTest(signer=i,kind=blob[:8]):
                     self.assertEqual(self.crypto.verify_policy(seal(blob,self.seeds[i]),policy),expected)
 
+    def test_default_signing_roles(self):
+        module_public = (ROOT/'build/development.pub').read_bytes()
+        application_public = (ROOT/'build/application.pub').read_bytes()
+        self.assertNotEqual(module_public, application_public)
+        policy = trust_policy.development(module_public, application_public)
+        self.assertEqual(self.crypto.verify_policy(self.app,policy),0)
+        self.assertEqual(self.crypto.verify_policy(self.mod,policy),0)
+        for blob,seedfile in [(self.app,'development.seed'),(self.mod,'application.seed')]:
+            seed = (ROOT/'.keys'/seedfile).read_bytes()
+            self.assertEqual(self.crypto.verify_policy(seal(blob,seed),policy),-2)
+        with self.assertRaises(ValueError):
+            trust_policy.development(module_public,module_public)
+
     def test_revocation_and_no_fallback(self):
         data = seal(self.app,self.seeds[1])
         for keys in [(self.key(0),self.key(1,revoked=True)),(self.key(1,revoked=True),self.key(0))]:

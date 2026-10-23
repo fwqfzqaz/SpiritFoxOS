@@ -64,14 +64,23 @@ def main(policy_path=None):
     seed = seedfile.read_bytes()
     pub = Crypto().key(seed)[1]
     Path('build/development.pub').write_bytes(pub)
+    application_seedfile = keys / 'application.seed'
+    if not application_seedfile.exists():
+        application_seedfile.write_bytes(os.urandom(32))
+    application_seed = application_seedfile.read_bytes()
+    application_pub = Crypto().key(application_seed)[1]
+    if application_pub == pub:
+        raise ValueError('Module and application signing keys must be distinct')
+    Path('build/application.pub').write_bytes(application_pub)
     explicit_policy = policy_path is not None
     policy_path = Path(policy_path) if explicit_policy else keys / 'trust-policy.json'
     policy_path = policy_path.resolve()
     if not policy_path.is_relative_to(ROOT):
         raise ValueError('Trust policy must be inside the workspace')
-    policy = trust_policy.load(policy_path) if explicit_policy or policy_path.exists() else trust_policy.development(pub)
-    if not any(k['public_key'] == pub.hex() and not k['revoked'] and set(k['usage']) == {'module', 'app'} for k in policy['keys']):
-        raise ValueError('Current development build requires its signing key active for modules and apps')
+    policy = trust_policy.load(policy_path) if explicit_policy or policy_path.exists() else trust_policy.development(pub, application_pub)
+    for signer, usage in [(pub, 'module'), (application_pub, 'app')]:
+        if not any(k['public_key'] == signer.hex() and not k['revoked'] and usage in k['usage'] for k in policy['keys']):
+            raise ValueError('Current build requires an active ' + usage + ' signing key in the trust policy')
     Path('build/trust.h').write_text(trust_policy.header(policy))
     Path('build/trust-policy.json').write_text(json.dumps(policy, indent=2)+'\n')
     print('Building userspace packages', flush=True)
@@ -96,10 +105,11 @@ def main(policy_path=None):
             manifest['runtime_id'] = 'org.spiritfox.native'
             manifest['app_abi'] = 1
         package_name = name+('.sfmod' if kind == 1 else '.sfk')
-        package_bytes = pack(manifest, image, kind, seed)
+        signing_seed = seed if kind == 1 else application_seed
+        package_bytes = pack(manifest, image, kind, signing_seed)
         if name=='disknext':
             for label,version in [('short','0.3'),('leading','00.3.0'),('overflow','4294967296.0.0'),('suffix','0.3.0-alpha')]:
-                Path('build/version-'+label+'.sfk').write_bytes(pack(dict(manifest,version=version),image,kind,seed))
+                Path('build/version-'+label+'.sfk').write_bytes(pack(dict(manifest,version=version),image,kind,signing_seed))
         if name.startswith('disk'):
             disk_files[('/modules/' if kind == 1 else '/bin/')+package_name] = package_bytes
             Path('build/'+package_name).write_bytes(package_bytes)

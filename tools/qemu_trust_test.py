@@ -22,22 +22,29 @@ def make_fixtures():
     import trust_policy
     crypto = Crypto()
     FIXTURES.mkdir(exist_ok=True)
-    keys = trust_policy.development((ROOT/'build/development.pub').read_bytes())['keys']
-    for name in ('old','next','revoked','module'):
-        usage = ['module'] if name=='module' else ['module','app'] if name=='revoked' else ['app']
+    keys = trust_policy.development((ROOT/'build/development.pub').read_bytes(),(ROOT/'build/application.pub').read_bytes())['keys']
+    SEEDS['module'] = (ROOT/'.keys/development.seed').read_bytes()
+    application_seed = (ROOT/'.keys/application.seed').read_bytes()
+    legacy = {'version':1,'keys':[dict(k) for k in keys]}
+    legacy['keys'][0]['usage'] = ['module','app']
+    (FIXTURES/'legacy.json').write_text(json.dumps(legacy),encoding='utf-8')
+    (FIXTURES/'legacy.sfk').write_bytes(seal((ROOT/'build/diskhello.sfk').read_bytes(),SEEDS['module'],crypto))
+    for name in ('old','next','revoked'):
+        usage = ['module','app'] if name=='revoked' else ['app']
         keys.append({'public_key':crypto.key(SEEDS[name])[1].hex(), 'usage':usage, 'revoked':name=='revoked'})
     for phase in ('overlap','revoked'):
         policy = {'version':1,'keys':[dict(k) for k in keys]}
         if phase=='revoked':
-            policy['keys'][1]['revoked'] = True
+            policy['keys'][2]['revoked'] = True
         (FIXTURES/(phase+'.json')).write_text(json.dumps(policy),encoding='utf-8')
     manifest = {'app_id':'org.spiritfox.diskhello','version':'0.4.0','runtime_id':'org.spiritfox.native','app_abi':1,'requested_caps':['stdio']}
     image = (ROOT/'build/diskhello.elf').read_bytes()
     for name,version,signer in [('old','0.4.0','old'),('next','0.5.0','next'),('oldnext','0.6.0','old'),('revoked','0.6.0','revoked'),('module','0.6.0','module'),('unknown','0.6.0','unknown')]:
         (FIXTURES/(name+'.sfk')).write_bytes(pack(dict(manifest,version=version),image,2,SEEDS[signer]))
     for name in ('next','revoked'):
-        (FIXTURES/('bootstrap-'+name+'.sfmod')).write_bytes(seal((ROOT/'build/sf-init.sfmod').read_bytes(),SEEDS[name],crypto))
-    (FIXTURES/'app-signed-module.sfmod').write_bytes(seal((ROOT/'build/disk-echo.sfmod').read_bytes(),SEEDS['next'],crypto))
+        signer = application_seed if name=='next' else SEEDS[name]
+        (FIXTURES/('bootstrap-'+name+'.sfmod')).write_bytes(seal((ROOT/'build/sf-init.sfmod').read_bytes(),signer,crypto))
+    (FIXTURES/'app-signed-module.sfmod').write_bytes(seal((ROOT/'build/disk-echo.sfmod').read_bytes(),application_seed,crypto))
 
 
 def child(args, label):
@@ -77,7 +84,7 @@ def boot_rejection(label, replacement):
 
 
 def run():
-    names = ['esp/EFI/BOOT/BOOTX64.EFI','storage.img','persistent.img','development.pub','trust-policy.json']
+    names = ['esp/EFI/BOOT/BOOTX64.EFI','storage.img','persistent.img','development.pub','application.pub','trust-policy.json']
     baseline = {n:hashlib.sha256((ROOT/'build'/n).read_bytes()).digest() for n in names}
     FIXTURES.mkdir(exist_ok=True)
     restore_policy = FIXTURES/'restore.json'
@@ -85,8 +92,40 @@ def run():
     saved = {}
     try:
         child(['tools/qemu_trust_test.py','--fixtures'],'fixtures-default')
+        child(['tools/build.py','--trust-policy',str(FIXTURES/'legacy.json')],'build-legacy')
+        legacy_base = replace_base((ROOT/'build/persistent.img').read_bytes(),{'/bin/diskhello.sfk':(FIXTURES/'legacy.sfk').read_bytes()})
+        migrated = {}
+        for iommu in (False,True):
+            label = 'modern' if iommu else 'legacy'
+            disk = ROOT/'build'/('trust-legacy-key-'+label+'.img')
+            disk.write_bytes(legacy_base)
+            vm = VM(disk,'trust-key-migration-'+label,iommu=iommu)
+            try:
+                vm.boot()
+                for name in ('diskhello','diskupdate'):
+                    vm.command('install /disk/bin/'+name+'.sfk','install: COMMITTED')
+                    vm.command('run installed','sfexec: exit 0')
+                vm.command('persist','confirmed-version=0.2.0 policy=monotonic')
+            finally:
+                vm.close()
+            migrated[iommu] = disk.read_bytes()
         child(['tools/build.py','--trust-policy',str(FIXTURES/'overlap.json')],'build-overlap')
         child(['tools/qemu_trust_test.py','--fixtures'],'fixtures-overlap')
+        for iommu,data in migrated.items():
+            label = 'modern' if iommu else 'legacy'
+            disk = ROOT/'build'/('trust-legacy-key-'+label+'.img')
+            disk.write_bytes(data)
+            vm = VM(disk,'trust-key-migrated-strict-'+label,iommu=iommu)
+            try:
+                vm.boot()
+                vm.expect('DISK PACKAGE REJECTED app code=2')
+                vm.command('run installed','sfexec: exit 0')
+                vm.command('run /disk/bin/diskhello.sfk','sfexec: failed code=2')
+                vm.command('install /disk/bin/diskhello.sfk','install: failed code=2')
+                vm.command('persist','confirmed-version=0.2.0 policy=monotonic')
+            finally:
+                vm.close()
+            assert disk.read_bytes()==data, 'Migrated app or rejected legacy signer changed disk'
         for name in ('next','revoked'):
             boot_rejection(name,(FIXTURES/('bootstrap-'+name+'.sfmod')).read_bytes())
         files = {'/bin/'+PATHS[name]+'.sfk':(FIXTURES/(name+'.sfk')).read_bytes() for name in PATHS}
@@ -150,7 +189,7 @@ def run():
         # even when a negative test fails; never ship the public test keys.
         child(['tools/build.py','--trust-policy',str(restore_policy)],'restore-default')
         assert all(hashlib.sha256((ROOT/'build'/n).read_bytes()).digest()==h for n,h in baseline.items()), 'Default deliverables changed after trust fixture restore'
-    print('TRUST QEMU PASS: 10 boots; bootstrap purpose/revocation rejection, cross-key install/confirm, revoked/unknown/wrong-purpose rejection without writes, revoked confirmed floor fails closed, pending revoked trial rollback, legacy and modern, default artifacts restored',flush=True)
+    print('TRUST QEMU PASS: 14 boots; separate default keys and explicit legacy signer migration, bootstrap purpose/revocation rejection, cross-key install/confirm, revoked/unknown/wrong-purpose rejection without writes, revoked confirmed floor fails closed, pending revoked trial rollback, legacy and modern, original artifacts restored',flush=True)
 
 
 if __name__ == '__main__':

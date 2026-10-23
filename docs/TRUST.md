@@ -4,7 +4,7 @@
 
 ## 配置与查询
 
-默认仍只信任 `.keys/development.seed` 对应的开发公钥。可将公开策略保存到工作区内任意 JSON 文件，再执行：
+默认使用两个不同的开发密钥：`.keys/development.seed` 只签模块，`.keys/application.seed` 只签应用，公开输出分别是 `build/development.pub` 与 `build/application.pub`。两个构建签名者的公钥相同时构建拒绝；私钥只在忽略提交的工作区 `.keys` 中保存。可将公开策略保存到工作区内任意 JSON 文件，再执行：
 
 ```powershell
 python tools/build.py --trust-policy .keys/trust-policy.json
@@ -12,7 +12,7 @@ python tools/sfpack.py trust --policy build/trust-policy.json
 python tools/sfpack.py inspect build/hello.sfk --trust-policy build/trust-policy.json
 ```
 
-不传参数时，构建优先读取工作区的 `.keys/trust-policy.json`；不存在才使用默认开发策略。显式指定的文件不存在或内容非法时停止构建。当前构建脚本仍用开发密钥签署自测模块和应用，因此该密钥必须保留 `module` 与 `app` 两种用途且未撤销；扩展应用密钥可独立轮换和撤销。此约束不表示有独立生产根或生产签名流程。
+不传参数时，构建优先读取工作区的 `.keys/trust-policy.json`；不存在才使用默认的双密钥策略。显式指定的文件不存在或内容非法时停止构建。自定义策略必须允许当前模块签名公钥的 `module` 用途，以及当前应用签名公钥的 `app` 用途，且二者均未撤销；默认没有交叉用途。扩展应用密钥可独立轮换和撤销。两个角色都仍是工作区开发密钥，此分离不表示已有独立生产根、硬件密钥保护或生产签名流程。
 
 策略结构如下，`public_key` 应替换为实际 32 字节 Ed25519 公钥的 64 个小写十六进制字符：
 
@@ -20,7 +20,8 @@ python tools/sfpack.py inspect build/hello.sfk --trust-policy build/trust-policy
 {
   "version": 1,
   "keys": [
-    {"public_key": "<64 lowercase hex characters>", "usage": ["module", "app"], "revoked": false}
+    {"public_key": "<64 lowercase module public key hex characters>", "usage": ["module"], "revoked": false},
+    {"public_key": "<64 lowercase application public key hex characters>", "usage": ["app"], "revoked": false}
   ]
 }
 ```
@@ -42,7 +43,15 @@ SFMOD1/SFK1 格式、104 字节签名尾部和签名消息不变。验证器先�
 
 未知、已撤销和用途不符时不尝试其他公钥或开发密钥回退。用途取自已验证的容器类型；包不能通过改变清单中的 category 获得模块签名权。固件启动加载、管理器加载、持久化安装/已安装包读取、独立 native 运行时复验均调用同一套策略接口。Core 0 继续不解析签名或密钥。
 
-## 应用密钥轮换顺序
+## 旧单密钥镜像的显式迁移
+
+旧原型的应用使用 `development.seed` 签名。新默认策略只授予该公钥模块用途，因此旧应用会被拒绝（`SF_DENIED`），旧已确认包的版本下限也不能自动作为合法应用认证；不会静默增加旧用途或重置事务盘。
+
+需要保留旧安装时，先构建新版本以生成应用公钥，复制 `build/trust-policy.json` 到 `.keys/trust-policy.json`，仅在此显式过渡策略中把旧开发公钥的 usage 改为 `["module", "app"]`，保留新应用公钥的 app 用途。重新构建并启动，使用 `application.seed` 签署同一 app_id 的更高版本，经安装与试运行确认后，再把旧公钥恢复为仅 module 并重建启动。不能撤销仍在签署启动模块的整个旧公钥；这里只移除它的应用用途。
+
+新 `.keys/application.seed` 已存在时保持不变；删除或替换任一私钥都会改变相应签名身份。自定义旧策略也须显式加入新的应用公钥，否则构建拒绝。原事务盘布局、选择器格式与版本下限规则保持不变，迁移不提供离线旧盘或旧 EFI 防回放。
+
+## 外部应用密钥轮换顺序
 
 1. 构建并启动同时信任旧、新应用公钥的策略。新密钥可只获授 `app`，不能因此签署 bootstrap、runtime 或驱动模块。
 2. 以新密钥签署同一 app_id 的更高版本，经原有双槽安装和健康确认流程成为已确认包。
@@ -54,8 +63,8 @@ SFMOD1/SFK1 格式、104 字节签名尾部和签名消息不变。验证器先�
 
 ## 验证范围
 
-`tests/test_trust.py` 对共享 C 验证器检查多签名者、模块/应用用途、未知与撤销密钥、重复策略、8-key 上限、key_id 冒用、签名篡改、严格 JSON、离线工具及 1000 次固定种子变异。测试密钥只用于夹具。
+`tests/test_trust.py` 对共享 C 验证器检查默认签名角色分离、多签名者、模块/应用用途、未知与撤销密钥、重复策略、8-key 上限、key_id 冒用、签名篡改、严格 JSON、离线工具及 1000 次固定种子变异。测试密钥只用于夹具。
 
-`tools/qemu_trust_test.py` 使用临时策略镜像，共十次启动：固件拒绝应用专用密钥及撤销密钥签署的 bootstrap；legacy 和 VT-d/modern 下分别执行跨密钥升级、确认与重启后撤销，检查未知/撤销/用途错误的运行和安装不改盘，已确认旧密钥包及其版本下限被撤销时拒绝执行/安装，待更新旧密钥撤销后回退新密钥已确认包。测试替换既有只读盘路径以遵守命名空间配额。结束时重新构建正常策略并校验 EFI、两种盘、公钥和有效策略与测试前的精确摘要一致，测试用公开种子不会留在交付镜像内。
+`tools/qemu_trust_test.py` 使用临时策略镜像，共十四次启动：两种传输均先显式允许旧开发公钥的应用用途，确认新应用公钥签署的更新，再在严格策略下重启验证新包可运行、旧签名应用被拒绝且不改盘。固件拒绝默认应用密钥及撤销密钥签署的 bootstrap；legacy 和 VT-d/modern 下另执行外部应用密钥升级、确认与撤销，验证默认模块密钥签署应用、未知与撤销签名者均被拒绝，以及已确认旧密钥版本下限失败关闭和待更新候选回退。测试替换既有只读盘路径以遵守命名空间配额。结束时重新构建原策略，校验 EFI、两种盘、两个公钥和有效策略与测试前的精确摘要一致，测试用公开种子不会留在交付镜像内。
 
 开发 EFI 的 PE 时间戳和可选校验和在签名前（本原型尚无 EFI 签名）规范为零，避免时钟元数据影响相同输入的重建比较；实际规范化后的镜像仍须通过完整启动测试。

@@ -48,8 +48,12 @@ def load(path):
     return validate(json.loads(raw, object_pairs_hook=unique_object))
 
 
-def development(public):
-    return validate({'version': 1, 'keys': [{'public_key': public.hex(), 'usage': ['module', 'app'], 'revoked': False}]})
+def development(module_public, application_public):
+    if module_public == application_public:
+        raise ValueError('Module and application signing keys must be distinct')
+    return validate({'version': 1, 'keys': [
+        {'public_key': module_public.hex(), 'usage': ['module'], 'revoked': False},
+        {'public_key': application_public.hex(), 'usage': ['app'], 'revoked': False}]})
 
 
 def header(policy):
