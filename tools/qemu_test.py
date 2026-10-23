@@ -94,6 +94,8 @@ def run(memory=256, interactive=False, storage='normal', persistent=False, iommu
         expect('BOOT TESTS PASSED', 60)
         if iommu and b'[IOMMU] VT-d active' not in output:
             raise RuntimeError('VT-d not active')
+        if iommu and storage == 'normal' and b'MMIO BUFFER TESTS PASSED' not in output:
+            raise RuntimeError('MMIO syscall buffer isolation not exercised')
         if storage == 'normal':
             if b'STORAGE READY' not in output or b'signed disk application runs through native runtime' not in output:
                 raise RuntimeError('Disk-backed module/application path not exercised')

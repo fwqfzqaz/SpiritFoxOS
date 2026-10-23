@@ -46,12 +46,17 @@ long sf_main(const SfBootArgs*a,size_t bytes){
 #elif ROLE == 7
  uint8_t code[]={0x90,0xc3};((void(*)(void))code)();return 1;
 #elif ROLE == 8
+ for(unsigned i=0;i<128;i++){long ep=sf_sys(SYS_EP_CREATE,0,0,0);if(ep<0||sf_sys(SYS_CAP_CLOSE,ep,0,0))return 9;}
  int ok=sf_sys(SYS_SPAWN,0,0,0)==SF_DENIED&&sf_sys(SYS_LOG,0x100000,16,0)==SF_DENIED&&sf_sys(SYS_MAP_TEST,SF_BASE,7,0)==SF_DENIED&&sf_sys(SYS_SEND,0x1234,0,0)==SF_STALE_HANDLE&&sf_sys(SYS_CAP_DERIVE,a->manager,7,0)==SF_DENIED&&sf_sys(SYS_PCI_READ,0,0,0)==SF_DENIED&&sf_sys(SYS_PORT_IO,0xcf8,4,0)==SF_DENIED;
  ok=ok&&sf_sys(SYS_DMA_STATUS,0,0,0)==SF_DENIED;SfMessage m;sf_message(&m,OP_HELLO,1);m.status=ok?0:SF_DENIED;sf_send(a->manager,&m);return ok?0:1;
 #elif ROLE == 10
  return *(volatile uint32_t*)0xfed90000ull;
 #elif ROLE == 11
  return 42;
+#elif ROLE == 12
+ return SF_BUSY;
+#elif ROLE == 13
+ __asm__ volatile("movabs $0x800000000000,%%rsp; mov $1,%%rax; int $0x80; ud2":::"memory");__builtin_unreachable();
 #else
  return SF_INVALID;
 #endif

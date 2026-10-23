@@ -38,7 +38,12 @@ fail: device_release(t);ipc_cleanup(t);pages_free(t->pid);device_forget(t);t->st
 }
 void task_dead(Task*t,int status){device_release(t);ipc_cleanup(t);t->state=T_DEAD;t->exit_status=status;if(current>=0&&t==&tasks[current])__asm__ volatile("mov %0,%%cr3"::"r"(boot_cr3):"memory");pages_free(t->pid);device_forget(t);}
 Frame *schedule(void){
- for(;;){for(int n=1;n<=SF_MAX_TASKS;n++){int i=(current+n)%SF_MAX_TASKS;if(tasks[i].state==T_READY){current=i;arch_task(&tasks[i]);return tasks[i].frame;}}
+ for(;;){for(int n=1;n<=SF_MAX_TASKS;n++){int i=(current+n)%SF_MAX_TASKS;if(tasks[i].state==T_READY){
+   Task*t=&tasks[i];uint64_t rsp=t->frame->rsp;
+   /* An arbitrary ring-3 RSP can make IRET fault in ring 0. Validate before
+    * returning, independently of the emulator's IRET canonicality checks. */
+   if(rsp>=0x0000800000000000ull&&rsp<0xffff800000000000ull){if(t->pid==1)panic("initial task return frame");task_dead(t,-113);continue;}
+   current=i;arch_task(t);return t->frame;}}
   __asm__ volatile("sti; hlt; cli");
  }
 }
@@ -50,7 +55,7 @@ static long syscall(Frame*f){Task*t=&tasks[current];uint64_t a=f->rdi,b=f->rsi,c
  case SYS_TICKS:return ticks;
  case SYS_SPAWN:{if(t->pid!=1)return SF_DENIED;SfLoadPlan plan;if(copy_in(t,&plan,a,sizeof(plan)))return SF_DENIED;return task_new(&plan,0);}
  case SYS_KILL:if(t->pid!=1||a==1)return SF_DENIED;for(unsigned i=0;i<SF_MAX_TASKS;i++)if(tasks[i].pid==a&&tasks[i].state!=T_DEAD){task_dead(&tasks[i],(int)b);return 0;}return SF_NOT_FOUND;
- case SYS_TASK_STATUS:if(t->pid!=1)return SF_DENIED;for(unsigned i=0;i<SF_MAX_TASKS;i++)if(tasks[i].pid==a)return tasks[i].state==T_DEAD?tasks[i].exit_status:SF_BUSY;return SF_NOT_FOUND;
+ case SYS_TASK_STATUS:if(t->pid!=1)return SF_DENIED;for(unsigned i=0;i<SF_MAX_TASKS;i++)if(tasks[i].pid==a&&tasks[i].state!=T_EMPTY)return tasks[i].state==T_DEAD?(long)tasks[i].exit_status:SF_TASK_RUNNING;return SF_NOT_FOUND;
  case SYS_CONSOLE_READ:if(t->pid!=1)return SF_DENIED;return console_read();
  case SYS_SHUTDOWN:if(t->pid!=1)return SF_DENIED;__asm__ volatile("outl %0,%1"::"a"((uint32_t)a),"Nd"((uint16_t)0xf4));outb(0x604,0);return 0;
  case SYS_MAP_TEST:return SF_DENIED;

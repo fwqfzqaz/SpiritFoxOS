@@ -45,7 +45,7 @@ static long notes_read(unsigned index,uint64_t offset,void*out,size_t bytes){
  if(offset>=(uint64_t)n)return 0;if(bytes>(uint64_t)n-offset)bytes=n-offset;memcpy(out,scratch+offset,bytes);return bytes;
 }
 static long notes_write(unsigned index,uint64_t offset,const void*data,size_t bytes){
- if(index!=UINT32_MAX)return SF_READ_ONLY;if(offset>sizeof(scratch)||bytes>sizeof(scratch)-offset)return SF_NO_SPACE;
+ if(index!=UINT32_MAX)return SF_READ_ONLY;if(!sf_storage_writable())return SF_DEVICE_GONE;if(offset>sizeof(scratch)||bytes>sizeof(scratch)-offset)return SF_NO_SPACE;
  long old=sf_txn_get(&volume,"/notes/user",scratch,sizeof(scratch));if(old<0&&old!=SF_NOT_FOUND)return old;if(old<0)old=0;
  if(offset>(uint64_t)old)memset(scratch+old,0,offset-old);memcpy(scratch+offset,data,bytes);
  uint32_t length=offset+bytes;if(length<(uint64_t)old)length=old;const char*paths[]={"/notes/user"};const void*items[]={scratch};int r=commit(paths,items,&length,1);return r?r:(long)bytes;
@@ -57,13 +57,13 @@ int sf_persist_mount(SfNamespace*ns){
  sf_storage_write_tests();
  SfUpdate state;r=state_read(&state);if(r){volume.ready=0;return r;}
  if(state.phase==SF_UPDATE_TRYING){sf_update_finish(&state,0);r=state_commit(&state);if(r){volume.ready=0;return r;}sf_log("update: RECOVERED interrupted trial\n");}
- if(ns->external_read!=notes_read)disk_read=ns->external_read;ns->external_read=notes_read;ns->external_write=notes_write;
+ long n=sf_txn_get(&volume,"/notes/user",scratch,sizeof(scratch));if(n<0&&n!=SF_NOT_FOUND){volume.ready=0;return n;}
  r=sf_ns_create(ns,"/persist",NODE_DIR,0);if(r){volume.ready=0;return r;}
  unsigned directory=0;for(unsigned i=0;i<32;i++)if(!strcmp(ns->nodes[i].path,"/persist"))directory=i;
  r=sf_ns_create(ns,"/persist/notes",NODE_DISK,0);if(r){memset(&ns->nodes[directory],0,sizeof(SfNode));volume.ready=0;return r;}
- long n=sf_txn_get(&volume,"/notes/user",scratch,sizeof(scratch));if(n<0&&n!=SF_NOT_FOUND)return n;
  for(unsigned i=0;i<32;i++)if(!strcmp(ns->nodes[i].path,"/persist/notes")){ns->nodes[i].external=UINT32_MAX;ns->nodes[i].mount_tag=1;ns->nodes[i].size=n<0?0:n;}
  ns->nodes[directory].readonly=1;ns->nodes[directory].mount_tag=1;
+ if(ns->external_read!=notes_read)disk_read=ns->external_read;ns->external_read=notes_read;ns->external_write=notes_write;
  sf_log("PERSIST READY generation=");sf_number(volume.generation);sf_log("\n");return 0;
 }
 int sf_persist_install(const char*source){

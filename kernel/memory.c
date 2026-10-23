@@ -1,5 +1,6 @@
 #include "kernel.h"
 #define POOL_PAGES 4096
+#define PTE_MMIO (1ull<<9)
 static uint8_t pool[POOL_PAGES][4096] __attribute__((aligned(4096)));
 static uint32_t owner[POOL_PAGES];
 static uint64_t kernel_pd[512] __attribute__((aligned(4096)));
@@ -38,10 +39,12 @@ int space_map(Task*t,uint64_t v,uint64_t physical,uint32_t flags){
  uint64_t*p=pte(t,v,1);if(!p)return SF_NO_SPACE;if(*p&1)return SF_INVALID;
  *p=physical|5|((flags&2)?2:0)|((flags&4)?0:NX);return SF_OK;
 }
-int space_map_mmio(Task*t,uint64_t v,uint64_t physical){int r=space_map(t,v,physical,3);if(!r)*pte(t,v,0)|=0x18;return r;}
+int space_map_mmio(Task*t,uint64_t v,uint64_t physical){int r=space_map(t,v,physical,3);if(!r)*pte(t,v,0)|=0x18|PTE_MMIO;return r;}
 int user_range(Task*t,uint64_t v,uint64_t n,int write){
  if(v<SF_BASE||v>=0x80000000ull||n>0x80000000ull-v)return 0;if(!n)return 1;
- uint64_t end=(v+n-1)&~4095ull;for(uint64_t a=v&~4095ull;;a+=4096){uint64_t*p=pte(t,a,0);if(!p||!(*p&1)||!(*p&4)||(write&&!(*p&2)))return 0;if(a==end)return 1;}
+ /* Copy helpers dereference RAM through the kernel identity map. Device
+  * registers are not RAM buffers, even when the caller can access them. */
+ uint64_t end=(v+n-1)&~4095ull;for(uint64_t a=v&~4095ull;;a+=4096){uint64_t*p=pte(t,a,0);if(!p||!(*p&1)||!(*p&4)||(*p&PTE_MMIO)||(write&&!(*p&2)))return 0;if(a==end)return 1;}
 }
 void *user_phys(Task*t,uint64_t v){uint64_t*p=pte(t,v,0);return p&&(*p&1)?(void*)((*p&0x000ffffffffff000ull)+(v&4095)):0;}
 int copy_in(Task*t,void*dst,uint64_t src,size_t n){if(!user_range(t,src,n,0))return SF_DENIED;uint8_t*d=dst;while(n){size_t k=4096-(src&4095);if(k>n)k=n;memcpy(d,user_phys(t,src),k);d+=k;src+=k;n-=k;}return 0;}

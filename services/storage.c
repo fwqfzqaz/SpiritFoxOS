@@ -12,7 +12,7 @@ static SfReadFs fs;
 static uint8_t verified[SF_READFS_FILE_MAX];
 static int writable,write_grant;
 static int call(SfMessage*m){
- if(!driver_pid||sf_sys(SYS_TASK_STATUS,driver_pid,0,0)!=SF_BUSY)return SF_DEVICE_GONE;
+ if(!driver_pid||sf_sys(SYS_TASK_STATUS,driver_pid,0,0)!=SF_TASK_RUNNING)return SF_DEVICE_GONE;
  uint64_t id=++sequence;m->h.request_id=id;int r=sf_send(driver_ep,m);if(r)return r;
  long from=sf_recv(manager_ep,m,sf_deadline(2000));if(from<0){sf_sys(SYS_KILL,driver_pid,SF_DEVICE_GONE,0);return from;}
  if(from!=driver_pid||m->h.request_id!=id)return SF_STALE_HANDLE;return m->status;
@@ -22,21 +22,25 @@ static int sector(void*context,uint64_t lba,uint8_t out[512]){
  for(unsigned half=0;half<512;half+=256){SfMessage m;sf_message(&m,OP_BLOCK_READ,0);m.offset=lba*512;m.mode=half;m.length=256;int r=call(&m);if(r)return r;if(m.length!=256)return SF_BAD_FORMAT;memcpy(out+half,m.data,256);}return 0;
 }
 int sf_storage_sector_read(void*c,uint64_t lba,uint8_t out[512]){return sector(c,lba,out);}
-int sf_storage_writable(void){return writable&&fs.mounted;}
+int sf_storage_writable(void){return writable&&fs.mounted&&driver_pid&&sf_sys(SYS_TASK_STATUS,driver_pid,0,0)==SF_TASK_RUNNING;}
 int sf_storage_sector_write(void*c,uint64_t lba,const uint8_t data[512]){
  if(!sf_storage_writable())return SF_READ_ONLY;
+ if(lba>=capacity/512)return SF_INVALID;
  for(unsigned half=0;half<512;half+=256){SfMessage m;sf_message(&m,OP_BLOCK_WRITE,0);m.offset=lba*512;m.mode=half;m.length=256;memcpy(m.data,data+half,256);int r=call(&m);if(r)return r;}return 0;
 }
 int sf_storage_flush(void*c){SfMessage m;sf_message(&m,OP_BLOCK_FLUSH,0);return call(&m);}
 int sf_storage_write_range(uint64_t first,uint64_t end){SfMessage m;sf_message(&m,OP_BLOCK_WRITE_RANGE,0);m.offset=first;m.handle=end;return call(&m);}
 int sf_storage_transaction(int begin){
+ /* A failed write can kill the driver after admission. Release its ledger
+  * entry even when no further storage operation is allowed. */
+ if(!begin)return fs_slot>=0?sfmod_release(manager,fs_slot,RES_DIRTY):SF_STALE_HANDLE;
  if(!sf_storage_writable())return SF_READ_ONLY;
- return begin?sfmod_acquire(manager,fs_slot,RES_DIRTY):sfmod_release(manager,fs_slot,RES_DIRTY);
+ return sfmod_acquire(manager,fs_slot,RES_DIRTY);
 }
 static int mount_open(unsigned tag){return tag==1&&fs_slot>=0?sfmod_acquire(manager,fs_slot,RES_OPEN):SF_STALE_HANDLE;}
 static void mount_close(unsigned tag){if(tag==1&&fs_slot>=0)sfmod_release(manager,fs_slot,RES_OPEN);}
 static long external_read(unsigned index,uint64_t offset,void*out,size_t bytes){
- if(!fs.mounted||index>=fs.count||sf_sys(SYS_TASK_STATUS,driver_pid,0,0)!=SF_BUSY)return SF_DEVICE_GONE;
+ if(!fs.mounted||index>=fs.count||sf_sys(SYS_TASK_STATUS,driver_pid,0,0)!=SF_TASK_RUNNING)return SF_DEVICE_GONE;
  SfReadFile*f=&fs.files[index];if(offset>=f->bytes||!bytes)return 0;
  if(cache_index!=(int)index){long n=sf_readfs_load(&fs,index,verified,sizeof(verified));if(n<0){cache_index=-1;return n;}cache_index=index;}
  if(bytes>f->bytes-offset)bytes=f->bytes-offset;memcpy(out,verified+offset,bytes);return bytes;
@@ -49,7 +53,7 @@ static int namespace_node(const char*path,unsigned type,unsigned external,uint32
 }
 void sf_storage_init(SfManager*m,SfNamespace*n,uint32_t ep,SfModuleSpawn callback){manager=m;ns=n;manager_ep=ep;spawn=callback;ns->external_read=external_read;ns->mount_open=mount_open;ns->mount_close=mount_close;}
 static int start_driver(unsigned rights){
- if(driver_pid&&sf_sys(SYS_TASK_STATUS,driver_pid,0,0)==SF_BUSY)return SF_BUSY;
+ if(driver_pid&&sf_sys(SYS_TASK_STATUS,driver_pid,0,0)==SF_TASK_RUNNING)return SF_BUSY;
  uint32_t device=0;for(unsigned d=0;d<32&&!device;d++)for(unsigned f=0;f<8;f++){uint32_t bdf=d*8+f;long id=sf_sys(SYS_PCI_READ,bdf,0,0);if(id==0x10011af4u||id==0x10421af4u){device=bdf+1;break;}}
  if(!device)return SF_NOT_FOUND;
  if(driver_slot<0){driver_slot=sfmod_add(manager,"org.spiritfox.virtio.blk",0,0);if(driver_slot<0)return driver_slot;}
@@ -97,7 +101,10 @@ int sf_storage_stop(void){
  if(driver_slot<0||!driver_pid)return SF_NOT_FOUND;int r=sfmod_prepare(manager,driver_slot);if(r)return r;
  if(manager->modules[driver_slot].resources[RES_LEASE]){sfmod_cancel(manager,driver_slot);return SF_DEPENDENCY;}
  for(unsigned i=0;i<RES_COUNT;i++)if(i!=RES_DMA&&manager->modules[driver_slot].resources[i]){sfmod_cancel(manager,driver_slot);return SF_BUSY;}
- if(sf_sys(SYS_TASK_STATUS,driver_pid,0,0)==SF_BUSY){SfMessage message;sf_message(&message,OP_BLOCK_STOP,0);r=call(&message);}else r=sf_sys(SYS_DEVICE_RELEASE,driver_pid,0,0);
+ if(sf_sys(SYS_TASK_STATUS,driver_pid,0,0)==SF_TASK_RUNNING){SfMessage message;sf_message(&message,OP_BLOCK_STOP,0);r=call(&message);}else r=sf_sys(SYS_DEVICE_RELEASE,driver_pid,0,0);
+ /* A dead task's slot may already belong to a new PID. Core 0 completed
+  * device cleanup before recycling that slot; its quarantine still gates grants. */
+ if(r==SF_NOT_FOUND)r=0;
  if(r){manager->modules[driver_slot].state=MOD_QUARANTINED;return r;}
  sfmod_release(manager,driver_slot,RES_DMA);r=sfmod_stop(manager,driver_slot);if(r)return r;sf_sys(SYS_KILL,driver_pid,0,0);sf_sys(SYS_CAP_REVOKE,driver_ep,0,0);driver_pid=driver_ep=0;return 0;
 }
@@ -106,6 +113,16 @@ long sf_storage_load(const char*path,void*out,size_t capacity_bytes){
  int r=sfmod_acquire(manager,fs_slot,RES_OPEN);if(r)return r;int index=sf_readfs_find(&fs,path+5);long result=index<0?index:sf_readfs_load(&fs,index,out,capacity_bytes);sfmod_release(manager,fs_slot,RES_OPEN);return result;
 }
 int sf_storage_ready(void){return fs.mounted;}
+int sf_storage_crash_test(void){
+ if(!sf_storage_writable())return SF_DEVICE_GONE;
+ int h=sf_ns_open(ns,1,"/","/persist/notes",OPEN_READ|OPEN_WRITE);if(h<0)return h;
+ char data[32];long r=sf_ns_read(ns,1,h,data,sizeof(data));if(r<0){sf_ns_close(ns,1,h);return r;}
+ sf_assert(!sf_storage_transaction(1),"driver failure test owns dirty lease");
+ sf_assert(!sf_sys(SYS_KILL,driver_pid,SF_BUSY,0),"driver failure uses exit code SF_BUSY");
+ sf_assert(!sf_storage_writable()&&sf_ns_read(ns,1,h,data,1)==SF_DEVICE_GONE&&sf_ns_write(ns,1,h,"x",1)==SF_DEVICE_GONE,"dead driver rejects held persistent read and write");
+ sf_ns_close(ns,1,h);sf_assert(!sf_storage_transaction(0),"driver failure still releases dirty lease");
+ sf_log("STORAGE CRASH TEST PASSED\n");return 0;
+}
 void sf_storage_dma_probe(unsigned mode){
  SfDmaStatus before,after;int r=sf_sys(SYS_DMA_STATUS,(uint64_t)&before,sizeof(before),0);
  if(r||before.mode!=1||!driver_pid||!before.active_mapping||mode>1){sf_log("DMA PROBE REFUSED\n");return;}
@@ -118,6 +135,7 @@ void sf_storage_dma_probe(unsigned mode){
 }
 void sf_storage_write_tests(void){
  uint8_t zero[512]={0};sf_assert(sf_storage_sector_write(0,0,zero)==SF_INVALID,"write grant cannot overwrite immutable disk region");
+ sf_assert(sf_storage_sector_write(0,capacity/512,zero)==SF_INVALID&&sf_storage_sector_write(0,(1ull<<55)+SF_TXN_BANK,zero)==SF_INVALID,"sector write rejects capacity and wrapped LBA before multiplication");
  SfMessage m;sf_message(&m,OP_BLOCK_WRITE,0);m.offset=SF_TXN_BANK*512ull;m.mode=256;m.length=256;sf_assert(call(&m)==SF_INVALID,"write service rejects missing first fragment");
  sf_assert(!sf_storage_transaction(1),"transaction acquires dirty resource");sf_assert(sf_storage_unmount()==SF_BUSY,"dirty transaction prevents unmount and restores admission");sf_assert(!sf_storage_transaction(0),"transaction releases dirty resource");
 }

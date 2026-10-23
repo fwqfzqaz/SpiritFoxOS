@@ -18,7 +18,7 @@ static int native_upload(const SfPackage*p){for(uint64_t off=0;off<p->bytes;){Sf
 static int spawn_package_device(const char*name,uint32_t service,uint32_t rights,uint32_t device,uint32_t device_rights){
  SfPackage p;int r=package_get(name,&p);if(r)return r;
  if(p.kind==2){char id[96];if(sf_manifest_text(&p,"runtime_id",id,sizeof(id))||strcmp(id,"org.spiritfox.native")||manager.modules[runtime_slot].state!=MOD_ACTIVE)return SF_DEPENDENCY;
-  if(sf_sys(SYS_TASK_STATUS,runtime_pid,0,0)!=SF_BUSY)return SF_DEVICE_GONE;
+  if(sf_sys(SYS_TASK_STATUS,runtime_pid,0,0)!=SF_TASK_RUNNING)return SF_DEVICE_GONE;
   int external=name[0]=='/';if(external){int status=native_upload(&p);if(status)return status;}
   SfMessage request;sf_message(&request,OP_NATIVE_PREPARE,++requests);request.length=strlen(name)+1;if(request.length>sizeof(request.data))return SF_INVALID;request.mode=external;memcpy(request.data,name,request.length);int rc=sf_send(runtime_ep,&request);if(rc)return rc;long from=sf_recv(manager_ep,&request,sf_deadline(1000));if(from!=(long)runtime_pid||request.h.request_id!=requests)return from<0?from:SF_INVALID;if(request.status)return request.status;
   if(request.length!=sizeof(SfNativePlan))return SF_BAD_FORMAT;SfNativePlan native;memcpy(&native,request.data,sizeof(native));if(native.entry!=p.entry||native.reserved||native.count>5)return SF_BAD_FORMAT;unsigned j=0;for(unsigned i=0;i<p.count;i++){SfSection*s=&p.sections[i];if(s->type>3)continue;if(j>=native.count)return SF_BAD_FORMAT;SfNativeSegment*t=&native.segments[j++];if(t->rva!=s->rva||t->memory!=s->memory||t->offset!=s->offset||t->bytes!=s->bytes||t->flags!=s->flags||t->reserved)return SF_BAD_FORMAT;}if(j!=native.count)return SF_BAD_FORMAT;
@@ -55,7 +55,7 @@ static int serve_once(unsigned timeout_ms){
  }
  m.status=status;return sf_send(c->reply,&m);
 }
-static int wait_app(uint32_t pid){uint64_t end=sf_ticks()+300;for(;;){long status=sf_sys(SYS_TASK_STATUS,pid,0,0);if(status!=SF_BUSY){app_reap(pid);return status;}if(sf_ticks()>end){sf_sys(SYS_KILL,pid,SF_TIMEOUT,0);app_reap(pid);return SF_TIMEOUT;}serve_once(10);sf_yield();}}
+static int wait_app(uint32_t pid){uint64_t end=sf_ticks()+300;for(;;){long status=sf_sys(SYS_TASK_STATUS,pid,0,0);if(status!=SF_TASK_RUNNING){app_reap(pid);return status;}if(sf_ticks()>end){sf_sys(SYS_KILL,pid,SF_TIMEOUT,0);app_reap(pid);return SF_TIMEOUT;}serve_once(10);sf_yield();}}
 static int echo_call(uint32_t ep,uint32_t pid){if(manager.modules[echo_slot].state!=MOD_ACTIVE)return SF_DRAINING;SfMessage m;sf_message(&m,OP_ECHO,++requests);memcpy(m.data,"ping",4);m.length=4;int r=sf_send(ep,&m);if(r)return r;long from=sf_recv(manager_ep,&m,sf_deadline(1000));return from==pid&&m.h.request_id==requests&&m.length==4&&!memcmp(m.data,"ping",4)?0:SF_INVALID;}
 static void namespace_setup(void){
  sf_ns_init(&ns,console_write);const char*dirs[]={"/boot","/system","/modules","/bin","/dev","/proc","/sys","/run","/etc","/home","/var","/tmp"};
@@ -93,11 +93,13 @@ static void runtime_tests(void){
  int hello=launch_app("hello.sfk");sf_assert(hello>0,"sfexec validates and launches hello.sfk");sfmod_prepare(&manager,runtime_slot);sf_assert(sfmod_stop(&manager,runtime_slot)==SF_DEPENDENCY,"application pins runtime lease");sfmod_cancel(&manager,runtime_slot);
  sf_assert(wait_app(hello)==0,"hello.sfk writes through namespace RPC and exits");
  int probe=launch_app("probe.sfk");sf_assert(probe>0&&wait_app(probe)==0,"forged handles pointers RWX and privilege amplification rejected");
+ uint64_t exited_at=sf_ticks();int exited=launch_app("exitbusy.sfk");sf_assert(exited>0&&wait_app(exited)==SF_BUSY&&sf_ticks()-exited_at<100,"exit code SF_BUSY is distinct from a live task");
  int fault=launch_app("fault.sfk");sf_assert(fault>0&&wait_app(fault)==-114&&!echo_call(echo_ep,echo_pid),"user kernel-memory write isolated");
  fault=launch_app("illegal.sfk");sf_assert(fault>0&&wait_app(fault)==-106,"illegal instruction isolated");
  fault=launch_app("nx.sfk");sf_assert(fault>0&&wait_app(fault)==-114,"non-executable user stack enforced");
  fault=launch_app("mmio.sfk");sf_assert(fault>0&&wait_app(fault)==-114,"IOMMU control MMIO inaccessible to ordinary user task");
- int spin=launch_app("spinner.sfk");uint64_t before=sf_ticks();while(sf_ticks()<before+5)sf_yield();sf_assert(spin>0&&sf_sys(SYS_TASK_STATUS,spin,0,0)==SF_BUSY&&!echo_call(echo_ep,echo_pid),"timer preempts noncooperating user task");sf_sys(SYS_KILL,spin,0,0);app_reap(spin);
+ fault=launch_app("badrsp.sfk");sf_assert(fault>0&&wait_app(fault)==-113&&!echo_call(echo_ep,echo_pid),"noncanonical user stack is isolated before kernel return");
+ int spin=launch_app("spinner.sfk");uint64_t before=sf_ticks();while(sf_ticks()<before+5)sf_yield();sf_assert(spin>0&&sf_sys(SYS_TASK_STATUS,spin,0,0)==SF_TASK_RUNNING&&!echo_call(echo_ep,echo_pid),"timer preempts noncooperating user task");sf_sys(SYS_KILL,spin,0,0);app_reap(spin);
  sfmod_prepare(&manager,runtime_slot);sf_assert(!sfmod_stop(&manager,runtime_slot),"runtime releases lease after application exit");
  sf_assert(launch_app("hello.sfk")==SF_STALE_HANDLE,"missing runtime returns diagnostic error");sfmod_start(&manager,runtime_slot);
  sf_sys(SYS_KILL,runtime_pid,SF_DEVICE_GONE,0);sf_assert(launch_app("hello.sfk")==SF_DEVICE_GONE&&!echo_call(echo_ep,echo_pid),"runtime death is diagnosed without harming other services");sfmod_prepare(&manager,runtime_slot);sfmod_stop(&manager,runtime_slot);sf_sys(SYS_CAP_REVOKE,runtime_ep,0,0);sfmod_start(&manager,runtime_slot);runtime_ep=sf_sys(SYS_EP_CREATE,0,0,0);runtime_pid=spawn_package("sf-native.sfmod",runtime_ep,RIGHT_RECV);sf_assert(runtime_pid>0,"runtime restarts after failure");
@@ -107,6 +109,7 @@ static void command(char*line){
  else if(!strcmp(line,"persist"))sf_persist_status();
  else if(!strcmp(line,"dma-test write"))sf_storage_dma_probe(0);
  else if(!strcmp(line,"dma-test read"))sf_storage_dma_probe(1);
+ else if(!strcmp(line,"disk-crash")){if(sf_storage_crash_test())sf_log("disk: crash test refused\n");}
  else if(!memcmp(line,"install ",8)){int r=sf_persist_install(line+8);if(!r)sf_log("install: COMMITTED\n");else if(r==1)sf_log("install: UNCHANGED\n");else{sf_log("install: failed code=");sf_number(-r);sf_log("\n");}}
  else if(!strcmp(line,"modules")){sf_log("sf-init ACTIVE pinned; sf-native ");sf_log(manager.modules[runtime_slot].state==MOD_ACTIVE?"ACTIVE":"STOPPED");sf_log("; echo ");sf_log(manager.modules[echo_slot].state==MOD_ACTIVE?"ACTIVE\n":"STOPPED\n");}
  else if(!strcmp(line,"echo")){sf_log(echo_call(echo_ep,echo_pid)==0?"echo: ping\n":"echo: service unavailable\n");}

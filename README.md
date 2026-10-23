@@ -13,7 +13,7 @@ python tools/bootstrap.py
 python tools/test.py
 ```
 
-第一步下载并校验 Zig 0.13.0、QEMU Windows 构建和 Monocypher 4.0.3。已提供的 Monocypher 源码在 `vendor/monocypher`。第二步执行基础服务、229 条 IOMMU 与 4069 条版本策略检查、14 组 Python 测试（含 2000 次变异）、783 个事务及 3132 个更新故障场景，以及含真实越界 DMA、试运行、版本策略和恢复的七十五次 QEMU 启动。
+第一步下载并校验 Zig 0.13.0、QEMU Windows 构建和 Monocypher 4.0.3。已提供的 Monocypher 源码在 `vendor/monocypher`。第二步执行基础服务、950 条内核 IPC/内存边界、229 条 IOMMU 与 4069 条版本策略检查、14 组 Python 测试（含 2000 次变异）、783 个事务及 3132 个更新故障场景，以及含真实越界 DMA、试运行、版本策略、驱动死亡和恢复的七十七次 QEMU 启动。
 
 只构建：`python tools/build.py`。只运行宿主测试：`python tools/test.py --host-only`。已有镜像测试：`python tools/test.py --skip-build`。
 
@@ -81,4 +81,4 @@ python tools/sfpack.py sign build/hello.sfk --seed .keys/development.seed
 
 输入 ELF 是构建中间产物，交付包使用设计说明中的 96 字节头、64 字节段描述符、确定性 CBOR 和 Ed25519 尾部。当前代码只接受静态地址 native 子集；不支持资源包、动态导入、重定位或压缩。构建脚本中列出了实际清单字段。
 
-详见 [存储协议与磁盘格式](docs/STORAGE.md)、[事务持久化](docs/PERSISTENCE.md)、[实现边界](docs/IMPLEMENTATION.md)、[测试记录](docs/TESTING.md) 和 [后续路线](docs/ROADMAP.md)。
+详见 [存储协议与磁盘格式](docs/STORAGE.md)、[事务持久化](docs/PERSISTENCE.md)、[实现边界](docs/IMPLEMENTATION.md)、[安全审查与修复](docs/SECURITY.md)、[测试记录](docs/TESTING.md) 和 [后续路线](docs/ROADMAP.md)。

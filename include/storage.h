@@ -20,4 +20,5 @@ int sf_storage_write_range(uint64_t,uint64_t);
 int sf_storage_transaction(int);
 void sf_storage_write_tests(void);
 void sf_storage_dma_probe(unsigned);
+int sf_storage_crash_test(void);
 #endif

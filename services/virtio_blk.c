@@ -71,8 +71,22 @@ static int request_at(unsigned type,uint64_t sector,uint64_t target,int header_p
 }
 static int request(unsigned type,uint64_t sector){return request_at(type,sector,0,0);}
 static int read_sector(uint64_t sector){return last_sector==sector?0:request(0,sector);}
+static void mmio_buffer_tests(void){
+ if(!(boot->device_rights&SF_DEVICE_MODERN))return;
+ for(unsigned off=0;off<16384;off+=4096){
+  sf_assert(sf_sys(SYS_LOG,SF_DEVICE_MMIO+off,1,0)==SF_DENIED,"MMIO page is not a log buffer");
+  sf_assert(sf_sys(SYS_SEND,boot->manager,SF_DEVICE_MMIO+off,0)==SF_DENIED,"MMIO page is not an IPC input buffer");
+ }
+ int ep=sf_sys(SYS_EP_CREATE,0,0,0);sf_assert(ep>0,"MMIO buffer test endpoint");
+ SfMessage m;sf_message(&m,OP_ECHO,0x4d4d494f);sf_assert(!sf_send(ep,&m),"MMIO buffer test queues RAM message");
+ sf_assert(sf_sys(SYS_RECV,ep,SF_DEVICE_MMIO,0)==SF_DENIED,"MMIO receive rejects before consuming queue");
+ sf_assert(sf_recv(ep,&m,sf_deadline(100))==(long)boot->pid&&m.h.request_id==0x4d4d494f,"rejected MMIO receive preserves queued message");
+ sf_assert(sf_sys(SYS_RECV,ep,SF_DEVICE_MMIO+12288,0)==SF_DENIED,"MMIO receive cannot install a blocked buffer");
+ sf_assert(!sf_sys(SYS_CAP_REVOKE,ep,0,0),"MMIO buffer test endpoint reclaimed");
+ sf_log("MMIO BUFFER TESTS PASSED\n");
+}
 long sf_main(const SfBootArgs*a,size_t size){
- boot=a;if(size!=sizeof(*a)||a->abi_major!=1)return SF_ABI_MISMATCH;int startup=start();if(startup)stop();
+ boot=a;if(size!=sizeof(*a)||a->abi_major!=1)return SF_ABI_MISMATCH;mmio_buffer_tests();int startup=start();if(startup)stop();
  sf_log(startup?"[VIRTIO] device initialization refused\n":writable?"[VIRTIO] flush-capable write service in ring 3\n":"[VIRTIO] readonly block service in ring 3\n");
  for(;;){SfMessage m;long sender=sf_recv(a->service,&m,0);if(sender<0){stop();return sender;}int result=0;
   if(sender!=1)result=SF_DENIED;

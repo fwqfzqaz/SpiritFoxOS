@@ -86,6 +86,16 @@ M5 回归为 151 条 C 断言、14 组 Python 测试中的包/只读格式部分
 
 最终源码已构建后，`python tools/test.py --skip-build` 完整通过（271.37 秒）。结果同时具有 `version_policy_host=true`、`version_policy_qemu=true`；打包门拒绝缺失这些标记的旧结果。完整本轮日志为 `build/version-final-test.txt`。此策略不提供离线旧盘回放保护、TPM 可信计数或密钥撤销。
 
+## 权限边界与驱动失效回归
+
+基于 `9a25ac6` 的审查与修复见 `SECURITY.md`。新增宿主测试直接链接真实内核实现：908 条 IPC 检查覆盖端点循环创建/关闭、派生和跨任务引用、撤销唤醒、退出清理及 generation 退休；42 条内存检查覆盖跨页/只读/范围边界、MMIO 拒绝且不产生部分复制、普通 DMA RAM 正常复制。审查基线在新增两组测试分别失败，修复后全部通过。
+
+所有启动 VM 中，非特权应用执行 128 次端点创建/关闭，退出 -7 的应用及时返回该退出码，非 canonical RSP 在返回用户态前被隔离。modern 驱动实际使用四页设备 MMIO 作为 LOG/SEND 指针，另验证拒绝的 RECV 不消费消息也不安装阻塞缓冲，随后继续正常 I/O。
+
+在上一轮七十五次基础上增加两个可写盘 VM，共七十七次：legacy 与 VT-d/modern 均先确认应用与笔记，再以 -7 终止驱动，验证已打开笔记句柄、写入、installed、安装和状态全部失败关闭，盘字节不变，dirty 引用可以释放。先运行 bundle 应用以复用死亡任务槽，再卸载/停止/重启/重挂载驱动，恢复原数据和应用，generation 保持 5；modern 再触发真实 DMA 故障，确认隔离后的持久化入口仍拒绝缓存。
+
+最终源码构建后，`python tools/test.py --skip-build` 完整通过（287.34 秒），输出 `build/security-final-test.txt`，实际日志计数为 77 个 VM。结果包含 `security_host=true`、`security_qemu=true`、`ipc_host_assertions=908`、`memory_host_assertions=42` 以及全部已有完整回归标记与镜像摘要。打包门对缺少安全标记的旧结果作拒绝测试，通过后才生成发布包。当前仅报告本地测试结果。
+
 ## 外部助手审查
 
 按用户授权调用已有 DeepSeek Harness。首次宽范围审查超时，没有采用其未完成输出；随后以低推理档审查一个文件写函数，11 秒完成且未使用工具。核实并修复空写返回错误，增加容量防御检查及对应宿主断言。审查回执在 `.cache/deepseek/runs/`，不包含提交或推送权限。

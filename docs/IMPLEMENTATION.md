@@ -23,6 +23,8 @@ Core 0 校验 BootInfo 大小、版本、内存映射边界、引导对象的 Lo
 
 能力撤销当前以整个端点为单位，不实现完整派生树。IPC 消息上限为固定 `SfMessage`（328 字节，其中正文数据 256 字节），采用 ABI 1 的 40 字节头；拒绝伪造 cap_count。当前不提供附带能力转移、通用共享内存、调用优先级继承或大消息零拷贝。
 
+关闭最后一个能力引用会回收端点；存在派生或跨任务引用时保持有效，拥有者退出仍整体撤销。设备 MMIO 页可由获授驱动直接访问，但不能作为系统调用复制缓冲区；普通 DMA RAM 不受该限制。返回用户态之前检查 RSP canonical 性。`SYS_TASK_STATUS` 对活任务返回 64 位 `SF_TASK_RUNNING (0x100000000)`，死亡任务返回有符号 int32 退出码；这是未冻结 ABI 的语义修订，所有当前服务已同步重建。修复及回归见 `SECURITY.md`。
+
 ## 用户态服务
 
 sf-init 在一个用户态二进制中组合模块管理、sf-process、sfexec、namespace、RAMFS、SFRFS1 文件服务和简化 stdio 策略。回显服务、sf-native 和 sf-virtio-blk 分别运行在独立地址空间。shell、磁盘解析和普通文件逻辑不在内核中。
