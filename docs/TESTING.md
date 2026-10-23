@@ -182,6 +182,12 @@ rpcprobe.sfk 在 legacy/modern 各一个 VM 检查四种超长请求直接在发
 
 legacy/modern 各十二轮，每轮七种拒绝（含无参数、runat、runenv、runenvat、native 与设备模块），随后正常运行普通和 PI 应用、echo；错误安装仍由既有策略拒绝，盘字节保持并能卸载/停止。最终源码构建后完整 python tools/test.py --skip-build 通过（687.44 秒、125 次启动），日志 build/launch-kind-final-test.txt；全部原有回归和六项交付摘要一致。发布门要求 launch_kind_qemu=true、launch_kind_qemu_boots=2，旧结果缺失时拒绝发布。
 
+## M2 依赖代次和租约事务
+
+旧 manager.c 在独立宿主替换提供者槽后，错误允许已停止消费者绑定新登记，基线在该断言失败，日志 build/manager-dependency-baseline.txt。新测试直接链接产品 manager.c，共 25080 项检查、一千次相同/不同 ID 的提供者替换和回收，以及同一登记重启、非法位图、代次耗尽、多提供者计数溢出与停止不平衡时的全状态保持。普通应用尚未开放这些管理器内部 API。
+
+每次正常 VM 启动执行独立管理器图的真实替换测试，输出 DEPENDENCY GENERATION TESTS PASSED，再继续系统服务与设备/应用测试。最终源码构建后完整 python tools/test.py --skip-build 通过（678.98 秒、125 次启动），日志 build/manager-dependencies-final-test.txt；全部原有回归及六项交付摘要一致。发布门要求 manager_dependency_host_checks=25080、manager_dependency_qemu=true，旧结果拒绝测试通过。协议边界见 LIFECYCLE.md。
+
 ## 外部助手审查
 
 按用户授权调用已有 DeepSeek Harness。首次宽范围审查超时，没有采用其未完成输出；随后以低推理档审查一个文件写函数，11 秒完成且未使用工具。核实并修复空写返回错误，增加容量防御检查及对应宿主断言。审查回执在 `.cache/deepseek/runs/`，不包含提交或推送权限。

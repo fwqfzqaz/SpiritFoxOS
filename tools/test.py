@@ -22,6 +22,8 @@ build.run(['-target', 'x86_64-windows-gnu', '-g0', '-O2', '-Wall', '-Wextra', '-
 subprocess.run([str(ROOT / 'build/test_environment.exe')], check=True)
 build.run(['-target', 'x86_64-windows-gnu', '-g0', '-O2', '-Wall', '-Wextra', '-Werror', '-Iinclude', 'tests/test_file_rpc.c', 'services/file_rpc.c', 'services/namespace.c', '-o', 'build/test_file_rpc.exe'])
 subprocess.run([str(ROOT / 'build/test_file_rpc.exe')], check=True)
+build.run(['-target', 'x86_64-windows-gnu', '-g0', '-O2', '-Wall', '-Wextra', '-Werror', '-Iinclude', 'tests/test_manager.c', 'services/manager.c', '-o', 'build/test_manager.exe'])
+subprocess.run([str(ROOT / 'build/test_manager.exe')], check=True)
 build.run(['-target', 'x86_64-windows-gnu', '-g0', '-O2', '-Wall', '-Wextra', '-Werror', '-Iinclude', 'tests/test_services.c', 'services/manager.c', 'services/namespace.c', '-o', 'build/test_services.exe'])
 subprocess.run([str(ROOT / 'build/test_services.exe')], check=True)
 build.run(['-target', 'x86_64-windows-gnu', '-g0', '-O2', '-Wall', '-Wextra', '-Werror', '-Iinclude', 'tests/test_openat.c', 'services/namespace.c', '-o', 'build/test_openat.exe'])
@@ -84,6 +86,8 @@ result['openat_qemu'] = not args.host_only
 result['truncate_host_assertions'] = 83
 result['resize_fault_scenarios'] = 4*261*3
 result['truncate_qemu'] = not args.host_only
+result['manager_dependency_host_checks'] = 25080
+result['manager_dependency_qemu'] = not args.host_only
 result['trust_policy_host'] = True
 result['trust_policy_host_groups'] = 7
 result['separate_signing_keys'] = True

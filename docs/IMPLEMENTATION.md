@@ -64,3 +64,5 @@ VT-d 实现验证 ACPI/DMAR，发布一个 BDF 的固定 64 KiB DMA 域并执行
 内嵌文件使用按内容摘要命名的 `.incbin` 输入，防止编译缓存重复嵌入旧镜像。开发种子、工具、缓存、DLL、镜像和日志均被 Git 忽略。工作区外的 DeepSeek Harness 仅作为用户授权的审查工具调用，未改动其安装或认证配置；本地桥副本和运行输出位于 `.cache/deepseek`。
 
 包签名使用 [Monocypher 4.0.3](https://monocypher.org/download/)，许可保留在 `vendor/monocypher/LICENCE.md`。启动器、管理器、持久化与 native 运行时共用构建时固化的最多八个公钥，支持 module/app 用途、撤销拒绝与 shell 查询；默认模块与应用分别使用两个不同开发公钥，无交叉用途。格式、旧单密钥显式迁移、轮换顺序和已确认包撤销后的恢复限制见 `TRUST.md`。签名验证不是 UEFI Secure Boot，也不构成完整硬件信任链；在线策略更新与独立生产根保护仍未实现。
+
+模块登记依赖固定到提供者 generation，登记槽复用不会让旧消费者绑定新模块；启动/停止对全部依赖预检后统一记账，计数和代次耗尽失败关闭。管理器仍与 sf-init 合并，完整生命周期 RPC、监督和状态迁移尚未提供，详见 LIFECYCLE.md。

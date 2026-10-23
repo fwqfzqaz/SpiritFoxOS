@@ -115,7 +115,16 @@ static void object_tests(void){
  sf_assert(sf_ns_seek(&ns,1,rd,0)==SF_NOT_SEEKABLE&&sf_ns_read(&ns,1,rd,text,1)==SF_WOULD_BLOCK,"pipe seek and WOULD_BLOCK");
  sf_ns_write(&ns,1,wr,"abc",3);sf_assert((sf_ns_poll(&ns,1,rd)&1)&&sf_ns_read(&ns,1,rd,text,8)==3,"pipe poll and partial read");sf_ns_close(&ns,1,wr);sf_assert(sf_ns_read(&ns,1,rd,text,8)==0,"pipe EOF after final writer");sf_ns_close(&ns,1,rd);
 }
+static void dependency_generation_tests(void){
+ SfManager m={0};int p=sfmod_add(&m,"provider",0,0);sf_assert(p>=0&&!sfmod_start(&m,p),"dependency fixture provider active");
+ int c=sfmod_add(&m,"consumer",1u<<p,0);sf_assert(c>=0&&!sfmod_start(&m,c)&&!sfmod_prepare(&m,c)&&!sfmod_stop(&m,c),"dependency fixture lease balanced");
+ sf_assert(!sfmod_prepare(&m,p)&&!sfmod_stop(&m,p)&&!sfmod_unload(&m,p),"dependency fixture retires provider registration");
+ int q=sfmod_add(&m,"replacement",0,0);sf_assert(q==p&&!sfmod_start(&m,q),"dependency provider slot reused by new generation");
+ sf_assert(sfmod_start(&m,c)==SF_DEPENDENCY&&!m.modules[q].resources[RES_LEASE]&&m.modules[c].state==MOD_STOPPED,"stale dependency cannot bind replacement provider");
+ sf_log("DEPENDENCY GENERATION TESTS PASSED\n");
+}
 static void lifecycle_tests(void){
+ dependency_generation_tests();
  sf_assert(!echo_call(echo_ep,echo_pid),"user-space echo IPC without filesystem or sfexec");
  sfmod_acquire(&manager,echo_slot,RES_OPEN);sfmod_prepare(&manager,echo_slot);
  sf_assert(sfmod_acquire(&manager,echo_slot,RES_OPEN)==SF_DRAINING&&sfmod_stop(&manager,echo_slot)==SF_BUSY,"drain gate refuses new opens and busy unload");sfmod_cancel(&manager,echo_slot);sf_assert(!echo_call(echo_ep,echo_pid),"cancel stop restores existing service");sfmod_release(&manager,echo_slot,RES_OPEN);

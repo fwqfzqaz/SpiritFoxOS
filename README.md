@@ -102,3 +102,5 @@ python tools/sfpack.py sign build/hello.sfk --seed .keys/application.seed
 `echo-channel-test` 同时验证回显回复与两个冷缓存只读应用，`echo-capacity-test` 验证实际端点能力耗尽后的启动回滚和恢复。echo 回复按实例隔离，新旧代并存时各自持有回复队列。
 
 启动按认证后的包类型区分 MODULE 与 APP；run/runat/runenv 只接受 APP，模块启动只接受 MODULE，后缀不决定授权。
+
+模块依赖绑定提供者登记代次；槽复用必须显式重新登记消费者。全部依赖租约统一预检和记账，约束与尚未实现的生命周期功能见 [LIFECYCLE](docs/LIFECYCLE.md)。
