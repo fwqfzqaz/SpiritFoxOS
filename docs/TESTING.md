@@ -202,6 +202,14 @@ legacy/modern 各十二轮，每轮七种拒绝（含无参数、runat、runenv�
 
 最终源码构建后完整 python tools/test.py --skip-build 通过（761.42 秒、129 次启动），日志 build/echo-health-final-test.txt。原有死亡预算/稳定周期、97101 项策略、25080 项管理器和全部已有回归继续通过，六项交付摘要一致。发布门要求 echo_health_qemu=true、echo_health_qemu_boots=2，缺少标记的旧结果拒绝发布。覆盖内置 echo 的指定协议，不替代通用服务语义或硬件健康验证。
 
+## Native 事务启动、租约排空与有界恢复
+
+新增 legacy/modern 两个 VM：实际耗尽根能力槽，分别触发回复端点与服务端点分配失败并回到 STOPPED；共享空闲接收端点创建真实服务进程直至进程容量不足，确认根端点槽仍有空间，再验证 native 创建进程失败回收两个端点。释放后成功重建并继续执行应用。
+
+native-drain-test 持有两个真实读取应用：忙显式停止保留 ACTIVE；终止实际 native 后进入 DRAINING、拒绝新启动，原应用文件 RPC 仍成功，租约释放后后台恢复。另以死亡、自旋、错误健康状态触发三次恢复，第四次错误操作码进入 BLOCKED；停止时不会复活，显式启动后静态/PI/环境/目录应用继续工作，十二次停止/启动回收通过，整盘字节不变。
+
+最终源码构建后完整 python tools/test.py --skip-build 通过（778.66 秒、131 次启动），日志 build/native-lifecycle-final-test.txt；97101 项共享监督策略、25080 项管理器和全部原有回归继续通过，六项交付摘要一致。发布门要求 native_supervision_qemu=true、native_supervision_qemu_boots=2，旧结果缺失时拒绝发布。虚拟机不验证设备自动重启、通用服务状态迁移或生产硬件复位。
+
 ## 外部助手审查
 
 按用户授权调用已有 DeepSeek Harness。首次宽范围审查超时，没有采用其未完成输出；随后以低推理档审查一个文件写函数，11 秒完成且未使用工具。核实并修复空写返回错误，增加容量防御检查及对应宿主断言。审查回执在 `.cache/deepseek/runs/`，不包含提交或推送权限。

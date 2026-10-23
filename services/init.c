@@ -18,7 +18,7 @@ static uint8_t package_snapshot[SF_READFS_FILE_MAX];
 typedef struct {uint32_t pid,reply,root;int lease;} Child;
 static Child children[16];static uint64_t requests;
 typedef struct {uint32_t pid,service,reply;} EchoPeer;
-static EchoPeer echo_peers[16];static SfSupervisor echo_watch;static uint64_t echo_health_at;
+static EchoPeer echo_peers[16];static SfSupervisor echo_watch;static uint64_t echo_health_at;static SfSupervisor native_watch;static uint64_t native_health_at;static int native_draining;
 static int echo_request(uint32_t,uint32_t,unsigned);
 static uint64_t echo_after(uint64_t now,uint64_t delay){return delay>UINT64_MAX-now?UINT64_MAX:now+delay;}
 static long console_write(const void*p,size_t n){return sf_sys(SYS_LOG,(uint64_t)p,n,0);}
@@ -45,6 +45,28 @@ static int spawn_package_policy(const char*name,uint32_t service,uint32_t rights
 static int spawn_package_device(const char*name,uint32_t service,uint32_t rights,uint32_t device,uint32_t device_rights){return spawn_package_policy(name,service,rights,device,device_rights,0,0,0,1);}
 static int spawn_storage_package(const char*name,uint32_t service,uint32_t rights,uint32_t device,uint32_t device_rights,uint32_t reply){return spawn_package_policy(name,service,rights,device,device_rights,0,0,reply,1);}
 static int spawn_package(const char*name,uint32_t service,uint32_t rights){return spawn_package_device(name,service,rights,0,0);}
+static void native_forget(void){
+ if(runtime_pid)sf_sys(SYS_KILL,runtime_pid,SF_DEVICE_GONE,0);
+ if(runtime_ep)sf_sys(SYS_CAP_REVOKE,runtime_ep,0,0);if(runtime_reply)sf_sys(SYS_CAP_REVOKE,runtime_reply,0,0);
+ runtime_pid=runtime_ep=runtime_reply=0;
+}
+static int native_start_service(void){
+ unsigned state=manager.modules[runtime_slot].state;if(state!=MOD_VERIFIED&&state!=MOD_STOPPED)return SF_INVALID;
+ if(runtime_pid||runtime_ep||runtime_reply)return SF_BUSY;
+ int r=sfmod_start(&manager,runtime_slot);if(r)return r;
+ int ep=sf_sys(SYS_EP_CREATE,0,0,0);if(ep<0){r=ep;goto fail;}runtime_reply=ep;
+ ep=sf_sys(SYS_EP_CREATE,0,0,0);if(ep<0){r=ep;goto fail;}runtime_ep=ep;
+ int pid=spawn_package("sf-native.sfmod",runtime_ep,RIGHT_RECV);if(pid<0){r=pid;goto fail;}runtime_pid=pid;return 0;
+fail:native_forget();sfmod_prepare(&manager,runtime_slot);sfmod_stop(&manager,runtime_slot);return r;
+}
+static int native_stop_service(void){
+ int prepared=0,r=0;unsigned state=manager.modules[runtime_slot].state;
+ if(state==MOD_STOPPED&&!runtime_pid&&!runtime_ep&&!runtime_reply)return 0;
+ if(state==MOD_ACTIVE){r=sfmod_prepare(&manager,runtime_slot);if(r)return r;prepared=1;}
+ else if(state!=MOD_DRAINING)return SF_INVALID;
+ r=sfmod_stop(&manager,runtime_slot);if(r){if(prepared)sfmod_cancel(&manager,runtime_slot);return r;}
+ native_forget();native_draining=0;return 0;
+}
 static EchoPeer*echo_peer(uint32_t pid){for(unsigned i=0;i<16;i++)if(echo_peers[i].pid==pid)return &echo_peers[i];return 0;}
 static int spawn_echo(const char*name,uint32_t service,uint32_t rights){
  unsigned slot;for(slot=0;slot<16;slot++)if(!echo_peers[slot].pid)break;if(slot==16)return SF_NO_SPACE;
@@ -84,6 +106,38 @@ static void echo_status(void){
  static const char*names[]={"STOPPED","WAITING","STARTING","RUNNING","BLOCKED"};uint64_t now=sf_ticks();
  sf_log("echo: state=");sf_log(echo_watch.state<5?names[echo_watch.state]:"UNKNOWN");sf_log(" attempts=");sf_number(echo_watch.attempts);
  sf_log(echo_watch.state==SF_SUP_RUNNING&&now>=echo_watch.running_since&&now-echo_watch.running_since>=echo_watch.stable_ticks?" stable=1\n":" stable=0\n");
+}
+static int native_ping(void){
+ SfMessage m;sf_message(&m,OP_NATIVE_HEALTH,++requests);int r=sf_send(runtime_ep,&m);if(r)return r;
+ long from=sf_recv(runtime_reply,&m,sf_deadline(100));
+ return from==runtime_pid&&m.h.request_id==requests&&m.h.opcode==OP_NATIVE_HEALTH&&!m.status&&!m.length?0:SF_INVALID;
+}
+static void native_supervise(void){
+ uint64_t now=sf_ticks();int failed=0;
+ if(native_watch.state==SF_SUP_RUNNING){
+  failed=sf_sys(SYS_TASK_STATUS,runtime_pid,0,0)!=SF_TASK_RUNNING;
+  if(!failed&&now>=native_health_at){native_health_at=echo_after(now,100);if(native_ping()){failed=1;sf_log("native: health failure\n");}now=sf_ticks();}
+  if(failed){
+   if(sfmod_prepare(&manager,runtime_slot)){native_watch.state=SF_SUP_BLOCKED;sf_log("native: recovery blocked by prepare\n");return;}
+   native_forget();native_draining=1;sf_supervisor_failure(&native_watch,now);
+   sf_log(native_watch.state==SF_SUP_BLOCKED?"native: recovery blocked\n":"native: recovery scheduled\n");
+  }
+ }
+ if(native_draining){
+  int r=sfmod_stop(&manager,runtime_slot);if(r==SF_DEPENDENCY||r==SF_BUSY)return;
+  native_draining=0;if(r){native_watch.state=SF_SUP_BLOCKED;sf_log("native: recovery blocked by cleanup\n");return;}
+ }
+ if(native_watch.state==SF_SUP_WAITING&&!sf_supervisor_begin(&native_watch,now)){
+  int r=native_start_service();now=sf_ticks();
+  if(r){sf_supervisor_failure(&native_watch,now);sf_log(native_watch.state==SF_SUP_BLOCKED?"native: recovery blocked\n":"native: recovery retry scheduled\n");}
+  else{sf_supervisor_started(&native_watch,now);native_health_at=echo_after(now,100);sf_log("native: recovered\n");}
+ }
+}
+static void native_status(void){
+ static const char*names[]={"STOPPED","WAITING","STARTING","RUNNING","BLOCKED"};uint64_t now=sf_ticks();
+ sf_log("native: state=");sf_log(native_watch.state<5?names[native_watch.state]:"UNKNOWN");sf_log(" attempts=");sf_number(native_watch.attempts);
+ sf_log(native_watch.state==SF_SUP_RUNNING&&now>=native_watch.running_since&&now-native_watch.running_since>=native_watch.stable_ticks?" stable=1":" stable=0");
+ sf_log(" leases=");sf_number(manager.modules[runtime_slot].resources[RES_LEASE]);sf_log(manager.modules[runtime_slot].state==MOD_DRAINING?" draining=1\n":" draining=0\n");
 }
 static Child*child(uint32_t pid){for(unsigned i=0;i<16;i++)if(children[i].pid==pid)return&children[i];return 0;}
 static int launch_app_root_args(const char*name,const char*root,const SfArguments*arguments){
@@ -125,6 +179,31 @@ static void echo_capacity_test(void){
  sf_assert(echo_start_service()==SF_NO_SPACE&&manager.modules[echo_slot].state==MOD_STOPPED,"failed echo reply allocation reclaims service endpoint");
  while(used)sf_assert(!sf_sys(SYS_CAP_REVOKE,held[--used],0,0),"echo capacity test reclaims temporary endpoint");
  sf_assert(!echo_start_service()&&!echo_call(echo_ep,echo_pid),"echo restarts after endpoint allocation failures");sf_log("ECHO CAPACITY TEST PASSED\n");
+}
+static void native_capacity_test(void){
+ sf_assert(!native_stop_service(),"native capacity test stops current instance");int held[64],used=0,r=0;
+ while(used<64&&(r=sf_sys(SYS_EP_CREATE,0,0,0))>0)held[used++]=r;
+ sf_assert(r==SF_NO_SPACE&&used>0,"native capacity test exhausts root capability slots");
+ sf_assert(native_start_service()==SF_NO_SPACE&&manager.modules[runtime_slot].state==MOD_STOPPED&&!runtime_reply&&!runtime_ep&&!runtime_pid,"native reply allocation failure rolls back registration");
+ sf_assert(!sf_sys(SYS_CAP_REVOKE,held[--used],0,0),"native capacity releases one root slot");
+ sf_assert(native_start_service()==SF_NO_SPACE&&manager.modules[runtime_slot].state==MOD_STOPPED&&!runtime_reply&&!runtime_ep&&!runtime_pid,"native service allocation failure reclaims reply");
+ while(used)sf_assert(!sf_sys(SYS_CAP_REVOKE,held[--used],0,0),"native capacity releases held endpoint");
+ int shared=sf_sys(SYS_EP_CREATE,0,0,0);sf_assert(shared>0,"native capacity creates shared idle receiver");uint32_t pids[16];unsigned count=0;
+ while(count<16&&(r=spawn_echo("echo.sfmod",shared,RIGHT_RECV))>0)pids[count++]=r;
+ sf_assert(r==SF_NO_SPACE&&count>0,"native capacity fills actual process resources");
+ int first=sf_sys(SYS_EP_CREATE,0,0,0),second=sf_sys(SYS_EP_CREATE,0,0,0);sf_assert(first>0&&second>0,"native process capacity test still has both root endpoint slots");
+ sf_sys(SYS_CAP_REVOKE,first,0,0);sf_sys(SYS_CAP_REVOKE,second,0,0);
+ sf_assert(native_start_service()==SF_NO_SPACE&&manager.modules[runtime_slot].state==MOD_STOPPED&&!runtime_reply&&!runtime_ep&&!runtime_pid,"failed native process creation reclaims both endpoints");
+ while(count){uint32_t pid=pids[--count];sf_sys(SYS_KILL,pid,0,0);echo_forget(pid);}sf_sys(SYS_CAP_REVOKE,shared,0,0);
+ sf_assert(!native_start_service(),"native starts after real capability and process exhaustion");sf_supervisor_enable(&native_watch,sf_ticks(),1);native_health_at=echo_after(sf_ticks(),100);sf_log("NATIVE CAPACITY TEST PASSED\n");
+}
+static void native_drain_test(void){
+ int a=launch_app_root("readprobe.sfk","/disk/etc"),b=launch_app_root("readprobe.sfk","/disk/etc");sf_assert(a>0&&b>0,"native drain holds two real application leases");
+ sf_assert(native_stop_service()==SF_DEPENDENCY&&manager.modules[runtime_slot].state==MOD_ACTIVE,"busy explicit native stop preserves active provider");
+ sf_assert(!sf_sys(SYS_KILL,runtime_pid,SF_DEVICE_GONE,0),"native drain terminates actual runtime");native_supervise();
+ sf_assert(manager.modules[runtime_slot].state==MOD_DRAINING&&manager.modules[runtime_slot].resources[RES_LEASE]==2&&native_draining,"failed native waits for existing application leases");
+ sf_assert(launch_app("hello.sfk")==SF_DRAINING,"failed native drain rejects new launches");
+ int ar=wait_app(a),br=wait_app(b);sf_assert(!ar&&!br&&!manager.modules[runtime_slot].resources[RES_LEASE],"existing apps finish namespace RPC and release failed runtime leases");sf_log("NATIVE DRAIN TEST PASSED\n");
 }
 static void namespace_setup(void){
  sf_ns_init(&ns,console_write);const char*dirs[]={"/boot","/system","/modules","/bin","/dev","/proc","/sys","/run","/etc","/home","/var","/tmp"};
@@ -189,7 +268,7 @@ static void runtime_tests(void){
  int spin=launch_app("spinner.sfk");uint64_t before=sf_ticks();while(sf_ticks()<before+5)sf_yield();sf_assert(spin>0&&sf_sys(SYS_TASK_STATUS,spin,0,0)==SF_TASK_RUNNING&&!echo_call(echo_ep,echo_pid),"timer preempts noncooperating user task");sf_sys(SYS_KILL,spin,0,0);app_reap(spin);
  sfmod_prepare(&manager,runtime_slot);sf_assert(!sfmod_stop(&manager,runtime_slot),"runtime releases lease after application exit");
  sf_assert(launch_app("hello.sfk")==SF_STALE_HANDLE,"missing runtime returns diagnostic error");sfmod_start(&manager,runtime_slot);
- sf_sys(SYS_KILL,runtime_pid,SF_DEVICE_GONE,0);sf_assert(launch_app("hello.sfk")==SF_DEVICE_GONE&&!echo_call(echo_ep,echo_pid),"runtime death is diagnosed without harming other services");sfmod_prepare(&manager,runtime_slot);sfmod_stop(&manager,runtime_slot);sf_sys(SYS_CAP_REVOKE,runtime_ep,0,0);sf_sys(SYS_CAP_REVOKE,runtime_reply,0,0);runtime_reply=sf_sys(SYS_EP_CREATE,0,0,0);sf_assert((int)runtime_reply>0,"runtime reply endpoint recreated after failure");sfmod_start(&manager,runtime_slot);runtime_ep=sf_sys(SYS_EP_CREATE,0,0,0);runtime_pid=spawn_package("sf-native.sfmod",runtime_ep,RIGHT_RECV);sf_assert(runtime_pid>0,"runtime restarts after failure");
+ sf_sys(SYS_KILL,runtime_pid,SF_DEVICE_GONE,0);sf_assert(launch_app("hello.sfk")==SF_DEVICE_GONE&&!echo_call(echo_ep,echo_pid),"runtime death is diagnosed without harming other services");uint32_t old_reply=runtime_reply;sf_assert(!native_stop_service()&&!native_start_service(),"runtime restarts after failure");sf_assert(runtime_reply&&runtime_reply!=old_reply,"runtime reply endpoint recreated after failure");
 }
 static void run_command(const char*name,const char*root,const SfArguments*arguments){
  int status=0;if(root){int h=sf_ns_open(&ns,1,"/",root,OPEN_READ|OPEN_DIRECTORY);if(h<0)status=h;else sf_ns_close(&ns,1,h);}
@@ -228,7 +307,8 @@ static void command(char*line){
  if(!strcmp(line,"help")){
   sf_log("help | ls [path] | cat <path> | write <path> <text> | truncate <path> <bytes> | modules | trust | echo\n");
   sf_log("run <app or installed> [args] | runat <read-only-dir> <app> [args]\nrunenv [NAME=VALUE ...] -- <app> [args] | runenvat <dir> [NAME=VALUE ...] -- <app> [args]\n");
-  sf_log("install /disk/bin/app.sfk | persist | stop echo | start echo | echo-status | echo-crash | echo-hang | echo-bad-reply | echo-bad-op | mount /disk | unmount /disk | stop disk | start disk | selftest | shutdown\n");}
+  sf_log("install /disk/bin/app.sfk | persist | stop echo | start echo | echo-status | echo-crash | echo-hang | echo-bad-reply | echo-bad-op | mount /disk | unmount /disk | stop disk | start disk | selftest | shutdown\n");
+  sf_log("stop native | start native | native-status | native-crash | native-hang | native-bad-reply | native-bad-op\n");}
  else if(!strcmp(line,"persist"))sf_persist_status();
  else if(!strcmp(line,"dma-test write"))sf_storage_dma_probe(0);
  else if(!strcmp(line,"dma-test read"))sf_storage_dma_probe(1);
@@ -251,6 +331,16 @@ static void command(char*line){
  else if(!strcmp(line,"channel-test")){channel_test(0);}
  else if(!strcmp(line,"echo-channel-test")){channel_test(1);}
  else if(!strcmp(line,"echo-capacity-test")){echo_capacity_test();}
+ else if(!strcmp(line,"native-status"))native_status();
+ else if(!strcmp(line,"native-capacity-test"))native_capacity_test();
+ else if(!strcmp(line,"native-drain-test"))native_drain_test();
+ else if(!strcmp(line,"native-crash")){int r=native_watch.state==SF_SUP_RUNNING&&runtime_pid?sf_sys(SYS_KILL,runtime_pid,SF_DEVICE_GONE,0):SF_STALE_HANDLE;sf_log(!r?"native: crash injected\n":"native: crash refused\n");}
+ else if(!strcmp(line,"native-hang")||!strcmp(line,"native-bad-reply")||!strcmp(line,"native-bad-op")){
+  unsigned mode=!strcmp(line,"native-hang")?1:!strcmp(line,"native-bad-reply")?2:3;SfMessage m;sf_message(&m,OP_NATIVE_DIAGNOSTIC,++requests);m.mode=mode;
+  int r=native_watch.state==SF_SUP_RUNNING?sf_send(runtime_ep,&m):SF_STALE_HANDLE;sf_log(r?"native: injection refused\n":mode==1?"native: hang injected\n":mode==2?"native: bad reply injected\n":"native: bad opcode injected\n");
+ }
+ else if(!strcmp(line,"stop native")){int r=native_stop_service();if(!r)sf_supervisor_disable(&native_watch);sf_log(!r?"native: STOPPED\n":"native: BUSY\n");}
+ else if(!strcmp(line,"start native")){int r=native_start_service();if(!r){sf_supervisor_enable(&native_watch,sf_ticks(),1);native_health_at=echo_after(sf_ticks(),100);}else if(r!=SF_INVALID)sf_supervisor_disable(&native_watch);sf_log(!r?"native: ACTIVE\n":manager.modules[runtime_slot].state==MOD_DRAINING?"native: draining\n":r==SF_INVALID?"native: already active\n":"native: spawn failed\n");}
  else if(!strcmp(line,"echo-status"))echo_status();
  else if(!strcmp(line,"echo-hang")||!strcmp(line,"echo-bad-reply")||!strcmp(line,"echo-bad-op")){
   unsigned mode=!strcmp(line,"echo-hang")?1:!strcmp(line,"echo-bad-reply")?2:3;SfMessage m;sf_message(&m,OP_ECHO_DIAGNOSTIC,++requests);m.mode=mode;
@@ -270,15 +360,16 @@ static void command(char*line){
 long sf_main(const SfBootArgs*a,size_t size){
  boot=a;if(size!=sizeof(*a)||a->abi_major!=1||!a->bundle)return SF_INVALID;
  sf_log("[INIT] sf-init.sfmod in ring 3; services live outside Core 0\n");manager_ep=sf_sys(SYS_EP_CREATE,0,0,0);
- int init=sfmod_add(&manager,"org.spiritfox.init",0,1);sfmod_start(&manager,init);runtime_slot=sfmod_add(&manager,"org.spiritfox.native",0,0);sfmod_start(&manager,runtime_slot);
+ int init=sfmod_add(&manager,"org.spiritfox.init",0,1);sfmod_start(&manager,init);runtime_slot=sfmod_add(&manager,"org.spiritfox.native",0,0);
  echo_slot=sfmod_add(&manager,"org.spiritfox.echo",0,0);sfmod_start(&manager,echo_slot);echo_ep=sf_sys(SYS_EP_CREATE,0,0,0);echo_pid=spawn_echo("echo.sfmod",echo_ep,RIGHT_RECV);sf_assert((int)echo_pid>0,"verified echo.sfmod staged in private address space");
- lifecycle_tests();namespace_setup();object_tests();runtime_reply=sf_sys(SYS_EP_CREATE,0,0,0);sf_assert((int)runtime_reply>0,"runtime replies have an isolated endpoint");runtime_ep=sf_sys(SYS_EP_CREATE,0,0,0);runtime_pid=spawn_package("sf-native.sfmod",runtime_ep,RIGHT_RECV);sf_assert(runtime_pid>0,"native runtime module active");runtime_tests();
+ lifecycle_tests();namespace_setup();object_tests();sf_assert(!native_start_service(),"native runtime module active");sf_assert((int)runtime_reply>0,"runtime replies have an isolated endpoint");runtime_tests();
  sf_storage_init(&manager,&ns,spawn_storage_package);int storage=sf_storage_start();if(!storage)storage=sf_storage_mount();
  if(storage){sf_log("STORAGE UNAVAILABLE code=");sf_number(-storage);sf_log("\n");}
  else{sf_storage_tests();if(sf_storage_writable()){int r=sf_persist_mount(&ns);if(r){sf_log("PERSIST UNAVAILABLE code=");sf_number(-r);sf_log("\n");}}int ep=sf_sys(SYS_EP_CREATE,0,0,0);int disk_module=spawn_echo("/disk/modules/disk-echo.sfmod",ep,RIGHT_RECV);
   if(disk_module>0){int slot=sfmod_add(&manager,"org.spiritfox.disk-echo",0,0);sf_assert(slot>=0&&!sfmod_start(&manager,slot)&&!echo_call(ep,disk_module),"signed sfmod loaded from disk without bundle fallback");sfmod_prepare(&manager,slot);sfmod_stop(&manager,slot);sf_sys(SYS_KILL,disk_module,0,0);echo_forget(disk_module);sfmod_unload(&manager,slot);}else{sf_log("DISK PACKAGE REJECTED module code=");sf_number(-disk_module);sf_log("\n");}sf_sys(SYS_CAP_REVOKE,ep,0,0);
   int app=launch_app("/disk/bin/diskhello.sfk");if(app>0)sf_assert(wait_app(app)==0,"signed disk application runs through native runtime");else{sf_log("DISK PACKAGE REJECTED app code=");sf_number(-app);sf_log("\n");}}
  sf_assert(!sf_supervisor_init(&echo_watch,3,25,1000),"echo restart policy configured");sf_supervisor_enable(&echo_watch,sf_ticks(),1);echo_health_at=echo_after(sf_ticks(),100);
+ sf_assert(!sf_supervisor_init(&native_watch,3,25,1000),"native restart policy configured");sf_supervisor_enable(&native_watch,sf_ticks(),1);native_health_at=echo_after(sf_ticks(),100);
  sf_log("BOOT TESTS PASSED\nSpiritFoxOS ready. Type help.\nfox> ");char line[192]={0};unsigned used=0;
- for(;;){echo_supervise();long c=sf_sys(SYS_CONSOLE_READ,0,0,0);if(c>=0){if(c=='\r'||c=='\n'){sf_log("\n");line[used]=0;command(line);used=0;memset(line,0,sizeof(line));sf_log("fox> ");}else if(c==8||c==127){if(used){used--;sf_log("\b \b");}}else if(c>=32&&c<127&&used+1<sizeof(line)){line[used++]=c;char s[2]={(char)c,0};sf_log(s);}}else if(c==SF_EVENT_OVERFLOW){used=0;memset(line,0,sizeof(line));sf_log("\nconsole input overflow; line discarded\nfox> ");}else{serve_once(10);sf_yield();}}
+ for(;;){echo_supervise();native_supervise();long c=sf_sys(SYS_CONSOLE_READ,0,0,0);if(c>=0){if(c=='\r'||c=='\n'){sf_log("\n");line[used]=0;command(line);used=0;memset(line,0,sizeof(line));sf_log("fox> ");}else if(c==8||c==127){if(used){used--;sf_log("\b \b");}}else if(c>=32&&c<127&&used+1<sizeof(line)){line[used++]=c;char s[2]={(char)c,0};sf_log(s);}}else if(c==SF_EVENT_OVERFLOW){used=0;memset(line,0,sizeof(line));sf_log("\nconsole input overflow; line discarded\nfox> ");}else{serve_once(10);sf_yield();}}
 }

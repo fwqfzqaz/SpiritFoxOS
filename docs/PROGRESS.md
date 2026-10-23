@@ -4,12 +4,12 @@
 
 - 工作区：`E:\SpiritFoxOS`。指定源目录的三项顶层内容已移动到这里。
 - 本轮目标：按用户要求持续推进到任一额度剩余 10%；native argv/显式环境/PI、文件分发防御已交付，块设备及 echo 的私有回复与失败回滚现已验证，APP/MODULE 入口检查已交付，当前补齐 M2 依赖代次和故障监督。
-- status: echo_health_verified_continuing
+- status: native_lifecycle_verified_continuing
 - round_complete: true
 - continuous_work: true
 - quota_paused: false
 - 分支：`codex/trust-policy-20261023`，基于已合并的 `origin/main`（`ca9e1a3`）；远端：`origin`，读取和推送地址均为 `https://github.com/fwqfzqaz/SpiritFoxOS.git`。
-- 额度已实际刷新并恢复，quota_paused=false；健康期间保持五分钟接续，活跃实现只在任一剩余小于等于 10% 时保存暂停。最近完整 echo 回归已通过并推送 a5f430c（628.35 秒、123 VM）；APP/MODULE 启动意图已通过完整回归并推送 352f565（687.44 秒、125 VM）。M2 依赖代次与租约事务已完整验证并推送 79a2262（678.98 秒、125 VM）。echo 死亡监督完整回归通过并推送 803a795（736.3 秒、127 VM）。周期健康期限、实际挂起与协议错误检查完整回归通过（761.42 秒、129 VM），当前交付按 HEAD/origin 实际 SHA 对照。
+- 额度已实际刷新并恢复，quota_paused=false；健康期间保持五分钟接续，活跃实现只在任一剩余小于等于 10% 时保存暂停。最近完整 echo 回归已通过并推送 a5f430c（628.35 秒、123 VM）；APP/MODULE 启动意图已通过完整回归并推送 352f565（687.44 秒、125 VM）。M2 依赖代次与租约事务已完整验证并推送 79a2262（678.98 秒、125 VM）。echo 死亡监督完整回归通过并推送 803a795（736.3 秒、127 VM）。echo 周期健康期限已完整验证并推送 47c84ac（761.42 秒、129 VM）。native 事务启动、排空及死亡/健康监督完整回归通过（778.66 秒、131 VM），交付以 HEAD/origin 实际 SHA 为准。
 
 ## 已完成
 
@@ -74,9 +74,12 @@
 50. M2 echo 周期健康检查：100 tick 周期、100 ms 回复期限，实际发送者/请求 ID/操作码/成功状态/精确 ping 校验；普通调用保留一秒期限。实际仍存活的自旋或认证回复协议错误都会回收原实例，进入已有退避和三次尝试预算；显式停止不检查/复活，设备/native 策略保持。
 51. 新增 legacy/modern 两个 VM，真实可抢占自旋、正确实例返回错误状态和错误操作码分别触发三次恢复，第四次故障进入 BLOCKED；普通/PI 应用、笔记、显式重试和六轮冷并发读仍通过。最终完整回归通过（761.42 秒、129 VM），日志 build/echo-health-final-test.txt，全部既有回归和六项摘要一致，发布门新增 echo_health 标记。
 
+52. M2 native 事务启动：回复/服务端点及进程创建失败均撤销回滚，保留旧句柄时拒绝覆盖。死亡或健康失败先 DRAINING 并回收旧实例，已有私有映像应用继续 namespace RPC、释放租约；排空后才按共享三次/退避/稳定策略重启。手动停启与健康诊断不改变设备隔离或持久化格式。
+53. 新增 legacy/modern 两个 VM，实际根能力耗尽的两条分配失败、实际进程容量耗尽时撤销两端点、两个真实应用持租约排空和拒绝新启动通过；死亡/自旋/错误状态三次恢复后错误操作码阻塞，显式停启、静态/PI/环境/目录应用与十二次端点重建通过。完整回归通过（778.66 秒、131 VM），日志 build/native-lifecycle-final-test.txt；全部原有宿主/VM 回归及六项摘要一致，发布门新增 native_supervision 标记。
+
 ## 交付与续做
 
-本轮 echo 实现已完成完整回归；当前交付以 Git HEAD 及 origin 同名分支的实际 SHA 对照为准，不强制推送。开放 PR #10 沿用当前工作分支；若外部合并则由交付工具建立后继请求。额度仍充足，echo 健康期限交付后执行 .cache/next-native-supervision-plan.txt：native 事务启动/失败回滚、应用租约排空和有界死亡/健康恢复合为一轮。尚未改变设备隔离恢复策略，也没有一般生命周期 RPC 或状态迁移。旧共用 echo 队列在 73108a7 的真实失败证据保留于 build/qemu-persist-echo-channel-baseline.log；恢复后的完整结果取代不完整的额度中断批次。
+本轮 echo 实现已完成完整回归；当前交付以 Git HEAD 及 origin 同名分支的实际 SHA 对照为准，不强制推送。开放 PR #10 沿用当前工作分支；若外部合并则由交付工具建立后继请求。额度仍充足，native 生命周期交付后执行 .cache/next-pid-plan.txt：修复 Core 进程标识越过有符号返回范围及回绕，使用实际 task_new 宿主边界回归。没有一般生命周期 RPC、设备自动恢复或状态迁移。旧共用 echo 队列在 73108a7 的真实失败证据保留于 build/qemu-persist-echo-channel-baseline.log；恢复后的完整结果取代不完整的额度中断批次。
 
 
 当前 native 参数轮次已完成全套验证，日志 `build/arguments-final-test.txt`。额度检查短期剩余 73%、长期 52%，普通使用可用；因此提交推送并继续下一项显式环境变量传递，不因本轮交付停止。已有 109 VM 结果属于签名角色分离基线，111 VM 为当前源码结果。

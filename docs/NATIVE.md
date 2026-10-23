@@ -35,3 +35,7 @@ tools/qemu_native_test.py 在 legacy 和 VT-d/modern 各执行初次启动与重
 管理器完成包签名、key_id 与用途认证后，先把容器类型和调用方意图比较，再准备 native 映像或分配特定服务授权。模块、设备、echo 入口只接受 MODULE，run/runat/runenv/runenvat 只接受 APP；不符返回 SF_DENIED。没有附加 argv 或环境时也执行该检查。已安装路径原有 APP 策略保持。
 
 类型由签名容器 magic/kind 决定：有效 APP 放在 .sfmod 文件中仍可作为应用运行；有效 MODULE 改名 .sfk 不能进入应用路径。bundle 与 runtime 私有回复的特殊授权同时要求 MODULE 类型及受控内置 sf-native 名称。文件名仍用于查找，不作为类型证明。
+
+## 运行时恢复与已有进程
+
+内置 native 的启动分配失败会撤销两个私有端点并回退登记；死亡或有界健康失败关闭新应用准入，原应用保留已复制的私有映像和 namespace RPC。应用租约全部释放后才创建新运行时，使用新 PID 和新端点。健康往返不改变 OP_NATIVE_STAGE 快照；不会自动重放中断的 PREPARE/上传。状态、退避预算、root 诊断和适用边界见 LIFECYCLE.md。

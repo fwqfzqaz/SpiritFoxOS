@@ -20,7 +20,10 @@ long sf_main(const SfBootArgs*a,size_t bytes){
   if(m.h.opcode!=OP_ECHO)continue;m.status=bad_reply==2?SF_DENIED:0;if(bad_reply==3)m.h.opcode=OP_HELLO;bad_reply=0;sf_send(a->manager,&m);
  }
 #elif ROLE == 2
+ unsigned bad_health=0;
  for(;;){SfMessage m;long status=sf_recv(a->service,&m,0);if(status<0)return status;if(status!=1){m.status=SF_DENIED;sf_send(a->manager,&m);continue;}
+  if(m.h.opcode==OP_NATIVE_DIAGNOSTIC){if(m.mode==1)for(;;)__asm__ volatile("pause");if(m.mode==2||m.mode==3)bad_health=m.mode;continue;}
+  if(m.h.opcode==OP_NATIVE_HEALTH){m.status=bad_health==2?SF_DENIED:0;if(bad_health==3)m.h.opcode=OP_HELLO;bad_health=0;m.length=0;sf_send(a->manager,&m);continue;}
   if(m.h.opcode==OP_NATIVE_STAGE){status=0;if(!m.offset){native_have=0;native_expected=0;if(!m.handle||m.handle>sizeof(native_upload))status=SF_INVALID;else native_expected=m.handle;}
    if(!status&&(!native_expected||m.handle!=native_expected||m.offset!=native_have||!m.length||m.length>sizeof(m.data)||m.length>native_expected-native_have))status=SF_INVALID;
    if(!status){memcpy(native_upload+native_have,m.data,m.length);native_have+=m.length;}else native_have=native_expected=0;m.status=status;m.length=0;m.offset=native_have;sf_send(a->manager,&m);continue;}
