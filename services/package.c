@@ -40,6 +40,17 @@ int sf_manifest_text(const SfPackage*p,const char*key,char*out,size_t size){
   if(!item(&c,1))return SF_BAD_FORMAT;
  }return SF_NOT_FOUND;
 }
+int sf_manifest_capability(const SfPackage*p,const char*capability){
+ Cbor c={p->manifest,p->manifest+p->manifest_bytes};uint8_t t;uint64_t n;
+ if(!head(&c,&t,&n)||t!=5)return SF_BAD_FORMAT;
+ for(uint64_t i=0;i<n;i++){uint64_t len;if(!head(&c,&t,&len)||t!=3||!span(0,len,c.end-c.p))return SF_BAD_FORMAT;
+  int match=len==14&&!memcmp(c.p,"requested_caps",14);c.p+=len;
+  if(match){uint64_t count;if(!head(&c,&t,&count)||t!=4||count>65536)return SF_BAD_FORMAT;int found=0;
+   for(uint64_t j=0;j<count;j++){if(!head(&c,&t,&len)||t!=3||!span(0,len,c.end-c.p)||!utf8(c.p,len))return SF_BAD_FORMAT;if(len==strlen(capability)&&!memcmp(c.p,capability,len))found=1;c.p+=len;}return found;
+  }
+  if(!item(&c,1))return SF_BAD_FORMAT;
+ }return 0;
+}
 static int app_abi(const SfPackage*p){
  Cbor c={p->manifest,p->manifest+p->manifest_bytes};uint8_t t;uint64_t n;
  if(!head(&c,&t,&n)||t!=5)return 0;

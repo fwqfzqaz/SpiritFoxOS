@@ -10,13 +10,14 @@ static uint32_t manager_ep;static SfManager manager;static SfNamespace ns;
 static int runtime_slot,echo_slot;static uint32_t runtime_pid,runtime_ep,echo_pid,echo_ep;
 static uint8_t staging[1024*1024] __attribute__((aligned(4096)));
 static uint8_t package_snapshot[SF_READFS_FILE_MAX];
-typedef struct {uint32_t pid,reply;int lease;} Child;
+typedef struct {uint32_t pid,reply,root;int lease;} Child;
 static Child children[16];static uint64_t requests;
 static long console_write(const void*p,size_t n){return sf_sys(SYS_LOG,(uint64_t)p,n,0);}
 static int package_get(const char*name,SfPackage*p){const uint8_t*d;uint64_t n;if(name[0]=='/'){long r=!strcmp(name,"/installed.sfk")?sf_persist_package(package_snapshot,sizeof(package_snapshot)):sf_storage_load(name,package_snapshot,sizeof(package_snapshot));return r<0?r:sf_package_open(p,package_snapshot,r,sf_trust_key);}int r=sf_bundle_find((void*)boot->bundle,boot->bundle_bytes,name,&d,&n);return r?r:sf_package_open(p,d,n,sf_trust_key);}
 static int native_upload(const SfPackage*p){for(uint64_t off=0;off<p->bytes;){SfMessage m;sf_message(&m,OP_NATIVE_STAGE,++requests);m.handle=p->bytes;m.offset=off;m.length=p->bytes-off;if(m.length>sizeof(m.data))m.length=sizeof(m.data);uint32_t sent=m.length;memcpy(m.data,p->data+off,sent);int rc=sf_send(runtime_ep,&m);if(rc)return rc;long from=sf_recv(manager_ep,&m,sf_deadline(1000));if(from!=(long)runtime_pid||m.h.request_id!=requests)return from<0?from:SF_STALE_HANDLE;if(m.status)return m.status;off+=sent;if(m.offset!=off)return SF_BAD_FORMAT;}return 0;}
-static int spawn_package_device(const char*name,uint32_t service,uint32_t rights,uint32_t device,uint32_t device_rights){
+static int spawn_package_policy(const char*name,uint32_t service,uint32_t rights,uint32_t device,uint32_t device_rights,int directory){
  SfPackage p;int r=package_get(name,&p);if(r)return r;
+ if(directory){r=sf_manifest_capability(&p,"namespace.read");if(r<0)return r;if(p.kind!=2||r!=1)return SF_DENIED;}
  if(p.kind==2){char id[96];if(sf_manifest_text(&p,"runtime_id",id,sizeof(id))||strcmp(id,"org.spiritfox.native")||manager.modules[runtime_slot].state!=MOD_ACTIVE)return SF_DEPENDENCY;
   if(sf_sys(SYS_TASK_STATUS,runtime_pid,0,0)!=SF_TASK_RUNNING)return SF_DEVICE_GONE;
   int external=name[0]=='/';if(external){int status=native_upload(&p);if(status)return status;}
@@ -28,30 +29,45 @@ static int spawn_package_device(const char*name,uint32_t service,uint32_t rights
  size_t used=0;for(unsigned i=0;i<p.count;i++){SfSection*s=&p.sections[i];if(s->type>3)continue;size_t mem=(s->memory+4095)&~4095ull;if(mem>sizeof(staging)-used||plan.count==8)return SF_NO_SPACE;memset(staging+used,0,mem);memcpy(staging+used,p.data+s->offset,s->bytes);plan.segments[plan.count++]=(SfLoadSegment){s->rva,s->memory,(uint64_t)(staging+used),s->flags,0};used+=mem;}
  return sf_sys(SYS_SPAWN,(uint64_t)&plan,0,0);
 }
+static int spawn_package_device(const char*name,uint32_t service,uint32_t rights,uint32_t device,uint32_t device_rights){return spawn_package_policy(name,service,rights,device,device_rights,0);}
 static int spawn_package(const char*name,uint32_t service,uint32_t rights){return spawn_package_device(name,service,rights,0,0);}
 static Child*child(uint32_t pid){for(unsigned i=0;i<16;i++)if(children[i].pid==pid)return&children[i];return 0;}
-static int launch_app(const char*name){
+static int launch_app_root(const char*name,const char*root){
  if(!strcmp(name,"installed"))name="/installed.sfk";
  int slot=-1;for(unsigned i=0;i<16;i++)if(!children[i].pid){slot=i;break;}if(slot<0)return SF_NO_SPACE;
- int r=sfmod_acquire(&manager,runtime_slot,RES_LEASE);if(r)return r;int ep=sf_sys(SYS_EP_CREATE,0,0,0);if(ep<0){sfmod_release(&manager,runtime_slot,RES_LEASE);return ep;}
- int pid=spawn_package(name,ep,RIGHT_RECV);if(pid<0){sf_sys(SYS_CAP_REVOKE,ep,0,0);sfmod_release(&manager,runtime_slot,RES_LEASE);return pid;}children[slot]=(Child){pid,ep,1};return pid;
+ /* Reserve and pin the directory before creating a child. No failure after
+  * spawn can leave an unregistered child's RPC in the manager queue. */
+ int directory=root?sf_ns_open(&ns,1,"/",root,OPEN_READ|OPEN_DIRECTORY):0;if(directory<0)return directory;
+ int ep=0,r=sfmod_acquire(&manager,runtime_slot,RES_LEASE);if(r)goto fail_root;
+ ep=sf_sys(SYS_EP_CREATE,0,0,0);if(ep<0){r=ep;goto fail_lease;}
+ int pid=spawn_package_policy(name,ep,RIGHT_RECV,0,0,directory!=0);if(pid<0){r=pid;goto fail_lease;}
+ if(directory)ns.handles[(directory&255)-1].owner=pid;
+ children[slot]=(Child){pid,ep,directory,1};return pid;
+fail_lease:if(ep>0)sf_sys(SYS_CAP_REVOKE,ep,0,0);sfmod_release(&manager,runtime_slot,RES_LEASE);
+fail_root:if(directory)sf_ns_close(&ns,1,directory);return r;
 }
+static int launch_app(const char*name){return launch_app_root(name,0);}
 static void app_reap(uint32_t pid){Child*c=child(pid);if(!c)return;sf_ns_reap(&ns,pid);sf_sys(SYS_CAP_REVOKE,c->reply,0,0);if(c->lease)sfmod_release(&manager,runtime_slot,RES_LEASE);memset(c,0,sizeof(*c));}
 static int serve_once(unsigned timeout_ms){
  SfMessage m;long sender=sf_recv(manager_ep,&m,sf_deadline(timeout_ms));if(sender<0)return sender;Child*c=child(sender);if(!c)return SF_INVALID;
  if(m.h.opcode==OP_HELLO)return m.status;
  int status=SF_INVALID;
  switch(m.h.opcode){
+ case OP_ROOT:status=c->root?0:SF_DENIED;m.handle=c->root;break;
+ case OP_OPENAT:
+  if(!m.length||m.length>SF_MSG_BYTES||m.data[m.length-1]||strlen((char*)m.data)+1!=m.length){status=SF_INVALID;break;}
+  status=sf_ns_openat(&ns,sender,m.handle,(char*)m.data,m.mode);if(status>=0){m.handle=status;status=0;}break;
  case OP_OPEN:
-  if(!m.length||m.length>SF_MSG_BYTES||m.data[m.length-1]){status=SF_INVALID;break;}
-  /* Initial application policy delegates stdout only; no filesystem root. */
+  if(!m.length||m.length>SF_MSG_BYTES||m.data[m.length-1]||strlen((char*)m.data)+1!=m.length){status=SF_INVALID;break;}
+  /* Absolute application opens delegate stdout; files use directory handles. */
   if(strcmp((char*)m.data,"/dev/console")||m.mode!=OPEN_WRITE){status=SF_DENIED;break;}
   status=sf_ns_open(&ns,sender,"/",(char*)m.data,m.mode);if(status>=0){m.handle=status;status=0;}break;
  case OP_WRITE:status=sf_ns_write(&ns,sender,m.handle,m.data,m.length);break;
  case OP_READ:status=sf_ns_read(&ns,sender,m.handle,m.data,m.length);if(status>=0)m.length=status;break;
- case OP_CLOSE:status=sf_ns_close(&ns,sender,m.handle);break;
+ case OP_CLOSE:status=sf_ns_close(&ns,sender,m.handle);if(!status&&m.handle==c->root)c->root=0;break;
  case OP_SEEK:status=sf_ns_seek(&ns,sender,m.handle,m.offset);break;
  case OP_POLL:status=sf_ns_poll(&ns,sender,m.handle);break;
+ case OP_ENUMERATE:status=sf_ns_enumerate(&ns,sender,m.handle,(char*)m.data,m.length);if(status>=0)m.length=status;break;
  }
  m.status=status;return sf_send(c->reply,&m);
 }
@@ -93,6 +109,7 @@ static void runtime_tests(void){
  int hello=launch_app("hello.sfk");sf_assert(hello>0,"sfexec validates and launches hello.sfk");sfmod_prepare(&manager,runtime_slot);sf_assert(sfmod_stop(&manager,runtime_slot)==SF_DEPENDENCY,"application pins runtime lease");sfmod_cancel(&manager,runtime_slot);
  sf_assert(wait_app(hello)==0,"hello.sfk writes through namespace RPC and exits");
  int probe=launch_app("probe.sfk");sf_assert(probe>0&&wait_app(probe)==0,"forged handles pointers RWX and privilege amplification rejected");
+ int reader=launch_app_root("fileprobe.sfk","/tmp");sf_assert(reader>0&&wait_app(reader)==0,"directory capability reads file and rejects escape and write amplification");
  uint64_t exited_at=sf_ticks();int exited=launch_app("exitbusy.sfk");sf_assert(exited>0&&wait_app(exited)==SF_BUSY&&sf_ticks()-exited_at<100,"exit code SF_BUSY is distinct from a live task");
  int fault=launch_app("fault.sfk");sf_assert(fault>0&&wait_app(fault)==-114&&!echo_call(echo_ep,echo_pid),"user kernel-memory write isolated");
  fault=launch_app("illegal.sfk");sf_assert(fault>0&&wait_app(fault)==-106,"illegal instruction isolated");
@@ -104,8 +121,15 @@ static void runtime_tests(void){
  sf_assert(launch_app("hello.sfk")==SF_STALE_HANDLE,"missing runtime returns diagnostic error");sfmod_start(&manager,runtime_slot);
  sf_sys(SYS_KILL,runtime_pid,SF_DEVICE_GONE,0);sf_assert(launch_app("hello.sfk")==SF_DEVICE_GONE&&!echo_call(echo_ep,echo_pid),"runtime death is diagnosed without harming other services");sfmod_prepare(&manager,runtime_slot);sfmod_stop(&manager,runtime_slot);sf_sys(SYS_CAP_REVOKE,runtime_ep,0,0);sfmod_start(&manager,runtime_slot);runtime_ep=sf_sys(SYS_EP_CREATE,0,0,0);runtime_pid=spawn_package("sf-native.sfmod",runtime_ep,RIGHT_RECV);sf_assert(runtime_pid>0,"runtime restarts after failure");
 }
+static void run_command(const char*name,const char*root){
+ int status=0;if(root){int h=sf_ns_open(&ns,1,"/",root,OPEN_READ|OPEN_DIRECTORY);if(h<0)status=h;else sf_ns_close(&ns,1,h);}
+ if(!status){int installed=!strcmp(name,"installed")||!strcmp(name,"/installed.sfk");int trial=installed?sf_persist_begin():0;status=trial;
+  if(trial>=0){int pid=launch_app_root(name,root);status=pid>0?wait_app(pid):pid;if(trial){int r=sf_persist_finish(!status);if(r)status=r;}}
+ }
+ if(!status)sf_log("sfexec: exit 0\n");else{sf_log("sfexec: failed code=");sf_number(status<0?-status:status);sf_log("\n");}
+}
 static void command(char*line){
- if(!strcmp(line,"help")){sf_log("help | ls [path] | cat <path> | write <path> <text> | modules | echo | run <app.sfk or installed> | install /disk/bin/app.sfk | persist | stop echo | start echo | mount /disk | unmount /disk | stop disk | start disk | selftest | shutdown\n");}
+ if(!strcmp(line,"help")){sf_log("help | ls [path] | cat <path> | write <path> <text> | modules | echo | run <app.sfk or installed> | runat <read-only-dir> <app> | install /disk/bin/app.sfk | persist | stop echo | start echo | mount /disk | unmount /disk | stop disk | start disk | selftest | shutdown\n");}
  else if(!strcmp(line,"persist"))sf_persist_status();
  else if(!strcmp(line,"dma-test write"))sf_storage_dma_probe(0);
  else if(!strcmp(line,"dma-test read"))sf_storage_dma_probe(1);
@@ -113,11 +137,8 @@ static void command(char*line){
  else if(!memcmp(line,"install ",8)){int r=sf_persist_install(line+8);if(!r)sf_log("install: COMMITTED\n");else if(r==1)sf_log("install: UNCHANGED\n");else{sf_log("install: failed code=");sf_number(-r);sf_log("\n");}}
  else if(!strcmp(line,"modules")){sf_log("sf-init ACTIVE pinned; sf-native ");sf_log(manager.modules[runtime_slot].state==MOD_ACTIVE?"ACTIVE":"STOPPED");sf_log("; echo ");sf_log(manager.modules[echo_slot].state==MOD_ACTIVE?"ACTIVE\n":"STOPPED\n");}
  else if(!strcmp(line,"echo")){sf_log(echo_call(echo_ep,echo_pid)==0?"echo: ping\n":"echo: service unavailable\n");}
- else if(!memcmp(line,"run ",4)){
-  int installed=!strcmp(line+4,"installed")||!strcmp(line+4,"/installed.sfk");int trial=installed?sf_persist_begin():0,status=trial;
-  if(trial>=0){int pid=launch_app(line+4);status=pid>0?wait_app(pid):pid;if(trial){int r=sf_persist_finish(!status);if(r)status=r;}}
-  if(!status)sf_log("sfexec: exit 0\n");else{sf_log("sfexec: failed code=");sf_number(status<0?-status:status);sf_log("\n");}
- }
+ else if(!memcmp(line,"run ",4))run_command(line+4,0);
+ else if(!memcmp(line,"runat ",6)){char*root=line+6,*name=root;while(*name&&*name!=' ')name++;if(!*name||!name[1])sf_log("runat: expected directory and application\n");else{*name++=0;run_command(name,root);}}
  else if(!strcmp(line,"unmount /disk")){int r=sf_storage_unmount();sf_log(!r?"disk: UNMOUNTED\n":"disk: unmount refused\n");}
  else if(!strcmp(line,"mount /disk")){int r=sf_storage_mount();if(!r&&sf_storage_writable())r=sf_persist_mount(&ns);sf_log(!r?"disk: MOUNTED\n":"disk: mount refused\n");}
  else if(!strcmp(line,"stop disk")){int r=sf_storage_stop();sf_log(!r?"disk: STOPPED\n":"disk: stop refused\n");}

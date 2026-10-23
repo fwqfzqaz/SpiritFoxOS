@@ -17,12 +17,18 @@ def run():
             vm.command('run installed', 'sfexec: exit 0')
             vm.command('persist', 'persist: ACTIVE generation=5')
             committed = disk.read_bytes()
+            start = vm.send('runat /persist fileprobe.sfk')
+            vm.expect('OPENAT APP PASSED', start)
+            vm.expect('sfexec: exit 0', start)
+            vm.command('runat /persist installed', 'sfexec: failed code=2')
+            assert disk.read_bytes() == committed, 'Read-only delegation wrote persistent data'
             vm.command('disk-crash', 'STORAGE CRASH TEST PASSED')
             vm.command('persist', 'persist: UNAVAILABLE generation=5')
             vm.command('cat /persist/notes', 'cat: error')
             vm.command('write /persist/notes forbidden', 'write: error')
             vm.command('run installed', 'sfexec: failed code=10')
             vm.command('install /disk/bin/diskupdate.sfk', 'install: failed code=10')
+            vm.command('runat /persist fileprobe.sfk', 'sfexec: failed code=13')
             assert disk.read_bytes() == committed, 'Offline access modified disk'
             vm.command('echo', 'echo: ping')
             vm.command('run hello.sfk', 'sfexec: exit 0')

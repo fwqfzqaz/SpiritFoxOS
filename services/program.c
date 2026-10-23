@@ -7,6 +7,9 @@ static uint8_t native_upload[128*1024];
 static uint32_t native_have,native_expected;
 #endif
 static __attribute__((unused)) int rpc(const SfBootArgs*a,SfMessage*m){long r=sf_send(a->manager,m);if(r)return r;r=sf_recv(a->service,m,sf_deadline(3000));return r<0?r:(int)m->status;}
+#if ROLE == 14 || ROLE == 15
+static int relative_open(const SfBootArgs*a,SfMessage*m,uint32_t root,const char*path,unsigned mode){sf_message(m,OP_OPENAT,1);m->handle=root;m->length=strlen(path)+1;m->mode=mode;memcpy(m->data,path,m->length);return rpc(a,m);}
+#endif
 long sf_main(const SfBootArgs*a,size_t bytes){
  if(bytes!=sizeof(*a)||a->size!=sizeof(*a)||a->abi_major!=1)return SF_ABI_MISMATCH;
 #if ROLE == 1
@@ -57,6 +60,29 @@ long sf_main(const SfBootArgs*a,size_t bytes){
  return SF_BUSY;
 #elif ROLE == 13
  __asm__ volatile("movabs $0x800000000000,%%rsp; mov $1,%%rax; int $0x80; ud2":::"memory");__builtin_unreachable();
+#elif ROLE == 14 || ROLE == 15
+ SfMessage m;sf_message(&m,OP_ROOT,1);if(rpc(a,&m))return 2;uint32_t root=m.handle;
+#if ROLE == 14
+ const char*target="notes";
+#else
+ const char*target="readme.txt";
+#endif
+ if(relative_open(a,&m,root,target,OPEN_WRITE)!=SF_DENIED)return 3;
+ const char*bad[]={"../outside","/dev/console",".","sub/../notes","notes/","sub//notes"};
+ for(unsigned i=0;i<sizeof(bad)/sizeof(*bad);i++)if(relative_open(a,&m,root,bad[i],OPEN_READ)!=SF_INVALID)return 4;
+ if(relative_open(a,&m,root^256,target,OPEN_READ)!=SF_STALE_HANDLE)return 5;
+ sf_message(&m,OP_OPEN,1);memcpy(m.data,"/tmp/notes",11);m.length=11;m.mode=OPEN_READ;if(rpc(a,&m)!=SF_DENIED)return 6;
+ sf_message(&m,OP_OPENAT,1);m.handle=root;m.mode=OPEN_READ;memcpy(m.data,"notes\0extra",12);m.length=12;if(rpc(a,&m)!=SF_INVALID)return 7;
+ sf_message(&m,OP_ENUMERATE,1);m.handle=root;m.length=sizeof(m.data);if(rpc(a,&m)<=0)return 8;
+ if(relative_open(a,&m,root,target,OPEN_READ))return 9;uint32_t file=m.handle;
+ sf_message(&m,OP_CLOSE,1);m.handle=root;if(rpc(a,&m))return 10;
+ sf_message(&m,OP_ROOT,1);if(rpc(a,&m)!=SF_DENIED)return 11;
+ if(relative_open(a,&m,root,target,OPEN_READ)!=SF_STALE_HANDLE)return 12;
+ sf_message(&m,OP_READ,1);m.handle=file;m.length=sizeof(m.data);if(rpc(a,&m)<=0)return 13;
+ /* Deliberately leave the child file and stdout open: process reap must
+  * release their namespace descriptions and any disk mount lease. */
+ sf_message(&m,OP_OPEN,1);memcpy(m.data,"/dev/console",13);m.length=13;m.mode=OPEN_WRITE;if(rpc(a,&m))return 14;uint32_t console=m.handle;
+ sf_message(&m,OP_WRITE,1);m.handle=console;const char*text="OPENAT APP PASSED\n";m.length=strlen(text);memcpy(m.data,text,m.length);return rpc(a,&m)<0?15:0;
 #else
  return SF_INVALID;
 #endif

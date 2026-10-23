@@ -17,6 +17,7 @@ class Crypto:
         self.lib.sf_key_pair.argtypes = [C.c_void_p] * 3
         self.lib.sf_sign.argtypes = [C.c_void_p, C.c_void_p, C.c_void_p, C.c_size_t]
         self.lib.sf_check.argtypes = [C.c_void_p, C.c_size_t, C.c_void_p]
+        self.lib.sf_cap_check.argtypes = [C.c_void_p, C.c_size_t, C.c_void_p, C.c_char_p]
         self.lib.sf_ed_check.argtypes = [C.c_void_p, C.c_void_p, C.c_void_p, C.c_size_t]
         self.lib.sf_hash.argtypes = [C.c_void_p, C.c_void_p, C.c_size_t]
         self.lib.sf_fs_check.argtypes = [C.c_void_p, C.c_size_t, C.c_int]

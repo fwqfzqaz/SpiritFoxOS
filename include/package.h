@@ -13,5 +13,6 @@ uint64_t sf_u64(const uint8_t *);
 void sf_sha256(uint8_t out[32],const uint8_t *data,size_t bytes);
 int sf_package_open(SfPackage *,const void *,uint64_t,const uint8_t public_key[32]);
 int sf_manifest_text(const SfPackage *,const char *key,char *out,size_t size);
+int sf_manifest_capability(const SfPackage *,const char *);
 int sf_bundle_find(const void *,uint64_t,const char *,const uint8_t **,uint64_t *);
 #endif

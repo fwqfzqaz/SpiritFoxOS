@@ -70,10 +70,12 @@ def main():
     manifest = {'module_id': 'org.spiritfox.init', 'version': '0.1.0', 'category': 'bootstrap', 'requested_caps': ['bootstrap'], 'resource_limits': {'memory': 2097152}}
     packages.append(('sf-init.sfmod', pack(manifest, image, 1, seed)))
     disk_files = {'/etc/readme.txt': b'SpiritFoxOS read-only disk mounted through user-space virtio-blk.\n'}
-    for name, role, kind in [('echo', 1, 1), ('sf-native', 2, 1), ('hello', 3, 2), ('fault', 4, 2), ('illegal', 5, 2), ('spinner', 6, 2), ('nx', 7, 2), ('probe', 8, 2), ('mmio', 10, 2), ('exitbusy', 12, 2), ('badrsp', 13, 2), ('disk-echo', 1, 1), ('diskhello', 9, 2), ('diskupdate', 9, 2), ('disknext', 9, 2), ('diskfault', 4, 2), ('diskexit', 11, 2), ('diskspin', 6, 2), ('diskother', 9, 2)]:
+    for name, role, kind in [('echo', 1, 1), ('sf-native', 2, 1), ('hello', 3, 2), ('fault', 4, 2), ('illegal', 5, 2), ('spinner', 6, 2), ('nx', 7, 2), ('probe', 8, 2), ('mmio', 10, 2), ('exitbusy', 12, 2), ('badrsp', 13, 2), ('fileprobe', 14, 2), ('readprobe', 15, 2), ('disk-echo', 1, 1), ('diskhello', 9, 2), ('diskupdate', 9, 2), ('disknext', 9, 2), ('diskfault', 4, 2), ('diskexit', 11, 2), ('diskspin', 6, 2), ('diskother', 9, 2)]:
         native_crypto = objects('native-crypto', CRYPTO) if role == 2 else []
         image = link_elf(name, shared + native_crypto + objects(name, ['services/program.c'], defines=['-DROLE='+str(role)]), 'services/user.ld')
         manifest = {('module_id' if kind == 1 else 'app_id'): 'org.spiritfox.'+('native' if name == 'sf-native' else name), 'version': '0.1.0', 'requested_caps': ['stdio'] if role in (3, 9) else [], 'resource_limits': {'memory': 262144 if role == 2 else 131072}}
+        if name in ('fileprobe','readprobe','fault','spinner'):
+            manifest['requested_caps'] = ['stdio','namespace.read']
         if name in ('diskfault', 'diskexit', 'diskspin', 'disknext', 'diskupdate'):
             manifest.update(app_id='org.spiritfox.diskhello', version='0.2.0' if name=='diskupdate' else '0.3.0')
         if kind == 1:

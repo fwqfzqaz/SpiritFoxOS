@@ -1,6 +1,6 @@
 #include "namespace.h"
 static int path_utf8(const uint8_t*p){while(*p){uint32_t c=*p++;if(c<32)return 0;if(c<128)continue;unsigned k;uint32_t min;if(c>=0xc2&&c<=0xdf){k=1;c&=31;min=128;}else if(c>=0xe0&&c<=0xef){k=2;c&=15;min=2048;}else if(c>=0xf0&&c<=0xf4){k=3;c&=7;min=65536;}else return 0;while(k--){if((*p&192)!=128)return 0;c=(c<<6)|(*p++&63);}if(c<min||c>0x10ffff||(c>=0xd800&&c<=0xdfff))return 0;}return 1;}
-static int path_ok(const char*p){if(*p!='/'||strlen(p)>95||!path_utf8((const uint8_t*)p))return 0;for(const char*s=p;*s;){if(*s++=='/'){const char*b=s;while(*s&&*s!='/')s++;size_t n=s-b;if((!n&&*s)||(n==1&&*b=='.')||(n==2&&b[0]=='.'&&b[1]=='.'))return 0;}}return 1;}
+static int path_ok(const char*p){size_t len=strlen(p);if(*p!='/'||len>95||(len>1&&p[len-1]=='/')||!path_utf8((const uint8_t*)p))return 0;for(const char*s=p;*s;){if(*s++=='/'){const char*b=s;while(*s&&*s!='/')s++;size_t n=s-b;if((!n&&*s)||(n==1&&*b=='.')||(n==2&&b[0]=='.'&&b[1]=='.'))return 0;}}return 1;}
 static int node_find(SfNamespace*n,const char*path){for(unsigned i=0;i<32;i++)if(n->nodes[i].type&&!strcmp(n->nodes[i].path,path))return i;return SF_NOT_FOUND;}
 void sf_ns_init(SfNamespace*n,long(*console)(const void*,size_t)){memset(n,0,sizeof(*n));n->console=console;sf_ns_create(n,"/",NODE_DIR,0);}
 int sf_ns_create(SfNamespace*n,const char*p,unsigned type,int ro){if(!path_ok(p)||type<1||type>5)return SF_INVALID;if(node_find(n,p)>=0)return SF_BUSY;
@@ -8,12 +8,23 @@ int sf_ns_create(SfNamespace*n,const char*p,unsigned type,int ro){if(!path_ok(p)
  for(unsigned i=0;i<32;i++)if(!n->nodes[i].type){SfNode*x=&n->nodes[i];memset(x,0,sizeof(*x));memcpy(x->path,p,strlen(p)+1);x->type=type;x->readonly=ro;return 0;}return SF_NO_SPACE;
 }
 static SfDescription*description(SfNamespace*n,uint32_t owner,uint32_t h){unsigned i=h&255;if(!i||i>64)return 0;SfFileHandle*x=&n->handles[i-1];if(x->owner!=owner||x->generation!=(h>>8)||!x->description)return 0;return&n->descriptions[x->description-1];}
-static int handle_new(SfNamespace*n,uint32_t owner,unsigned d){for(unsigned i=0;i<64;i++)if(!n->handles[i].description){SfFileHandle*h=&n->handles[i];if(h->generation>=0x7fffff)return SF_NO_SPACE;h->generation++;h->owner=owner;h->description=d+1;n->descriptions[d].refs++;return(h->generation<<8)|(i+1);}return SF_NO_SPACE;}
+static int handle_new(SfNamespace*n,uint32_t owner,unsigned d){for(unsigned i=0;i<64;i++)if(!n->handles[i].description){SfFileHandle*h=&n->handles[i];if(h->generation>=0x7fffff)continue;h->generation++;h->owner=owner;h->description=d+1;n->descriptions[d].refs++;return(h->generation<<8)|(i+1);}return SF_NO_SPACE;}
 int sf_ns_open(SfNamespace*n,uint32_t owner,const char*root,const char*path,unsigned mode){
- if(!owner||!path_ok(root)||!path_ok(path)||!(mode&3)||(mode&~7))return SF_INVALID;
+ if(!owner||!path_ok(root)||!path_ok(path)||!(mode&3)||(mode&~15))return SF_INVALID;
  size_t len=strlen(root);if(strcmp(root,"/")&&(strlen(path)<len||memcmp(path,root,len)|| (path[len]&&path[len]!='/')))return SF_DENIED;
- int i=node_find(n,path);if(i<0)return i;SfNode*x=&n->nodes[i];if(x->readonly&&(mode&OPEN_WRITE))return SF_READ_ONLY;
+ int base=node_find(n,root);if(base<0)return base;if(n->nodes[base].type!=NODE_DIR)return SF_INVALID;
+ int i=node_find(n,path);if(i<0)return i;SfNode*x=&n->nodes[i];if((mode&OPEN_DIRECTORY)&&x->type!=NODE_DIR)return SF_INVALID;if(x->readonly&&(mode&OPEN_WRITE))return SF_READ_ONLY;
  for(unsigned d=0;d<32;d++)if(!n->descriptions[d].refs){if(x->mount_tag&&n->mount_open){int r=n->mount_open(x->mount_tag);if(r)return r;}n->descriptions[d]=(SfDescription){i,0,mode,0};int h=handle_new(n,owner,d);if(h<0){if(x->mount_tag&&n->mount_close)n->mount_close(x->mount_tag);return h;}if(x->type==NODE_PIPE&&(mode&OPEN_WRITE))x->writers++;return h;}return SF_NO_SPACE;
+}
+int sf_ns_openat(SfNamespace*n,uint32_t owner,uint32_t directory,const char*relative,unsigned mode){
+ SfDescription*d=description(n,owner,directory);if(!d)return SF_STALE_HANDLE;
+ SfNode*base=&n->nodes[d->node];if(base->type!=NODE_DIR)return SF_INVALID;
+ if(!(mode&3)||(mode&~15))return SF_INVALID;if((mode&3)&~d->mode)return SF_DENIED;
+ if(!*relative||*relative=='/')return SF_INVALID;size_t a=strlen(base->path),b=strlen(relative);unsigned separator=a!=1;
+ if(b>95||a+separator+b>95)return SF_INVALID;char path[96];memcpy(path,base->path,a);if(separator)path[a++]='/';memcpy(path+a,relative,b+1);
+ /* Canonical components only; there are no symlinks or path aliases. The
+  * validated directory object supplies the root, never the request string. */
+ if(!path_ok(path))return SF_INVALID;return sf_ns_open(n,owner,base->path,path,mode);
 }
 int sf_ns_dup(SfNamespace*n,uint32_t owner,uint32_t h){SfDescription*d=description(n,owner,h);return d?handle_new(n,owner,d-n->descriptions):SF_STALE_HANDLE;}
 int sf_ns_close(SfNamespace*n,uint32_t owner,uint32_t h){SfDescription*d=description(n,owner,h);if(!d)return SF_STALE_HANDLE;if(!--d->refs){SfNode*x=&n->nodes[d->node];if(x->type==NODE_PIPE&&(d->mode&OPEN_WRITE))x->writers--;if(x->mount_tag&&n->mount_close)n->mount_close(x->mount_tag);}n->handles[(h&255)-1].description=0;return 0;}
