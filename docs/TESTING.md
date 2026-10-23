@@ -128,6 +128,14 @@ M5 回归为 151 条 C 断言、14 组 Python 测试中的包/只读格式部分
 
 最终源码构建后，完整 `python tools/test.py --skip-build` 通过，耗时 486.45 秒，共 109 次实际启动、22 组 Python 测试与 3000 次变异，日志 `build/separate-keys-final-test.txt`。结果为 trust_policy_host_groups=7、trust_policy_qemu_boots=14、separate_signing_keys=true，并绑定 EFI、两种盘、两个公钥与公开策略六个摘要；发布门拒绝旧标记或文件摘要不一致。原始模块公钥不变，四轮策略构建保持两份现有种子，最终交付恢复为原有效策略，未遗留测试 VM。
 
+## Native 参数 ABI 与命令行
+
+新增 8155 项参数 C 检查，验证 512 字节边界、1000 次固定种子往返、规范偏移/终止、数量和长度破坏、头部别名、引用/空串/转义及非法词法。真实 SYS_SPAWN 负例检查非法数量和指向头部的参数偏移，均在创建子进程前拒绝。
+
+legacy 与 modern 各新增一个参数 VM：带参数的普通、目录委派、installed 调用均通过；未提供额外参数保留旧布局。写参数页触发隔离页故障，随后回显及十次进程重用正常。非法引号/数量在 PENDING 更新试运行前拒绝，磁盘不变；有效参数调用完成健康确认，参数本身不落盘。所有目录及描述符可正常回收并卸载。
+
+最终源码构建后完整 `python tools/test.py --skip-build` 通过，547.21 秒、111 次实际启动，日志 `build/arguments-final-test.txt`。全部已有签名、设备、内核、命名空间与事务/故障回归通过，交付六个摘要一致。结果和发布门增加 arguments_host_checks=8155、arguments_qemu=true；协议与尚未冻结的装载计划 ABI 见 `ARGUMENTS.md`。
+
 ## 外部助手审查
 
 按用户授权调用已有 DeepSeek Harness。首次宽范围审查超时，没有采用其未完成输出；随后以低推理档审查一个文件写函数，11 秒完成且未使用工具。核实并修复空写返回错误，增加容量防御检查及对应宿主断言。审查回执在 `.cache/deepseek/runs/`，不包含提交或推送权限。

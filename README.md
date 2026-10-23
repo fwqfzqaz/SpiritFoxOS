@@ -13,7 +13,7 @@ python tools/bootstrap.py
 python tools/test.py
 ```
 
-第一步下载并校验 Zig 0.13.0、QEMU Windows 构建和 Monocypher 4.0.3。已提供的 Monocypher 源码在 `vendor/monocypher`。第二步执行基础服务、950 条内核 IPC/内存边界、108 条 openat、83 条截断、229 条 IOMMU 与 4069 条版本策略检查、22 组 Python 测试（含 3000 次变异）、783 个事务、3132 个更新及 3132 个截断故障场景，以及含真实越界 DMA、试运行、版本策略、目录授权、持久化截断、密钥轮换/撤销与旧密钥迁移、驱动死亡和恢复的 109 次 QEMU 启动。
+第一步下载并校验 Zig 0.13.0、QEMU Windows 构建和 Monocypher 4.0.3。已提供的 Monocypher 源码在 `vendor/monocypher`。第二步执行基础服务、950 条内核 IPC/内存边界、8155 条参数检查、108 条 openat、83 条截断、229 条 IOMMU 与 4069 条版本策略检查、22 组 Python 测试（含 3000 次变异）、783 个事务、3132 个更新及 3132 个截断故障场景，以及含真实越界 DMA、试运行、版本策略、目录授权、持久化截断、密钥轮换/撤销与旧密钥迁移、驱动死亡和恢复的 111 次 QEMU 启动。
 
 只构建：`python tools/build.py`。只运行宿主测试：`python tools/test.py --host-only`。已有镜像测试：`python tools/test.py --skip-build`。
 
@@ -44,6 +44,7 @@ python tools/qemu_test.py --interactive
 ls /disk/bin
 cat /disk/etc/readme.txt
 run /disk/bin/diskhello.sfk
+run argprobe.sfk alpha "two words" ''
 unmount /disk
 stop disk
 start disk
@@ -89,3 +90,5 @@ python tools/sfpack.py sign build/hello.sfk --seed .keys/application.seed
 目录授权示例：`runat /tmp fileprobe.sfk`、`runat /disk/etc readprobe.sfk`。只有显式选择目录且应用签名清单声明 namespace.read 时才授予只读访问；普通 run 不授予文件根。
 
 详见 [截断与补零扩展](docs/TRUNCATE.md)、[目录能力与 openat](docs/NAMESPACE.md)、[存储协议与磁盘格式](docs/STORAGE.md)、[事务持久化](docs/PERSISTENCE.md)、[实现边界](docs/IMPLEMENTATION.md)、[安全审查与修复](docs/SECURITY.md)、[测试记录](docs/TESTING.md) 和 [后续路线](docs/ROADMAP.md)。
+
+`run`/`runat` 可显式传递最多八个参数（含 argv[0]），支持引号、空字符串和转义。参数位于只读 BootArgs 页，解析错误不启动更新试运行；无额外参数保留空 argv 布局。SDK 和兼容边界见 [命令行参数](docs/ARGUMENTS.md)。

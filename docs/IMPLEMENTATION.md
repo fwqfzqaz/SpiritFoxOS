@@ -45,13 +45,13 @@ M6 新增 `/persist/notes` 的 16 KiB 有界读写适配器，每次成功 write
 
 当前 native 代码预先链接到虚拟地址 `0x40000000`，映像上限 2 MiB；sf-init 的装载暂存区上限 1 MiB，sf-native 返回计划最多 5 段。所有进程有独立页表，因此相同虚拟基址不会共享可写物理页。该受限配置不宣称实现设计说明中完整的位置无关、相对重定位和导入协议；非空 RELOC 一律拒绝。
 
-用户栈顶 `0x41010000`，大小 64 KiB；只读 BootArgs 在 `0x42000000`，其 argv/env 当前为空。只读启动包在 `0x60000000`，仅授予初始任务和 native 运行时。BootArgs 原 24 字节保留区现用于可选设备授权信息；驱动的 64 KiB 固定 DMA 区位于 `0x50000000`，普通应用没有该映射。普通应用通过 `_sf_start` 进入 main，并通过退出系统调用回收。
+用户栈顶 `0x41010000`，大小 64 KiB；只读 BootArgs 在 `0x42000000`，显式调用支持最多八个 argv，头保持 96 字节，规范偏移表和字符串使对象总长最多 608；无额外参数保留旧 argc=0/96 字节布局，环境变量仍为空。Core 0 独立校验和复制载荷，SDK 与词法规则见 `ARGUMENTS.md`。只读启动包在 `0x60000000`，仅授予初始任务和 native 运行时。BootArgs 原 24 字节保留区现用于可选设备授权信息；驱动的 64 KiB 固定 DMA 区位于 `0x50000000`，普通应用没有该映射。普通应用通过 `_sf_start` 进入 main，并通过退出系统调用回收。
 
-本开发版本保持 BootArgs 总长 96 字节，把尾部设备 BDF 的高 16 位定义为 device_rights；装载计划相应字段传递显式写权。只读驱动模式和带 FLUSH 的可写模式分别协商。尚未冻结 ABI，不承诺兼容此前构建的设备驱动包。
+本开发版本保持 BootArgs 固定头 96 字节，把尾部设备 BDF 的高 16 位定义为 device_rights；装载计划相应字段传递显式写权。只读驱动模式和带 FLUSH 的可写模式分别协商。尚未冻结 ABI，不承诺兼容此前构建的设备驱动包。
 
 设备释放先复位并确认状态、禁用 PCI Bus Master，再撤销 I/O 权和可选 IOMMU context。DMA 页始终保留；只有旧地址空间销毁后才允许新驱动使用。复位或失效不能确认时进入隔离状态并禁止新授权。默认无 DMAR 时是 legacy 可信驱动模式；QEMU q35 可选 Intel VT-d + modern virtio ACCESS_PLATFORM，实际把未授权 RAM DMA 阻止在设备页表之外。完整限制见 `IOMMU.md`。
 
-VT-d 实现验证 ACPI/DMAR，发布一个 BDF 的固定 64 KiB DMA 域并执行同步失效；没有通用恒等 DMA 映射。支持已核实的 modern BAR4 布局，驱动仅获授其 16 KiB uncached MMIO。BootArgs 新增只由内核报告的 ISOLATED/MODERN 标志，`dma_physical` 在隔离模式表示 IOVA，`device_io` 在 modern 模式表示用户 MMIO 基址。原 ABI 总长度仍为 96 字节，尚未冻结。
+VT-d 实现验证 ACPI/DMAR，发布一个 BDF 的固定 64 KiB DMA 域并执行同步失效；没有通用恒等 DMA 映射。支持已核实的 modern BAR4 布局，驱动仅获授其 16 KiB uncached MMIO。BootArgs 新增只由内核报告的 ISOLATED/MODERN 标志，`dma_physical` 在隔离模式表示 IOVA，`device_io` 在 modern 模式表示用户 MMIO 基址。固定头仍为 96 字节，尚未冻结。
 
 内核 VT-d 控制 MMIO 是 supervisor/NX，普通应用实际访问会页故障。越界 DMA 的硬件记录触发驱动复位、撤销、终止与永久设备隔离，测试再次创建拥有者也被内核拒绝。该范围不包括中断重映射、ACS、真实硬件和任意设备；不将 QEMU RAM DMA 负例称为完整物理设备安全证明。
 

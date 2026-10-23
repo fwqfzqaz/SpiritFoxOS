@@ -16,6 +16,8 @@ args = parser.parse_args()
 started = time.time()
 if not args.skip_build:
     build.main()
+build.run(['-target', 'x86_64-windows-gnu', '-g0', '-O2', '-Wall', '-Wextra', '-Werror', '-Iinclude', 'tests/test_arguments.c', 'services/arguments.c', 'services/argparse.c', '-o', 'build/test_arguments.exe'])
+subprocess.run([str(ROOT / 'build/test_arguments.exe')], check=True)
 build.run(['-target', 'x86_64-windows-gnu', '-g0', '-O2', '-Wall', '-Wextra', '-Werror', '-Iinclude', 'tests/test_services.c', 'services/manager.c', 'services/namespace.c', '-o', 'build/test_services.exe'])
 subprocess.run([str(ROOT / 'build/test_services.exe')], check=True)
 build.run(['-target', 'x86_64-windows-gnu', '-g0', '-O2', '-Wall', '-Wextra', '-Werror', '-Iinclude', 'tests/test_openat.c', 'services/namespace.c', '-o', 'build/test_openat.exe'])
@@ -41,6 +43,7 @@ subprocess.run([sys.executable, 'tests/test_packages.py'], check=True)
 subprocess.run([sys.executable, 'tests/test_trust.py'], check=True)
 subprocess.run([sys.executable, 'tests/test_readfs.py'], check=True)
 if not args.host_only:
+    subprocess.run([sys.executable, 'tools/qemu_arguments_test.py'], check=True)
     subprocess.run([sys.executable, 'tools/qemu_trust_test.py'], check=True)
     for memory in [128, 256, 512]:
         subprocess.run([sys.executable, 'tools/qemu_test.py', '--memory', str(memory)], check=True)
@@ -73,6 +76,8 @@ result['truncate_qemu'] = not args.host_only
 result['trust_policy_host'] = True
 result['trust_policy_host_groups'] = 7
 result['separate_signing_keys'] = True
+result['arguments_host_checks'] = 8155
+result['arguments_qemu'] = not args.host_only
 result['trust_policy_qemu'] = not args.host_only
 result['trust_policy_qemu_boots'] = 0 if args.host_only else 14
 result['artifacts_sha256'] = {name: hashlib.sha256((ROOT/'build'/name).read_bytes()).hexdigest() for name in ['esp/EFI/BOOT/BOOTX64.EFI', 'storage.img', 'persistent.img', 'development.pub', 'application.pub', 'trust-policy.json']}

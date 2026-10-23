@@ -13,6 +13,8 @@
 #define SF_DMA_BYTES 65536u
 #define SF_MAX_TASKS 12
 #define SF_MSG_BYTES 256
+#define SF_ARGUMENT_MAX 8u
+#define SF_ARGUMENT_BYTES 512u
 /* SYS_TASK_STATUS must not confuse a live task with any int32_t exit code. */
 #define SF_TASK_RUNNING 0x100000000ll
 enum { SF_OK=0, SF_INVALID=-1, SF_DENIED=-2, SF_BAD_FORMAT=-3,
@@ -70,11 +72,13 @@ typedef struct {
  SfBootSegment init_segments[8];
 } SfBootInfo;
 typedef struct { uint64_t rva,bytes,data; uint32_t flags,reserved; } SfLoadSegment;
+typedef struct { uint32_t count,bytes; uint8_t data[SF_ARGUMENT_BYTES]; } SfArguments;
 typedef struct {
  uint32_t size,count; uint64_t entry;
  uint32_t grant_manager,grant_service,service_rights,grant_bundle;
  uint32_t grant_device,device_rights;
  SfLoadSegment segments[8];
+ SfArguments arguments;
 } SfLoadPlan;
 typedef struct {uint64_t rva,memory,offset,bytes;uint32_t flags,reserved;} SfNativeSegment;
 typedef struct {uint64_t entry;uint32_t count,reserved;SfNativeSegment segments[5];} SfNativePlan;

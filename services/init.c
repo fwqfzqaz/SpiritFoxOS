@@ -5,6 +5,7 @@
 #include "storage.h"
 #include "persistence.h"
 #include "trust.h"
+#include "arguments.h"
 static const SfBootArgs*boot;
 static uint32_t manager_ep;static SfManager manager;static SfNamespace ns;
 static int runtime_slot,echo_slot;static uint32_t runtime_pid,runtime_ep,echo_pid,echo_ep;
@@ -15,8 +16,9 @@ static Child children[16];static uint64_t requests;
 static long console_write(const void*p,size_t n){return sf_sys(SYS_LOG,(uint64_t)p,n,0);}
 static int package_get(const char*name,SfPackage*p){const uint8_t*d;uint64_t n;if(name[0]=='/'){long r=!strcmp(name,"/installed.sfk")?sf_persist_package(package_snapshot,sizeof(package_snapshot)):sf_storage_load(name,package_snapshot,sizeof(package_snapshot));return r<0?r:sf_package_open_trusted(p,package_snapshot,r,&sf_trust_store);}int r=sf_bundle_find((void*)boot->bundle,boot->bundle_bytes,name,&d,&n);return r?r:sf_package_open_trusted(p,d,n,&sf_trust_store);}
 static int native_upload(const SfPackage*p){for(uint64_t off=0;off<p->bytes;){SfMessage m;sf_message(&m,OP_NATIVE_STAGE,++requests);m.handle=p->bytes;m.offset=off;m.length=p->bytes-off;if(m.length>sizeof(m.data))m.length=sizeof(m.data);uint32_t sent=m.length;memcpy(m.data,p->data+off,sent);int rc=sf_send(runtime_ep,&m);if(rc)return rc;long from=sf_recv(manager_ep,&m,sf_deadline(1000));if(from!=(long)runtime_pid||m.h.request_id!=requests)return from<0?from:SF_STALE_HANDLE;if(m.status)return m.status;off+=sent;if(m.offset!=off)return SF_BAD_FORMAT;}return 0;}
-static int spawn_package_policy(const char*name,uint32_t service,uint32_t rights,uint32_t device,uint32_t device_rights,int directory){
+static int spawn_package_policy(const char*name,uint32_t service,uint32_t rights,uint32_t device,uint32_t device_rights,int directory,const SfArguments*arguments){
  SfPackage p;int r=package_get(name,&p);if(r)return r;
+ if(arguments&&arguments->count&&p.kind!=2)return SF_DENIED;
  if(directory){r=sf_manifest_capability(&p,"namespace.read");if(r<0)return r;if(p.kind!=2||r!=1)return SF_DENIED;}
  if(p.kind==2){char id[96];if(sf_manifest_text(&p,"runtime_id",id,sizeof(id))||strcmp(id,"org.spiritfox.native")||manager.modules[runtime_slot].state!=MOD_ACTIVE)return SF_DEPENDENCY;
   if(sf_sys(SYS_TASK_STATUS,runtime_pid,0,0)!=SF_TASK_RUNNING)return SF_DEVICE_GONE;
@@ -26,13 +28,14 @@ static int spawn_package_policy(const char*name,uint32_t service,uint32_t rights
  }
  SfLoadPlan plan={0};plan.size=sizeof(plan);plan.entry=p.entry;plan.grant_manager=manager_ep;plan.grant_service=service;plan.service_rights=rights;plan.grant_bundle=!strcmp(name,"sf-native.sfmod");
  plan.grant_device=device;plan.device_rights=device_rights;
+ if(arguments)plan.arguments=*arguments;
  size_t used=0;for(unsigned i=0;i<p.count;i++){SfSection*s=&p.sections[i];if(s->type>3)continue;size_t mem=(s->memory+4095)&~4095ull;if(mem>sizeof(staging)-used||plan.count==8)return SF_NO_SPACE;memset(staging+used,0,mem);memcpy(staging+used,p.data+s->offset,s->bytes);plan.segments[plan.count++]=(SfLoadSegment){s->rva,s->memory,(uint64_t)(staging+used),s->flags,0};used+=mem;}
  return sf_sys(SYS_SPAWN,(uint64_t)&plan,0,0);
 }
-static int spawn_package_device(const char*name,uint32_t service,uint32_t rights,uint32_t device,uint32_t device_rights){return spawn_package_policy(name,service,rights,device,device_rights,0);}
+static int spawn_package_device(const char*name,uint32_t service,uint32_t rights,uint32_t device,uint32_t device_rights){return spawn_package_policy(name,service,rights,device,device_rights,0,0);}
 static int spawn_package(const char*name,uint32_t service,uint32_t rights){return spawn_package_device(name,service,rights,0,0);}
 static Child*child(uint32_t pid){for(unsigned i=0;i<16;i++)if(children[i].pid==pid)return&children[i];return 0;}
-static int launch_app_root(const char*name,const char*root){
+static int launch_app_root_args(const char*name,const char*root,const SfArguments*arguments){
  if(!strcmp(name,"installed"))name="/installed.sfk";
  int slot=-1;for(unsigned i=0;i<16;i++)if(!children[i].pid){slot=i;break;}if(slot<0)return SF_NO_SPACE;
  /* Reserve and pin the directory before creating a child. No failure after
@@ -40,12 +43,13 @@ static int launch_app_root(const char*name,const char*root){
  int directory=root?sf_ns_open(&ns,1,"/",root,OPEN_READ|OPEN_DIRECTORY):0;if(directory<0)return directory;
  int ep=0,r=sfmod_acquire(&manager,runtime_slot,RES_LEASE);if(r)goto fail_root;
  ep=sf_sys(SYS_EP_CREATE,0,0,0);if(ep<0){r=ep;goto fail_lease;}
- int pid=spawn_package_policy(name,ep,RIGHT_RECV,0,0,directory!=0);if(pid<0){r=pid;goto fail_lease;}
+ int pid=spawn_package_policy(name,ep,RIGHT_RECV,0,0,directory!=0,arguments);if(pid<0){r=pid;goto fail_lease;}
  if(directory)ns.handles[(directory&255)-1].owner=pid;
  children[slot]=(Child){pid,ep,directory,1};return pid;
 fail_lease:if(ep>0)sf_sys(SYS_CAP_REVOKE,ep,0,0);sfmod_release(&manager,runtime_slot,RES_LEASE);
 fail_root:if(directory)sf_ns_close(&ns,1,directory);return r;
 }
+static int launch_app_root(const char*name,const char*root){return launch_app_root_args(name,root,0);}
 static int launch_app(const char*name){return launch_app_root(name,0);}
 static void app_reap(uint32_t pid){Child*c=child(pid);if(!c)return;sf_ns_reap(&ns,pid);sf_sys(SYS_CAP_REVOKE,c->reply,0,0);if(c->lease)sfmod_release(&manager,runtime_slot,RES_LEASE);memset(c,0,sizeof(*c));}
 static int serve_once(unsigned timeout_ms){
@@ -105,6 +109,8 @@ static void lifecycle_tests(void){
 static void runtime_tests(void){
  SfLoadPlan bad={0};bad.size=sizeof(bad);bad.count=1;bad.segments[0]=(SfLoadSegment){0,4096,(uint64_t)staging,7,0};sf_assert(sf_sys(SYS_SPAWN,(uint64_t)&bad,0,0)==SF_INVALID,"process service rejects actual RWX load plan");
  bad.segments[0].flags=5;bad.device_rights=SF_DEVICE_WRITE;sf_assert(sf_sys(SYS_SPAWN,(uint64_t)&bad,0,0)==SF_INVALID,"process service rejects write right without device");bad.grant_device=1;bad.device_rights=2;sf_assert(sf_sys(SYS_SPAWN,(uint64_t)&bad,0,0)==SF_INVALID,"process service rejects unknown device rights");
+ bad.grant_device=bad.device_rights=0;bad.arguments.count=SF_ARGUMENT_MAX+1;sf_assert(sf_sys(SYS_SPAWN,(uint64_t)&bad,0,0)==SF_INVALID,"kernel rejects argument count overflow");
+ bad.arguments.count=1;bad.arguments.bytes=5;sf_assert(sf_sys(SYS_SPAWN,(uint64_t)&bad,0,0)==SF_INVALID,"kernel rejects argument offset into header");sf_log("ARGUMENT PLAN TESTS PASSED\n");
  int ep=sf_sys(SYS_EP_CREATE,0,0,0);SfMessage message;sf_message(&message,OP_ECHO,1);message.h.cap_count=1;sf_assert(sf_send(ep,&message)==SF_INVALID,"message cannot forge transferred capabilities");message.h.cap_count=0;
  for(unsigned i=0;i<8;i++)sf_assert(!sf_send(ep,&message),"bounded IPC queue accepts capacity");sf_assert(sf_send(ep,&message)==SF_WOULD_BLOCK,"full IPC queue applies backpressure");for(unsigned i=0;i<8;i++)sf_recv(ep,&message,sf_deadline(100));sf_assert(sf_recv(ep,&message,sf_deadline(20))==SF_TIMEOUT,"blocked receive expires on monotonic deadline");sf_sys(SYS_CAP_REVOKE,ep,0,0);
  int hello=launch_app("hello.sfk");sf_assert(hello>0,"sfexec validates and launches hello.sfk");sfmod_prepare(&manager,runtime_slot);sf_assert(sfmod_stop(&manager,runtime_slot)==SF_DEPENDENCY,"application pins runtime lease");sfmod_cancel(&manager,runtime_slot);
@@ -122,12 +128,19 @@ static void runtime_tests(void){
  sf_assert(launch_app("hello.sfk")==SF_STALE_HANDLE,"missing runtime returns diagnostic error");sfmod_start(&manager,runtime_slot);
  sf_sys(SYS_KILL,runtime_pid,SF_DEVICE_GONE,0);sf_assert(launch_app("hello.sfk")==SF_DEVICE_GONE&&!echo_call(echo_ep,echo_pid),"runtime death is diagnosed without harming other services");sfmod_prepare(&manager,runtime_slot);sfmod_stop(&manager,runtime_slot);sf_sys(SYS_CAP_REVOKE,runtime_ep,0,0);sfmod_start(&manager,runtime_slot);runtime_ep=sf_sys(SYS_EP_CREATE,0,0,0);runtime_pid=spawn_package("sf-native.sfmod",runtime_ep,RIGHT_RECV);sf_assert(runtime_pid>0,"runtime restarts after failure");
 }
-static void run_command(const char*name,const char*root){
+static void run_command(const char*name,const char*root,const SfArguments*arguments){
  int status=0;if(root){int h=sf_ns_open(&ns,1,"/",root,OPEN_READ|OPEN_DIRECTORY);if(h<0)status=h;else sf_ns_close(&ns,1,h);}
  if(!status){int installed=!strcmp(name,"installed")||!strcmp(name,"/installed.sfk");int trial=installed?sf_persist_begin():0;status=trial;
-  if(trial>=0){int pid=launch_app_root(name,root);status=pid>0?wait_app(pid):pid;if(trial){int r=sf_persist_finish(!status);if(r)status=r;}}
+  if(trial>=0){int pid=launch_app_root_args(name,root,arguments);status=pid>0?wait_app(pid):pid;if(trial){int r=sf_persist_finish(!status);if(r)status=r;}}
  }
  if(!status)sf_log("sfexec: exit 0\n");else{sf_log("sfexec: failed code=");sf_number(status<0?-status:status);sf_log("\n");}
+}
+static void run_line(char*line,int directory){
+ char*words[SF_ARGUMENT_MAX+1];int count=sf_arguments_split(line,words,SF_ARGUMENT_MAX+directory),status=0;unsigned start=directory?1:0;SfArguments arguments;
+ if(count<0)status=count;else if((unsigned)count<=start||!words[start][0])status=SF_INVALID;
+ if(!status){unsigned argc=count-start;if(argc>1)status=sf_arguments_pack(&arguments,(const char*const*)(words+start),argc);
+  if(!status){run_command(words[start],directory?words[0]:0,argc>1?&arguments:0);return;}}
+ sf_log("sfexec: failed code=");sf_number(-status);sf_log("\n");
 }
 static int parse_size(const char*text,uint64_t*out){
  if(!*text)return SF_INVALID;uint64_t n=0;for(;*text;text++){if(*text<'0'||*text>'9')return SF_INVALID;unsigned digit=*text-'0';if(n>(UINT64_MAX-digit)/10)return SF_INVALID;n=n*10+digit;}*out=n;return 0;
@@ -141,7 +154,7 @@ static void trust_show(void){
  }
 }
 static void command(char*line){
- if(!strcmp(line,"help")){sf_log("help | ls [path] | cat <path> | write <path> <text> | truncate <path> <bytes> | modules | trust | echo | run <app.sfk or installed> | runat <read-only-dir> <app> | install /disk/bin/app.sfk | persist | stop echo | start echo | mount /disk | unmount /disk | stop disk | start disk | selftest | shutdown\n");}
+ if(!strcmp(line,"help")){sf_log("help | ls [path] | cat <path> | write <path> <text> | truncate <path> <bytes> | modules | trust | echo | run <app.sfk or installed> [args] | runat <read-only-dir> <app> [args] | install /disk/bin/app.sfk | persist | stop echo | start echo | mount /disk | unmount /disk | stop disk | start disk | selftest | shutdown\n");}
  else if(!strcmp(line,"persist"))sf_persist_status();
  else if(!strcmp(line,"dma-test write"))sf_storage_dma_probe(0);
  else if(!strcmp(line,"dma-test read"))sf_storage_dma_probe(1);
@@ -150,8 +163,8 @@ static void command(char*line){
  else if(!strcmp(line,"trust"))trust_show();
  else if(!strcmp(line,"modules")){sf_log("sf-init ACTIVE pinned; sf-native ");sf_log(manager.modules[runtime_slot].state==MOD_ACTIVE?"ACTIVE":"STOPPED");sf_log("; echo ");sf_log(manager.modules[echo_slot].state==MOD_ACTIVE?"ACTIVE\n":"STOPPED\n");}
  else if(!strcmp(line,"echo")){sf_log(echo_call(echo_ep,echo_pid)==0?"echo: ping\n":"echo: service unavailable\n");}
- else if(!memcmp(line,"run ",4))run_command(line+4,0);
- else if(!memcmp(line,"runat ",6)){char*root=line+6,*name=root;while(*name&&*name!=' ')name++;if(!*name||!name[1])sf_log("runat: expected directory and application\n");else{*name++=0;run_command(name,root);}}
+ else if(!memcmp(line,"run ",4))run_line(line+4,0);
+ else if(!memcmp(line,"runat ",6))run_line(line+6,1);
  else if(!memcmp(line,"truncate ",9)){char*path=line+9,*text=path;while(*text&&*text!=' ')text++;uint64_t bytes=0;int r=SF_INVALID;
   if(*text){*text++=0;r=parse_size(text,&bytes);if(!r){int h=sf_ns_open(&ns,1,"/",path,OPEN_WRITE);r=h<0?h:sf_ns_truncate(&ns,1,h,bytes);if(h>=0)sf_ns_close(&ns,1,h);}}
   if(!r)sf_log("truncate: OK\n");else{sf_log("truncate: failed code=");sf_number(-r);sf_log("\n");}}
