@@ -18,7 +18,7 @@ ROOT = qemu_test.ROOT
 class VM:
     def __init__(self, disk, name, extra=(), debug=None, stop_on_error=False, iommu=False, writable=True, memory=256, iommu_options=None, legacy=False):
         print('Persistence VM: '+name,flush=True)
-        shutil.copyfile(ROOT/'.tools/qemu/share/edk2-i386-vars.fd', ROOT/'build/OVMF_VARS.fd')
+        shutil.copyfile(qemu_test.VARS_SRC, ROOT/'build/OVMF_VARS.fd')
         args = qemu_test.command(memory=memory,disk=disk,writable=writable,iommu=iommu)
         if iommu_options:
             args[args.index(next(x for x in args if x.startswith('intel-iommu,')))]=iommu_options
@@ -135,12 +135,12 @@ def snapshot(data):
     gen,slot = max(records)
     bank = (2051+slot*256)*512
     files = {}
-    for i in range(4):
+    for i in range(5):
         entry = bank+512+i*128
         name = data[entry:entry+64].split(b'\0',1)[0].decode()
         if name:
             size = struct.unpack_from('<I',data,entry+64)[0]
-            files[name] = bytes(data[bank+1024+i*16384:bank+1024+i*16384+size])
+            files[name] = bytes(data[bank+1152+i*16384:bank+1152+i*16384+size])
     return gen,slot,files
 
 
@@ -149,13 +149,13 @@ def rewrite(data, changes):
     data = bytearray(data)
     _,slot,_ = snapshot(data)
     bank = (2051+slot*256)*512
-    for i in range(4):
+    for i in range(5):
         entry = bank+512+i*128
         name = data[entry:entry+64].split(b'\0',1)[0].decode()
         if name in changes:
             content = changes[name]
             assert len(content)<=16384
-            start = bank+1024+i*16384
+            start = bank+1152+i*16384
             data[start:start+16384] = content+bytes(16384-len(content))
             struct.pack_into('<I',data,entry+64,len(content))
             data[entry+96:entry+128] = hashlib.sha256(content).digest()
@@ -462,7 +462,7 @@ def run(iommu=False):
         vm.close()
     # Damage the newest snapshot: select previous complete generation.
     corrupted = bytearray(committed)
-    corrupted[(2051+256)*512+1024] ^= 1
+    corrupted[(2051+256)*512+1152] ^= 1
     disk.write_bytes(corrupted)
     vm = machine('fallback')
     try:

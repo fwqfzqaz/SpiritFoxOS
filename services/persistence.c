@@ -12,8 +12,13 @@ static int commit(const char*const*paths,const void*const*data,const uint32_t*by
  int r=sf_storage_transaction(1);if(r)return r;r=sf_txn_commit(&volume,paths,data,bytes,count);sf_storage_transaction(0);return r;
 }
 static const char*slot_path(char slot){return slot=='a'?"/slots/a.sfk":"/slots/b.sfk";}
-static int package_policy(const void*data,size_t bytes,char id[64],SfVersion*version){
- SfPackage p;int r=sf_package_open(&p,data,bytes,sf_trust_key);if(r)return r;char runtime[64];
+static int package_policy(const void*data,size_t bytes,char id[64],SfVersion*version,int enforce,const uint8_t**key_id){
+ SfPackage p;int r=sf_trust_open(&sf_trust,&p,data,bytes);char runtime[64];
+ /* State accounting only proves package integrity; callers decide whether a
+  * revoked signer may still be executed or staged. */
+ if(r==SF_REVOKED&&!enforce)r=0;
+ if(r)return r;
+ if(key_id)*key_id=p.key_id;
  if(p.kind!=2||sf_manifest_text(&p,"runtime_id",runtime,sizeof(runtime))||strcmp(runtime,"org.spiritfox.native"))return SF_DEPENDENCY;
  memset(id,0,64);r=sf_manifest_text(&p,"app_id",id,64);if(r)return r;
  char text[33];r=sf_manifest_text(&p,"version",text,sizeof(text));return r?r:sf_version_parse(version,text);
@@ -22,7 +27,7 @@ static int package_policy(const void*data,size_t bytes,char id[64],SfVersion*ver
  * counter can advance before the existing health-confirmation transaction. */
 static int confirmed_version(const SfUpdate*s,SfVersion*version){
  long n=sf_txn_get(&volume,slot_path(s->good),scratch,sizeof(scratch));if(n<0)return n;uint8_t hash[32];sf_sha256(hash,scratch,n);
- if(memcmp(hash,s->good_hash,32))return SF_BAD_SIGNATURE;char id[64];int r=package_policy(scratch,n,id,version);if(r)return r;return strcmp(id,s->app_id)?SF_DEPENDENCY:0;
+ if(memcmp(hash,s->good_hash,32))return SF_BAD_SIGNATURE;char id[64];int r=package_policy(scratch,n,id,version,0,0);if(r)return r;return strcmp(id,s->app_id)?SF_DEPENDENCY:0;
 }
 static int state_read(SfUpdate*s){
  uint8_t bytes[SF_UPDATE_BYTES];long n=sf_txn_get(&volume,"/boot/current",bytes,sizeof(bytes));
@@ -30,7 +35,7 @@ static int state_read(SfUpdate*s){
  /* Import the original selector only after authenticating its selected app. */
  if(n==1&&(bytes[0]=='a'||bytes[0]=='b')){
   memset(s,0,sizeof(*s));s->good=bytes[0];n=sf_txn_get(&volume,slot_path(s->good),scratch,sizeof(scratch));if(n<0)return n;
-  SfVersion version;int r=package_policy(scratch,n,s->app_id,&version);if(r)return r;sf_sha256(s->good_hash,scratch,n);
+  SfVersion version;int r=package_policy(scratch,n,s->app_id,&version,0,0);if(r)return r;sf_sha256(s->good_hash,scratch,n);
   return sf_update_encode(s,bytes);
  }
  return n<0?n:sf_update_decode(s,bytes,n);
@@ -59,6 +64,12 @@ int sf_persist_mount(SfNamespace*ns){
  int r=sf_txn_mount(&volume,sf_storage_sector_read,sf_storage_sector_write,sf_storage_flush,0);if(r)return r;
  r=sf_storage_write_range(SF_TXN_HEADER+1,SF_TXN_BANK+2*SF_TXN_BANK_SECTORS);if(r){volume.ready=0;return r;}
  sf_storage_write_tests();
+ /* Load persisted key revocations before any package is verified again, so
+  * a revocation committed before shutdown applies immediately after restart. */
+ long revoked=sf_txn_get(&volume,"/boot/revoked",scratch,sizeof(scratch));
+ if(revoked<0&&revoked!=SF_NOT_FOUND){volume.ready=0;return revoked;}
+ if(revoked>0&&revoked%32){volume.ready=0;return SF_BAD_FORMAT;}
+ for(long off=0;off<revoked;off+=32)if(sf_trust_revoke(&sf_trust,scratch+off)){volume.ready=0;return SF_NO_SPACE;}
  SfUpdate state;r=state_read(&state);if(r){volume.ready=0;return r;}
  if(state.phase==SF_UPDATE_TRYING){sf_update_finish(&state,0);r=state_commit(&state);if(r){volume.ready=0;return r;}sf_log("update: RECOVERED interrupted trial\n");}
  long n=sf_txn_get(&volume,"/notes/user",scratch,sizeof(scratch));if(n<0&&n!=SF_NOT_FOUND){volume.ready=0;return n;}
@@ -75,7 +86,7 @@ int sf_persist_install(const char*source){
  SfUpdate state;int r=state_read(&state);if(r)return r;if(state.phase!=SF_UPDATE_STABLE)return SF_BUSY;
  SfVersion floor,version;if(state.good){r=confirmed_version(&state,&floor);if(r)return r;}
  long n=sf_storage_load(source,scratch,sizeof(scratch));if(n<0)return n;
- char id[64];r=package_policy(scratch,n,id,&version);if(r)return r;uint8_t hash[32],encoded[SF_UPDATE_BYTES];sf_sha256(hash,scratch,n);
+ char id[64];r=package_policy(scratch,n,id,&version,1,0);if(r)return r;uint8_t hash[32],encoded[SF_UPDATE_BYTES];sf_sha256(hash,scratch,n);
  if(state.good){if(strcmp(state.app_id,id))return SF_DEPENDENCY;r=sf_version_upgrade(&floor,state.good_hash,&version,hash);if(r)return r;}
  r=sf_update_stage(&state,id,hash);if(r)return r;r=sf_update_encode(&state,encoded);if(r)return r;
  const char*paths[]={slot_path(state.candidate),"/boot/current"};const void*data[]={scratch,encoded};uint32_t lengths[]={n,sizeof(encoded)};
@@ -92,12 +103,35 @@ int sf_persist_finish(int success){
  r=sf_update_finish(&state,success);if(r)return r;r=state_commit(&state);if(r){sf_log("update: health commit failed\n");return r;}
  sf_log(success?"update: CONFIRMED\n":"update: ROLLED BACK\n");return 0;
 }
+/* Revoke the anchor key that signed a stored package. The package itself must
+ * carry a valid anchor signature; revocation then outlives restarts through
+ * the transaction volume. 1 means the signer was already revoked. */
+int sf_persist_revoke(const char*source){
+ if(!sf_storage_writable()||!volume.ready)return SF_DEVICE_GONE;
+ long n=sf_storage_load(source,scratch,sizeof(scratch));if(n<0)return n;
+ SfPackage p;int r=sf_trust_open(&sf_trust,&p,scratch,n);if(r==SF_REVOKED)return 1;if(r)return r;
+ if(sf_trust_revoked(&sf_trust,p.key_id))return 1;
+ uint8_t list[SF_TRUST_MAX*32];long old=sf_txn_get(&volume,"/boot/revoked",list,sizeof(list));
+ if(old<0&&old!=SF_NOT_FOUND)return old;if(old<0)old=0;
+ if(old%32||old+32>(long)sizeof(list))return SF_BAD_FORMAT;
+ if(sf_trust_revoke(&sf_trust,p.key_id))return SF_NO_SPACE;
+ memcpy(list+old,p.key_id,32);
+ const char*paths[]={"/boot/revoked"};const void*data[]={list};uint32_t lengths[]={old+32};
+ return commit(paths,data,lengths,1);
+}
+void sf_persist_trust_status(void){
+ sf_log("trust: anchors=");sf_number(sf_trust.count);sf_log(" revoked=");sf_number(sf_trust.revoked);sf_log("\n");
+ static const char hex[]="0123456789abcdef";
+ for(unsigned i=0;i<sf_trust.revoked;i++){sf_log("trust: revoked key=");char text[17];
+  for(unsigned j=0;j<8;j++){text[j*2]=hex[sf_trust.revoked_ids[i][j]>>4];text[j*2+1]=hex[sf_trust.revoked_ids[i][j]&15];}
+  text[16]=0;sf_log(text);sf_log("...\n");}
+}
 long sf_persist_package(void*out,size_t capacity){
  if(!sf_storage_writable())return SF_DEVICE_GONE;SfUpdate state;int r=state_read(&state);if(r)return r;
  if(state.phase==SF_UPDATE_PENDING)return SF_BUSY;char selected=state.phase==SF_UPDATE_TRYING?state.candidate:state.good;if(!selected)return SF_NOT_FOUND;
  long n=sf_txn_get(&volume,slot_path(selected),out,capacity);if(n<0)return n;uint8_t hash[32];sf_sha256(hash,out,n);
  if(memcmp(hash,state.phase==SF_UPDATE_TRYING?state.candidate_hash:state.good_hash,32))return SF_BAD_SIGNATURE;
- char id[64];SfVersion version;r=package_policy(out,n,id,&version);if(r)return r;if(strcmp(id,state.app_id))return SF_DEPENDENCY;
+ char id[64];SfVersion version;r=package_policy(out,n,id,&version,1,0);if(r)return r;if(strcmp(id,state.app_id))return SF_DEPENDENCY;
  /* Recheck pending records created by an older implementation, too. */
  if(state.phase==SF_UPDATE_TRYING&&state.good){SfVersion floor;r=confirmed_version(&state,&floor);if(r)return r;r=sf_version_upgrade(&floor,state.good_hash,&version,hash);if(r<0)return r;}
  return n;

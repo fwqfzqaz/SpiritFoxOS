@@ -11,10 +11,35 @@ import threading
 import time
 
 ROOT = Path(__file__).resolve().parents[1]
+# QEMU's vvfat driver creates temporary files through the host temp directory.
+# Keep them inside the workspace so a read-only /var/tmp cannot break boot.
+(ROOT / '.cache').mkdir(exist_ok=True)
+os.environ['TMPDIR'] = os.environ['TEMP'] = os.environ['TMP'] = str(ROOT / '.cache')
+LINUX = hasattr(os, 'uname') and os.uname().sysname == 'Linux'
+if LINUX:
+    import shutil
+    QEMU = shutil.which('qemu-system-x86_64')
+    FIRMWARE = VARS_SRC = None
+    # OVMF naming differs across distributions: Arch uses OVMF_CODE.4m.fd,
+    # Debian/Ubuntu use OVMF_CODE_4M.fd, and older packages use OVMF_CODE.fd.
+    for base in ('/usr/share/ovmf/x64', '/usr/share/OVMF', '/usr/share/edk2/x64'):
+        for code_name, vars_name in (('OVMF_CODE.4m.fd', 'OVMF_VARS.4m.fd'),
+                                     ('OVMF_CODE_4M.fd', 'OVMF_VARS_4M.fd'),
+                                     ('OVMF_CODE.fd', 'OVMF_VARS.fd')):
+            code, vars_ = Path(base) / code_name, Path(base) / vars_name
+            if code.exists() and vars_.exists():
+                FIRMWARE, VARS_SRC = code, vars_
+                break
+        if FIRMWARE:
+            break
+else:
+    QEMU = str(ROOT / '.tools/qemu/qemu-system-x86_64.exe')
+    FIRMWARE = ROOT / '.tools/qemu/share/edk2-x86_64-code.fd'
+    VARS_SRC = ROOT / '.tools/qemu/share/edk2-i386-vars.fd'
 
 
 def command(memory=256, disk=None, writable=False, ioerror=False, iommu=False):
-    args = [str(ROOT / '.tools/qemu/qemu-system-x86_64.exe'), '-L', str(ROOT / '.tools/qemu/share'), '-machine', 'q35', '-accel', 'tcg', '-cpu', 'qemu64,+nx', '-m', str(memory), '-smp', '1', '-drive', 'if=pflash,format=raw,readonly=on,file='+str(ROOT / '.tools/qemu/share/edk2-x86_64-code.fd'), '-drive', 'if=pflash,format=raw,file='+str(ROOT / 'build/OVMF_VARS.fd'), '-drive', 'format=raw,file=fat:rw:'+str(ROOT / 'build/esp'), '-net', 'none', '-display', 'none', '-serial', 'stdio', '-monitor', 'none', '-no-reboot', '-device', 'isa-debug-exit,iobase=0xf4,iosize=0x04']
+    args = [str(QEMU), '-machine', 'q35', '-accel', 'tcg', '-cpu', 'qemu64,+nx', '-m', str(memory), '-smp', '1', '-drive', 'if=pflash,format=raw,readonly=on,file='+str(FIRMWARE), '-drive', 'if=pflash,format=raw,file='+str(ROOT / 'build/OVMF_VARS.fd'), '-drive', 'format=raw,file=fat:rw:'+str(ROOT / 'build/esp'), '-net', 'none', '-display', 'none', '-serial', 'stdio', '-monitor', 'none', '-no-reboot', '-device', 'isa-debug-exit,iobase=0xf4,iosize=0x04']
     if iommu:
         args += ['-device','intel-iommu,intremap=off,caching-mode=on,device-iotlb=off,aw-bits=39']
     if disk:
@@ -26,9 +51,11 @@ def command(memory=256, disk=None, writable=False, ioerror=False, iommu=False):
 
 
 def run(memory=256, interactive=False, storage='normal', persistent=False, iommu=False):
+    if not QEMU or not FIRMWARE:
+        raise RuntimeError('Linux needs qemu-system-x86_64 and OVMF (ovmf package) installed')
     os.chdir(ROOT)
-    os.environ['TEMP'] = os.environ['TMP'] = str(ROOT / '.cache')
-    shutil.copyfile(ROOT / '.tools/qemu/share/edk2-i386-vars.fd', ROOT / 'build/OVMF_VARS.fd')
+    os.environ['TMPDIR'] = os.environ['TEMP'] = os.environ['TMP'] = str(ROOT / '.cache')
+    shutil.copyfile(VARS_SRC, ROOT / 'build/OVMF_VARS.fd')
     if persistent:
         if not interactive:
             raise ValueError('Use --interactive with --persistent')

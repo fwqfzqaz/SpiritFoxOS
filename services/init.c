@@ -13,7 +13,7 @@ static uint8_t package_snapshot[SF_READFS_FILE_MAX];
 typedef struct {uint32_t pid,reply,root;int lease;} Child;
 static Child children[16];static uint64_t requests;
 static long console_write(const void*p,size_t n){return sf_sys(SYS_LOG,(uint64_t)p,n,0);}
-static int package_get(const char*name,SfPackage*p){const uint8_t*d;uint64_t n;if(name[0]=='/'){long r=!strcmp(name,"/installed.sfk")?sf_persist_package(package_snapshot,sizeof(package_snapshot)):sf_storage_load(name,package_snapshot,sizeof(package_snapshot));return r<0?r:sf_package_open(p,package_snapshot,r,sf_trust_key);}int r=sf_bundle_find((void*)boot->bundle,boot->bundle_bytes,name,&d,&n);return r?r:sf_package_open(p,d,n,sf_trust_key);}
+static int package_get(const char*name,SfPackage*p){const uint8_t*d;uint64_t n;if(name[0]=='/'){long r=!strcmp(name,"/installed.sfk")?sf_persist_package(package_snapshot,sizeof(package_snapshot)):sf_storage_load(name,package_snapshot,sizeof(package_snapshot));return r<0?r:sf_trust_open(&sf_trust,p,package_snapshot,r);}int r=sf_bundle_find((void*)boot->bundle,boot->bundle_bytes,name,&d,&n);return r?r:sf_trust_open(&sf_trust,p,d,n);}
 static int native_upload(const SfPackage*p){for(uint64_t off=0;off<p->bytes;){SfMessage m;sf_message(&m,OP_NATIVE_STAGE,++requests);m.handle=p->bytes;m.offset=off;m.length=p->bytes-off;if(m.length>sizeof(m.data))m.length=sizeof(m.data);uint32_t sent=m.length;memcpy(m.data,p->data+off,sent);int rc=sf_send(runtime_ep,&m);if(rc)return rc;long from=sf_recv(manager_ep,&m,sf_deadline(1000));if(from!=(long)runtime_pid||m.h.request_id!=requests)return from<0?from:SF_STALE_HANDLE;if(m.status)return m.status;off+=sent;if(m.offset!=off)return SF_BAD_FORMAT;}return 0;}
 static int spawn_package_policy(const char*name,uint32_t service,uint32_t rights,uint32_t device,uint32_t device_rights,int directory){
  SfPackage p;int r=package_get(name,&p);if(r)return r;
@@ -133,7 +133,9 @@ static int parse_size(const char*text,uint64_t*out){
  if(!*text)return SF_INVALID;uint64_t n=0;for(;*text;text++){if(*text<'0'||*text>'9')return SF_INVALID;unsigned digit=*text-'0';if(n>(UINT64_MAX-digit)/10)return SF_INVALID;n=n*10+digit;}*out=n;return 0;
 }
 static void command(char*line){
- if(!strcmp(line,"help")){sf_log("help | ls [path] | cat <path> | write <path> <text> | truncate <path> <bytes> | modules | echo | run <app.sfk or installed> | runat <read-only-dir> <app> | install /disk/bin/app.sfk | persist | stop echo | start echo | mount /disk | unmount /disk | stop disk | start disk | selftest | shutdown\n");}
+ if(!strcmp(line,"help")){sf_log("help | ls [path] | cat <path> | write <path> <text> | truncate <path> <bytes> | modules | echo | run <app.sfk or installed> | runat <read-only-dir> <app> | install /disk/bin/app.sfk | revoke-key /disk/pkg | trust | persist | stop echo | start echo | mount /disk | unmount /disk | stop disk | start disk | selftest | shutdown\n");}
+ else if(!strcmp(line,"trust"))sf_persist_trust_status();
+ else if(!memcmp(line,"revoke-key ",11)){int r=sf_persist_revoke(line+11);if(!r)sf_log("revoke: OK\n");else if(r==1)sf_log("revoke: UNCHANGED\n");else{sf_log("revoke: failed code=");sf_number(-r);sf_log("\n");}}
  else if(!strcmp(line,"persist"))sf_persist_status();
  else if(!strcmp(line,"dma-test write"))sf_storage_dma_probe(0);
  else if(!strcmp(line,"dma-test read"))sf_storage_dma_probe(1);
@@ -161,6 +163,7 @@ static void command(char*line){
 }
 long sf_main(const SfBootArgs*a,size_t size){
  boot=a;if(size!=sizeof(*a)||a->abi_major!=1||!a->bundle)return SF_INVALID;
+ if(sf_trust_init(&sf_trust,sf_trust_keys,sf_trust_count))return SF_INVALID;
  sf_log("[INIT] sf-init.sfmod in ring 3; services live outside Core 0\n");manager_ep=sf_sys(SYS_EP_CREATE,0,0,0);
  int init=sfmod_add(&manager,"org.spiritfox.init",0,1);sfmod_start(&manager,init);runtime_slot=sfmod_add(&manager,"org.spiritfox.native",0,0);sfmod_start(&manager,runtime_slot);
  echo_slot=sfmod_add(&manager,"org.spiritfox.echo",0,0);sfmod_start(&manager,echo_slot);echo_ep=sf_sys(SYS_EP_CREATE,0,0,0);echo_pid=spawn_package("echo.sfmod",echo_ep,RIGHT_RECV);sf_assert((int)echo_pid>0,"verified echo.sfmod staged in private address space");

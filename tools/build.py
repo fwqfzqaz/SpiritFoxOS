@@ -17,9 +17,13 @@ for key in ['TEMP', 'TMP', 'TMPDIR', 'XDG_CACHE_HOME', 'ZIG_GLOBAL_CACHE_DIR', '
     os.environ[key] = str(ROOT / '.cache' / key.lower())
     Path(os.environ[key]).mkdir(exist_ok=True)
 os.environ['PYTHONPYCACHEPREFIX'] = str(ROOT / '.cache' / 'pycache')
-ZIG = str(ROOT / '.tools/zig/zig.exe')
+LINUX = hasattr(os, 'uname') and os.uname().sysname == 'Linux'
+ZIG = str(ROOT / ('.tools/zig/zig' if LINUX else '.tools/zig/zig.exe'))
+# Host tests run natively; the EFI stub stays PE/COFF through the windows-gnu target.
+HOST = 'x86_64-linux-gnu' if LINUX else 'x86_64-windows-gnu'
+EXE = '' if LINUX else '.exe'
 COMMON = ['-Iinclude', '-Ivendor/monocypher', '-Ibuild', '-g0', '-ffreestanding', '-fno-builtin', '-fno-stack-protector', '-fno-unwind-tables', '-fno-asynchronous-unwind-tables', '-O2', '-Wall', '-Wextra', '-Werror', '-Wno-unused-parameter', '-mno-red-zone', '-mno-mmx', '-mno-sse', '-mno-sse2']
-CRYPTO = ['services/package.c', 'services/sha256.c', 'vendor/monocypher/monocypher.c', 'vendor/monocypher/monocypher-ed25519.c']
+CRYPTO = ['services/trust.c', 'services/package.c', 'services/sha256.c', 'vendor/monocypher/monocypher.c', 'vendor/monocypher/monocypher-ed25519.c']
 
 
 def run(args):
@@ -52,16 +56,28 @@ def link_elf(name, objs, script):
 
 def main():
     print('Building host package verifier', flush=True)
-    run(['-target', 'x86_64-windows-gnu', '-shared', '-O2', '-Iinclude', '-Ivendor/monocypher', 'tools/crypto_host.c', 'services/readfs.c', *CRYPTO, '-o', 'build/sfcrypto.dll'])
+    crypto_lib = 'build/sfcrypto.dll' if not LINUX else 'build/sfcrypto.so'
+    pic = ['-fPIC'] if LINUX else []
+    run(['-target', HOST, '-shared', '-O2', *pic, '-Iinclude', '-Ivendor/monocypher', 'tools/crypto_host.c', 'services/readfs.c', *CRYPTO, '-o', crypto_lib])
     keys = ROOT / '.keys'
     keys.mkdir(exist_ok=True)
     seedfile = keys / 'development.seed'
     if not seedfile.exists():
         seedfile.write_bytes(os.urandom(32))
     seed = seedfile.read_bytes()
-    pub = Crypto().key(seed)[1]
+    crypto = Crypto()
+    pub = crypto.key(seed)[1]
+    # Two anchors: the active development key plus the standby key used for
+    # rotation. Both sign valid packages; revocation (services/trust.c) is what
+    # retires a signer after the fact.
+    backup = keys / 'backup.seed'
+    if not backup.exists():
+        backup.write_bytes(os.urandom(32))
+    backup_pub = crypto.key(backup.read_bytes())[1]
     Path('build/development.pub').write_bytes(pub)
-    Path('build/trust.h').write_text('static const unsigned char sf_trust_key[32]={' + ','.join(map(str, pub)) + '};\n')
+    Path('build/backup.pub').write_bytes(backup_pub)
+    anchors = '#define sf_trust_count 2u\nstatic const unsigned char sf_trust_keys[sf_trust_count][32]={' + ','.join('{'+','.join(map(str, k))+'}' for k in (pub, backup_pub)) + '};\n'
+    Path('build/trust.h').write_text(anchors)
     print('Building userspace packages', flush=True)
     shared = objects('user-common', ['services/start.S', 'services/memory.c', 'services/libsf.c'])
     init = shared + objects('init', ['services/init.c', 'services/storage.c', 'services/readfs.c', 'services/txn.c', 'services/update.c', 'services/version.c', 'services/persistence.c', 'services/manager.c', 'services/namespace.c', *CRYPTO])
@@ -85,6 +101,10 @@ def main():
             manifest['app_abi'] = 1
         package_name = name+('.sfmod' if kind == 1 else '.sfk')
         package_bytes = pack(manifest, image, kind, seed)
+        if name == 'diskhello':
+            # Same manifest, signed by the standby anchor: proves revocation of
+            # the active key does not break packages from other anchors.
+            disk_files['/bin/backuphello.sfk'] = pack(manifest, image, kind, backup.read_bytes())
         if name=='disknext':
             for label,version in [('short','0.3'),('leading','00.3.0'),('overflow','4294967296.0.0'),('suffix','0.3.0-alpha')]:
                 Path('build/version-'+label+'.sfk').write_bytes(pack(dict(manifest,version=version),image,kind,seed))

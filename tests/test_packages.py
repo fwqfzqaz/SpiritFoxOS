@@ -122,6 +122,36 @@ class Packages(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, 'C loader rejected generated package: -5'):
                 pack(current, (ROOT/'build/hello.elf').read_bytes(), 2, self.seed)
 
+    def test_anchor_set_and_revocation(self):
+        backup = self.crypto.key((ROOT / '.keys/backup.seed').read_bytes())[1]
+        stranger = self.crypto.key(bytes(range(32)))[1]
+        good_key = bytes(self.pub)
+        # A single-key call still works; the stranger's package fails; the
+        # anchor set accepts both development- and backup-signed packages.
+        self.assertEqual(self.crypto.lib.sf_check_set(self.good, len(self.good), (C.c_ubyte*32).from_buffer_copy(good_key), 1), 0)
+        hello_backup = pack({'app_id': 'org.spiritfox.hello', 'version': '0.1.0', 'runtime_id': 'org.spiritfox.native', 'app_abi': 1, 'requested_caps': ['stdio']},
+                            (ROOT/'build/hello.elf').read_bytes(), 2, (ROOT/'.keys/backup.seed').read_bytes())
+        keys = (C.c_ubyte*32*2).from_buffer_copy(good_key+backup)
+        self.assertEqual(self.crypto.lib.sf_check_set(bytes(hello_backup), len(hello_backup), keys, 2), 0)
+        self.assertEqual(self.crypto.lib.sf_check_set(self.good, len(self.good), keys, 2), 0)
+        # A package signed by a key outside the anchor set is rejected even
+        # when the set itself is otherwise valid.
+        hello_stranger = pack({'app_id': 'org.spiritfox.hello', 'version': '0.1.0', 'runtime_id': 'org.spiritfox.native', 'app_abi': 1, 'requested_caps': ['stdio']},
+                              (ROOT/'build/hello.elf').read_bytes(), 2, bytes(range(32)))
+        self.assertEqual(self.crypto.lib.sf_check_set(bytes(hello_stranger), len(hello_stranger), keys, 2), -4)
+        for count in [0, 5]:
+            self.assertEqual(self.crypto.lib.sf_check_set(self.good, len(self.good), keys, count), -1)
+        # Revocation: an anchor-signed package is accepted until its signer is
+        # revoked, then sf_trust_open reports SF_REVOKED (-13). The helper takes
+        # the revocation set explicitly so the result is deterministic.
+        self.assertEqual(self.crypto.lib.sf_trust_check(self.good, len(self.good), keys, 2), 0)
+        self.assertEqual(self.crypto.lib.sf_trust_check(bytes(hello_backup), len(hello_backup), keys, 2), 0)
+        backup_id = hashlib.sha256(backup).digest()
+        revoked = (C.c_ubyte*32).from_buffer_copy(backup_id)
+        self.assertEqual(self.crypto.lib.sf_trust_check_revoked(bytes(hello_backup), len(hello_backup), keys, 2, revoked, 1), -13)
+        self.assertEqual(self.crypto.lib.sf_trust_check_revoked(self.good, len(self.good), keys, 2, revoked, 1), 0)
+        self.assertEqual(self.crypto.lib.sf_trust_revoke_id(keys, 2, backup_id), 0)
+
 
 if __name__ == '__main__':
     unittest.main(verbosity=2)

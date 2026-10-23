@@ -13,7 +13,9 @@ DOMAIN = b'SpiritFoxOS-Package-v1\0'
 
 class Crypto:
     def __init__(self):
-        self.lib = C.CDLL(str(ROOT / 'build' / 'sfcrypto.dll'))
+        import os
+        name = 'sfcrypto.dll' if os.name == 'nt' else 'sfcrypto.so'
+        self.lib = C.CDLL(str(ROOT / 'build' / name))
         self.lib.sf_key_pair.argtypes = [C.c_void_p] * 3
         self.lib.sf_sign.argtypes = [C.c_void_p, C.c_void_p, C.c_void_p, C.c_size_t]
         self.lib.sf_check.argtypes = [C.c_void_p, C.c_size_t, C.c_void_p]
@@ -21,6 +23,10 @@ class Crypto:
         self.lib.sf_ed_check.argtypes = [C.c_void_p, C.c_void_p, C.c_void_p, C.c_size_t]
         self.lib.sf_hash.argtypes = [C.c_void_p, C.c_void_p, C.c_size_t]
         self.lib.sf_fs_check.argtypes = [C.c_void_p, C.c_size_t, C.c_int]
+        self.lib.sf_check_set.argtypes = [C.c_void_p, C.c_size_t, C.c_void_p, C.c_uint]
+        self.lib.sf_trust_check.argtypes = [C.c_void_p, C.c_size_t, C.c_void_p, C.c_uint]
+        self.lib.sf_trust_check_revoked.argtypes = [C.c_void_p, C.c_size_t, C.c_void_p, C.c_uint, C.c_void_p, C.c_uint]
+        self.lib.sf_trust_revoke_id.argtypes = [C.c_void_p, C.c_uint, C.c_void_p]
 
     def key(self, seed):
         if len(seed) != 32:

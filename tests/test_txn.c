@@ -36,8 +36,8 @@ int main(void){
  }
  fail_at=0;mode=0;memcpy(stable,baseline,sizeof(stable));boot(&volume);CHECK(!sf_txn_commit(&volume,paths,next,sizes,2));
  /* Damage newest bank: recover previous complete snapshot; damage both: deny. */
- stable[(SF_TXN_BANK+256)*512+1024]^=1;boot(&recovered);CHECK(recovered.generation==3);
- stable[SF_TXN_BANK*512+1024]^=1;memcpy(cache,stable,sizeof(cache));CHECK(sf_txn_mount(&recovered,read_sector,write_sector,flush,0)==SF_BAD_FORMAT&&!recovered.ready);
+ stable[(SF_TXN_BANK+256)*512+SF_TXN_DATA]^=1;boot(&recovered);CHECK(recovered.generation==3);
+ stable[SF_TXN_BANK*512+SF_TXN_DATA]^=1;memcpy(cache,stable,sizeof(cache));CHECK(sf_txn_mount(&recovered,read_sector,write_sector,flush,0)==SF_BAD_FORMAT&&!recovered.ready);
  memcpy(stable,baseline,sizeof(stable));boot(&volume);const char*invalid[]={"/../bad"};CHECK(sf_txn_commit(&volume,invalid,next,sizes,1)==SF_INVALID);
  const char*duplicate[]={"/same","/same"};CHECK(sf_txn_commit(&volume,duplicate,next,sizes,2)==SF_INVALID);sizes[0]=SF_TXN_FILE_BYTES+1;CHECK(sf_txn_commit(&volume,paths,next,sizes,1)==SF_INVALID);
  volume.generation=UINT64_MAX;CHECK(sf_txn_commit(&volume,paths,next,sizes,1)==SF_INVALID);

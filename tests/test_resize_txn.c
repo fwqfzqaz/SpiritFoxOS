@@ -33,6 +33,7 @@ int main(void){
   }
  }
  fail_at=mode=0;memcpy(stable,baseline,sizeof(stable));boot(&volume);CHECK(!sf_txn_resize(&volume,"/notes/user",SF_TXN_FILE_BYTES));uint8_t out[SF_TXN_FILE_BYTES];CHECK(sf_txn_get(&volume,"/notes/user",out,sizeof(out))==SF_TXN_FILE_BYTES);for(unsigned i=0;i<sizeof(out);i++)CHECK(out[i]==0);
+ CHECK(!sf_txn_resize(&volume,"/boot/revoked",1));
  operations=0;uint64_t generation=volume.generation;CHECK(sf_txn_resize(&volume,"/notes/user",SF_TXN_FILE_BYTES+1)==SF_NO_SPACE);CHECK(sf_txn_resize(&volume,"/notes/user",UINT64_MAX)==SF_NO_SPACE);CHECK(sf_txn_resize(&volume,"/../bad",0)==SF_INVALID);CHECK(sf_txn_resize(&volume,"/no-slot",1)==SF_NO_SPACE);CHECK(!operations&&volume.generation==generation&&volume.ready);
  CHECK(!sf_txn_resize(&volume,"/notes/user",0));CHECK(!sf_txn_resize(&volume,"/notes/user",SF_TXN_FILE_BYTES));boot(&recovered);CHECK(sf_txn_get(&recovered,"/notes/user",out,sizeof(out))==SF_TXN_FILE_BYTES);for(unsigned i=0;i<sizeof(out);i++)CHECK(out[i]==0);guards(&recovered);
  printf("RESIZE TXN PASS: %u checks, %u fault scenarios (4 transitions x 261 boundaries x 3 modes); zero extension, idempotence and independent files preserved\n",checks,scenarios);return 0;

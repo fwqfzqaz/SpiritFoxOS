@@ -35,7 +35,9 @@ sf-native 接收 `OP_NATIVE_PREPARE`，验证应用签名、类型、运行时�
 
 命名空间包含目录、1 KiB 内存文件、管道、控制台和最大 128 KiB 的只读磁盘文件。open 有独立偏移，dup 共享 open-description，并保留挂载租约至最后一个引用关闭。支持 `/disk` 的受控挂载/卸载；文件和目录的活跃句柄都会阻止卸载。namespace 路径为 UTF-8，拒绝 `.`/`..`、重复与尾随斜线；SFRFS1 磁盘名额外限制为可打印 ASCII。新增目录句柄 openat 和读写权限衰减；`runat` 按签名 namespace.read 请求与显式目录选择授予只读目录，应用经真实 IPC 相对打开、列举和读取，退出/故障/超时回收引用。普通 run 仍只授予控制台写入。没有符号链接、动态挂载视图或完整身份策略，协议和边界见 `NAMESPACE.md`。
 
-M6 新增 `/persist/notes` 的 16 KiB 有界读写适配器，每次成功 write 完成双银行事务与设备 flush。卷最多四个 16 KiB 文件，余下三个槽用于签名应用 A/B 包和选择器。安装先验证类型、ABI、运行时与签名，将备用包与 PENDING 记录一起提交；运行时再次验证固定快照。试运行前持久记录 TRYING，按时退出 0 后确认，失败或中断回退已确认槽，应用身份与包摘要绑定。已确认包的签名数字版本形成软件下限，拒绝降级与同版本换包，精确重装不写盘；候选执行时再次验证版本策略。写/flush 失败停止准入，重挂载或重启后恢复。格式、错误模型与限制见 `PERSISTENCE.md` 和 `UPDATES.md`；它不是完整 POSIX 文件系统或全局更新系统。
+M6 新增 `/persist/notes` 的 16 KiB 有界读写适配器，每次成功 write 完成双银行事务与设备 flush。卷最多五个 16 KiB 文件，余下槽位用于签名应用 A/B 包、选择器与密钥撤销记录。安装先验证类型、ABI、运行时与签名，将备用包与 PENDING 记录一起提交；运行时再次验证固定快照。试运行前持久记录 TRYING，按时退出 0 后确认，失败或中断回退已确认槽，应用身份与包摘要绑定。已确认包的签名数字版本形成软件下限，拒绝降级与同版本换包，精确重装不写盘；候选执行时再次验证版本策略。写/flush 失败停止准入，重挂载或重启后恢复。格式、错误模型与限制见 `PERSISTENCE.md` 和 `UPDATES.md`；它不是完整 POSIX 文件系统或全局更新系统。
+
+包验证使用构建时生成的双锚点信任集合（`services/trust.c`），boot bundle、磁盘包与持久化安装统一经过信任存储；运行期撤销把签名者 key_id 持久化到事务键 `/boot/revoked`，挂载时在任何包重新验证之前加载。被撤销签名者的有效签名按 `SF_REVOKED` 拒绝，与 `SF_BAD_SIGNATURE` 区分。`revoke-key` 要求目标包当前仍有有效锚点签名，重复撤销幂等。撤销上限 4 个 key_id；语义与限制见 `PERSISTENCE.md`。
 
 统一句柄新增 truncate 与 RPC：RAMFS 和持久化笔记可缩短、清空或补零扩展，保持句柄偏移；只读委派不能截断。笔记长度变化走同一事务引擎，同长度不改盘，失败停止准入并允许释放 dirty 引用。实际恢复与权限边界见 `TRUNCATE.md`，没有增加磁盘格式或通用文件创建/删除能力。
 
@@ -57,8 +59,8 @@ VT-d 实现验证 ACPI/DMAR，发布一个 BDF 的固定 64 KiB DMA 域并执行
 
 ## 构建与信任
 
-构建使用 Windows 本地 Zig 的 Clang/LLD。UEFI 以 PE32+ 直接链接，EFI_STATUS/UINTN 使用明确 64 位类型，入口预留 MS ABI shadow space；原来依赖 objcopy 的脚本保留为历史引导资料，不参与当前构建。内核仍以 ELF 作为固件内嵌中间产物。
+构建支持 Linux 与 Windows 宿主，均使用 Zig 0.13.0 的 Clang/LLD；Linux 使用系统 qemu-system-x86_64 与 OVMF 固件，EFI stub 仍以 windows-gnu 目标产出 PE/COFF。UEFI 以 PE32+ 直接链接，EFI_STATUS/UINTN 使用明确 64 位类型，入口预留 MS ABI shadow space。内核仍以 ELF 作为固件内嵌中间产物。
 
-内嵌文件使用按内容摘要命名的 `.incbin` 输入，防止编译缓存重复嵌入旧镜像。开发种子、工具、缓存、DLL、镜像和日志均被 Git 忽略。工作区外的 DeepSeek Harness 仅作为用户授权的审查工具调用，未改动其安装或认证配置；本地桥副本和运行输出位于 `.cache/deepseek`。
+内嵌文件使用按内容摘要命名的 `.incbin` 输入，防止编译缓存重复嵌入旧镜像。开发种子、备用种子、工具、缓存、共享库、镜像和日志均被 Git 忽略。
 
 包签名使用 [Monocypher 4.0.3](https://monocypher.org/download/)，许可保留在 `vendor/monocypher/LICENCE.md`。签名验证不是 UEFI Secure Boot，也不构成完整硬件信任链。生产签名政策和密钥管理不在本原型范围内。
