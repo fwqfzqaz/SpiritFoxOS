@@ -5,6 +5,7 @@ import hashlib
 import json
 from pathlib import Path
 import struct
+import trust_policy
 
 ROOT = Path(__file__).resolve().parents[1]
 BASE = 0x40000000
@@ -17,6 +18,8 @@ class Crypto:
         self.lib.sf_key_pair.argtypes = [C.c_void_p] * 3
         self.lib.sf_sign.argtypes = [C.c_void_p, C.c_void_p, C.c_void_p, C.c_size_t]
         self.lib.sf_check.argtypes = [C.c_void_p, C.c_size_t, C.c_void_p]
+        self.lib.sf_trust_check.argtypes = [C.c_void_p, C.c_size_t, C.c_void_p, C.c_uint32]
+        self.lib.sf_trust_policy_check.argtypes = [C.c_void_p, C.c_uint32]
         self.lib.sf_cap_check.argtypes = [C.c_void_p, C.c_size_t, C.c_void_p, C.c_char_p]
         self.lib.sf_ed_check.argtypes = [C.c_void_p, C.c_void_p, C.c_void_p, C.c_size_t]
         self.lib.sf_hash.argtypes = [C.c_void_p, C.c_void_p, C.c_size_t]
@@ -39,6 +42,11 @@ class Crypto:
         if len(pub) != 32:
             raise ValueError('Ed25519 public key must be 32 bytes')
         return self.lib.sf_check(data, len(data), pub)
+
+    def verify_policy(self, data, policy):
+        trust_policy.validate(policy)
+        keys = b''.join(struct.pack('<32sII', bytes.fromhex(k['public_key']), sum(trust_policy.USAGE[x] for x in k['usage']), int(k['revoked'])) for k in policy['keys'])
+        return self.lib.sf_trust_check(data, len(data), keys, len(policy['keys']))
 
 
 def cbor(value):
@@ -145,7 +153,11 @@ def main():
             s.add_argument('--'+flag, type=Path, required=True)
     s = sub.add_parser('inspect')
     s.add_argument('file', type=Path)
-    s.add_argument('--public-key', type=Path, required=True)
+    group = s.add_mutually_exclusive_group(required=True)
+    group.add_argument('--public-key', type=Path)
+    group.add_argument('--trust-policy', type=Path)
+    s = sub.add_parser('trust')
+    s.add_argument('--policy', type=Path, required=True)
     s = sub.add_parser('sign')
     s.add_argument('file', type=Path)
     s.add_argument('--seed', type=Path, required=True)
@@ -154,12 +166,15 @@ def main():
         a.out.write_bytes(pack(json.loads(a.manifest.read_text(encoding='utf-8')), a.image.read_bytes(), 1 if a.command == 'module' else 2, a.seed.read_bytes()))
     elif a.command == 'sign':
         a.file.write_bytes(seal(a.file.read_bytes(), a.seed.read_bytes()))
+    elif a.command == 'trust':
+        print(json.dumps(trust_policy.describe(trust_policy.load(a.policy)), indent=2))
     else:
         data = a.file.read_bytes()
-        status = Crypto().verify(data, a.public_key.read_bytes())
+        status = Crypto().verify_policy(data, trust_policy.load(a.trust_policy)) if a.trust_policy else Crypto().verify(data, a.public_key.read_bytes())
         if status:
             raise SystemExit('Rejected package: ' + str(status))
-        print(json.dumps({'file': str(a.file), 'bytes': len(data), 'sha256': hashlib.sha256(data).hexdigest(), 'kind': struct.unpack_from('<H', data, 24)[0], 'sections': struct.unpack_from('<I', data, 36)[0], 'signature': 'verified'}, indent=2))
+        sig = struct.unpack_from('<Q', data, 64)[0]
+        print(json.dumps({'file': str(a.file), 'bytes': len(data), 'sha256': hashlib.sha256(data).hexdigest(), 'kind': struct.unpack_from('<H', data, 24)[0], 'sections': struct.unpack_from('<I', data, 36)[0], 'key_id': data[sig:sig+32].hex(), 'signature': 'verified', 'verification': 'trust-policy' if a.trust_policy else 'explicit-public-key'}, indent=2))
 
 
 if __name__ == '__main__':

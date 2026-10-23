@@ -24,7 +24,7 @@ long sf_main(const SfBootArgs*a,size_t bytes){
   else if(m.mode==1){if(!native_expected||native_have!=native_expected)status=SF_BAD_FORMAT;else{d=native_upload;n=native_have;}}
   else if(m.mode)status=SF_INVALID;
   else status=sf_bundle_find((void*)a->bundle,a->bundle_bytes,(char*)m.data,&d,&n);
-  if(!status)status=sf_package_open(&p,d,n,sf_trust_key);
+  if(!status)status=sf_package_open_trusted(&p,d,n,&sf_trust_store);
   if(!status&&(p.kind!=2||sf_manifest_text(&p,"runtime_id",id,sizeof(id))||strcmp(id,"org.spiritfox.native")))status=SF_BAD_FORMAT;
   if(!status){plan.entry=p.entry;for(unsigned i=0;i<p.count;i++){SfSection*s=&p.sections[i];if(s->type>3)continue;if(plan.count==5){status=SF_NO_SPACE;break;}plan.segments[plan.count++]=(SfNativeSegment){s->rva,s->memory,s->offset,s->bytes,s->flags,0};}}
   native_have=native_expected=0;m.status=status;m.length=status?0:sizeof(plan);if(!status)memcpy(m.data,&plan,sizeof(plan));sf_send(a->manager,&m);

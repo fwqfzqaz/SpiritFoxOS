@@ -13,7 +13,7 @@ static int commit(const char*const*paths,const void*const*data,const uint32_t*by
 }
 static const char*slot_path(char slot){return slot=='a'?"/slots/a.sfk":"/slots/b.sfk";}
 static int package_policy(const void*data,size_t bytes,char id[64],SfVersion*version){
- SfPackage p;int r=sf_package_open(&p,data,bytes,sf_trust_key);if(r)return r;char runtime[64];
+ SfPackage p;int r=sf_package_open_trusted(&p,data,bytes,&sf_trust_store);if(r)return r;char runtime[64];
  if(p.kind!=2||sf_manifest_text(&p,"runtime_id",runtime,sizeof(runtime))||strcmp(runtime,"org.spiritfox.native"))return SF_DEPENDENCY;
  memset(id,0,64);r=sf_manifest_text(&p,"app_id",id,64);if(r)return r;
  char text[33];r=sf_manifest_text(&p,"version",text,sizeof(text));return r?r:sf_version_parse(version,text);

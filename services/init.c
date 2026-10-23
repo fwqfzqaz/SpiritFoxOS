@@ -13,7 +13,7 @@ static uint8_t package_snapshot[SF_READFS_FILE_MAX];
 typedef struct {uint32_t pid,reply,root;int lease;} Child;
 static Child children[16];static uint64_t requests;
 static long console_write(const void*p,size_t n){return sf_sys(SYS_LOG,(uint64_t)p,n,0);}
-static int package_get(const char*name,SfPackage*p){const uint8_t*d;uint64_t n;if(name[0]=='/'){long r=!strcmp(name,"/installed.sfk")?sf_persist_package(package_snapshot,sizeof(package_snapshot)):sf_storage_load(name,package_snapshot,sizeof(package_snapshot));return r<0?r:sf_package_open(p,package_snapshot,r,sf_trust_key);}int r=sf_bundle_find((void*)boot->bundle,boot->bundle_bytes,name,&d,&n);return r?r:sf_package_open(p,d,n,sf_trust_key);}
+static int package_get(const char*name,SfPackage*p){const uint8_t*d;uint64_t n;if(name[0]=='/'){long r=!strcmp(name,"/installed.sfk")?sf_persist_package(package_snapshot,sizeof(package_snapshot)):sf_storage_load(name,package_snapshot,sizeof(package_snapshot));return r<0?r:sf_package_open_trusted(p,package_snapshot,r,&sf_trust_store);}int r=sf_bundle_find((void*)boot->bundle,boot->bundle_bytes,name,&d,&n);return r?r:sf_package_open_trusted(p,d,n,&sf_trust_store);}
 static int native_upload(const SfPackage*p){for(uint64_t off=0;off<p->bytes;){SfMessage m;sf_message(&m,OP_NATIVE_STAGE,++requests);m.handle=p->bytes;m.offset=off;m.length=p->bytes-off;if(m.length>sizeof(m.data))m.length=sizeof(m.data);uint32_t sent=m.length;memcpy(m.data,p->data+off,sent);int rc=sf_send(runtime_ep,&m);if(rc)return rc;long from=sf_recv(manager_ep,&m,sf_deadline(1000));if(from!=(long)runtime_pid||m.h.request_id!=requests)return from<0?from:SF_STALE_HANDLE;if(m.status)return m.status;off+=sent;if(m.offset!=off)return SF_BAD_FORMAT;}return 0;}
 static int spawn_package_policy(const char*name,uint32_t service,uint32_t rights,uint32_t device,uint32_t device_rights,int directory){
  SfPackage p;int r=package_get(name,&p);if(r)return r;
@@ -132,13 +132,22 @@ static void run_command(const char*name,const char*root){
 static int parse_size(const char*text,uint64_t*out){
  if(!*text)return SF_INVALID;uint64_t n=0;for(;*text;text++){if(*text<'0'||*text>'9')return SF_INVALID;unsigned digit=*text-'0';if(n>(UINT64_MAX-digit)/10)return SF_INVALID;n=n*10+digit;}*out=n;return 0;
 }
+static void trust_show(void){
+ if(sf_trust_validate(&sf_trust_store)){sf_log("trust: INVALID\n");return;}
+ sf_log("trust: build-time keys=");sf_number(sf_trust_store.count);sf_log("\n");
+ for(unsigned i=0;i<sf_trust_store.count;i++){const SfTrustKey*k=&sf_trust_store.keys[i];uint8_t hash[32];char id[65];sf_sha256(hash,k->public_key,32);
+  for(unsigned j=0;j<32;j++){id[j*2]="0123456789abcdef"[hash[j]>>4];id[j*2+1]="0123456789abcdef"[hash[j]&15];}id[64]=0;
+  sf_log("key ");sf_log(id);sf_log(k->revoked?" REVOKED":" ACTIVE");if(k->usage&SF_TRUST_MODULE)sf_log(" module");if(k->usage&SF_TRUST_APP)sf_log(" app");sf_log("\n");
+ }
+}
 static void command(char*line){
- if(!strcmp(line,"help")){sf_log("help | ls [path] | cat <path> | write <path> <text> | truncate <path> <bytes> | modules | echo | run <app.sfk or installed> | runat <read-only-dir> <app> | install /disk/bin/app.sfk | persist | stop echo | start echo | mount /disk | unmount /disk | stop disk | start disk | selftest | shutdown\n");}
+ if(!strcmp(line,"help")){sf_log("help | ls [path] | cat <path> | write <path> <text> | truncate <path> <bytes> | modules | trust | echo | run <app.sfk or installed> | runat <read-only-dir> <app> | install /disk/bin/app.sfk | persist | stop echo | start echo | mount /disk | unmount /disk | stop disk | start disk | selftest | shutdown\n");}
  else if(!strcmp(line,"persist"))sf_persist_status();
  else if(!strcmp(line,"dma-test write"))sf_storage_dma_probe(0);
  else if(!strcmp(line,"dma-test read"))sf_storage_dma_probe(1);
  else if(!strcmp(line,"disk-crash")){if(sf_storage_crash_test())sf_log("disk: crash test refused\n");}
  else if(!memcmp(line,"install ",8)){int r=sf_persist_install(line+8);if(!r)sf_log("install: COMMITTED\n");else if(r==1)sf_log("install: UNCHANGED\n");else{sf_log("install: failed code=");sf_number(-r);sf_log("\n");}}
+ else if(!strcmp(line,"trust"))trust_show();
  else if(!strcmp(line,"modules")){sf_log("sf-init ACTIVE pinned; sf-native ");sf_log(manager.modules[runtime_slot].state==MOD_ACTIVE?"ACTIVE":"STOPPED");sf_log("; echo ");sf_log(manager.modules[echo_slot].state==MOD_ACTIVE?"ACTIVE\n":"STOPPED\n");}
  else if(!strcmp(line,"echo")){sf_log(echo_call(echo_ep,echo_pid)==0?"echo: ping\n":"echo: service unavailable\n");}
  else if(!memcmp(line,"run ",4))run_command(line+4,0);

@@ -112,6 +112,14 @@ M5 回归为 151 条 C 断言、14 组 Python 测试中的包/只读格式部分
 
 最终产品源码构建后，`python tools/test.py --skip-build` 完整通过（386.03 秒），日志 `build/truncate-final-test.txt`，机器结果包含 truncate_host_assertions=83、resize_fault_scenarios=3132、truncate_qemu=true 及全部已有标记和精确镜像摘要。打包门对缺少新增标记的旧结果作拒绝测试。详细语义及安全擦除限制见 `TRUNCATE.md`。
 
+## 构建时签名信任策略
+
+新增六组宿主测试，使用与固件和服务相同的 C 验证器，覆盖多公钥、模块/应用用途、未知与撤销密钥、重复策略、8-key 上限、key_id 冒用、严格 JSON、离线查询/验证工具及 1000 次固定种子签名包变异。临时测试公钥不进入正常交付策略。
+
+新增十次真实 VM：两次固件拒绝（应用专用密钥与有模块用途但已撤销密钥签署 bootstrap），legacy 与 modern 各四次验证重叠轮换、已确认旧密钥撤销后的失败关闭、新密钥已确认包继续执行，以及旧密钥待试运行候选撤销后回退。未知/撤销/用途错误的直接运行和安装不改盘；已确认包本身撤销时，执行和依赖旧版本认证的安装均拒绝。测试结束按原有效公开策略重建，核对 EFI、两种盘、公钥与策略摘要恢复一致。
+
+最终源码已构建后，`python tools/test.py --skip-build` 完整通过，耗时 461.53 秒，实际 105 次启动，输出 `build/trust-final-test.txt`。包含全部原有 C 边界/故障测试和 21 组 Python 测试（3000 次变异）。结果 `build/test-results.json` 新增 trust_policy_host=true、trust_policy_host_groups=6、trust_policy_qemu=true、trust_policy_qemu_boots=10，发布门同时要求新增标记及 `trust-policy.json` 的精确摘要。规范化后的 EFI 时间戳/可选校验和亦已通过完整启动回归；生产信任链与在线策略更新仍未实现。
+
 ## 外部助手审查
 
 按用户授权调用已有 DeepSeek Harness。首次宽范围审查超时，没有采用其未完成输出；随后以低推理档审查一个文件写函数，11 秒完成且未使用工具。核实并修复空写返回错误，增加容量防御检查及对应宿主断言。审查回执在 `.cache/deepseek/runs/`，不包含提交或推送权限。

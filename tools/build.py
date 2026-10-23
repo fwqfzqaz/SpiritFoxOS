@@ -1,13 +1,16 @@
 """Build entirely inside the workspace using the pinned local Zig C toolchain."""
 import concurrent.futures
 import hashlib
+import json
 import os
 from pathlib import Path
 import subprocess
+import struct
 import sys
 from sfpack import Crypto, pack, bundle
 from mkreadfs import create as create_readfs
 from mkpersist import create as create_persist
+import trust_policy
 
 ROOT = Path(__file__).resolve().parents[1]
 os.chdir(ROOT)
@@ -50,7 +53,7 @@ def link_elf(name, objs, script):
     return Path(out).read_bytes()
 
 
-def main():
+def main(policy_path=None):
     print('Building host package verifier', flush=True)
     run(['-target', 'x86_64-windows-gnu', '-shared', '-O2', '-Iinclude', '-Ivendor/monocypher', 'tools/crypto_host.c', 'services/readfs.c', *CRYPTO, '-o', 'build/sfcrypto.dll'])
     keys = ROOT / '.keys'
@@ -61,7 +64,16 @@ def main():
     seed = seedfile.read_bytes()
     pub = Crypto().key(seed)[1]
     Path('build/development.pub').write_bytes(pub)
-    Path('build/trust.h').write_text('static const unsigned char sf_trust_key[32]={' + ','.join(map(str, pub)) + '};\n')
+    explicit_policy = policy_path is not None
+    policy_path = Path(policy_path) if explicit_policy else keys / 'trust-policy.json'
+    policy_path = policy_path.resolve()
+    if not policy_path.is_relative_to(ROOT):
+        raise ValueError('Trust policy must be inside the workspace')
+    policy = trust_policy.load(policy_path) if explicit_policy or policy_path.exists() else trust_policy.development(pub)
+    if not any(k['public_key'] == pub.hex() and not k['revoked'] and set(k['usage']) == {'module', 'app'} for k in policy['keys']):
+        raise ValueError('Current development build requires its signing key active for modules and apps')
+    Path('build/trust.h').write_text(trust_policy.header(policy))
+    Path('build/trust-policy.json').write_text(json.dumps(policy, indent=2)+'\n')
     print('Building userspace packages', flush=True)
     shared = objects('user-common', ['services/start.S', 'services/memory.c', 'services/libsf.c'])
     init = shared + objects('init', ['services/init.c', 'services/storage.c', 'services/readfs.c', 'services/txn.c', 'services/update.c', 'services/version.c', 'services/persistence.c', 'services/manager.c', 'services/namespace.c', *CRYPTO])
@@ -124,9 +136,24 @@ def main():
     efi = objects('efi', ['boot/efi_stub/crt0-efi-x86_64.S', 'boot/efi_stub/efi_main.c', 'build/payload.S', 'services/memory.c', *CRYPTO], 'x86_64-windows-gnu')
     esp = Path('build/esp/EFI/BOOT')
     esp.mkdir(parents=True, exist_ok=True)
-    run(['-target', 'x86_64-windows-gnu', '-nostdlib', '-s', '-Wl,--entry,_start', '-Wl,--subsystem,efi_application', '-Wl,--image-base,0x10000000', *efi, '-o', str(esp / 'BOOTX64.EFI')])
+    efi_path = esp / 'BOOTX64.EFI'
+    run(['-target', 'x86_64-windows-gnu', '-nostdlib', '-s', '-Wl,--entry,_start', '-Wl,--subsystem,efi_application', '-Wl,--image-base,0x10000000', *efi, '-o', str(efi_path)])
+    # Zig 0.13's PE linker inserts wall-clock metadata. Normalize the optional
+    # timestamp/checksum fields before testing this unsigned development image.
+    pe_image = bytearray(efi_path.read_bytes())
+    pe = struct.unpack_from('<I', pe_image, 60)[0]
+    assert pe_image[pe:pe+4] == b'PE\0\0' and struct.unpack_from('<H', pe_image, pe+24)[0] == 0x20b
+    struct.pack_into('<I', pe_image, pe+8, 0)
+    struct.pack_into('<I', pe_image, pe+24+64, 0)
+    efi_path.write_bytes(pe_image)
     print('Build complete:', (esp / 'BOOTX64.EFI').resolve(), flush=True)
 
 
 if __name__ == '__main__':
-    main()
+    import argparse
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--trust-policy', type=Path)
+    args = parser.parse_args()
+    if args.trust_policy and not args.trust_policy.exists():
+        parser.error('Explicit trust policy does not exist')
+    main(args.trust_policy)

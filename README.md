@@ -13,7 +13,7 @@ python tools/bootstrap.py
 python tools/test.py
 ```
 
-第一步下载并校验 Zig 0.13.0、QEMU Windows 构建和 Monocypher 4.0.3。已提供的 Monocypher 源码在 `vendor/monocypher`。第二步执行基础服务、950 条内核 IPC/内存边界、108 条 openat、83 条截断、229 条 IOMMU 与 4069 条版本策略检查、15 组 Python 测试（含 2000 次变异）、783 个事务、3132 个更新及 3132 个截断故障场景，以及含真实越界 DMA、试运行、版本策略、目录授权、持久化截断、驱动死亡和恢复的九十五次 QEMU 启动。
+第一步下载并校验 Zig 0.13.0、QEMU Windows 构建和 Monocypher 4.0.3。已提供的 Monocypher 源码在 `vendor/monocypher`。第二步执行基础服务、950 条内核 IPC/内存边界、108 条 openat、83 条截断、229 条 IOMMU 与 4069 条版本策略检查、21 组 Python 测试（含 3000 次变异）、783 个事务、3132 个更新及 3132 个截断故障场景，以及含真实越界 DMA、试运行、版本策略、目录授权、持久化截断、密钥轮换/撤销、驱动死亡和恢复的 105 次 QEMU 启动。
 
 只构建：`python tools/build.py`。只运行宿主测试：`python tools/test.py --host-only`。已有镜像测试：`python tools/test.py --skip-build`。
 
@@ -24,6 +24,7 @@ python tools/test.py
 - `build/storage.img`：1 MiB 的只读测试盘，含 `diskhello.sfk`、`disk-echo.sfmod`、更新故障测试包和说明文件；磁盘应用与模块不在启动包中。
 - `build/persistent.img`：2 MiB 新格式事务盘，具有相同只读包区；请复制后作为可写盘使用，重新构建会覆盖原始构建镜像。
 - `build/development.pub`：当前开发公钥；私钥种子在忽略提交的 `.keys/development.seed`。
+- `build/trust-policy.json`：镜像中实际生效的公开包信任策略，包含用途和撤销规则。
 - `build/qemu-128.log`、`build/qemu-256.log`、`build/qemu-512.log`：串口验证记录。
 - `build/test-results.json`：本次测试结果。
 
@@ -76,10 +77,14 @@ persist
 python tools/sfpack.py module --manifest echo.json --image echo.elf --out echo.sfmod --seed .keys/development.seed
 python tools/sfpack.py app --manifest hello.json --image hello.elf --out hello.sfk --seed .keys/development.seed
 python tools/sfpack.py inspect build/hello.sfk --public-key build/development.pub
+python tools/sfpack.py inspect build/hello.sfk --trust-policy build/trust-policy.json
+python tools/sfpack.py trust --policy build/trust-policy.json
 python tools/sfpack.py sign build/hello.sfk --seed .keys/development.seed
 ```
 
 输入 ELF 是构建中间产物，交付包使用设计说明中的 96 字节头、64 字节段描述符、确定性 CBOR 和 Ed25519 尾部。当前代码只接受静态地址 native 子集；不支持资源包、动态导入、重定位或压缩。构建脚本中列出了实际清单字段。
+
+默认策略只含开发公钥；`python tools/build.py --trust-policy <工作区内JSON>` 可固化最多八个公钥，区分模块/应用用途并拒绝撤销密钥，shell 的 `trust` 可查询。应用密钥须先重叠信任、确认新密钥包，再撤销旧密钥并重建启动；在线策略更新和旧 EFI 防回放尚未实现，配置与限制见 [信任策略](docs/TRUST.md)。
 
 目录授权示例：`runat /tmp fileprobe.sfk`、`runat /disk/etc readprobe.sfk`。只有显式选择目录且应用签名清单声明 namespace.read 时才授予只读访问；普通 run 不授予文件根。
 

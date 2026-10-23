@@ -38,6 +38,7 @@ subprocess.run([str(ROOT / 'build/test_version.exe')], check=True)
 build.run(['-target', 'x86_64-windows-gnu', '-g0', '-O2', '-Wall', '-Wextra', '-Werror', '-Wno-unused-parameter', '-Iinclude', 'tests/test_iommu.c', 'kernel/acpi.c', 'kernel/vtd_tables.c', '-o', 'build/test_iommu.exe'])
 subprocess.run([str(ROOT / 'build/test_iommu.exe')], check=True)
 subprocess.run([sys.executable, 'tests/test_packages.py'], check=True)
+subprocess.run([sys.executable, 'tests/test_trust.py'], check=True)
 subprocess.run([sys.executable, 'tests/test_readfs.py'], check=True)
 if not args.host_only:
     for memory in [128, 256, 512]:
@@ -49,6 +50,7 @@ if not args.host_only:
     subprocess.run([sys.executable, 'tools/qemu_security_test.py'], check=True)
     subprocess.run([sys.executable, 'tools/qemu_openat_test.py'], check=True)
     subprocess.run([sys.executable, 'tools/qemu_truncate_test.py'], check=True)
+    subprocess.run([sys.executable, 'tools/qemu_trust_test.py'], check=True)
 result = {'passed': True, 'elapsed_seconds': round(time.time()-started, 2), 'service_assertions': 116, 'storage_assertions': 35, 'package_tests': 'passed (10 groups, including 1500 seeded mutations)', 'readfs_tests': 'passed (5 groups, including 500 seeded metadata mutations)', 'qemu_memory_mib': [] if args.host_only else [128, 256, 512], 'storage_failure_cases': [] if args.host_only else ['missing', 'badheader', 'badhash', 'badsignature', 'writable', 'ioerror']}
 result['txn_fault_boundaries'] = 261
 result['txn_fault_modes'] = 3
@@ -68,6 +70,10 @@ result['openat_qemu'] = not args.host_only
 result['truncate_host_assertions'] = 83
 result['resize_fault_scenarios'] = 4*261*3
 result['truncate_qemu'] = not args.host_only
-result['artifacts_sha256'] = {name: hashlib.sha256((ROOT/'build'/name).read_bytes()).hexdigest() for name in ['esp/EFI/BOOT/BOOTX64.EFI', 'storage.img', 'persistent.img', 'development.pub']}
+result['trust_policy_host'] = True
+result['trust_policy_host_groups'] = 6
+result['trust_policy_qemu'] = not args.host_only
+result['trust_policy_qemu_boots'] = 0 if args.host_only else 10
+result['artifacts_sha256'] = {name: hashlib.sha256((ROOT/'build'/name).read_bytes()).hexdigest() for name in ['esp/EFI/BOOT/BOOTX64.EFI', 'storage.img', 'persistent.img', 'development.pub', 'trust-policy.json']}
 (ROOT / 'build/test-results.json').write_text(json.dumps(result, indent=2)+'\n')
 print(json.dumps(result, indent=2))

@@ -60,8 +60,18 @@ static int app_abi(const SfPackage*p){
   if(!item(&c,1))return 0;
  }return 0;
 }
-int sf_package_open(SfPackage*p,const void*data,uint64_t bytes,const uint8_t pub[32]){
- const uint8_t*d=data;memset(p,0,sizeof(*p));
+int sf_trust_validate(const SfTrustStore*trust){
+ if(!trust||!trust->keys||!trust->count||trust->count>SF_TRUST_MAX)return SF_BAD_FORMAT;
+ for(unsigned i=0;i<trust->count;i++){
+  const SfTrustKey*k=&trust->keys[i];
+  if(!k->usage||(k->usage&~(SF_TRUST_MODULE|SF_TRUST_APP))||k->revoked>1)return SF_BAD_FORMAT;
+  for(unsigned j=0;j<i;j++)if(!memcmp(k->public_key,trust->keys[j].public_key,32))return SF_BAD_FORMAT;
+ }return 0;
+}
+int sf_package_open_trusted(SfPackage*p,const void*data,uint64_t bytes,const SfTrustStore*trust){
+ if(!p)return SF_INVALID;memset(p,0,sizeof(*p));
+ int valid=sf_trust_validate(trust);if(valid)return valid;
+ const uint8_t*d=data;if(!d)return SF_INVALID;
  if(bytes<264||bytes>SF_PACKAGE_MAX)return SF_BAD_FORMAT;
  int mod=!memcmp(d,"SFMOD1\0\0",8),app=!memcmp(d,"SFK1\r\n\032\n",8);
  if(!mod&&!app)return SF_BAD_FORMAT;
@@ -95,10 +105,21 @@ int sf_package_open(SfPackage*p,const void*data,uint64_t bytes,const uint8_t pub
  /* This static native profile intentionally has no relocation/import tables. */
  for(unsigned i=0;i<count;i++)if(p->sections[i].type==4&&p->sections[i].bytes)return SF_BAD_FORMAT;
  if(sf_u16(d+sig+32)!=1||sf_u16(d+sig+34)||sf_u32(d+sig+36)!=64)return SF_BAD_FORMAT;
- uint8_t hash[32],message[55];sf_sha256(hash,pub,32);if(memcmp(hash,d+sig,32))return SF_BAD_SIGNATURE;
+ const SfTrustKey*key=0;uint8_t hash[32],message[55];
+ for(unsigned i=0;i<trust->count;i++){sf_sha256(hash,trust->keys[i].public_key,32);if(!memcmp(hash,d+sig,32))key=&trust->keys[i];}
+ if(!key)return SF_BAD_SIGNATURE;
+ if(key->revoked)return SF_REVOKED;
+ if(!(key->usage&(mod?SF_TRUST_MODULE:SF_TRUST_APP)))return SF_DENIED;
  static const uint8_t domain[]="SpiritFoxOS-Package-v1";
  _Static_assert(sizeof(domain)==23,"signature domain");memcpy(message,domain,sizeof(domain));sf_sha256(message+sizeof(domain),d,bytes-64);
- return crypto_ed25519_check(d+bytes-64,pub,message,sizeof(message))?SF_BAD_SIGNATURE:SF_OK;
+ return crypto_ed25519_check(d+bytes-64,key->public_key,message,sizeof(message))?SF_BAD_SIGNATURE:SF_OK;
+}
+/* Explicit-key verification is retained for offline authoring tools. Runtime
+ * consumers use the complete policy and must never fall back to this API. */
+int sf_package_open(SfPackage*p,const void*data,uint64_t bytes,const uint8_t pub[32]){
+ if(!pub){if(p)memset(p,0,sizeof(*p));return SF_INVALID;}
+ SfTrustKey key={{0},SF_TRUST_MODULE|SF_TRUST_APP,0};memcpy(key.public_key,pub,32);
+ SfTrustStore trust={&key,1};return sf_package_open_trusted(p,data,bytes,&trust);
 }
 int sf_bundle_find(const void*data,uint64_t bytes,const char*name,const uint8_t**out,uint64_t*length){
  const uint8_t*d=data;if(bytes<16||memcmp(d,"SFB1",4)||sf_u32(d+4)>32||sf_u64(d+8)!=bytes)return SF_BAD_FORMAT;uint32_t n=sf_u32(d+4);
