@@ -1,5 +1,6 @@
 """Build, host negative tests, C service tests, and real QEMU integration."""
 import argparse
+import hashlib
 import json
 from pathlib import Path
 import subprocess
@@ -17,10 +18,16 @@ if not args.skip_build:
     build.main()
 build.run(['-target', 'x86_64-windows-gnu', '-g0', '-O2', '-Wall', '-Wextra', '-Werror', '-Iinclude', 'tests/test_services.c', 'services/manager.c', 'services/namespace.c', '-o', 'build/test_services.exe'])
 subprocess.run([str(ROOT / 'build/test_services.exe')], check=True)
+build.run(['-target', 'x86_64-windows-gnu', '-g0', '-O2', '-Wall', '-Wextra', '-Werror', '-Iinclude', 'tests/test_storage.c', 'services/namespace.c', '-o', 'build/test_storage.exe'])
+subprocess.run([str(ROOT / 'build/test_storage.exe')], check=True)
 subprocess.run([sys.executable, 'tests/test_packages.py'], check=True)
+subprocess.run([sys.executable, 'tests/test_readfs.py'], check=True)
 if not args.host_only:
     for memory in [128, 256, 512]:
         subprocess.run([sys.executable, 'tools/qemu_test.py', '--memory', str(memory)], check=True)
-result = {'passed': True, 'elapsed_seconds': round(time.time()-started, 2), 'service_tests': 'passed', 'package_tests': 'passed (8 groups, including 1500 seeded mutations)', 'qemu_memory_mib': [] if args.host_only else [128, 256, 512]}
+    for case in ['missing', 'badheader', 'badhash', 'badsignature', 'writable', 'ioerror']:
+        subprocess.run([sys.executable, 'tools/qemu_test.py', '--storage', case], check=True)
+result = {'passed': True, 'elapsed_seconds': round(time.time()-started, 2), 'service_assertions': 116, 'storage_assertions': 35, 'package_tests': 'passed (8 groups, including 1500 seeded mutations)', 'readfs_tests': 'passed (5 groups, including 500 seeded metadata mutations)', 'qemu_memory_mib': [] if args.host_only else [128, 256, 512], 'storage_failure_cases': [] if args.host_only else ['missing', 'badheader', 'badhash', 'badsignature', 'writable', 'ioerror']}
+result['artifacts_sha256'] = {name: hashlib.sha256((ROOT/'build'/name).read_bytes()).hexdigest() for name in ['esp/EFI/BOOT/BOOTX64.EFI', 'storage.img', 'development.pub']}
 (ROOT / 'build/test-results.json').write_text(json.dumps(result, indent=2)+'\n')
 print(json.dumps(result, indent=2))

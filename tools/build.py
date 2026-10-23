@@ -6,6 +6,7 @@ from pathlib import Path
 import subprocess
 import sys
 from sfpack import Crypto, pack, bundle
+from mkreadfs import create as create_readfs
 
 ROOT = Path(__file__).resolve().parents[1]
 os.chdir(ROOT)
@@ -50,7 +51,7 @@ def link_elf(name, objs, script):
 
 def main():
     print('Building host package verifier', flush=True)
-    run(['-target', 'x86_64-windows-gnu', '-shared', '-O2', '-Iinclude', '-Ivendor/monocypher', 'tools/crypto_host.c', *CRYPTO, '-o', 'build/sfcrypto.dll'])
+    run(['-target', 'x86_64-windows-gnu', '-shared', '-O2', '-Iinclude', '-Ivendor/monocypher', 'tools/crypto_host.c', 'services/readfs.c', *CRYPTO, '-o', 'build/sfcrypto.dll'])
     keys = ROOT / '.keys'
     keys.mkdir(exist_ok=True)
     seedfile = keys / 'development.seed'
@@ -62,21 +63,31 @@ def main():
     Path('build/trust.h').write_text('static const unsigned char sf_trust_key[32]={' + ','.join(map(str, pub)) + '};\n')
     print('Building userspace packages', flush=True)
     shared = objects('user-common', ['services/start.S', 'services/memory.c', 'services/libsf.c'])
-    init = shared + objects('init', ['services/init.c', 'services/manager.c', 'services/namespace.c', *CRYPTO])
+    init = shared + objects('init', ['services/init.c', 'services/storage.c', 'services/readfs.c', 'services/manager.c', 'services/namespace.c', *CRYPTO])
     packages = []
     image = link_elf('sf-init', init, 'services/user.ld')
     manifest = {'module_id': 'org.spiritfox.init', 'version': '0.1.0', 'category': 'bootstrap', 'requested_caps': ['bootstrap'], 'resource_limits': {'memory': 2097152}}
     packages.append(('sf-init.sfmod', pack(manifest, image, 1, seed)))
-    for name, role, kind in [('echo', 1, 1), ('sf-native', 2, 1), ('hello', 3, 2), ('fault', 4, 2), ('illegal', 5, 2), ('spinner', 6, 2), ('nx', 7, 2), ('probe', 8, 2)]:
+    disk_files = {'/etc/readme.txt': b'SpiritFoxOS read-only disk mounted through user-space virtio-blk.\n'}
+    for name, role, kind in [('echo', 1, 1), ('sf-native', 2, 1), ('hello', 3, 2), ('fault', 4, 2), ('illegal', 5, 2), ('spinner', 6, 2), ('nx', 7, 2), ('probe', 8, 2), ('disk-echo', 1, 1), ('diskhello', 9, 2)]:
         native_crypto = objects('native-crypto', CRYPTO) if role == 2 else []
         image = link_elf(name, shared + native_crypto + objects(name, ['services/program.c'], defines=['-DROLE='+str(role)]), 'services/user.ld')
-        manifest = {('module_id' if kind == 1 else 'app_id'): 'org.spiritfox.'+('native' if name == 'sf-native' else name), 'version': '0.1.0', 'requested_caps': ['stdio'] if name == 'hello' else [], 'resource_limits': {'memory': 131072}}
+        manifest = {('module_id' if kind == 1 else 'app_id'): 'org.spiritfox.'+('native' if name == 'sf-native' else name), 'version': '0.1.0', 'requested_caps': ['stdio'] if role in (3, 9) else [], 'resource_limits': {'memory': 262144 if role == 2 else 131072}}
         if kind == 1:
             manifest['category'] = 'runtime' if role == 2 else 'service'
         else:
             manifest['runtime_id'] = 'org.spiritfox.native'
             manifest['app_abi'] = 1
-        packages.append((name+('.sfmod' if kind == 1 else '.sfk'), pack(manifest, image, kind, seed)))
+        package_name = name+('.sfmod' if kind == 1 else '.sfk')
+        package_bytes = pack(manifest, image, kind, seed)
+        if name in ('disk-echo', 'diskhello'):
+            disk_files[('/modules/' if kind == 1 else '/bin/')+package_name] = package_bytes
+            Path('build/'+package_name).write_bytes(package_bytes)
+        else:
+            packages.append((package_name, package_bytes))
+    image = link_elf('sf-virtio-blk', shared + objects('virtio-blk', ['services/virtio_blk.c']), 'services/user.ld')
+    packages.append(('sf-virtio-blk.sfmod', pack({'module_id': 'org.spiritfox.virtio.blk', 'version': '0.1.0', 'category': 'driver', 'requested_caps': ['device.virtio-blk.trusted'], 'resource_limits': {'memory': 131072}}, image, 1, seed)))
+    Path('build/storage.img').write_bytes(create_readfs(disk_files))
     for name, data in packages:
         Path('build/'+name).write_bytes(data)
     Path('build/bundle.bin').write_bytes(bundle(packages))
@@ -90,7 +101,7 @@ def main():
     asm += ['.section .rodata', '.global isr_table', 'isr_table:'] + [f'.quad isr_{i}' for i in range(256)]
     Path('build/interrupts.S').write_text('\n'.join(asm)+'\n')
     print('Building Core 0', flush=True)
-    kernel = objects('kernel', ['kernel/entry.S', 'kernel/arch.c', 'kernel/core.c', 'kernel/memory.c', 'kernel/ipc.c', 'services/memory.c', 'build/interrupts.S'])
+    kernel = objects('kernel', ['kernel/entry.S', 'kernel/arch.c', 'kernel/core.c', 'kernel/memory.c', 'kernel/ipc.c', 'kernel/device.c', 'services/memory.c', 'build/interrupts.S'])
     link_elf('kernel', kernel, 'kernel/linker.ld')
     # Content-addressed incbin inputs prevent assembler caches reusing old bytes.
     embedded = {}

@@ -19,6 +19,7 @@ class Crypto:
         self.lib.sf_check.argtypes = [C.c_void_p, C.c_size_t, C.c_void_p]
         self.lib.sf_ed_check.argtypes = [C.c_void_p, C.c_void_p, C.c_void_p, C.c_size_t]
         self.lib.sf_hash.argtypes = [C.c_void_p, C.c_void_p, C.c_size_t]
+        self.lib.sf_fs_check.argtypes = [C.c_void_p, C.c_size_t, C.c_int]
 
     def key(self, seed):
         if len(seed) != 32:

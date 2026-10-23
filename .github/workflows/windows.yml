@@ -11,6 +11,7 @@ jobs:
           python-version: '3.13'
       - run: python tools/bootstrap.py
       - run: python tools/test.py
+      - run: python tools/package_release.py
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -19,3 +20,5 @@ jobs:
             build/*.log
             build/test-results.json
             build/esp/EFI/BOOT/BOOTX64.EFI
+            build/storage.img
+            build/SpiritFoxOS-M5.zip

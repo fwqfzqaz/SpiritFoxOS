@@ -9,6 +9,8 @@
 #define SF_STACK 0x41010000ull
 #define SF_ARGS 0x42000000ull
 #define SF_BUNDLE 0x60000000ull
+#define SF_DMA 0x50000000ull
+#define SF_DMA_BYTES 65536u
 #define SF_MAX_TASKS 12
 #define SF_MSG_BYTES 256
 enum { SF_OK=0, SF_INVALID=-1, SF_DENIED=-2, SF_BAD_FORMAT=-3,
@@ -20,10 +22,11 @@ enum { SF_OK=0, SF_INVALID=-1, SF_DENIED=-2, SF_BAD_FORMAT=-3,
 enum { SYS_EXIT, SYS_YIELD, SYS_LOG, SYS_TICKS, SYS_EP_CREATE,
  SYS_SEND, SYS_RECV, SYS_SPAWN, SYS_KILL, SYS_TASK_STATUS,
  SYS_CONSOLE_READ, SYS_SHUTDOWN, SYS_CAP_DERIVE, SYS_CAP_CLOSE,
- SYS_MAP_TEST, SYS_CAP_REVOKE };
+ SYS_MAP_TEST, SYS_CAP_REVOKE, SYS_PCI_READ, SYS_PORT_IO, SYS_DEVICE_RELEASE };
 enum { RIGHT_SEND=1, RIGHT_RECV=2, RIGHT_DELEGATE=4 };
 enum { OP_ECHO=1, OP_OPEN=10, OP_READ, OP_WRITE, OP_CLOSE, OP_SEEK,
- OP_POLL, OP_CREATE, OP_DESCRIBE, OP_ENUMERATE, OP_HELLO=30, OP_NATIVE_PREPARE=40 };
+ OP_POLL, OP_CREATE, OP_DESCRIBE, OP_ENUMERATE, OP_HELLO=30, OP_NATIVE_PREPARE=40,
+ OP_NATIVE_STAGE, OP_BLOCK_INFO=50, OP_BLOCK_READ, OP_BLOCK_WRITE, OP_BLOCK_STOP };
 typedef struct {
  uint32_t size; uint16_t protocol_major,protocol_minor;
  uint32_t opcode,flags; uint64_t request_id;
@@ -38,7 +41,8 @@ typedef struct {
  uint32_t pid,manager,reply,service;
  uint32_t stdin_cap,stdout_cap,stderr_cap,root_cap;
  uint32_t argc,argv_offset,envc,env_offset;
- uint8_t reserved[24];
+ uint64_t dma_virtual,dma_physical;
+ uint32_t device_io,device_bdf;
 } SfBootArgs;
 _Static_assert(sizeof(SfBootArgs)==96,"BootArgs ABI");
 typedef struct { uint64_t physical,rva,file_bytes,memory_bytes; uint32_t flags,reserved; } SfBootSegment;
@@ -56,6 +60,7 @@ typedef struct { uint64_t rva,bytes,data; uint32_t flags,reserved; } SfLoadSegme
 typedef struct {
  uint32_t size,count; uint64_t entry;
  uint32_t grant_manager,grant_service,service_rights,grant_bundle;
+ uint32_t grant_device,reserved;
  SfLoadSegment segments[8];
 } SfLoadPlan;
 typedef struct {uint64_t rva,memory,offset,bytes;uint32_t flags,reserved;} SfNativeSegment;
