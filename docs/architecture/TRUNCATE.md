@@ -33,10 +33,10 @@ NODE_DISK 通过 `external_truncate(index, length)` 回调处理，回调只有�
 
 ## 验证入口
 
-- `tests/test_truncate.c`：83 条命名空间检查，覆盖写权限/类型、所有者与 generation、缩短/补零/空洞、偏移与 dup、容量、后端失败和节点长度只在成功后更新。
-- `tests/test_resize_txn.c`：真实 resize 与事务引擎执行缩短、扩展、清空、首次扩展四种转换，每种覆盖 261 个写/flush 边界 × 三种故障模式，共 3132 个故障场景。验证恢复长度、字节、零区、同长度不改盘和三个独立保护文件。
-- `tools/qemu_truncate_test.py`：legacy 与 VT-d/modern 各八次真实 VM 启动。验证缩短、零扩展、清空、最大容量、重启、同长度与非法请求不改盘、只读应用 RPC 拒绝、应用槽和选择器不变，以及实际 OUT/FLUSH EIO 和银行中段写入时终止 VM 后恢复。
+- `tests/host/test_truncate.c`：83 条命名空间检查，覆盖写权限/类型、所有者与 generation、缩短/补零/空洞、偏移与 dup、容量、后端失败和节点长度只在成功后更新。
+- `tests/host/test_resize_txn.c`：真实 resize 与事务引擎执行缩短、扩展、清空、首次扩展四种转换，每种覆盖 261 个写/flush 边界 × 三种故障模式，共 3132 个故障场景。验证恢复长度、字节、零区、同长度不改盘和三个独立保护文件。
+- `tests/qemu/qemu_truncate_test.py`：legacy 与 VT-d/modern 各八次真实 VM 启动。验证缩短、零扩展、清空、最大容量、重启、同长度与非法请求不改盘、只读应用 RPC 拒绝、应用槽和选择器不变，以及实际 OUT/FLUSH EIO 和银行中段写入时终止 VM 后恢复。
 
-完整套件继续由 `python tools/test.py --skip-build` 运行，增加到 95 次 VM 启动。发布门要求 `truncate_host_assertions=83`、`resize_fault_scenarios=3132`、`truncate_qemu=true` 以及全部已有标记和精确镜像摘要。
+完整套件继续由 `python3 tools/test.py --skip-build` 运行，增加到 95 次 VM 启动。发布门要求 `truncate_host_assertions=83`、`resize_fault_scenarios=3132`、`truncate_qemu=true` 以及全部已有标记和精确镜像摘要。
 
 最终产品源码构建后完整回归通过（386.03 秒），实际日志计数为 95 个 VM，输出 `build/truncate-final-test.txt`。新增事务测试完成 474481 条内部检查及上述 3132 个有界故障场景；缺少本轮标记的旧结果被打包门拒绝。

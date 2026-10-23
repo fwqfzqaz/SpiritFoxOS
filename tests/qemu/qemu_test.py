@@ -7,10 +7,12 @@ import queue
 import shutil
 import struct
 import subprocess
+import sys
 import threading
 import time
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT / 'tools/package'))
 # QEMU's vvfat driver creates temporary files through the host temp directory.
 # Keep them inside the workspace so a read-only /var/tmp cannot break boot.
 (ROOT / '.cache').mkdir(exist_ok=True)

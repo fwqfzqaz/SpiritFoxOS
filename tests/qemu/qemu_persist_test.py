@@ -7,12 +7,13 @@ import shutil
 import socket
 import struct
 import subprocess
+import sys
 import threading
 import time
 import qemu_test
-from mkreadfs import create as create_readfs
-
 ROOT = qemu_test.ROOT
+sys.path.insert(0, str(ROOT / 'tools/package'))
+from mkreadfs import create as create_readfs
 
 
 class VM:

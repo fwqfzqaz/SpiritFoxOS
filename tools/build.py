@@ -5,11 +5,12 @@ import os
 from pathlib import Path
 import subprocess
 import sys
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / 'tools' / 'package'))
 from sfpack import Crypto, pack, bundle
 from mkreadfs import create as create_readfs
 from mkpersist import create as create_persist
 
-ROOT = Path(__file__).resolve().parents[1]
 os.chdir(ROOT)
 (ROOT / 'build').mkdir(exist_ok=True)
 (ROOT / '.cache').mkdir(exist_ok=True)
@@ -58,7 +59,7 @@ def main():
     print('Building host package verifier', flush=True)
     crypto_lib = 'build/sfcrypto.dll' if not LINUX else 'build/sfcrypto.so'
     pic = ['-fPIC'] if LINUX else []
-    run(['-target', HOST, '-shared', '-O2', *pic, '-Iinclude', '-Ivendor/monocypher', 'tools/crypto_host.c', 'services/readfs.c', *CRYPTO, '-o', crypto_lib])
+    run(['-target', HOST, '-shared', '-O2', *pic, '-Iinclude', '-Ivendor/monocypher', 'tools/package/crypto_host.c', 'services/readfs.c', *CRYPTO, '-o', crypto_lib])
     keys = ROOT / '.keys'
     keys.mkdir(exist_ok=True)
     seedfile = keys / 'development.seed'

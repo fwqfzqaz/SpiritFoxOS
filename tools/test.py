@@ -26,32 +26,32 @@ def host_test(name, *sources, no_unused=False):
     subprocess.run([str(ROOT / ('build/'+name+build.EXE))], check=True)
 
 
-host_test('test_services', 'tests/test_services.c', 'services/manager.c', 'services/namespace.c')
-host_test('test_openat', 'tests/test_openat.c', 'services/namespace.c')
-host_test('test_truncate', 'tests/test_truncate.c', 'services/namespace.c')
-host_test('test_resize_txn', 'tests/test_resize_txn.c', 'services/txn.c', 'services/sha256.c', no_unused=True)
+host_test('test_services', 'tests/host/test_services.c', 'services/manager.c', 'services/namespace.c')
+host_test('test_openat', 'tests/host/test_openat.c', 'services/namespace.c')
+host_test('test_truncate', 'tests/host/test_truncate.c', 'services/namespace.c')
+host_test('test_resize_txn', 'tests/host/test_resize_txn.c', 'services/txn.c', 'services/sha256.c', no_unused=True)
 for name, source in [('ipc', 'kernel/ipc.c'), ('memory', 'kernel/memory.c')]:
-    host_test('test_'+name, 'tests/test_'+name+'.c', source, no_unused=True)
-host_test('test_storage', 'tests/test_storage.c', 'services/namespace.c')
-host_test('test_txn', 'tests/test_txn.c', 'services/txn.c', 'services/sha256.c', no_unused=True)
-host_test('test_update', 'tests/test_update.c', 'services/update.c', 'services/txn.c', 'services/sha256.c', no_unused=True)
-host_test('test_version', 'tests/test_version.c', 'services/version.c')
-host_test('test_trust', 'tests/test_trust.c', *build.CRYPTO)
-host_test('test_iommu', 'tests/test_iommu.c', 'kernel/acpi.c', 'kernel/vtd_tables.c', no_unused=True)
-subprocess.run([sys.executable, 'tests/test_packages.py'], check=True)
-subprocess.run([sys.executable, 'tests/test_readfs.py'], check=True)
+    host_test('test_'+name, 'tests/host/test_'+name+'.c', source, no_unused=True)
+host_test('test_storage', 'tests/host/test_storage.c', 'services/namespace.c')
+host_test('test_txn', 'tests/host/test_txn.c', 'services/txn.c', 'services/sha256.c', no_unused=True)
+host_test('test_update', 'tests/host/test_update.c', 'services/update.c', 'services/txn.c', 'services/sha256.c', no_unused=True)
+host_test('test_version', 'tests/host/test_version.c', 'services/version.c')
+host_test('test_trust', 'tests/host/test_trust.c', *build.CRYPTO)
+host_test('test_iommu', 'tests/host/test_iommu.c', 'kernel/acpi.c', 'kernel/vtd_tables.c', no_unused=True)
+subprocess.run([sys.executable, 'tests/integration/test_packages.py'], check=True)
+subprocess.run([sys.executable, 'tests/integration/test_readfs.py'], check=True)
 if not args.host_only:
     for memory in [128, 256, 512]:
-        subprocess.run([sys.executable, 'tools/qemu_test.py', '--memory', str(memory)], check=True)
+        subprocess.run([sys.executable, 'tests/qemu/qemu_test.py', '--memory', str(memory)], check=True)
     for case in ['missing', 'badheader', 'badhash', 'badsignature', 'writable', 'ioerror']:
-        subprocess.run([sys.executable, 'tools/qemu_test.py', '--storage', case], check=True)
-    subprocess.run([sys.executable, 'tools/qemu_persist_test.py'], check=True)
-    subprocess.run([sys.executable, 'tools/qemu_iommu_test.py'], check=True)
-    subprocess.run([sys.executable, 'tools/qemu_security_test.py'], check=True)
-    subprocess.run([sys.executable, 'tools/qemu_openat_test.py'], check=True)
-    subprocess.run([sys.executable, 'tools/qemu_truncate_test.py'], check=True)
-    subprocess.run([sys.executable, 'tools/qemu_trust_test.py'], check=True)
-result = {'passed': True, 'elapsed_seconds': round(time.time()-started, 2), 'service_assertions': 116, 'storage_assertions': 35, 'package_tests': 'passed (10 groups, including 1500 seeded mutations)', 'readfs_tests': 'passed (5 groups, including 500 seeded metadata mutations)', 'qemu_memory_mib': [] if args.host_only else [128, 256, 512], 'storage_failure_cases': [] if args.host_only else ['missing', 'badheader', 'badhash', 'badsignature', 'writable', 'ioerror']}
+        subprocess.run([sys.executable, 'tests/qemu/qemu_test.py', '--storage', case], check=True)
+    subprocess.run([sys.executable, 'tests/qemu/qemu_persist_test.py'], check=True)
+    subprocess.run([sys.executable, 'tests/qemu/qemu_iommu_test.py'], check=True)
+    subprocess.run([sys.executable, 'tests/qemu/qemu_security_test.py'], check=True)
+    subprocess.run([sys.executable, 'tests/qemu/qemu_openat_test.py'], check=True)
+    subprocess.run([sys.executable, 'tests/qemu/qemu_truncate_test.py'], check=True)
+    subprocess.run([sys.executable, 'tests/qemu/qemu_trust_test.py'], check=True)
+result = {'passed': True, 'elapsed_seconds': round(time.time()-started, 2), 'service_assertions': 116, 'storage_assertions': 35, 'package_tests': 'passed (11 groups, including 1500 seeded mutations)', 'readfs_tests': 'passed (5 groups, including 500 seeded metadata mutations)', 'qemu_memory_mib': [] if args.host_only else [128, 256, 512], 'storage_failure_cases': [] if args.host_only else ['missing', 'badheader', 'badhash', 'badsignature', 'writable', 'ioerror']}
 result['txn_fault_boundaries'] = 261
 result['txn_fault_modes'] = 3
 result['persistence_qemu'] = not args.host_only

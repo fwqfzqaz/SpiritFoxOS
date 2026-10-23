@@ -5,8 +5,8 @@ import random
 import struct
 import sys
 import unittest
-ROOT=Path(__file__).resolve().parents[1]
-sys.path.insert(0,str(ROOT/'tools'))
+ROOT=Path(__file__).resolve().parents[2]
+sys.path.insert(0,str(ROOT/'tools/package'))
 from mkreadfs import create
 from sfpack import Crypto
 

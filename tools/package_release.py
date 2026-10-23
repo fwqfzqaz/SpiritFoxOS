@@ -23,7 +23,7 @@ for name in ['esp/EFI/BOOT/BOOTX64.EFI','storage.img','persistent.img','developm
     if result.get('artifacts_sha256',{}).get(name) != actual:
         raise SystemExit('Artifact changed since validation: '+name)
 items = [(BUILD/'esp/EFI/BOOT/BOOTX64.EFI','EFI/BOOT/BOOTX64.EFI'),(BUILD/'storage.img','storage.img'),(BUILD/'persistent.img','persistent.img'),(BUILD/'development.pub','development.pub'),(BUILD/'backup.pub','backup.pub'),(BUILD/'test-results.json','test-results.json'),(ROOT/'README.md','README.md')]
-items += [(p,'docs/'+p.name) for p in sorted((ROOT/'docs').glob('*.md'))]
+items += [(p, p.relative_to(ROOT).as_posix()) for p in sorted((ROOT/'docs').rglob('*.md'))]
 manifest = {'files_sha256': {name: hashlib.sha256(path.read_bytes()).hexdigest() for path,name in items}, 'validation': 'tools/test.py: host + legacy storage + VT-d/modern DMA isolation + persistence/update-health/version-policy/trust-revocation/fault/restart + kernel-boundary/storage-failure security + directory-capability openat + truncate/zero-extension fault/recovery VMs'}
 archive = BUILD/'SpiritFoxOS-M6-Updates.zip'
 with zipfile.ZipFile(archive,'w',zipfile.ZIP_DEFLATED) as z:

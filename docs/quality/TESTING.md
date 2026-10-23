@@ -1,8 +1,19 @@
 # 测试记录
 
-日期：2026-10-23；宿主 Windows x64；Zig 0.13.0；QEMU TCG、q35、qemu64+NX、单核。
+日期：2026-10-23；最近验证：Linux x64（历史记录包含 Windows x64）；Zig 0.13.0；QEMU TCG、q35、qemu64+NX、单核。
 
-执行 `python tools/test.py`，构建时启用 `-Wall -Wextra -Werror`；自动测试完整运行于 128、256、512 MiB。输出日志与机器结果保存在忽略提交的 `build/`。
+执行 `python3 tools/test.py`，构建时启用 `-Wall -Wextra -Werror`；自动测试完整运行于 128、256、512 MiB。输出日志与机器结果保存在忽略提交的 `build/`。
+
+## Linux x64 重新验证（2026-10-23）
+
+工作区迁移到 Linux x64 后，用系统 QEMU/OVMF 与工作区 Zig 0.13.0 重新构建并运行整套测试：
+
+- 宿主：116 条基础服务、35 条存储、108 条 openat、83 条截断、908 条 IPC、42 条内存、229 条 IOMMU、4069 条版本、21 条信任撤销，以及事务/更新/截断故障场景全部通过。
+- Python：11 组包测试（含 1500 次变异）与 5 组 SFRFS1 测试（含 500 次变异）通过。
+- QEMU：128/256/512 MiB 正常启动、六种存储故障、持久化/更新/版本/IOMMU/安全/openat/截断/信任撤销场景全部通过。
+- 结构整理后运行 `python3 tools/test.py --skip-build` 完整通过，用时 506.34 秒；`build/test-results.json` 记录精确 EFI、磁盘与公钥摘要。整理前的功能基线运行用时 488.34 秒；差异来自环境抖动，结果一致。
+
+Linux 下 OVMF 文件名因发行版而异，QEMU 测试同时识别 `OVMF_CODE.4m.fd`、`OVMF_CODE_4M.fd` 与 `OVMF_CODE.fd`；临时文件统一放在工作区 `.cache/`，不依赖 `/var/tmp` 权限。
 
 ## 宿主验证
 
@@ -72,7 +83,7 @@ M5 回归为 151 条 C 断言、14 组 Python 测试中的包/只读格式部分
 - 开始试运行写 EIO 时不执行；恢复写 EIO 时拒绝持久化挂载；应用已退出 0 但确认写 EIO 时不输出确认或成功。解除故障后重新启动恢复。
 - 旧单字节选择器经认证读取，下一次安装迁移；新记录非法保留字节即使卷摘要正确也拒绝挂载。
 
-最终源码已构建后，`python tools/test.py --skip-build` 完整通过，耗时 227.14 秒，输出为 `build/update-final-test.txt`。最新结果含 `update_fault_scenarios=3132`、`update_health_qemu=true`。打包门同时要求完整更新回归和精确镜像摘要；串口输出仍在 `qemu-persist-*.log`。协议和不包含的数据副作用回滚见 `UPDATES.md`。
+最终源码已构建后，`python3 tools/test.py --skip-build` 完整通过，耗时 227.14 秒，输出为 `build/update-final-test.txt`。最新结果含 `update_fault_scenarios=3132`、`update_health_qemu=true`。打包门同时要求完整更新回归和精确镜像摘要；串口输出仍在 `qemu-persist-*.log`。协议和不包含的数据副作用回滚见 `../architecture/UPDATES.md`。
 
 ## 已确认版本策略
 
@@ -84,7 +95,7 @@ M5 回归为 151 条 C 断言、14 组 Python 测试中的包/只读格式部分
 - 人工构造旧格式 PENDING 状态，候选为低版本、同版本不同摘要或非法版本。installed 执行时仍拒绝，不执行入口，持久回退已确认包。
 - 继续执行全部确认写 EIO、试运行中断、银行损坏和重启恢复用例；版本下限与已确认包共用同一事务结果，没有第二份计数器需要协调。
 
-最终源码已构建后，`python tools/test.py --skip-build` 完整通过（271.37 秒）。结果同时具有 `version_policy_host=true`、`version_policy_qemu=true`；打包门拒绝缺失这些标记的旧结果。完整本轮日志为 `build/version-final-test.txt`。此策略不提供离线旧盘回放保护、TPM 可信计数或密钥撤销。
+最终源码已构建后，`python3 tools/test.py --skip-build` 完整通过（271.37 秒）。结果同时具有 `version_policy_host=true`、`version_policy_qemu=true`；打包门拒绝缺失这些标记的旧结果。完整本轮日志为 `build/version-final-test.txt`。此策略不提供离线旧盘回放保护、TPM 可信计数或密钥撤销。
 
 ## 权限边界与驱动失效回归
 
@@ -94,7 +105,7 @@ M5 回归为 151 条 C 断言、14 组 Python 测试中的包/只读格式部分
 
 在上一轮七十五次基础上增加两个可写盘 VM，共七十七次：legacy 与 VT-d/modern 均先确认应用与笔记，再以 -7 终止驱动，验证已打开笔记句柄、写入、installed、安装和状态全部失败关闭，盘字节不变，dirty 引用可以释放。先运行 bundle 应用以复用死亡任务槽，再卸载/停止/重启/重挂载驱动，恢复原数据和应用，generation 保持 5；modern 再触发真实 DMA 故障，确认隔离后的持久化入口仍拒绝缓存。
 
-最终源码构建后，`python tools/test.py --skip-build` 完整通过（287.34 秒），输出 `build/security-final-test.txt`，实际日志计数为 77 个 VM。结果包含 `security_host=true`、`security_qemu=true`、`ipc_host_assertions=908`、`memory_host_assertions=42` 以及全部已有完整回归标记与镜像摘要。打包门对缺少安全标记的旧结果作拒绝测试，通过后才生成发布包。当前仅报告本地测试结果。
+最终源码构建后，`python3 tools/test.py --skip-build` 完整通过（287.34 秒），输出 `build/security-final-test.txt`，实际日志计数为 77 个 VM。结果包含 `security_host=true`、`security_qemu=true`、`ipc_host_assertions=908`、`memory_host_assertions=42` 以及全部已有完整回归标记与镜像摘要。打包门对缺少安全标记的旧结果作拒绝测试，通过后才生成发布包。当前仅报告本地测试结果。
 
 ## 目录能力与 openat
 
@@ -102,7 +113,7 @@ M5 回归为 151 条 C 断言、14 组 Python 测试中的包/只读格式部分
 
 每次正常启动实际运行只读目录授权应用。另在上一轮 77 次 VM 基础上增加 legacy/modern 两个目录能力专项 VM，共 79 次：无授权时拒绝；runat 成功相对读文件；拒绝无请求声明、模块、缺少应用与非法目录；连续 40 次故意遗留文件的进程仍全部清理；页故障和超时后可卸载/重启/重挂载并再次读取。已有安全 VM 同时验证只读授权读取持久化笔记不改盘、已安装包不能自动获得未声明能力、驱动死亡后应用读取被拒绝。
 
-最终产品源码构建后，`python tools/test.py --skip-build` 完整通过（320.67 秒），日志 `build/openat-final-test.txt`。共 108 条新增 openat 检查、950 条已有内核检查、151 条基础/存储断言、229 条 IOMMU、4069 条版本、783 个事务与 3132 个更新故障场景、15 组 Python 测试和 79 个 VM。发布门要求 `openat_host_assertions=108`、`openat_qemu=true` 及全部已有标记与精确镜像摘要；缺标记的旧结果拒绝测试通过。
+最终产品源码构建后，`python3 tools/test.py --skip-build` 完整通过（320.67 秒），日志 `build/openat-final-test.txt`。共 108 条新增 openat 检查、950 条已有内核检查、151 条基础/存储断言、229 条 IOMMU、4069 条版本、783 个事务与 3132 个更新故障场景、15 组 Python 测试和 79 个 VM。发布门要求 `openat_host_assertions=108`、`openat_qemu=true` 及全部已有标记与精确镜像摘要；缺标记的旧结果拒绝测试通过。
 
 ## 统一截断与补零扩展
 
@@ -110,7 +121,7 @@ M5 回归为 151 条 C 断言、14 组 Python 测试中的包/只读格式部分
 
 在上一轮 79 次 VM 上，legacy 与 VT-d/modern 各新增八次，共 95 次。验证最大容量、零扩展、清空、截断后再扩展不会暴露旧尾部、重启恢复、非法参数和同长度操作整盘不变、只读文件应用 RPC 拒绝、已安装包与更新/版本记录不变。实际 OUT/FLUSH EIO 不输出成功，卷关闭并释放 dirty 资源；银行中段暂停后终止 VM，重新启动恢复已确认文件与应用。原始构建盘和只读底区保持不变。
 
-最终产品源码构建后，`python tools/test.py --skip-build` 完整通过（386.03 秒），日志 `build/truncate-final-test.txt`，机器结果包含 truncate_host_assertions=83、resize_fault_scenarios=3132、truncate_qemu=true 及全部已有标记和精确镜像摘要。打包门对缺少新增标记的旧结果作拒绝测试。详细语义及安全擦除限制见 `TRUNCATE.md`。
+最终产品源码构建后，`python3 tools/test.py --skip-build` 完整通过（386.03 秒），日志 `build/truncate-final-test.txt`，机器结果包含 truncate_host_assertions=83、resize_fault_scenarios=3132、truncate_qemu=true 及全部已有标记和精确镜像摘要。打包门对缺少新增标记的旧结果作拒绝测试。详细语义及安全擦除限制见 `../architecture/TRUNCATE.md`。
 
 ## 外部助手审查
 

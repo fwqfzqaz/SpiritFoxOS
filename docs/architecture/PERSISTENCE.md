@@ -15,7 +15,7 @@
 
 当前银行和它的提交记录始终保持不变。任何写入或 flush 失败都返回 `SF_COMMIT_UNCERTAIN (-20)`，关闭该卷的后续读写，要求重新挂载或重启后恢复。即使返回错误，新记录也可能已经落盘，所以不能承诺错误等于回滚。没有后台脏缓存；每个成功的持久化 write 都跨过完整提交边界。
 
-磁盘驱动死亡或被 DMA 隔离后，持久化状态为 UNAVAILABLE，已打开笔记句柄与 installed 执行入口都拒绝使用离线缓存。dirty 账本仍允许释放，受控卸载与驱动重启后重新挂载恢复已提交数据；设备被内核永久隔离时仍拒绝新授权。故障诊断与验证见 `SECURITY.md`。
+磁盘驱动死亡或被 DMA 隔离后，持久化状态为 UNAVAILABLE，已打开笔记句柄与 installed 执行入口都拒绝使用离线缓存。dirty 账本仍允许释放，受控卸载与驱动重启后重新挂载恢复已提交数据；设备被内核永久隔离时仍拒绝新授权。故障诊断与验证见 `../quality/SECURITY.md`。
 
 恢复检查两个记录的结构、保留字节、卷 ID、记录摘要、银行摘要和文件结构，选择 generation 最大的有效快照。最新快照无效时退回另一份完整快照；两份均无效或两份有效记录声称相同 generation 时拒绝挂载。读 I/O 错误同样失败关闭。generation 达到 `UINT64_MAX` 后禁止继续提交，避免回绕。
 
@@ -38,9 +38,9 @@
 
 银行头位于前 512 字节：magic[8]=`SFBANK1\0`，generation:u64，count:u32，reserved[492]=0。紧接五条 128 字节记录：path[64]、bytes:u32、reserved[28]=0、content_sha256[32]；记录区结束于偏移 1152（512+5*128），每个记录对应从银行偏移 `1152+i*16384` 开始的固定 16 KiB 数据槽，记录区与数据槽不重叠。未使用记录、数据尾部与银行剩余空间全零。路径是小于 64 字节的 NUL 结尾 ASCII 绝对名，拒绝空分量、点路径、反斜线和重复名。这是固定键集合的快照，不是完整目录树文件系统。
 
-`tools/mkpersist.py` 只格式化新构建镜像，写入空 generation 1；系统不会自动格式化无法识别的盘。重新构建会重建 `build/persistent.img`，实际使用时先复制为自己的工作镜像。
+`tools/package/mkpersist.py` 只格式化新构建镜像，写入空 generation 1；系统不会自动格式化无法识别的盘。重新构建会重建 `build/persistent.img`，实际使用时先复制为自己的工作镜像。
 
-`python tools/qemu_test.py --interactive --persistent` 会在首次运行时创建 `build/user-persistent.img` 并以可写盘启动，以后复用这份副本。重新构建不会删除该副本；它仍受创建时的包签名公钥约束。
+`python3 tests/qemu/qemu_test.py --interactive --persistent` 会在首次运行时创建 `build/user-persistent.img` 并以可写盘启动，以后复用这份副本。重新构建不会删除该副本；它仍受创建时的包签名公钥约束。
 
 ## 设备与命名空间
 

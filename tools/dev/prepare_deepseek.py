@@ -1,7 +1,7 @@
 """Adapt the user's existing bridge without changing its source or credentials."""
 from pathlib import Path
 
-root = Path(__file__).resolve().parents[1]
+root = Path(__file__).resolve().parents[2]
 source = Path('E:/code/tools/dsh-bridge/bridge.cjs').read_text(encoding='utf-8')
 source = source.replace("const home = path.join(__dirname, 'data');", "const home = 'E:/SpiritFoxOS/.cache/deepseek/home';")
 source = source.replace("const tempRoot = 'E:/code/tmp/dsh-bridge';", "const tempRoot = 'E:/SpiritFoxOS/.cache/deepseek/tmp';")

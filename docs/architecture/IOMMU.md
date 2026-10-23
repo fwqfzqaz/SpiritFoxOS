@@ -32,8 +32,8 @@ QEMU legacy/transitional virtio 未协商 ACCESS_PLATFORM 时会使用绕过平�
 modern 驱动协商 `VIRTIO_F_VERSION_1` 和 `VIRTIO_F_ACCESS_PLATFORM`，确认 FEATURES_OK，再配置队列并设置 DRIVER_OK。common/device/notify 分别位于 BAR4 偏移 `0`、`0x2000`、`0x3000`，notify multiplier 为 4。仅此已验证配置受到支持；不是任意 PCI capability 或 virtio MMIO 实现。数据协议、单队列轮询、半扇区消息、OUT/FLUSH 与只读格式仍位于用户态 sfmod。
 
 ```powershell
-python tools/qemu_test.py --interactive --persistent --iommu
-python tools/qemu_iommu_test.py
+python3 tests/qemu/qemu_test.py --interactive --persistent --iommu
+python3 tests/qemu/qemu_iommu_test.py
 ```
 
 QEMU 使用 `intel-iommu,intremap=off,caching-mode=on,device-iotlb=off,aw-bits=39`，块设备使用 `disable-legacy=on,iommu_platform=on,vectors=0`。没有设备 ATS/IOTLB，没有 MSI/MSI-X 或中断重映射。轮询 virtio 和既有 PIC/PIT/串口是当前验证配置。

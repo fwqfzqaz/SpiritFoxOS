@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 import struct
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 BASE = 0x40000000
 DOMAIN = b'SpiritFoxOS-Package-v1\0'
 

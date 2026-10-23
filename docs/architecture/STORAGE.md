@@ -56,7 +56,7 @@ sf-init 枚举 PCI 总线 0，Core 0 再核对设备身份和 BAR。legacy 驱�
 创建自定义镜像：
 
 ```powershell
-python tools/mkreadfs.py --out build/custom.img /bin/demo.sfk=build/hello.sfk
+python3 tools/package/mkreadfs.py --out build/custom.img /bin/demo.sfk=build/hello.sfk
 ```
 
 ## 装载与引用
@@ -67,6 +67,6 @@ python tools/mkreadfs.py --out build/custom.img /bin/demo.sfk=build/hello.sfk
 
 ## 验证与来源
 
-M5 的 151 条宿主 C 断言和九组 QEMU 回归继续保留，所有只读场景的镜像运行前后 SHA-256 一致。可写介质拒绝用例针对没有事务格式的旧盘。M6 额外验证可写事务盘、重启与故障恢复，详见 `PERSISTENCE.md`、`TESTING.md` 和本机 `build/test-results.json`。
+M5 的 151 条宿主 C 断言和九组 QEMU 回归继续保留，所有只读场景的镜像运行前后 SHA-256 一致。可写介质拒绝用例针对没有事务格式的旧盘。M6 额外验证可写事务盘、重启与故障恢复，详见 `PERSISTENCE.md`、`../quality/TESTING.md` 和本机 `build/test-results.json`。
 
 接口实现依据 [OASIS virtio 1.1 legacy 规范](https://docs.oasis-open.org/virtio/virtio/v1.1/virtio-v1.1.html)、[QEMU PCI ID 定义](https://www.qemu.org/docs/master/specs/pci-ids.html)和 [QEMU blkdebug 文档](https://www.qemu.org/docs/master/devel/testing/blkdebug.html)。SFRFS1、RPC 和授权策略由本项目定义。

@@ -24,11 +24,11 @@
 
 ## 回归入口与证据
 
-- `tests/test_ipc.c`：直接链接真实 `kernel/ipc.c`，仅替换任务缓冲复制与全局调度数据，908 条检查。
-- `tests/test_memory.c`：直接链接真实 `kernel/memory.c`，42 条检查，包含跨页复制、只读保护、MMIO 全段拒绝且不产生部分写入，以及 DMA RAM 复制。
+- `tests/host/test_ipc.c`：直接链接真实 `kernel/ipc.c`，仅替换任务缓冲复制与全局调度数据，908 条检查。
+- `tests/host/test_memory.c`：直接链接真实 `kernel/memory.c`，42 条检查，包含跨页复制、只读保护、MMIO 全段拒绝且不产生部分写入，以及 DMA RAM 复制。
 - 在 `build/` 编译审查基线的两份内核源文件，新增测试分别在端点循环和 MMIO 范围检查失败，输出 `security-baseline-test.txt`。修复后的两组通过。
-- `tools/qemu_security_test.py`：legacy 与 VT-d/modern 两个可写盘 VM，验证 held 句柄、installed、写入、状态、dirty 释放、任务槽复用后的恢复及已提交盘字节不变；modern 还覆盖实际越界 DMA 隔离后的持久化拒绝。
-- `python tools/test.py --skip-build`：将以上回归纳入完整包、事务、更新、版本、隔离与恢复套件。发布门要求 `security_host` 和 `security_qemu`，并继续核对实际 EFI 与磁盘摘要。
+- `tests/qemu/qemu_security_test.py`：legacy 与 VT-d/modern 两个可写盘 VM，验证 held 句柄、installed、写入、状态、dirty 释放、任务槽复用后的恢复及已提交盘字节不变；modern 还覆盖实际越界 DMA 隔离后的持久化拒绝。
+- `python3 tools/test.py --skip-build`：将以上回归纳入完整包、事务、更新、版本、隔离与恢复套件。发布门要求 `security_host` 和 `security_qemu`，并继续核对实际 EFI 与磁盘摘要。
 
 最终源码构建后，完整套件通过，耗时 287.34 秒，共 77 个 VM；原有 783 个事务故障场景、3132 个更新故障场景及版本、签名、IOMMU 回归继续通过。输出 `build/security-final-test.txt`，机器结果为 `build/test-results.json`。
 
@@ -36,4 +36,4 @@
 
 ## 审查边界
 
-本轮未发现新的签名绕过或事务原子性缺陷。离线旧盘回放、开发签名密钥、无 IRQ 重映射/ACS、legacy 可信驱动模式、物理断电与任意硬件支持仍按既有文档限制；当前回归不表示整个操作系统或硬件安全目标已经验收。签名锚点已扩展为构建时双锚点并支持运行期密钥撤销（见 `PERSISTENCE.md`）；离线密钥轮换流程、通用能力配额、完整命名空间授权和真实硬件测试仍是后续工作。
+本轮未发现新的签名绕过或事务原子性缺陷。离线旧盘回放、开发签名密钥、无 IRQ 重映射/ACS、legacy 可信驱动模式、物理断电与任意硬件支持仍按既有文档限制；当前回归不表示整个操作系统或硬件安全目标已经验收。签名锚点已扩展为构建时双锚点并支持运行期密钥撤销（见 `../architecture/PERSISTENCE.md`）；离线密钥轮换流程、通用能力配额、完整命名空间授权和真实硬件测试仍是后续工作。
