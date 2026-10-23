@@ -70,7 +70,7 @@ def main():
     manifest = {'module_id': 'org.spiritfox.init', 'version': '0.1.0', 'category': 'bootstrap', 'requested_caps': ['bootstrap'], 'resource_limits': {'memory': 2097152}}
     packages.append(('sf-init.sfmod', pack(manifest, image, 1, seed)))
     disk_files = {'/etc/readme.txt': b'SpiritFoxOS read-only disk mounted through user-space virtio-blk.\n'}
-    for name, role, kind in [('echo', 1, 1), ('sf-native', 2, 1), ('hello', 3, 2), ('fault', 4, 2), ('illegal', 5, 2), ('spinner', 6, 2), ('nx', 7, 2), ('probe', 8, 2), ('disk-echo', 1, 1), ('diskhello', 9, 2)]:
+    for name, role, kind in [('echo', 1, 1), ('sf-native', 2, 1), ('hello', 3, 2), ('fault', 4, 2), ('illegal', 5, 2), ('spinner', 6, 2), ('nx', 7, 2), ('probe', 8, 2), ('mmio', 10, 2), ('disk-echo', 1, 1), ('diskhello', 9, 2)]:
         native_crypto = objects('native-crypto', CRYPTO) if role == 2 else []
         image = link_elf(name, shared + native_crypto + objects(name, ['services/program.c'], defines=['-DROLE='+str(role)]), 'services/user.ld')
         manifest = {('module_id' if kind == 1 else 'app_id'): 'org.spiritfox.'+('native' if name == 'sf-native' else name), 'version': '0.1.0', 'requested_caps': ['stdio'] if role in (3, 9) else [], 'resource_limits': {'memory': 262144 if role == 2 else 131072}}
@@ -103,7 +103,7 @@ def main():
     asm += ['.section .rodata', '.global isr_table', 'isr_table:'] + [f'.quad isr_{i}' for i in range(256)]
     Path('build/interrupts.S').write_text('\n'.join(asm)+'\n')
     print('Building Core 0', flush=True)
-    kernel = objects('kernel', ['kernel/entry.S', 'kernel/arch.c', 'kernel/core.c', 'kernel/memory.c', 'kernel/ipc.c', 'kernel/device.c', 'services/memory.c', 'build/interrupts.S'])
+    kernel = objects('kernel', ['kernel/entry.S', 'kernel/arch.c', 'kernel/core.c', 'kernel/memory.c', 'kernel/ipc.c', 'kernel/device.c', 'kernel/acpi.c', 'kernel/vtd_tables.c', 'kernel/iommu.c', 'services/memory.c', 'build/interrupts.S'])
     link_elf('kernel', kernel, 'kernel/linker.ld')
     # Content-addressed incbin inputs prevent assembler caches reusing old bytes.
     embedded = {}

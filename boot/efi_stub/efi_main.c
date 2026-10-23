@@ -47,6 +47,9 @@ EFI_STATUS __attribute__((ms_abi)) efi_main(EFI_HANDLE image,EFI_SYSTEM_TABLE*st
  BootInfo*b;EFI_MEMORY_DESCRIPTOR*raw;MemoryMapEntry*map;
  if(bs->AllocatePool(EfiLoaderData,sizeof(*b),(void**)&b)||bs->AllocatePool(EfiLoaderData,131072,(void**)&raw)||bs->AllocatePool(EfiLoaderData,2048*sizeof(*map),(void**)&map))return EFI_OUT_OF_RESOURCES;
  memset(b,0,sizeof(*b));b->magic=BOOT_INFO_MAGIC;b->boot_type=1;b->version=1;b->size=sizeof(*b);
+ EFI_GUID acpi2=ACPI_20_TABLE_GUID,acpi1=ACPI_TABLE_GUID;
+ if(st->NumberOfTableEntries>256)return EFI_LOAD_ERROR;
+ for(UINTN i=0;i<st->NumberOfTableEntries;i++){EFI_CONFIGURATION_TABLE*t=&st->ConfigurationTable[i];if(!memcmp(&t->VendorGuid,&acpi2,sizeof(acpi2)))b->acpi_rsdp=(uint64_t)t->VendorTable;else if(!b->acpi_rsdp&&!memcmp(&t->VendorGuid,&acpi1,sizeof(acpi1)))b->acpi_rsdp=(uint64_t)t->VendorTable;}
  EFI_GUID guid=EFI_GOP_GUID;EFI_GRAPHICS_OUTPUT_PROTOCOL*gop=0;
  if(!bs->LocateProtocol(&guid,0,(void**)&gop)&&gop&&gop->Mode&&gop->Mode->Info){b->framebuffer_base=gop->Mode->FrameBufferBase;b->framebuffer_size=gop->Mode->FrameBufferSize;b->width=gop->Mode->Info->HorizontalResolution;b->height=gop->Mode->Info->VerticalResolution;b->pitch=gop->Mode->Info->PixelsPerScanLine*4;b->bpp=32;}
  void*entry;EFI_STATUS status=core_load(&entry);if(status){log_text("[EFISTUB] rejected Core 0 ELF\n");return status;}

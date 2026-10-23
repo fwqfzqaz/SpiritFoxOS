@@ -15,10 +15,14 @@ ROOT = qemu_test.ROOT
 
 
 class VM:
-    def __init__(self, disk, name, extra=(), debug=None, stop_on_error=False):
+    def __init__(self, disk, name, extra=(), debug=None, stop_on_error=False, iommu=False, writable=True, memory=256, iommu_options=None, legacy=False):
         print('Persistence VM: '+name,flush=True)
         shutil.copyfile(ROOT/'.tools/qemu/share/edk2-i386-vars.fd', ROOT/'build/OVMF_VARS.fd')
-        args = qemu_test.command(disk=disk, writable=True)
+        args = qemu_test.command(memory=memory,disk=disk,writable=writable,iommu=iommu)
+        if iommu_options:
+            args[args.index(next(x for x in args if x.startswith('intel-iommu,')))]=iommu_options
+        if legacy:
+            args[args.index(next(x for x in args if x.startswith('virtio-blk-pci,')))]='virtio-blk-pci,drive=sf-storage,disable-modern=on,disable-legacy=off,vectors=0,addr=0x5'
         if debug:
             index = args.index('if=none,id=sf-storage,format=raw,readonly=off,file='+str(disk))
             args[index] = 'if=none,id=sf-storage,format=raw,file=blkdebug:build/'+debug+':build/'+disk.name
@@ -120,11 +124,13 @@ def generation(disk):
     return max(valid)
 
 
-def run():
+def run(iommu=False):
     disk = ROOT/'build/persist-test.img'
     pristine = (ROOT/'build/persistent.img').read_bytes()
     disk.write_bytes(pristine)
-    vm = VM(disk,'write')
+    def machine(name,**kwargs):
+        return VM(disk,('iommu-' if iommu else '')+name,iommu=iommu,**kwargs)
+    vm = machine('write')
     try:
         vm.boot()
         vm.command('run installed','sfexec: failed code=16')
@@ -145,7 +151,7 @@ def run():
         vm.close()
     assert generation(disk)==4
     committed = disk.read_bytes()
-    vm = VM(disk,'reboot')
+    vm = machine('reboot')
     try:
         vm.boot('PERSIST READY generation=4')
         vm.command('cat /persist/notes','durable-note')
@@ -173,7 +179,7 @@ def run():
     tampered[record+40:record+72] = hashlib.sha256(tampered[bank_start:bank_start+256*512]).digest()
     tampered[record+480:record+512] = hashlib.sha256(tampered[record:record+480]).digest()
     disk.write_bytes(tampered)
-    vm = VM(disk,'untrusted-slot')
+    vm = machine('untrusted-slot')
     try:
         vm.boot('PERSIST READY generation=4')
         vm.command('run installed','sfexec: failed code=4')
@@ -184,7 +190,7 @@ def run():
     corrupted = bytearray(committed)
     corrupted[(2051+256)*512+1024] ^= 1
     disk.write_bytes(corrupted)
-    vm = VM(disk,'fallback')
+    vm = machine('fallback')
     try:
         vm.boot('PERSIST READY generation=3')
         vm.command('cat /persist/notes','durable-note')
@@ -195,7 +201,7 @@ def run():
     disk.write_bytes(committed)
     conf = ROOT/'build/persist-eio.conf'
     conf.write_text('[inject-error]\nevent = "write_aio"\nsector = "2049"\nerrno = "5"\nonce = "on"\n')
-    vm = VM(disk,'write-error',debug=conf.name)
+    vm = machine('write-error',debug=conf.name)
     try:
         vm.boot()
         vm.command('write /persist/notes forbidden-new','write: error')
@@ -207,7 +213,7 @@ def run():
     # This is a process-interruption test, not a physical power-loss guarantee.
     disk.write_bytes(committed)
     conf.write_text('[inject-error]\nevent = "write_aio"\nsector = "2180"\nerrno = "5"\nonce = "on"\n')
-    vm = VM(disk,'interrupted',debug=conf.name,stop_on_error=True)
+    vm = machine('interrupted',debug=conf.name,stop_on_error=True)
     try:
         vm.boot()
         vm.send('write /persist/notes interrupted!')
@@ -220,7 +226,7 @@ def run():
     finally:
         vm.close(False)
     assert disk.read_bytes()[2049*512:2050*512]==bytes(512), 'Target record not invalidated before bank reuse'
-    vm = VM(disk,'interrupted-recovery')
+    vm = machine('interrupted-recovery')
     try:
         vm.boot('PERSIST READY generation=4')
         vm.command('cat /persist/notes','durable-note')
@@ -229,14 +235,14 @@ def run():
         vm.close()
     disk.write_bytes(committed)
     conf.write_text('[inject-error]\nevent = "flush_to_disk"\niotype = "flush"\nerrno = "5"\nonce = "on"\n')
-    vm = VM(disk,'flush-error',debug=conf.name)
+    vm = machine('flush-error',debug=conf.name)
     try:
         vm.boot()
         vm.command('write /persist/notes flush-error!','write: error')
         vm.command('persist','persist: UNAVAILABLE')
     finally:
         vm.close()
-    vm = VM(disk,'error-recovery')
+    vm = machine('error-recovery')
     try:
         vm.boot('PERSIST READY generation=4')
         vm.command('cat /persist/notes','durable-note')
@@ -247,4 +253,7 @@ def run():
 
 
 if __name__=='__main__':
-    run()
+    import argparse
+    parser=argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--iommu',action='store_true')
+    run(parser.parse_args().iommu)

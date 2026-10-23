@@ -8,7 +8,7 @@ ROOT = Path(__file__).resolve().parents[1]
 BUILD = ROOT/'build'
 result = json.loads((BUILD/'test-results.json').read_text(encoding='utf-8'))
 cases = {'missing','badheader','badhash','badsignature','writable','ioerror'}
-if result.get('passed') is not True or result.get('persistence_qemu') is not True or result.get('qemu_memory_mib') != [128,256,512] or set(result.get('storage_failure_cases',[])) != cases:
+if result.get('passed') is not True or result.get('iommu_qemu') is not True or result.get('persistence_qemu') is not True or result.get('qemu_memory_mib') != [128,256,512] or set(result.get('storage_failure_cases',[])) != cases:
     raise SystemExit('Run the full test suite before packaging')
 for name in ['esp/EFI/BOOT/BOOTX64.EFI','storage.img','persistent.img','development.pub']:
     actual = hashlib.sha256((BUILD/name).read_bytes()).hexdigest()
@@ -16,8 +16,8 @@ for name in ['esp/EFI/BOOT/BOOTX64.EFI','storage.img','persistent.img','developm
         raise SystemExit('Artifact changed since validation: '+name)
 items = [(BUILD/'esp/EFI/BOOT/BOOTX64.EFI','EFI/BOOT/BOOTX64.EFI'),(BUILD/'storage.img','storage.img'),(BUILD/'persistent.img','persistent.img'),(BUILD/'development.pub','development.pub'),(BUILD/'test-results.json','test-results.json'),(ROOT/'README.md','README.md')]
 items += [(p,'docs/'+p.name) for p in sorted((ROOT/'docs').glob('*.md'))]
-manifest = {'files_sha256': {name: hashlib.sha256(path.read_bytes()).hexdigest() for path,name in items}, 'validation': 'tools/test.py: host tests + 9 M5 VMs + persistence/fault/restart VMs'}
-archive = BUILD/'SpiritFoxOS-M6.zip'
+manifest = {'files_sha256': {name: hashlib.sha256(path.read_bytes()).hexdigest() for path,name in items}, 'validation': 'tools/test.py: host + legacy storage + VT-d/modern DMA isolation + persistence/fault/restart VMs'}
+archive = BUILD/'SpiritFoxOS-M6-IOMMU.zip'
 with zipfile.ZipFile(archive,'w',zipfile.ZIP_DEFLATED) as z:
     for path,name in items:
         z.write(path,name)

@@ -45,7 +45,11 @@ M6 新增 `/persist/notes` 的 16 KiB 有界读写适配器，每次成功 write
 
 本开发版本保持 BootArgs 总长 96 字节，把尾部设备 BDF 的高 16 位定义为 device_rights；装载计划相应字段传递显式写权。只读驱动模式和带 FLUSH 的可写模式分别协商。尚未冻结 ABI，不承诺兼容此前构建的设备驱动包。
 
-设备释放先复位并确认状态、禁用 PCI Bus Master，再撤销 I/O 权。DMA 页始终保留；只有旧地址空间销毁后才允许新驱动使用。复位不能确认时进入隔离状态，禁止重新授权；没有 IOMMU，不能声称防御恶意 DMA。具体协议与限制见 `STORAGE.md`。
+设备释放先复位并确认状态、禁用 PCI Bus Master，再撤销 I/O 权和可选 IOMMU context。DMA 页始终保留；只有旧地址空间销毁后才允许新驱动使用。复位或失效不能确认时进入隔离状态并禁止新授权。默认无 DMAR 时是 legacy 可信驱动模式；QEMU q35 可选 Intel VT-d + modern virtio ACCESS_PLATFORM，实际把未授权 RAM DMA 阻止在设备页表之外。完整限制见 `IOMMU.md`。
+
+VT-d 实现验证 ACPI/DMAR，发布一个 BDF 的固定 64 KiB DMA 域并执行同步失效；没有通用恒等 DMA 映射。支持已核实的 modern BAR4 布局，驱动仅获授其 16 KiB uncached MMIO。BootArgs 新增只由内核报告的 ISOLATED/MODERN 标志，`dma_physical` 在隔离模式表示 IOVA，`device_io` 在 modern 模式表示用户 MMIO 基址。原 ABI 总长度仍为 96 字节，尚未冻结。
+
+内核 VT-d 控制 MMIO 是 supervisor/NX，普通应用实际访问会页故障。越界 DMA 的硬件记录触发驱动复位、撤销、终止与永久设备隔离，测试再次创建拥有者也被内核拒绝。该范围不包括中断重映射、ACS、真实硬件和任意设备；不将 QEMU RAM DMA 负例称为完整物理设备安全证明。
 
 ## 构建与信任
 

@@ -13,15 +13,19 @@ import time
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def command(memory=256, disk=None, writable=False, ioerror=False):
+def command(memory=256, disk=None, writable=False, ioerror=False, iommu=False):
     args = [str(ROOT / '.tools/qemu/qemu-system-x86_64.exe'), '-L', str(ROOT / '.tools/qemu/share'), '-machine', 'q35', '-accel', 'tcg', '-cpu', 'qemu64,+nx', '-m', str(memory), '-smp', '1', '-drive', 'if=pflash,format=raw,readonly=on,file='+str(ROOT / '.tools/qemu/share/edk2-x86_64-code.fd'), '-drive', 'if=pflash,format=raw,file='+str(ROOT / 'build/OVMF_VARS.fd'), '-drive', 'format=raw,file=fat:rw:'+str(ROOT / 'build/esp'), '-net', 'none', '-display', 'none', '-serial', 'stdio', '-monitor', 'none', '-no-reboot', '-device', 'isa-debug-exit,iobase=0xf4,iosize=0x04']
+    if iommu:
+        args += ['-device','intel-iommu,intremap=off,caching-mode=on,device-iotlb=off,aw-bits=39']
     if disk:
         image = 'blkdebug:build/storage-blkdebug.conf:build/storage.img' if ioerror else str(disk)
         args += ['-drive', 'if=none,id=sf-storage,format=raw,readonly='+('off' if writable else 'on')+',file='+image, '-device', 'virtio-blk-pci,drive=sf-storage,disable-modern=on,disable-legacy=off,vectors=0,addr=0x5']
+        if iommu:
+            args[-1]='virtio-blk-pci,drive=sf-storage,disable-modern=off,disable-legacy=on,iommu_platform=on,vectors=0,addr=0x5'
     return args
 
 
-def run(memory=256, interactive=False, storage='normal', persistent=False):
+def run(memory=256, interactive=False, storage='normal', persistent=False, iommu=False):
     os.chdir(ROOT)
     os.environ['TEMP'] = os.environ['TMP'] = str(ROOT / '.cache')
     shutil.copyfile(ROOT / '.tools/qemu/share/edk2-i386-vars.fd', ROOT / 'build/OVMF_VARS.fd')
@@ -31,7 +35,7 @@ def run(memory=256, interactive=False, storage='normal', persistent=False):
         disk = ROOT/'build/user-persistent.img'
         if not disk.exists():
             shutil.copyfile(ROOT/'build/persistent.img', disk)
-        return subprocess.call(command(memory, disk, writable=True))
+        return subprocess.call(command(memory, disk, writable=True, iommu=iommu))
     disk = None if storage == 'missing' else ROOT / 'build/storage.img'
     if storage in ('badheader', 'badhash', 'badsignature'):
         data = bytearray(disk.read_bytes())
@@ -57,8 +61,8 @@ def run(memory=256, interactive=False, storage='normal', persistent=False):
         (ROOT / 'build/storage-blkdebug.conf').write_text('[inject-error]\nevent = "read_aio"\nerrno = "5"\n')
     before = hashlib.sha256(disk.read_bytes()).hexdigest() if disk else None
     if interactive:
-        return subprocess.call(command(memory, disk, storage=='writable', storage=='ioerror'))
-    process = subprocess.Popen(command(memory, disk, storage=='writable', storage=='ioerror'), stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, bufsize=0)
+        return subprocess.call(command(memory, disk, storage=='writable', storage=='ioerror', iommu))
+    process = subprocess.Popen(command(memory, disk, storage=='writable', storage=='ioerror', iommu), stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, bufsize=0)
     chunks = queue.Queue()
     def read():
         while True:
@@ -68,7 +72,7 @@ def run(memory=256, interactive=False, storage='normal', persistent=False):
             chunks.put(data)
     threading.Thread(target=read, daemon=True).start()
     output = bytearray()
-    log = ROOT / 'build' / ('qemu-'+str(memory)+('' if storage=='normal' else '-'+storage)+'.log')
+    log = ROOT / 'build' / ('qemu-'+str(memory)+('' if storage=='normal' else '-'+storage)+('-iommu' if iommu else '')+'.log')
     def expect(text, timeout=60):
         until = time.monotonic()+timeout
         while text.encode() not in output:
@@ -88,6 +92,8 @@ def run(memory=256, interactive=False, storage='normal', persistent=False):
                     raise RuntimeError(line)
     try:
         expect('BOOT TESTS PASSED', 60)
+        if iommu and b'[IOMMU] VT-d active' not in output:
+            raise RuntimeError('VT-d not active')
         if storage == 'normal':
             if b'STORAGE READY' not in output or b'signed disk application runs through native runtime' not in output:
                 raise RuntimeError('Disk-backed module/application path not exercised')
@@ -134,6 +140,7 @@ if __name__ == '__main__':
     parser.add_argument('--memory', type=int, default=256, choices=[128, 256, 512])
     parser.add_argument('--interactive', action='store_true')
     parser.add_argument('--persistent', action='store_true', help='Interactive writable copy, build/user-persistent.img; kept across runs')
+    parser.add_argument('--iommu', action='store_true', help='Q35 Intel VT-d, 39-bit legacy remapping')
     parser.add_argument('--storage', choices=['normal', 'missing', 'badheader', 'badhash', 'badsignature', 'writable', 'ioerror'], default='normal')
     args = parser.parse_args()
-    run(args.memory, args.interactive, args.storage, args.persistent)
+    run(args.memory, args.interactive, args.storage, args.persistent, args.iommu)

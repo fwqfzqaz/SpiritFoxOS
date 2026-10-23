@@ -2,7 +2,7 @@
 
 基于 x86_64 UEFI 的可启动微内核原型。保留提供的 EFI 引导入口，按 [设计说明 v0.2](SpiritFoxOS_设计说明_v0.2.md) 实现用户态 sfmod、模块装卸、文件对象、native 运行时，以及从只读 virtio 磁盘验证并运行应用。
 
-当前推进到 M6 的受限实现：用户态 legacy virtio-blk、SFRFS1 只读区、双银行事务持久化与签名应用双槽激活。IOMMU、真实硬件断电保证、网络、图形与多核尚未实现；其余扩展保留在路线图中。
+当前推进到 M6 的受限实现：legacy/modern virtio-blk、SFRFS1、双银行事务、签名应用双槽，以及 QEMU q35 Intel VT-d 对 DMA RAM 访问的隔离。通用设备/IRQ 隔离、真实硬件断电保证、网络、图形与多核尚未完成；其余扩展保留在路线图中。
 
 ## 构建和测试
 
@@ -13,7 +13,7 @@ python tools/bootstrap.py
 python tools/test.py
 ```
 
-第一步下载并校验 Zig 0.13.0、QEMU Windows 构建和 Monocypher 4.0.3。已提供的 Monocypher 源码在 `vendor/monocypher`。第二步执行基础服务测试、14 组 Python 测试（含 2000 次固定种子变异）、783 个事务故障场景、128/256/512 MiB 启动与存储失败、持久化重启测试。
+第一步下载并校验 Zig 0.13.0、QEMU Windows 构建和 Monocypher 4.0.3。已提供的 Monocypher 源码在 `vendor/monocypher`。第二步执行基础服务与 229 条 IOMMU 检查、14 组 Python 测试（含 2000 次变异）、783 个事务故障场景，以及含真实越界 DMA 与恢复的三十三次 QEMU 启动。
 
 只构建：`python tools/build.py`。只运行宿主测试：`python tools/test.py --host-only`。已有镜像测试：`python tools/test.py --skip-build`。
 
@@ -27,7 +27,7 @@ python tools/test.py
 - `build/qemu-128.log`、`build/qemu-256.log`、`build/qemu-512.log`：串口验证记录。
 - `build/test-results.json`：本次测试结果。
 
-完整测试通过后，执行 `python tools/package_release.py` 生成 `build/SpiritFoxOS-M6.zip`，其中包含 EFI 镜像、两种测试盘、公钥、文档、测试结果与内容摘要。
+完整测试通过后，执行 `python tools/package_release.py` 生成 `build/SpiritFoxOS-M6-IOMMU.zip`，其中包含 EFI 镜像、两种测试盘、公钥、文档、测试结果与内容摘要。
 
 重新构建会使用本工作区现有开发密钥。删除种子后会生成新密钥并重新构建信任锚；这里没有生产密钥、Secure Boot 配置或发布签名流程。
 
@@ -51,7 +51,7 @@ mount /disk
 
 `/tmp` 等 RAMFS 文件关机后清空；`/disk` 只读，不接收写入。挂载时不能停止块驱动，打开的文件或目录会阻止卸载。缺盘、坏元数据和 I/O 错误会显示诊断并保留串口环境；坏签名应用被拒绝。串口输入有界，自动化驱动按字节节流。
 
-该驱动使用明确授权的端口范围和固定 DMA 页；没有 IOMMU，属于可信驱动模式。当前只支持 QEMU 的 legacy/transitional virtio PCI（`disable-modern=on,vectors=0`），不宣称支持现代 virtio MMIO、真实硬件或 DMA 故障隔离。
+默认配置使用 legacy 可信驱动模式。加上 `--iommu` 可启用受限 Intel VT-d 与 modern PCI ACCESS_PLATFORM 传输；此时 legacy 旁路设备会被拒绝，DMA 只能访问获授区域。启动日志会明确报告实际模式。尚不支持通用硬件、virtio MMIO 或 IRQ 重映射，详见 [DMA 隔离与验证边界](docs/IOMMU.md)。
 
 持久化端到端测试：`python tools/qemu_persist_test.py`，在镜像副本上自动验证写入、包安装、重启与故障恢复。交互启动：`python tools/qemu_test.py --interactive --persistent`，首次创建 `build/user-persistent.img`，以后继续使用该副本。挂载事务盘后支持：
 
@@ -63,6 +63,8 @@ persist
 ```
 
 成功写入与安装均等待设备 flush。任何写/flush 错误会停止卷的后续读写，需重新挂载或重启恢复；错误时不能假定新版本一定没有落盘。当前配额为四个 16 KiB 文件，只对笔记与一个应用提供入口。
+
+隔离模式交互：`python tools/qemu_test.py --interactive --persistent --iommu`；专项验证：`python tools/qemu_iommu_test.py`。诊断 `dma-test read/write` 会刻意触发设备隔离故障并使该 VM 的磁盘驱动停止至重启，请只在测试 VM 使用。
 
 ## 包工具
 

@@ -25,7 +25,7 @@ int task_new(const SfLoadPlan*p,int bootstrap){
  int result=SF_NO_SPACE;
  int slot=-1;for(unsigned i=0;i<SF_MAX_TASKS;i++)if(tasks[i].state==T_EMPTY||tasks[i].state==T_DEAD){slot=i;break;}if(slot<0)return SF_NO_SPACE;
  Task*t=&tasks[slot];/* Preserve capability generations across slot reuse. */
- for(unsigned i=0;i<32;i++)t->caps[i].endpoint=0;t->pid=next_pid++;t->state=T_EMPTY;t->device_io=0;t->device_bdf=0;t->device_fault=0;t->cr3=space_new(t->pid);if(!t->cr3)goto fail;
+ for(unsigned i=0;i<32;i++)t->caps[i].endpoint=0;t->pid=next_pid++;t->state=T_EMPTY;t->device_io=0;t->device_bdf=0;t->device_fault=0;t->device_modern=0;t->cr3=space_new(t->pid);if(!t->cr3)goto fail;
  for(unsigned i=0;i<p->count;i++){const SfLoadSegment*s=&p->segments[i];for(uint64_t off=0;off<s->bytes;off+=4096){void*page=page_alloc(t->pid);if(!page||space_map(t,SF_BASE+s->rva+off,(uint64_t)page,s->flags))goto fail;size_t n=s->bytes-off;if(n>4096)n=4096;if(parent){if(copy_in(parent,page,s->data+off,n))goto fail;}else memcpy(page,(void*)(s->data+off),n);}}
  for(uint64_t off=4096;off<=65536;off+=4096){void*page=page_alloc(t->pid);if(!page||space_map(t,SF_STACK-off,(uint64_t)page,3))goto fail;}
  void*arg_page=page_alloc(t->pid);if(!arg_page||space_map(t,SF_ARGS,(uint64_t)arg_page,1))goto fail;
@@ -57,6 +57,7 @@ static long syscall(Frame*f){Task*t=&tasks[current];uint64_t a=f->rdi,b=f->rsi,c
  case SYS_PCI_READ:if(t->pid!=1)return SF_DENIED;return pci_read(a,b);
  case SYS_PORT_IO:return device_io(t,a,b,c);
  case SYS_DEVICE_RELEASE:if(!a)return device_release(t);if(t->pid!=1)return SF_DENIED;for(unsigned i=0;i<SF_MAX_TASKS;i++)if(tasks[i].pid==a)return device_release(&tasks[i]);return SF_NOT_FOUND;
+ case SYS_DMA_STATUS:{if(t->pid!=1)return SF_DENIED;if(b!=sizeof(SfDmaStatus))return SF_INVALID;SfDmaStatus status;device_status(&status);return copy_out(t,a,&status,sizeof(status));}
  default:return ipc_syscall(f->rax,a,b,c);
  }
 }
@@ -64,7 +65,7 @@ Frame *interrupt_dispatch(Frame*f){
  if(f->vector==32){ticks++;outb(0x20,0x20);ipc_deadlines();}
  if(f->vector==36)console_irq();
  if((f->cs&3)==0){if(f->vector<32){serial("[CORE] kernel exception ");hex(f->vector);serial(" at ");hex(f->rip);panic("kernel exception");}return f;}
- Task*t=&tasks[current];t->frame=f;
+ Task*t=&tasks[current];t->frame=f;device_poll();if(t->state==T_DEAD)return schedule();
  if(f->vector==128)f->rax=syscall(f);
  else if(f->vector<32){serial("[CORE] isolated user fault pid=");hex(t->pid);serial(" vector=");hex(f->vector);serial("\n");if(t->pid==1)panic("initial task fault");task_dead(t,-100-(int)f->vector);}
  return schedule();
@@ -76,7 +77,7 @@ void kernel_main(SfBootInfo*b){
  if((b->bundle&4095)||!b->bundle_bytes||b->bundle_bytes>4*1024*1024||b->bundle>=0x40000000ull||b->bundle_bytes>0x40000000ull-b->bundle)panic("bundle bounds");
  if(b->memory_map_descriptor_size!=sizeof(BootMemory)||!b->memory_map_entry_count||b->memory_map_entry_count>2048||b->memory_map_size!=b->memory_map_entry_count*sizeof(BootMemory)||b->memory_map>=0x40000000ull||b->memory_map_size>0x40000000ull-b->memory_map)panic("memory map bounds");
  if(!boot_memory(b,(uint64_t)b,sizeof(*b))||!boot_memory(b,b->bundle,b->bundle_bytes))panic("unreserved boot object");
- bundle_phys=b->bundle;bundle_bytes=b->bundle_bytes;arch_init();SfLoadPlan p={0};p.size=sizeof(p);p.count=b->init_segment_count;p.entry=b->init_entry;
+ bundle_phys=b->bundle;bundle_bytes=b->bundle_bytes;arch_init();device_init(b);SfLoadPlan p={0};p.size=sizeof(p);p.count=b->init_segment_count;p.entry=b->init_entry;
  for(unsigned i=0;i<p.count;i++){SfBootSegment*s=&b->init_segments[i];if(s->reserved||s->file_bytes>s->memory_bytes||(s->physical&4095)||!boot_memory(b,s->physical,(s->memory_bytes+4095)&~4095ull))panic("boot segment");if(s->physical<b->bundle+b->bundle_bytes&&b->bundle<s->physical+s->memory_bytes)panic("boot segment overlaps bundle");for(unsigned j=0;j<i;j++){SfBootSegment*t=&b->init_segments[j];if(s->physical<t->physical+t->memory_bytes&&t->physical<s->physical+s->memory_bytes)panic("overlapping boot segments");}p.segments[i]=(SfLoadSegment){s->rva,s->memory_bytes,s->physical,s->flags,0};}
  if(task_new(&p,1)!=1)panic("bootstrap plan rejected");serial("[CORE] entering isolated sf-init.sfmod, timer=100Hz\n");arch_enter(schedule());
 }

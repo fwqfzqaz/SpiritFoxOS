@@ -50,7 +50,7 @@ static int namespace_node(const char*path,unsigned type,unsigned external,uint32
 void sf_storage_init(SfManager*m,SfNamespace*n,uint32_t ep,SfModuleSpawn callback){manager=m;ns=n;manager_ep=ep;spawn=callback;ns->external_read=external_read;ns->mount_open=mount_open;ns->mount_close=mount_close;}
 static int start_driver(unsigned rights){
  if(driver_pid&&sf_sys(SYS_TASK_STATUS,driver_pid,0,0)==SF_BUSY)return SF_BUSY;
- uint32_t device=0;for(unsigned d=0;d<32&&!device;d++)for(unsigned f=0;f<8;f++){uint32_t bdf=d*8+f;if(sf_sys(SYS_PCI_READ,bdf,0,0)==0x10011af4u){device=bdf+1;break;}}
+ uint32_t device=0;for(unsigned d=0;d<32&&!device;d++)for(unsigned f=0;f<8;f++){uint32_t bdf=d*8+f;long id=sf_sys(SYS_PCI_READ,bdf,0,0);if(id==0x10011af4u||id==0x10421af4u){device=bdf+1;break;}}
  if(!device)return SF_NOT_FOUND;
  if(driver_slot<0){driver_slot=sfmod_add(manager,"org.spiritfox.virtio.blk",0,0);if(driver_slot<0)return driver_slot;}
  int r=sfmod_start(manager,driver_slot);if(r)return r;driver_ep=sf_sys(SYS_EP_CREATE,0,0,0);if((int)driver_ep<0){r=(int)driver_ep;goto fail;}
@@ -106,6 +106,16 @@ long sf_storage_load(const char*path,void*out,size_t capacity_bytes){
  int r=sfmod_acquire(manager,fs_slot,RES_OPEN);if(r)return r;int index=sf_readfs_find(&fs,path+5);long result=index<0?index:sf_readfs_load(&fs,index,out,capacity_bytes);sfmod_release(manager,fs_slot,RES_OPEN);return result;
 }
 int sf_storage_ready(void){return fs.mounted;}
+void sf_storage_dma_probe(unsigned mode){
+ SfDmaStatus before,after;int r=sf_sys(SYS_DMA_STATUS,(uint64_t)&before,sizeof(before),0);
+ if(r||before.mode!=1||!driver_pid||!before.active_mapping||mode>1){sf_log("DMA PROBE REFUSED\n");return;}
+ SfMessage m;sf_message(&m,OP_BLOCK_DMA_PROBE,0);m.offset=before.probe_address;m.mode=mode;r=call(&m);
+ sf_sys(SYS_DMA_STATUS,(uint64_t)&after,sizeof(after),0);
+ sf_assert(r<0&&after.faults>before.faults&&after.last_address==before.probe_address&&after.source==granted_device-1&&after.guard_intact&&!after.active_mapping,"IOMMU blocks actual DMA outside granted arena");
+ sf_assert(sf_sys(SYS_TASK_STATUS,driver_pid,0,0)==SF_DEVICE_GONE,"faulting DMA driver terminated");
+ int ep=sf_sys(SYS_EP_CREATE,0,0,0);sf_assert(ep>0,"quarantine test endpoint allocated");int candidate=spawn("sf-virtio-blk.sfmod",ep,RIGHT_RECV,granted_device,0);sf_assert(candidate==SF_BUSY,"kernel refuses new owner of quarantined DMA device");sf_sys(SYS_CAP_REVOKE,ep,0,0);
+ sf_log("DMA PROBE PASSED: guard intact, device quarantined\n");
+}
 void sf_storage_write_tests(void){
  uint8_t zero[512]={0};sf_assert(sf_storage_sector_write(0,0,zero)==SF_INVALID,"write grant cannot overwrite immutable disk region");
  SfMessage m;sf_message(&m,OP_BLOCK_WRITE,0);m.offset=SF_TXN_BANK*512ull;m.mode=256;m.length=256;sf_assert(call(&m)==SF_INVALID,"write service rejects missing first fragment");
