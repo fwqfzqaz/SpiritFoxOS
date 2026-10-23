@@ -2,12 +2,34 @@
 #include "txn.h"
 #include "storage.h"
 #include "persistence.h"
+#include "update.h"
 #include "trust.h"
 static SfTxn volume;
 static uint8_t scratch[SF_TXN_FILE_BYTES];
 static long(*disk_read)(unsigned,uint64_t,void*,size_t);
 static int commit(const char*const*paths,const void*const*data,const uint32_t*bytes,unsigned count){
  int r=sf_storage_transaction(1);if(r)return r;r=sf_txn_commit(&volume,paths,data,bytes,count);sf_storage_transaction(0);return r;
+}
+static const char*slot_path(char slot){return slot=='a'?"/slots/a.sfk":"/slots/b.sfk";}
+static int package_policy(const void*data,size_t bytes,char id[64]){
+ SfPackage p;int r=sf_package_open(&p,data,bytes,sf_trust_key);if(r)return r;char runtime[64];
+ if(p.kind!=2||sf_manifest_text(&p,"runtime_id",runtime,sizeof(runtime))||strcmp(runtime,"org.spiritfox.native"))return SF_DEPENDENCY;
+ memset(id,0,64);return sf_manifest_text(&p,"app_id",id,64);
+}
+static int state_read(SfUpdate*s){
+ uint8_t bytes[SF_UPDATE_BYTES];long n=sf_txn_get(&volume,"/boot/current",bytes,sizeof(bytes));
+ if(n==SF_NOT_FOUND){memset(s,0,sizeof(*s));return 0;}
+ /* Import the original selector only after authenticating its selected app. */
+ if(n==1&&(bytes[0]=='a'||bytes[0]=='b')){
+  memset(s,0,sizeof(*s));s->good=bytes[0];n=sf_txn_get(&volume,slot_path(s->good),scratch,sizeof(scratch));if(n<0)return n;
+  int r=package_policy(scratch,n,s->app_id);if(r)return r;sf_sha256(s->good_hash,scratch,n);
+  return sf_update_encode(s,bytes);
+ }
+ return n<0?n:sf_update_decode(s,bytes,n);
+}
+static int state_commit(const SfUpdate*s){
+ uint8_t encoded[SF_UPDATE_BYTES];int r=sf_update_encode(s,encoded);if(r)return r;
+ const char*paths[]={"/boot/current"};const void*data[]={encoded};uint32_t lengths[]={sizeof(encoded)};return commit(paths,data,lengths,1);
 }
 static long notes_read(unsigned index,uint64_t offset,void*out,size_t bytes){
  if(index!=UINT32_MAX)return disk_read?disk_read(index,offset,out,bytes):SF_DEVICE_GONE;
@@ -25,6 +47,8 @@ int sf_persist_mount(SfNamespace*ns){
  int r=sf_txn_mount(&volume,sf_storage_sector_read,sf_storage_sector_write,sf_storage_flush,0);if(r)return r;
  r=sf_storage_write_range(SF_TXN_HEADER+1,SF_TXN_BANK+2*SF_TXN_BANK_SECTORS);if(r){volume.ready=0;return r;}
  sf_storage_write_tests();
+ SfUpdate state;r=state_read(&state);if(r){volume.ready=0;return r;}
+ if(state.phase==SF_UPDATE_TRYING){sf_update_finish(&state,0);r=state_commit(&state);if(r){volume.ready=0;return r;}sf_log("update: RECOVERED interrupted trial\n");}
  if(ns->external_read!=notes_read)disk_read=ns->external_read;ns->external_read=notes_read;ns->external_write=notes_write;
  r=sf_ns_create(ns,"/persist",NODE_DIR,0);if(r){volume.ready=0;return r;}
  unsigned directory=0;for(unsigned i=0;i<32;i++)if(!strcmp(ns->nodes[i].path,"/persist"))directory=i;
@@ -34,18 +58,36 @@ int sf_persist_mount(SfNamespace*ns){
  ns->nodes[directory].readonly=1;ns->nodes[directory].mount_tag=1;
  sf_log("PERSIST READY generation=");sf_number(volume.generation);sf_log("\n");return 0;
 }
-static int current(char*out){char c;long n=sf_txn_get(&volume,"/boot/current",&c,1);if(n==SF_NOT_FOUND){*out=0;return 0;}if(n!=1||(c!='a'&&c!='b'))return SF_BAD_FORMAT;*out=c;return 0;}
 int sf_persist_install(const char*source){
  if(!sf_storage_writable()||!volume.ready)return SF_DEVICE_GONE;
+ SfUpdate state;int r=state_read(&state);if(r)return r;if(state.phase!=SF_UPDATE_STABLE)return SF_BUSY;
  long n=sf_storage_load(source,scratch,sizeof(scratch));if(n<0)return n;
- SfPackage p;int r=sf_package_open(&p,scratch,n,sf_trust_key);if(r)return r;char runtime[64];
- if(p.kind!=2||sf_manifest_text(&p,"runtime_id",runtime,sizeof(runtime))||strcmp(runtime,"org.spiritfox.native"))return SF_DEPENDENCY;
- char selected;r=current(&selected);if(r)return r;selected=selected=='a'?'b':'a';
- const char*paths[]={selected=='a'?"/slots/a.sfk":"/slots/b.sfk","/boot/current"};const void*data[]={scratch,&selected};uint32_t lengths[]={n,1};
+ char id[64];r=package_policy(scratch,n,id);if(r)return r;uint8_t hash[32],encoded[SF_UPDATE_BYTES];sf_sha256(hash,scratch,n);
+ r=sf_update_stage(&state,id,hash);if(r)return r;r=sf_update_encode(&state,encoded);if(r)return r;
+ const char*paths[]={slot_path(state.candidate),"/boot/current"};const void*data[]={scratch,encoded};uint32_t lengths[]={n,sizeof(encoded)};
  return commit(paths,data,lengths,2);
 }
-long sf_persist_package(void*out,size_t capacity){
- if(!sf_storage_writable())return SF_DEVICE_GONE;char selected;int r=current(&selected);if(r)return r;if(!selected)return SF_NOT_FOUND;
- return sf_txn_get(&volume,selected=='a'?"/slots/a.sfk":"/slots/b.sfk",out,capacity);
+int sf_persist_begin(void){
+ if(!sf_storage_writable())return SF_DEVICE_GONE;SfUpdate state;int r=state_read(&state);if(r)return r;
+ if(state.phase==SF_UPDATE_STABLE)return state.good?0:SF_NOT_FOUND;
+ r=sf_update_begin(&state);if(r)return r;r=state_commit(&state);if(r)return r;
+ sf_log("update: TRIAL started\n");return 1;
 }
-void sf_persist_status(void){sf_log(volume.ready&&sf_storage_writable()?"persist: ACTIVE generation=":"persist: UNAVAILABLE generation=");sf_number(volume.generation);sf_log("\n");}
+int sf_persist_finish(int success){
+ if(!sf_storage_writable())return SF_DEVICE_GONE;SfUpdate state;int r=state_read(&state);if(r)return r;
+ r=sf_update_finish(&state,success);if(r)return r;r=state_commit(&state);if(r){sf_log("update: health commit failed\n");return r;}
+ sf_log(success?"update: CONFIRMED\n":"update: ROLLED BACK\n");return 0;
+}
+long sf_persist_package(void*out,size_t capacity){
+ if(!sf_storage_writable())return SF_DEVICE_GONE;SfUpdate state;int r=state_read(&state);if(r)return r;
+ if(state.phase==SF_UPDATE_PENDING)return SF_BUSY;char selected=state.phase==SF_UPDATE_TRYING?state.candidate:state.good;if(!selected)return SF_NOT_FOUND;
+ long n=sf_txn_get(&volume,slot_path(selected),out,capacity);if(n<0)return n;uint8_t hash[32];sf_sha256(hash,out,n);
+ if(memcmp(hash,state.phase==SF_UPDATE_TRYING?state.candidate_hash:state.good_hash,32))return SF_BAD_SIGNATURE;
+ char id[64];r=package_policy(out,n,id);if(r)return r;if(strcmp(id,state.app_id))return SF_DEPENDENCY;return n;
+}
+void sf_persist_status(void){
+ sf_log(volume.ready&&sf_storage_writable()?"persist: ACTIVE generation=":"persist: UNAVAILABLE generation=");sf_number(volume.generation);sf_log("\n");
+ SfUpdate state;if(!sf_storage_writable()||state_read(&state))return;
+ sf_log(state.phase==SF_UPDATE_STABLE?"update: STABLE good=":state.phase==SF_UPDATE_PENDING?"update: PENDING good=":"update: TRYING good=");
+ char text[]={state.good?state.good:'-',0};sf_log(text);sf_log(" candidate=");text[0]=state.candidate?state.candidate:'-';sf_log(text);sf_log("\n");
+}

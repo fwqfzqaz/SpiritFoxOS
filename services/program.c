@@ -50,6 +50,8 @@ long sf_main(const SfBootArgs*a,size_t bytes){
  ok=ok&&sf_sys(SYS_DMA_STATUS,0,0,0)==SF_DENIED;SfMessage m;sf_message(&m,OP_HELLO,1);m.status=ok?0:SF_DENIED;sf_send(a->manager,&m);return ok?0:1;
 #elif ROLE == 10
  return *(volatile uint32_t*)0xfed90000ull;
+#elif ROLE == 11
+ return 42;
 #else
  return SF_INVALID;
 #endif

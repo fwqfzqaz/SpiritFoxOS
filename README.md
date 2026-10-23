@@ -2,7 +2,7 @@
 
 基于 x86_64 UEFI 的可启动微内核原型。保留提供的 EFI 引导入口，按 [设计说明 v0.2](SpiritFoxOS_设计说明_v0.2.md) 实现用户态 sfmod、模块装卸、文件对象、native 运行时，以及从只读 virtio 磁盘验证并运行应用。
 
-当前推进到 M6 的受限实现：legacy/modern virtio-blk、SFRFS1、双银行事务、签名应用双槽，以及 QEMU q35 Intel VT-d 对 DMA RAM 访问的隔离。通用设备/IRQ 隔离、真实硬件断电保证、网络、图形与多核尚未完成；其余扩展保留在路线图中。
+当前推进到 M6 的受限实现：legacy/modern virtio-blk、SFRFS1、双银行事务、签名应用双槽试运行/确认/失败回退，以及 QEMU q35 Intel VT-d 对 DMA RAM 访问的隔离。通用设备/IRQ 隔离、真实硬件断电保证、网络、图形与多核尚未完成；其余扩展保留在路线图中。
 
 ## 构建和测试
 
@@ -13,7 +13,7 @@ python tools/bootstrap.py
 python tools/test.py
 ```
 
-第一步下载并校验 Zig 0.13.0、QEMU Windows 构建和 Monocypher 4.0.3。已提供的 Monocypher 源码在 `vendor/monocypher`。第二步执行基础服务与 229 条 IOMMU 检查、14 组 Python 测试（含 2000 次变异）、783 个事务故障场景，以及含真实越界 DMA 与恢复的三十三次 QEMU 启动。
+第一步下载并校验 Zig 0.13.0、QEMU Windows 构建和 Monocypher 4.0.3。已提供的 Monocypher 源码在 `vendor/monocypher`。第二步执行基础服务与 229 条 IOMMU 检查、14 组 Python 测试（含 2000 次变异）、783 个事务及 3132 个更新故障场景，以及含真实越界 DMA、试运行和恢复的六十一次 QEMU 启动。
 
 只构建：`python tools/build.py`。只运行宿主测试：`python tools/test.py --host-only`。已有镜像测试：`python tools/test.py --skip-build`。
 
@@ -21,13 +21,13 @@ python tools/test.py
 
 - `build/esp/EFI/BOOT/BOOTX64.EFI`：包含内核和已签名启动包的 UEFI 应用。
 - `build/*.sfmod`、`build/*.sfk`：实际构建出的模块与应用。
-- `build/storage.img`：1 MiB 的只读测试盘，含 `diskhello.sfk`、`disk-echo.sfmod` 和说明文件；磁盘应用与模块不在启动包中。
+- `build/storage.img`：1 MiB 的只读测试盘，含 `diskhello.sfk`、`disk-echo.sfmod`、更新故障测试包和说明文件；磁盘应用与模块不在启动包中。
 - `build/persistent.img`：2 MiB 新格式事务盘，具有相同只读包区；请复制后作为可写盘使用，重新构建会覆盖原始构建镜像。
 - `build/development.pub`：当前开发公钥；私钥种子在忽略提交的 `.keys/development.seed`。
 - `build/qemu-128.log`、`build/qemu-256.log`、`build/qemu-512.log`：串口验证记录。
 - `build/test-results.json`：本次测试结果。
 
-完整测试通过后，执行 `python tools/package_release.py` 生成 `build/SpiritFoxOS-M6-IOMMU.zip`，其中包含 EFI 镜像、两种测试盘、公钥、文档、测试结果与内容摘要。
+完整测试通过后，执行 `python tools/package_release.py` 生成 `build/SpiritFoxOS-M6-Updates.zip`，其中包含 EFI 镜像、两种测试盘、公钥、文档、测试结果与内容摘要。
 
 重新构建会使用本工作区现有开发密钥。删除种子后会生成新密钥并重新构建信任锚；这里没有生产密钥、Secure Boot 配置或发布签名流程。
 
@@ -63,6 +63,8 @@ persist
 ```
 
 成功写入与安装均等待设备 flush。任何写/flush 错误会停止卷的后续读写，需重新挂载或重启恢复；错误时不能假定新版本一定没有落盘。当前配额为四个 16 KiB 文件，只对笔记与一个应用提供入口。
+
+安装提交候选包，第一次运行前持久记录试运行，按时退出 0 才确认。失败或未确认时重启回退已确认包；待更新期间拒绝覆盖安装。此回退只改变应用选择器，不能撤销外部副作用；格式、旧版兼容与健康标准见 [应用更新](docs/UPDATES.md)。
 
 隔离模式交互：`python tools/qemu_test.py --interactive --persistent --iommu`；专项验证：`python tools/qemu_iommu_test.py`。诊断 `dma-test read/write` 会刻意触发设备隔离故障并使该 VM 的磁盘驱动停止至重启，请只在测试 VM 使用。
 

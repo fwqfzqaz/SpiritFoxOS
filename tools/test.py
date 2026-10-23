@@ -22,6 +22,8 @@ build.run(['-target', 'x86_64-windows-gnu', '-g0', '-O2', '-Wall', '-Wextra', '-
 subprocess.run([str(ROOT / 'build/test_storage.exe')], check=True)
 build.run(['-target', 'x86_64-windows-gnu', '-g0', '-O2', '-Wall', '-Wextra', '-Werror', '-Wno-unused-parameter', '-Iinclude', 'tests/test_txn.c', 'services/txn.c', 'services/sha256.c', '-o', 'build/test_txn.exe'])
 subprocess.run([str(ROOT / 'build/test_txn.exe')], check=True)
+build.run(['-target', 'x86_64-windows-gnu', '-g0', '-O2', '-Wall', '-Wextra', '-Werror', '-Wno-unused-parameter', '-Iinclude', 'tests/test_update.c', 'services/update.c', 'services/txn.c', 'services/sha256.c', '-o', 'build/test_update.exe'])
+subprocess.run([str(ROOT / 'build/test_update.exe')], check=True)
 build.run(['-target', 'x86_64-windows-gnu', '-g0', '-O2', '-Wall', '-Wextra', '-Werror', '-Wno-unused-parameter', '-Iinclude', 'tests/test_iommu.c', 'kernel/acpi.c', 'kernel/vtd_tables.c', '-o', 'build/test_iommu.exe'])
 subprocess.run([str(ROOT / 'build/test_iommu.exe')], check=True)
 subprocess.run([sys.executable, 'tests/test_packages.py'], check=True)
@@ -37,6 +39,8 @@ result = {'passed': True, 'elapsed_seconds': round(time.time()-started, 2), 'ser
 result['txn_fault_boundaries'] = 261
 result['txn_fault_modes'] = 3
 result['persistence_qemu'] = not args.host_only
+result['update_fault_scenarios'] = 4*261*3
+result['update_health_qemu'] = not args.host_only
 result['iommu_host_assertions'] = 229
 result['iommu_qemu'] = not args.host_only
 result['artifacts_sha256'] = {name: hashlib.sha256((ROOT/'build'/name).read_bytes()).hexdigest() for name in ['esp/EFI/BOOT/BOOTX64.EFI', 'storage.img', 'persistent.img', 'development.pub']}

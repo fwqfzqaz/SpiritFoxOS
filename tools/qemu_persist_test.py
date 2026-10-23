@@ -124,6 +124,194 @@ def generation(disk):
     return max(valid)
 
 
+def snapshot(data):
+    records = []
+    for slot in (0,1):
+        start = (2049+slot)*512
+        record = data[start:start+512]
+        if record[:8]==b'SFCMT1\0\0' and hashlib.sha256(record[:480]).digest()==record[480:]:
+            records.append((struct.unpack_from('<Q',record,8)[0],slot))
+    gen,slot = max(records)
+    bank = (2051+slot*256)*512
+    files = {}
+    for i in range(4):
+        entry = bank+512+i*128
+        name = data[entry:entry+64].split(b'\0',1)[0].decode()
+        if name:
+            size = struct.unpack_from('<I',data,entry+64)[0]
+            files[name] = bytes(data[bank+1024+i*16384:bank+1024+i*16384+size])
+    return gen,slot,files
+
+
+def rewrite(data, changes):
+    """Offline corruption fixture: repair filesystem hashes, preserving generation."""
+    data = bytearray(data)
+    _,slot,_ = snapshot(data)
+    bank = (2051+slot*256)*512
+    for i in range(4):
+        entry = bank+512+i*128
+        name = data[entry:entry+64].split(b'\0',1)[0].decode()
+        if name in changes:
+            content = changes[name]
+            assert len(content)<=16384
+            start = bank+1024+i*16384
+            data[start:start+16384] = content+bytes(16384-len(content))
+            struct.pack_into('<I',data,entry+64,len(content))
+            data[entry+96:entry+128] = hashlib.sha256(content).digest()
+    record = (2049+slot)*512
+    data[record+40:record+72] = hashlib.sha256(data[bank:bank+256*512]).digest()
+    data[record+480:record+512] = hashlib.sha256(data[record:record+480]).digest()
+    return bytes(data)
+
+
+def update_health(machine,disk,pristine,committed):
+    disk.write_bytes(pristine)
+    vm = machine('update-first-failure')
+    try:
+        vm.boot()
+        vm.command('install /disk/bin/diskfault.sfk','install: COMMITTED')
+        vm.command('run installed','sfexec: failed code=114')
+        assert b'update: ROLLED BACK' in vm.output
+        vm.command('persist','update: STABLE good=- candidate=-')
+        vm.command('run installed','sfexec: failed code=16')
+        vm.command('install /disk/bin/diskhello.sfk','install: COMMITTED')
+        vm.command('run installed','sfexec: exit 0')
+    finally:
+        vm.close()
+    disk.write_bytes(committed)
+    vm = machine('update-health-failures')
+    try:
+        vm.boot()
+        vm.command('install /disk/bin/diskother.sfk','install: failed code=6')
+        for name,code in [('diskfault',114),('diskexit',42),('diskspin',9)]:
+            vm.command('install /disk/bin/'+name+'.sfk','install: COMMITTED')
+            vm.command('install /disk/bin/diskhello.sfk','install: failed code=7')
+            start = vm.send('run installed')
+            vm.expect('sfexec: failed code='+str(code),start)
+            assert b'update: ROLLED BACK' in vm.output[start:]
+            vm.command('persist','update: STABLE good=b candidate=-')
+            vm.command('run installed','sfexec: exit 0')
+        vm.command('cat /persist/notes','durable-note')
+    finally:
+        vm.close()
+    assert generation(disk)==17
+    # A pending update survives a reboot, but an attempted, unconfirmed update
+    # never retries automatically after a process interruption.
+    disk.write_bytes(committed)
+    vm = machine('update-pending-stage')
+    try:
+        vm.boot()
+        vm.command('install /disk/bin/diskspin.sfk','install: COMMITTED')
+    finally:
+        vm.close()
+    pending = disk.read_bytes()
+    conf = ROOT/'build/update-begin-eio.conf'
+    conf.write_text('[inject-error]\nevent = "write_aio"\nsector = "2050"\nerrno = "5"\nonce = "on"\n')
+    vm = machine('update-begin-error',debug=conf.name)
+    try:
+        vm.boot('PERSIST READY generation=9')
+        start = vm.send('run installed')
+        vm.expect('sfexec: failed code=20',start)
+        assert b'update: TRIAL started' not in vm.output[start:]
+        assert b'update: CONFIRMED' not in vm.output[start:]
+        vm.command('persist','persist: UNAVAILABLE')
+    finally:
+        vm.close()
+    vm = machine('update-begin-recovery')
+    try:
+        vm.boot('PERSIST READY generation=9')
+        vm.command('persist','update: PENDING good=b candidate=a')
+    finally:
+        vm.close()
+    vm = machine('update-interrupted-trial')
+    try:
+        vm.boot('PERSIST READY generation=9')
+        vm.command('persist','update: PENDING good=b candidate=a')
+        vm.expect('update: TRIAL started',vm.send('run /installed.sfk'))
+    finally:
+        vm.close(False)
+    assert generation(disk)==10
+    conf = ROOT/'build/update-recovery-eio.conf'
+    conf.write_text('[inject-error]\nevent = "write_aio"\nsector = "2049"\nerrno = "5"\nonce = "on"\n')
+    vm = machine('update-recovery-error',debug=conf.name)
+    try:
+        vm.boot('PERSIST UNAVAILABLE code=20')
+        vm.command('run installed','sfexec: failed code=10')
+        vm.command('persist','persist: UNAVAILABLE')
+    finally:
+        vm.close()
+    vm = machine('update-trial-recovery')
+    try:
+        vm.boot('PERSIST READY generation=11')
+        assert b'update: RECOVERED interrupted trial' in vm.output
+        vm.command('persist','update: STABLE good=b candidate=-')
+        vm.command('run installed','sfexec: exit 0')
+        vm.command('cat /persist/notes','durable-note')
+    finally:
+        vm.close()
+    # A different, correctly signed package cannot replace the staged digest.
+    disk.write_bytes(rewrite(pending,{'/slots/a.sfk':(ROOT/'build/diskfault.sfk').read_bytes()}))
+    vm = machine('update-substituted-candidate')
+    try:
+        vm.boot()
+        vm.command('run installed','sfexec: failed code=4')
+        assert b'update: ROLLED BACK' in vm.output
+        vm.command('run installed','sfexec: exit 0')
+    finally:
+        vm.close()
+    # Successful execution alone must not acknowledge a failed health commit.
+    disk.write_bytes(committed)
+    vm = machine('update-confirm-stage')
+    try:
+        vm.boot()
+        vm.command('install /disk/bin/diskhello.sfk','install: COMMITTED')
+    finally:
+        vm.close()
+    conf = ROOT/'build/update-confirm-eio.conf'
+    conf.write_text('[inject-error]\nevent = "write_aio"\nsector = "2049"\nerrno = "5"\nonce = "on"\n')
+    vm = machine('update-confirm-error',debug=conf.name)
+    try:
+        vm.boot('PERSIST READY generation=9')
+        start = vm.send('run installed')
+        vm.expect('sfexec: failed code=20',start)
+        assert b'Hello from diskhello.sfk!' in vm.output[start:]
+        assert b'update: CONFIRMED' not in vm.output[start:]
+        assert b'sfexec: exit 0' not in vm.output[start:]
+        vm.command('persist','persist: UNAVAILABLE')
+    finally:
+        vm.close()
+    vm = machine('update-confirm-recovery')
+    try:
+        vm.boot('PERSIST READY generation=11')
+        assert b'update: RECOVERED interrupted trial' in vm.output
+        vm.command('persist','update: STABLE good=b candidate=-')
+        vm.command('run installed','sfexec: exit 0')
+    finally:
+        vm.close()
+    # Compatibility with the original authenticated, single-byte selector.
+    disk.write_bytes(rewrite(committed,{'/boot/current':b'b'}))
+    vm = machine('update-legacy-selector')
+    try:
+        vm.boot()
+        vm.command('run installed','sfexec: exit 0')
+        vm.command('install /disk/bin/diskhello.sfk','install: COMMITTED')
+        vm.command('run installed','sfexec: exit 0')
+        vm.command('persist','update: STABLE good=a candidate=-')
+    finally:
+        vm.close()
+    assert snapshot(disk.read_bytes())[2]['/boot/current'].startswith(b'SFUPD1\0\0')
+    _,_,files = snapshot(committed)
+    selector = bytearray(files['/boot/current']);selector[11] = 1
+    disk.write_bytes(rewrite(committed,{'/boot/current':selector}))
+    vm = machine('update-invalid-state')
+    try:
+        vm.boot('PERSIST UNAVAILABLE code=3')
+        vm.command('run installed','sfexec: failed code=10')
+        vm.command('persist','persist: UNAVAILABLE')
+    finally:
+        vm.close()
+
+
 def run(iommu=False):
     disk = ROOT/'build/persist-test.img'
     pristine = (ROOT/'build/persistent.img').read_bytes()
@@ -139,9 +327,14 @@ def run(iommu=False):
         vm.command('cat /persist/notes','durable-note')
         vm.command('install /disk/modules/disk-echo.sfmod','install: failed code=6')
         vm.command('install /disk/bin/diskhello.sfk','install: COMMITTED')
+        vm.command('persist','update: PENDING good=- candidate=a')
+        vm.command('install /disk/bin/diskhello.sfk','install: failed code=7')
         vm.command('run installed','sfexec: exit 0')
+        assert b'update: CONFIRMED' in vm.output
         vm.command('install /disk/bin/diskhello.sfk','install: COMMITTED')
-        vm.command('persist','persist: ACTIVE generation=4')
+        vm.command('run /installed.sfk','sfexec: exit 0')
+        vm.command('persist','persist: ACTIVE generation=8')
+        vm.command('persist','update: STABLE good=b candidate=-')
         vm.command('unmount /disk','disk: UNMOUNTED')
         vm.command('stop disk','disk: STOPPED')
         vm.command('start disk','disk: ACTIVE')
@@ -149,11 +342,11 @@ def run(iommu=False):
         vm.command('cat /persist/notes','durable-note')
     finally:
         vm.close()
-    assert generation(disk)==4
+    assert generation(disk)==8
     committed = disk.read_bytes()
     vm = machine('reboot')
     try:
-        vm.boot('PERSIST READY generation=4')
+        vm.boot('PERSIST READY generation=8')
         vm.command('cat /persist/notes','durable-note')
         vm.command('run installed','sfexec: exit 0')
         assert b'Hello from diskhello.sfk!' in vm.output
@@ -163,25 +356,14 @@ def run(iommu=False):
     assert committed[:2048*512]==pristine[:2048*512], 'Writes escaped transaction arena'
     # Repair storage hashes after tampering with the active package signature.
     # The volume is structurally valid, but each launch must still authenticate.
-    tampered = bytearray(committed)
-    bank_start = (2051+256)*512
-    for i in range(4):
-        entry = bank_start+512+i*128
-        if tampered[entry:entry+64].split(b'\0',1)[0] == b'/slots/b.sfk':
-            size = struct.unpack_from('<I',tampered,entry+64)[0]
-            start = bank_start+1024+i*16384
-            tampered[start+size-1] ^= 1
-            tampered[entry+96:entry+128] = hashlib.sha256(tampered[start:start+size]).digest()
-            break
-    else:
-        raise RuntimeError('Active B package missing')
-    record = 2050*512
-    tampered[record+40:record+72] = hashlib.sha256(tampered[bank_start:bank_start+256*512]).digest()
-    tampered[record+480:record+512] = hashlib.sha256(tampered[record:record+480]).digest()
-    disk.write_bytes(tampered)
+    _,_,files = snapshot(committed)
+    package = bytearray(files['/slots/b.sfk']);package[-1] ^= 1
+    selector = bytearray(files['/boot/current'])
+    selector[32:64] = hashlib.sha256(package).digest()
+    disk.write_bytes(rewrite(committed,{'/slots/b.sfk':package,'/boot/current':selector}))
     vm = machine('untrusted-slot')
     try:
-        vm.boot('PERSIST READY generation=4')
+        vm.boot('PERSIST READY generation=8')
         vm.command('run installed','sfexec: failed code=4')
         vm.command('run hello.sfk','sfexec: exit 0')
     finally:
@@ -192,7 +374,8 @@ def run(iommu=False):
     disk.write_bytes(corrupted)
     vm = machine('fallback')
     try:
-        vm.boot('PERSIST READY generation=3')
+        vm.boot('PERSIST READY generation=8')
+        assert b'update: RECOVERED interrupted trial' in vm.output
         vm.command('cat /persist/notes','durable-note')
         vm.command('run installed','sfexec: exit 0')
     finally:
@@ -228,7 +411,7 @@ def run(iommu=False):
     assert disk.read_bytes()[2049*512:2050*512]==bytes(512), 'Target record not invalidated before bank reuse'
     vm = machine('interrupted-recovery')
     try:
-        vm.boot('PERSIST READY generation=4')
+        vm.boot('PERSIST READY generation=8')
         vm.command('cat /persist/notes','durable-note')
         vm.command('run installed','sfexec: exit 0')
     finally:
@@ -244,12 +427,15 @@ def run(iommu=False):
         vm.close()
     vm = machine('error-recovery')
     try:
-        vm.boot('PERSIST READY generation=4')
+        vm.boot('PERSIST READY generation=8')
         vm.command('cat /persist/notes','durable-note')
     finally:
         vm.close()
     assert (ROOT/'build/persistent.img').read_bytes()==pristine
-    print('PERSIST QEMU PASS: durable file, signed A/B activation, reboot, untrusted slot, fallback, write/flush EIO, interrupted commit',flush=True)
+    update_health(machine,disk,pristine,committed)
+    assert (ROOT/'build/persistent.img').read_bytes()==pristine
+    assert disk.read_bytes()[:2048*512]==pristine[:2048*512]
+    print('PERSIST QEMU PASS: durable file, trial confirmation, fault/nonzero/timeout rollback, interrupted trial, identity/digest/signature, legacy selector, invalid state, write/flush/health EIO and interrupted commit',flush=True)
 
 
 if __name__=='__main__':

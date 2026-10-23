@@ -110,7 +110,11 @@ static void command(char*line){
  else if(!memcmp(line,"install ",8)){int r=sf_persist_install(line+8);if(!r)sf_log("install: COMMITTED\n");else{sf_log("install: failed code=");sf_number(-r);sf_log("\n");}}
  else if(!strcmp(line,"modules")){sf_log("sf-init ACTIVE pinned; sf-native ");sf_log(manager.modules[runtime_slot].state==MOD_ACTIVE?"ACTIVE":"STOPPED");sf_log("; echo ");sf_log(manager.modules[echo_slot].state==MOD_ACTIVE?"ACTIVE\n":"STOPPED\n");}
  else if(!strcmp(line,"echo")){sf_log(echo_call(echo_ep,echo_pid)==0?"echo: ping\n":"echo: service unavailable\n");}
- else if(!memcmp(line,"run ",4)){int pid=launch_app(line+4);int status=pid>0?wait_app(pid):pid;if(!status)sf_log("sfexec: exit 0\n");else{sf_log("sfexec: failed code=");sf_number(status<0?-status:status);sf_log("\n");}}
+ else if(!memcmp(line,"run ",4)){
+  int installed=!strcmp(line+4,"installed")||!strcmp(line+4,"/installed.sfk");int trial=installed?sf_persist_begin():0,status=trial;
+  if(trial>=0){int pid=launch_app(line+4);status=pid>0?wait_app(pid):pid;if(trial){int r=sf_persist_finish(!status);if(r)status=r;}}
+  if(!status)sf_log("sfexec: exit 0\n");else{sf_log("sfexec: failed code=");sf_number(status<0?-status:status);sf_log("\n");}
+ }
  else if(!strcmp(line,"unmount /disk")){int r=sf_storage_unmount();sf_log(!r?"disk: UNMOUNTED\n":"disk: unmount refused\n");}
  else if(!strcmp(line,"mount /disk")){int r=sf_storage_mount();if(!r&&sf_storage_writable())r=sf_persist_mount(&ns);sf_log(!r?"disk: MOUNTED\n":"disk: mount refused\n");}
  else if(!strcmp(line,"stop disk")){int r=sf_storage_stop();sf_log(!r?"disk: STOPPED\n":"disk: stop refused\n");}
