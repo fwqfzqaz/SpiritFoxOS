@@ -27,6 +27,7 @@ sf-init 在创建进程前验证目录、保留打开描述和挂载引用；包
 | `OP_ROOT (20)` | 无额外字段 | status=0，handle 为显式授予的目录；未授予或已关闭返回 SF_DENIED |
 | `OP_OPENAT (19)` | handle=本进程目录；data=相对 UTF-8 路径；length 包含唯一末尾 NUL；mode=打开模式 | status=0，handle=新的进程内句柄 |
 | `OP_ENUMERATE (18)` | handle=可读目录；length=输出容量，最多 256 | status 与 length 为实际字节数，data 为直接子节点名称，每项以换行结束 |
+| `OP_TRUNCATE (21)` | handle=可写普通文件；offset=新的 64 位长度 | status=0；只读目录派生的文件拒绝此操作，详见 `TRUNCATE.md` |
 | `OP_READ/WRITE/CLOSE/SEEK/POLL` | 沿用现有文件句柄协议 | 权限、独立偏移、dup、挂载失效与退出清理沿用同一实现 |
 
 `OPEN_READ=1`、`OPEN_WRITE=2` 是权限；`OPEN_NONBLOCK=4` 保留现有行为；`OPEN_DIRECTORY=8` 要求目标实际是目录，不会增加访问权限。`sf_ns_openat` 的目标读写位必须是父目录权限的子集。信任域内的服务可用可写目录进一步衰减权限，应用的 shell 委派目前始终只读。

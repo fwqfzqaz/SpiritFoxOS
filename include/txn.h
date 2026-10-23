@@ -20,4 +20,5 @@ typedef struct {
 int sf_txn_mount(SfTxn*,SfTxnRead,SfTxnWrite,SfTxnFlush,void*);
 long sf_txn_get(SfTxn*,const char*,void*,size_t);
 int sf_txn_commit(SfTxn*,const char*const*,const void*const*,const uint32_t*,unsigned);
+int sf_txn_resize(SfTxn*,const char*,uint64_t);
 #endif

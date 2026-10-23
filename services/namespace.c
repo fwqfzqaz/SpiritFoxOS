@@ -37,7 +37,14 @@ long sf_ns_write(SfNamespace*n,uint32_t owner,uint32_t h,const void*data,size_t 
  if(x->type==NODE_DISK){if(!n->external_write)return SF_READ_ONLY;long r=n->external_write(x->external,d->offset,data,bytes);if(r>=0){if((uint64_t)r>bytes||(uint64_t)r>UINT32_MAX-d->offset)return SF_BAD_FORMAT;d->offset+=r;if(d->offset>x->size)x->size=d->offset;}return r;}
  if(d->offset>sizeof(x->data)||x->size>sizeof(x->data))return SF_INVALID;
  if(x->type==NODE_PIPE){if(bytes>sizeof(x->data)-x->size)bytes=sizeof(x->data)-x->size;if(!bytes)return SF_WOULD_BLOCK;for(size_t i=0;i<bytes;i++)x->data[(x->head+x->size+i)%sizeof(x->data)]=((const uint8_t*)data)[i];x->size+=bytes;return bytes;}
- if(bytes>sizeof(x->data)-d->offset)bytes=sizeof(x->data)-d->offset;if(!bytes)return SF_NO_SPACE;memcpy(x->data+d->offset,data,bytes);d->offset+=bytes;if(d->offset>x->size)x->size=d->offset;return bytes;
+ if(bytes>sizeof(x->data)-d->offset)bytes=sizeof(x->data)-d->offset;if(!bytes)return SF_NO_SPACE;if(d->offset>x->size)memset(x->data+x->size,0,d->offset-x->size);memcpy(x->data+d->offset,data,bytes);d->offset+=bytes;if(d->offset>x->size)x->size=d->offset;return bytes;
+}
+int sf_ns_truncate(SfNamespace*n,uint32_t owner,uint32_t h,uint64_t bytes){
+ SfDescription*d=description(n,owner,h);if(!d)return SF_STALE_HANDLE;if(!(d->mode&OPEN_WRITE))return SF_DENIED;SfNode*x=&n->nodes[d->node];if(x->readonly)return SF_READ_ONLY;
+ if(x->type!=NODE_FILE&&x->type!=NODE_DISK)return SF_INVALID;if(bytes>UINT32_MAX)return SF_NO_SPACE;
+ if(x->type==NODE_DISK){if(!n->external_truncate)return SF_READ_ONLY;int r=n->external_truncate(x->external,bytes);if(r)return r>0?SF_BAD_FORMAT:r;}
+ else{if(bytes>sizeof(x->data))return SF_NO_SPACE;size_t start=bytes<x->size?bytes:x->size;memset(x->data+start,0,sizeof(x->data)-start);}
+ x->size=bytes;return 0;
 }
 long sf_ns_seek(SfNamespace*n,uint32_t owner,uint32_t h,uint64_t off){SfDescription*d=description(n,owner,h);if(!d)return SF_STALE_HANDLE;SfNode*x=&n->nodes[d->node];if(x->type==NODE_PIPE||x->type==NODE_CONSOLE)return SF_NOT_SEEKABLE;if((x->type!=NODE_FILE&&x->type!=NODE_DISK)||off>(x->type==NODE_DISK?x->size:sizeof(x->data)))return SF_INVALID;d->offset=off;return off;}
 long sf_ns_poll(SfNamespace*n,uint32_t owner,uint32_t h){SfDescription*d=description(n,owner,h);if(!d)return SF_STALE_HANDLE;SfNode*x=&n->nodes[d->node];unsigned mask=0;if(x->type==NODE_PIPE){if((d->mode&1)&&(x->size||!x->writers))mask|=1;if((d->mode&2)&&x->size<sizeof(x->data))mask|=2;if(!x->writers)mask|=4;}else{if(d->mode&1)mask|=1;if((d->mode&2)&&!x->readonly)mask|=2;}return mask;}

@@ -63,6 +63,7 @@ static int serve_once(unsigned timeout_ms){
   if(strcmp((char*)m.data,"/dev/console")||m.mode!=OPEN_WRITE){status=SF_DENIED;break;}
   status=sf_ns_open(&ns,sender,"/",(char*)m.data,m.mode);if(status>=0){m.handle=status;status=0;}break;
  case OP_WRITE:status=sf_ns_write(&ns,sender,m.handle,m.data,m.length);break;
+ case OP_TRUNCATE:status=sf_ns_truncate(&ns,sender,m.handle,m.offset);break;
  case OP_READ:status=sf_ns_read(&ns,sender,m.handle,m.data,m.length);if(status>=0)m.length=status;break;
  case OP_CLOSE:status=sf_ns_close(&ns,sender,m.handle);if(!status&&m.handle==c->root)c->root=0;break;
  case OP_SEEK:status=sf_ns_seek(&ns,sender,m.handle,m.offset);break;
@@ -128,8 +129,11 @@ static void run_command(const char*name,const char*root){
  }
  if(!status)sf_log("sfexec: exit 0\n");else{sf_log("sfexec: failed code=");sf_number(status<0?-status:status);sf_log("\n");}
 }
+static int parse_size(const char*text,uint64_t*out){
+ if(!*text)return SF_INVALID;uint64_t n=0;for(;*text;text++){if(*text<'0'||*text>'9')return SF_INVALID;unsigned digit=*text-'0';if(n>(UINT64_MAX-digit)/10)return SF_INVALID;n=n*10+digit;}*out=n;return 0;
+}
 static void command(char*line){
- if(!strcmp(line,"help")){sf_log("help | ls [path] | cat <path> | write <path> <text> | modules | echo | run <app.sfk or installed> | runat <read-only-dir> <app> | install /disk/bin/app.sfk | persist | stop echo | start echo | mount /disk | unmount /disk | stop disk | start disk | selftest | shutdown\n");}
+ if(!strcmp(line,"help")){sf_log("help | ls [path] | cat <path> | write <path> <text> | truncate <path> <bytes> | modules | echo | run <app.sfk or installed> | runat <read-only-dir> <app> | install /disk/bin/app.sfk | persist | stop echo | start echo | mount /disk | unmount /disk | stop disk | start disk | selftest | shutdown\n");}
  else if(!strcmp(line,"persist"))sf_persist_status();
  else if(!strcmp(line,"dma-test write"))sf_storage_dma_probe(0);
  else if(!strcmp(line,"dma-test read"))sf_storage_dma_probe(1);
@@ -139,6 +143,9 @@ static void command(char*line){
  else if(!strcmp(line,"echo")){sf_log(echo_call(echo_ep,echo_pid)==0?"echo: ping\n":"echo: service unavailable\n");}
  else if(!memcmp(line,"run ",4))run_command(line+4,0);
  else if(!memcmp(line,"runat ",6)){char*root=line+6,*name=root;while(*name&&*name!=' ')name++;if(!*name||!name[1])sf_log("runat: expected directory and application\n");else{*name++=0;run_command(name,root);}}
+ else if(!memcmp(line,"truncate ",9)){char*path=line+9,*text=path;while(*text&&*text!=' ')text++;uint64_t bytes=0;int r=SF_INVALID;
+  if(*text){*text++=0;r=parse_size(text,&bytes);if(!r){int h=sf_ns_open(&ns,1,"/",path,OPEN_WRITE);r=h<0?h:sf_ns_truncate(&ns,1,h,bytes);if(h>=0)sf_ns_close(&ns,1,h);}}
+  if(!r)sf_log("truncate: OK\n");else{sf_log("truncate: failed code=");sf_number(-r);sf_log("\n");}}
  else if(!strcmp(line,"unmount /disk")){int r=sf_storage_unmount();sf_log(!r?"disk: UNMOUNTED\n":"disk: unmount refused\n");}
  else if(!strcmp(line,"mount /disk")){int r=sf_storage_mount();if(!r&&sf_storage_writable())r=sf_persist_mount(&ns);sf_log(!r?"disk: MOUNTED\n":"disk: mount refused\n");}
  else if(!strcmp(line,"stop disk")){int r=sf_storage_stop();sf_log(!r?"disk: STOPPED\n":"disk: stop refused\n");}

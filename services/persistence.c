@@ -50,6 +50,10 @@ static long notes_write(unsigned index,uint64_t offset,const void*data,size_t by
  if(offset>(uint64_t)old)memset(scratch+old,0,offset-old);memcpy(scratch+offset,data,bytes);
  uint32_t length=offset+bytes;if(length<(uint64_t)old)length=old;const char*paths[]={"/notes/user"};const void*items[]={scratch};int r=commit(paths,items,&length,1);return r?r:(long)bytes;
 }
+static int notes_truncate(unsigned index,uint64_t bytes){
+ if(index!=UINT32_MAX)return SF_READ_ONLY;if(!sf_storage_writable()||!volume.ready)return SF_DEVICE_GONE;
+ int r=sf_storage_transaction(1);if(r)return r;r=sf_txn_resize(&volume,"/notes/user",bytes);sf_storage_transaction(0);return r;
+}
 int sf_persist_mount(SfNamespace*ns){
  volume.ready=0;if(!sf_storage_writable())return SF_READ_ONLY;
  int r=sf_txn_mount(&volume,sf_storage_sector_read,sf_storage_sector_write,sf_storage_flush,0);if(r)return r;
@@ -63,7 +67,7 @@ int sf_persist_mount(SfNamespace*ns){
  r=sf_ns_create(ns,"/persist/notes",NODE_DISK,0);if(r){memset(&ns->nodes[directory],0,sizeof(SfNode));volume.ready=0;return r;}
  for(unsigned i=0;i<32;i++)if(!strcmp(ns->nodes[i].path,"/persist/notes")){ns->nodes[i].external=UINT32_MAX;ns->nodes[i].mount_tag=1;ns->nodes[i].size=n<0?0:n;}
  ns->nodes[directory].readonly=1;ns->nodes[directory].mount_tag=1;
- if(ns->external_read!=notes_read)disk_read=ns->external_read;ns->external_read=notes_read;ns->external_write=notes_write;
+ if(ns->external_read!=notes_read)disk_read=ns->external_read;ns->external_read=notes_read;ns->external_write=notes_write;ns->external_truncate=notes_truncate;
  sf_log("PERSIST READY generation=");sf_number(volume.generation);sf_log("\n");return 0;
 }
 int sf_persist_install(const char*source){

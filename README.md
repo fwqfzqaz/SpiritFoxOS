@@ -13,7 +13,7 @@ python tools/bootstrap.py
 python tools/test.py
 ```
 
-第一步下载并校验 Zig 0.13.0、QEMU Windows 构建和 Monocypher 4.0.3。已提供的 Monocypher 源码在 `vendor/monocypher`。第二步执行基础服务、950 条内核 IPC/内存边界、108 条 openat、229 条 IOMMU 与 4069 条版本策略检查、15 组 Python 测试（含 2000 次变异）、783 个事务及 3132 个更新故障场景，以及含真实越界 DMA、试运行、版本策略、目录授权、驱动死亡和恢复的七十九次 QEMU 启动。
+第一步下载并校验 Zig 0.13.0、QEMU Windows 构建和 Monocypher 4.0.3。已提供的 Monocypher 源码在 `vendor/monocypher`。第二步执行基础服务、950 条内核 IPC/内存边界、108 条 openat、83 条截断、229 条 IOMMU 与 4069 条版本策略检查、15 组 Python 测试（含 2000 次变异）、783 个事务、3132 个更新及 3132 个截断故障场景，以及含真实越界 DMA、试运行、版本策略、目录授权、持久化截断、驱动死亡和恢复的九十五次 QEMU 启动。
 
 只构建：`python tools/build.py`。只运行宿主测试：`python tools/test.py --host-only`。已有镜像测试：`python tools/test.py --skip-build`。
 
@@ -62,7 +62,7 @@ run installed
 persist
 ```
 
-成功写入与安装均等待设备 flush。任何写/flush 错误会停止卷的后续读写，需重新挂载或重启恢复；错误时不能假定新版本一定没有落盘。当前配额为四个 16 KiB 文件，只对笔记与一个应用提供入口。
+成功写入与安装均等待设备 flush。`truncate /persist/notes <字节数>` 可缩短、清空或补零扩展笔记，同长度不写盘；RAMFS 普通文件也支持截断。任何写/flush 错误会停止卷的后续读写与截断，需重新挂载或重启恢复；错误时不能假定新版本一定没有落盘。当前配额为四个 16 KiB 文件，只对笔记与一个应用提供入口。
 
 安装提交候选包，第一次运行前持久记录试运行，按时退出 0 才确认。失败或未确认时重启回退已确认包；待更新期间拒绝覆盖安装。此回退只改变应用选择器，不能撤销外部副作用；格式、旧版兼容与健康标准见 [应用更新](docs/UPDATES.md)。
 
@@ -83,4 +83,4 @@ python tools/sfpack.py sign build/hello.sfk --seed .keys/development.seed
 
 目录授权示例：`runat /tmp fileprobe.sfk`、`runat /disk/etc readprobe.sfk`。只有显式选择目录且应用签名清单声明 namespace.read 时才授予只读访问；普通 run 不授予文件根。
 
-详见 [目录能力与 openat](docs/NAMESPACE.md)、[存储协议与磁盘格式](docs/STORAGE.md)、[事务持久化](docs/PERSISTENCE.md)、[实现边界](docs/IMPLEMENTATION.md)、[安全审查与修复](docs/SECURITY.md)、[测试记录](docs/TESTING.md) 和 [后续路线](docs/ROADMAP.md)。
+详见 [截断与补零扩展](docs/TRUNCATE.md)、[目录能力与 openat](docs/NAMESPACE.md)、[存储协议与磁盘格式](docs/STORAGE.md)、[事务持久化](docs/PERSISTENCE.md)、[实现边界](docs/IMPLEMENTATION.md)、[安全审查与修复](docs/SECURITY.md)、[测试记录](docs/TESTING.md) 和 [后续路线](docs/ROADMAP.md)。

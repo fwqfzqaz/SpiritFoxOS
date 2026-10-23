@@ -50,7 +50,7 @@ BootArgs 保持 96 字节：尾部由 `device_bdf:u32` 细分为 `device_bdf:u16
 
 OUT 请求通过两个严格有序的 256 字节消息组装。FLUSH 使用类型 4、sector=0、没有数据描述符；状态与队列完成仍经过校验。普通应用没有驱动端点、端口或 DMA 映射。
 
-`/persist/notes` 映射到事务键 `/notes/user`，支持普通 open/read/write/seek 和独立偏移，最大 16 KiB。每次 write 保留原文件未覆盖的尾部，与 RAMFS 一致，不隐式截断。打开文件持有 `/disk` 文件系统引用，事务持有实际 `RES_DIRTY` 资源；卸载失败会恢复准入。其余三个键为 `/slots/a.sfk`、`/slots/b.sfk`、`/boot/current`，没有授予普通文件写接口。当前应用策略仍只允许控制台输出。
+`/persist/notes` 映射到事务键 `/notes/user`，支持普通 open/read/write/seek、显式 truncate 和独立偏移，最大 16 KiB。每次 write 保留原文件未覆盖的尾部，与 RAMFS 一致，不隐式截断；truncate 缩短或补零扩展，同长度请求不写盘，保持打开偏移。改变长度使用同一双银行提交与 dirty 账本，语义及故障回归见 `TRUNCATE.md`。打开文件持有 `/disk` 文件系统引用，卸载失败会恢复准入。其余三个键为 `/slots/a.sfk`、`/slots/b.sfk`、`/boot/current`，没有授予普通文件写接口。普通 run 没有文件根；显式 runat 可按签名请求授予只读目录，不能据此写入或截断笔记。
 
 `/persist` 目录禁止创建其他文件，避免把 RAMFS 文件误认为持久化数据。卸载同步移除这两个投影节点；重新挂载从盘恢复。
 

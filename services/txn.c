@@ -47,6 +47,17 @@ long sf_txn_get(SfTxn*t,const char*path,void*out,size_t capacity){
  for(unsigned i=0;i<4;i++)if(!strcmp(t->files[i].path,path)){if(t->files[i].bytes>capacity)return SF_NO_SPACE;memcpy(out,t->files[i].data,t->files[i].bytes);return t->files[i].bytes;}
  return SF_NOT_FOUND;
 }
+int sf_txn_resize(SfTxn*t,const char*path,uint64_t bytes){
+ if(!t->ready)return SF_DEVICE_GONE;if(!path_ok(path))return SF_INVALID;if(bytes>SF_TXN_FILE_BYTES)return SF_NO_SPACE;
+ unsigned i=0;while(i<SF_TXN_FILES&&strcmp(t->files[i].path,path))i++;uint32_t old=i<SF_TXN_FILES?t->files[i].bytes:0;
+ /* An absent file is the adapter's empty file; a same-length resize is a
+  * read-only no-op, including an empty file not yet represented on disk. */
+ if(bytes==old)return 0;
+ memset(t->buffer,0,bytes);if(i<SF_TXN_FILES)memcpy(t->buffer,t->files[i].data,old<bytes?old:bytes);
+ const char*paths[]={path};const void*data[]={t->buffer};uint32_t lengths[]={bytes};
+ /* commit consumes this scratch input into next before rebuilding buffer. */
+ return sf_txn_commit(t,paths,data,lengths,1);
+}
 int sf_txn_commit(SfTxn*t,const char*const*paths,const void*const*data,const uint32_t*bytes,unsigned count){
  if(!t->ready)return SF_DEVICE_GONE;if(!count||count>4||t->generation==UINT64_MAX)return SF_INVALID;
  memcpy(t->next,t->files,sizeof(t->next));
