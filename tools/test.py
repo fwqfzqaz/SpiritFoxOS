@@ -48,6 +48,7 @@ subprocess.run([sys.executable, 'tests/test_trust.py'], check=True)
 subprocess.run([sys.executable, 'tests/test_readfs.py'], check=True)
 subprocess.run([sys.executable, 'tests/test_native.py'], check=True)
 if not args.host_only:
+    subprocess.run([sys.executable, 'tools/qemu_block_channel_test.py'], check=True)
     subprocess.run([sys.executable, 'tools/qemu_file_rpc_test.py'], check=True)
     subprocess.run([sys.executable, 'tools/qemu_native_test.py'], check=True)
     subprocess.run([sys.executable, 'tools/qemu_environment_test.py'], check=True)
@@ -95,6 +96,8 @@ result['native_relative_qemu_boots'] = 0 if args.host_only else 4
 result['file_rpc_host_checks'] = 353
 result['file_rpc_qemu'] = not args.host_only
 result['file_rpc_qemu_boots'] = 0 if args.host_only else 2
+result['block_reply_channel_qemu'] = not args.host_only
+result['block_reply_channel_qemu_boots'] = 0 if args.host_only else 2
 result['trust_policy_qemu'] = not args.host_only
 result['trust_policy_qemu_boots'] = 0 if args.host_only else 14
 result['artifacts_sha256'] = {name: hashlib.sha256((ROOT/'build'/name).read_bytes()).hexdigest() for name in ['esp/EFI/BOOT/BOOTX64.EFI', 'storage.img', 'persistent.img', 'development.pub', 'application.pub', 'trust-policy.json']}

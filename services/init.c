@@ -19,7 +19,7 @@ static Child children[16];static uint64_t requests;
 static long console_write(const void*p,size_t n){return sf_sys(SYS_LOG,(uint64_t)p,n,0);}
 static int package_get(const char*name,SfPackage*p){const uint8_t*d;uint64_t n;if(name[0]=='/'){long r=!strcmp(name,"/installed.sfk")?sf_persist_package(package_snapshot,sizeof(package_snapshot)):sf_storage_load(name,package_snapshot,sizeof(package_snapshot));return r<0?r:sf_package_open_trusted(p,package_snapshot,r,&sf_trust_store);}int r=sf_bundle_find((void*)boot->bundle,boot->bundle_bytes,name,&d,&n);return r?r:sf_package_open_trusted(p,d,n,&sf_trust_store);}
 static int native_upload(const SfPackage*p){for(uint64_t off=0;off<p->bytes;){SfMessage m;sf_message(&m,OP_NATIVE_STAGE,++requests);m.handle=p->bytes;m.offset=off;m.length=p->bytes-off;if(m.length>sizeof(m.data))m.length=sizeof(m.data);uint32_t sent=m.length;memcpy(m.data,p->data+off,sent);int rc=sf_send(runtime_ep,&m);if(rc)return rc;long from=sf_recv(runtime_reply,&m,sf_deadline(1000));if(from!=(long)runtime_pid||m.h.request_id!=requests)return from<0?from:SF_STALE_HANDLE;if(m.status)return m.status;off+=sent;if(m.offset!=off)return SF_BAD_FORMAT;}return 0;}
-static int spawn_package_policy(const char*name,uint32_t service,uint32_t rights,uint32_t device,uint32_t device_rights,int directory,const SfArguments*arguments){
+static int spawn_package_policy(const char*name,uint32_t service,uint32_t rights,uint32_t device,uint32_t device_rights,int directory,const SfArguments*arguments,uint32_t reply){
  SfPackage p;int r=package_get(name,&p);if(r)return r;
  if(arguments&&(arguments->count||arguments->env_count)&&p.kind!=2)return SF_DENIED;
  uint64_t image_base=p.native_profile?SF_PIE_MIN+((pie_sequence++&1)*0x2000000ull):SF_BASE;
@@ -30,13 +30,14 @@ static int spawn_package_policy(const char*name,uint32_t service,uint32_t rights
   SfMessage request;sf_message(&request,OP_NATIVE_PREPARE,++requests);request.length=strlen(name)+1;if(request.length>sizeof(request.data))return SF_INVALID;request.mode=external;request.offset=image_base;memcpy(request.data,name,request.length);int rc=sf_send(runtime_ep,&request);if(rc)return rc;long from=sf_recv(runtime_reply,&request,sf_deadline(1000));if(from!=(long)runtime_pid||request.h.request_id!=requests)return from<0?from:SF_INVALID;if(request.status)return request.status;
   if(request.length!=sizeof(SfNativePlan))return SF_BAD_FORMAT;SfNativePlan native;memcpy(&native,request.data,sizeof(native));if(native.entry!=p.entry||native.image_base!=image_base||native.profile!=p.native_profile||native.relocation_offset!=p.relocation_offset||native.relocation_count!=p.relocation_count||native.reserved||native.count>5)return SF_BAD_FORMAT;unsigned j=0;for(unsigned i=0;i<p.count;i++){SfSection*s=&p.sections[i];if(s->type>3)continue;if(j>=native.count)return SF_BAD_FORMAT;SfNativeSegment*t=&native.segments[j++];if(t->rva!=s->rva||t->memory!=s->memory||t->offset!=s->offset||t->bytes!=s->bytes||t->flags!=s->flags||t->reserved)return SF_BAD_FORMAT;}if(j!=native.count)return SF_BAD_FORMAT;
  }
- SfLoadPlan plan={0};plan.size=sizeof(plan);plan.entry=p.entry;plan.grant_manager=!strcmp(name,"sf-native.sfmod")?runtime_reply:manager_ep;plan.grant_service=service;plan.service_rights=rights;plan.grant_bundle=!strcmp(name,"sf-native.sfmod");
+ SfLoadPlan plan={0};plan.size=sizeof(plan);plan.entry=p.entry;plan.grant_manager=reply?reply:!strcmp(name,"sf-native.sfmod")?runtime_reply:manager_ep;plan.grant_service=service;plan.service_rights=rights;plan.grant_bundle=!strcmp(name,"sf-native.sfmod");
  plan.grant_device=device;plan.device_rights=device_rights;
  if(arguments)plan.arguments=*arguments;
  r=sf_native_image(&p,image_base,staging,sizeof(staging),&plan);if(r)return r;
  return sf_sys(SYS_SPAWN,(uint64_t)&plan,0,0);
 }
-static int spawn_package_device(const char*name,uint32_t service,uint32_t rights,uint32_t device,uint32_t device_rights){return spawn_package_policy(name,service,rights,device,device_rights,0,0);}
+static int spawn_package_device(const char*name,uint32_t service,uint32_t rights,uint32_t device,uint32_t device_rights){return spawn_package_policy(name,service,rights,device,device_rights,0,0,0);}
+static int spawn_storage_package(const char*name,uint32_t service,uint32_t rights,uint32_t device,uint32_t device_rights,uint32_t reply){return spawn_package_policy(name,service,rights,device,device_rights,0,0,reply);}
 static int spawn_package(const char*name,uint32_t service,uint32_t rights){return spawn_package_device(name,service,rights,0,0);}
 static Child*child(uint32_t pid){for(unsigned i=0;i<16;i++)if(children[i].pid==pid)return&children[i];return 0;}
 static int launch_app_root_args(const char*name,const char*root,const SfArguments*arguments){
@@ -47,7 +48,7 @@ static int launch_app_root_args(const char*name,const char*root,const SfArgument
  int directory=root?sf_ns_open(&ns,1,"/",root,OPEN_READ|OPEN_DIRECTORY):0;if(directory<0)return directory;
  int ep=0,r=sfmod_acquire(&manager,runtime_slot,RES_LEASE);if(r)goto fail_root;
  ep=sf_sys(SYS_EP_CREATE,0,0,0);if(ep<0){r=ep;goto fail_lease;}
- int pid=spawn_package_policy(name,ep,RIGHT_RECV,0,0,directory!=0,arguments);if(pid<0){r=pid;goto fail_lease;}
+ int pid=spawn_package_policy(name,ep,RIGHT_RECV,0,0,directory!=0,arguments,0);if(pid<0){r=pid;goto fail_lease;}
  if(directory)ns.handles[(directory&255)-1].owner=pid;
  children[slot]=(Child){pid,ep,directory,1};return pid;
 fail_lease:if(ep>0)sf_sys(SYS_CAP_REVOKE,ep,0,0);sfmod_release(&manager,runtime_slot,RES_LEASE);
@@ -62,6 +63,10 @@ static int serve_once(unsigned timeout_ms){
  sf_file_dispatch(&ns,sender,&c->root,&m);return sf_send(c->reply,&m);
 }
 static int wait_app(uint32_t pid){uint64_t end=sf_ticks()+300;for(;;){long status=sf_sys(SYS_TASK_STATUS,pid,0,0);if(status!=SF_TASK_RUNNING){app_reap(pid);return status;}if(sf_ticks()>end){sf_sys(SYS_KILL,pid,SF_TIMEOUT,0);app_reap(pid);return SF_TIMEOUT;}serve_once(10);sf_yield();}}
+static int channel_test(void){
+ int a=launch_app_root("readprobe.sfk","/disk/etc"),b=launch_app_root("readprobe.sfk","/disk/etc");int ar=a>0?wait_app(a):a,br=b>0?wait_app(b):b;
+ if(!ar&&!br)sf_log("RPC CHANNEL TEST PASSED\n");else{sf_log("rpc-channels: failed a=");sf_number(ar<0?-ar:ar);sf_log(" b=");sf_number(br<0?-br:br);sf_log("\n");}return ar?ar:br;
+}
 static int echo_call(uint32_t ep,uint32_t pid){if(manager.modules[echo_slot].state!=MOD_ACTIVE)return SF_DRAINING;SfMessage m;sf_message(&m,OP_ECHO,++requests);memcpy(m.data,"ping",4);m.length=4;int r=sf_send(ep,&m);if(r)return r;long from=sf_recv(manager_ep,&m,sf_deadline(1000));return from==pid&&m.h.request_id==requests&&m.length==4&&!memcmp(m.data,"ping",4)?0:SF_INVALID;}
 static void namespace_setup(void){
  sf_ns_init(&ns,console_write);const char*dirs[]={"/boot","/system","/modules","/bin","/dev","/proc","/sys","/run","/etc","/home","/var","/tmp"};
@@ -176,6 +181,7 @@ static void command(char*line){
  else if(!strcmp(line,"mount /disk")){int r=sf_storage_mount();if(!r&&sf_storage_writable())r=sf_persist_mount(&ns);sf_log(!r?"disk: MOUNTED\n":"disk: mount refused\n");}
  else if(!strcmp(line,"stop disk")){int r=sf_storage_stop();sf_log(!r?"disk: STOPPED\n":"disk: stop refused\n");}
  else if(!strcmp(line,"start disk")){int r=sf_storage_start();sf_log(!r?"disk: ACTIVE\n":"disk: start refused\n");}
+ else if(!strcmp(line,"channel-test")){channel_test();}
  else if(!strcmp(line,"stop echo")){int r=sfmod_prepare(&manager,echo_slot);if(!r)r=sfmod_stop(&manager,echo_slot);if(!r){sf_sys(SYS_KILL,echo_pid,0,0);sf_sys(SYS_CAP_REVOKE,echo_ep,0,0);sf_log("echo: STOPPED\n");}else{sfmod_cancel(&manager,echo_slot);sf_log("echo: BUSY\n");}}
  else if(!strcmp(line,"start echo")){int r=sfmod_start(&manager,echo_slot);if(!r){echo_ep=sf_sys(SYS_EP_CREATE,0,0,0);int pid=spawn_package("echo.sfmod",echo_ep,RIGHT_RECV);if(pid>0){echo_pid=pid;sf_log("echo: ACTIVE\n");}else sf_log("echo: spawn failed\n");}else sf_log("echo: already active\n");}
  else if(!strcmp(line,"ls")||!memcmp(line,"ls ",3)){const char*p=line[2]?line+3:"/";int h=sf_ns_open(&ns,1,"/",p,1);char out[256];long n=h<0?h:sf_ns_enumerate(&ns,1,h,out,sizeof(out));if(n>=0)console_write(out,n);else sf_log("ls: error\n");if(h>=0)sf_ns_close(&ns,1,h);}
@@ -191,7 +197,7 @@ long sf_main(const SfBootArgs*a,size_t size){
  int init=sfmod_add(&manager,"org.spiritfox.init",0,1);sfmod_start(&manager,init);runtime_slot=sfmod_add(&manager,"org.spiritfox.native",0,0);sfmod_start(&manager,runtime_slot);
  echo_slot=sfmod_add(&manager,"org.spiritfox.echo",0,0);sfmod_start(&manager,echo_slot);echo_ep=sf_sys(SYS_EP_CREATE,0,0,0);echo_pid=spawn_package("echo.sfmod",echo_ep,RIGHT_RECV);sf_assert((int)echo_pid>0,"verified echo.sfmod staged in private address space");
  lifecycle_tests();namespace_setup();object_tests();runtime_reply=sf_sys(SYS_EP_CREATE,0,0,0);sf_assert((int)runtime_reply>0,"runtime replies have an isolated endpoint");runtime_ep=sf_sys(SYS_EP_CREATE,0,0,0);runtime_pid=spawn_package("sf-native.sfmod",runtime_ep,RIGHT_RECV);sf_assert(runtime_pid>0,"native runtime module active");runtime_tests();
- sf_storage_init(&manager,&ns,manager_ep,spawn_package_device);int storage=sf_storage_start();if(!storage)storage=sf_storage_mount();
+ sf_storage_init(&manager,&ns,spawn_storage_package);int storage=sf_storage_start();if(!storage)storage=sf_storage_mount();
  if(storage){sf_log("STORAGE UNAVAILABLE code=");sf_number(-storage);sf_log("\n");}
  else{sf_storage_tests();if(sf_storage_writable()){int r=sf_persist_mount(&ns);if(r){sf_log("PERSIST UNAVAILABLE code=");sf_number(-r);sf_log("\n");}}int ep=sf_sys(SYS_EP_CREATE,0,0,0);int disk_module=spawn_package("/disk/modules/disk-echo.sfmod",ep,RIGHT_RECV);
   if(disk_module>0){int slot=sfmod_add(&manager,"org.spiritfox.disk-echo",0,0);sf_assert(slot>=0&&!sfmod_start(&manager,slot)&&!echo_call(ep,disk_module),"signed sfmod loaded from disk without bundle fallback");sfmod_prepare(&manager,slot);sfmod_stop(&manager,slot);sf_sys(SYS_KILL,disk_module,0,0);sfmod_unload(&manager,slot);}else{sf_log("DISK PACKAGE REJECTED module code=");sf_number(-disk_module);sf_log("\n");}sf_sys(SYS_CAP_REVOKE,ep,0,0);

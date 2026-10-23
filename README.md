@@ -13,7 +13,7 @@ python tools/bootstrap.py
 python tools/test.py
 ```
 
-第一步下载并校验 Zig 0.13.0、QEMU Windows 构建和 Monocypher 4.0.3。已提供的 Monocypher 源码在 `vendor/monocypher`。第二步执行基础服务、950 条内核 IPC/内存边界、8155 条参数与 12034 条环境检查、353 条文件 RPC 分发边界、108 条 openat、83 条截断、229 条 IOMMU 与 4069 条版本策略检查、28 组 Python 测试（含 3500 次变异）、783 个事务、3132 个更新及 3132 个截断故障场景，以及含真实越界 DMA、试运行、版本策略、目录授权、持久化截断、密钥轮换/撤销与旧密钥迁移、驱动死亡和恢复的 119 次 QEMU 启动。
+第一步下载并校验 Zig 0.13.0、QEMU Windows 构建和 Monocypher 4.0.3。已提供的 Monocypher 源码在 `vendor/monocypher`。第二步执行基础服务、950 条内核 IPC/内存边界、8155 条参数与 12034 条环境检查、353 条文件 RPC 分发边界、108 条 openat、83 条截断、229 条 IOMMU 与 4069 条版本策略检查、28 组 Python 测试（含 3500 次变异）、783 个事务、3132 个更新及 3132 个截断故障场景，以及含真实越界 DMA、试运行、版本策略、目录授权、持久化截断、密钥轮换/撤销与旧密钥迁移、驱动死亡和恢复的 121 次 QEMU 启动。
 
 只构建：`python tools/build.py`。只运行宿主测试：`python tools/test.py --host-only`。已有镜像测试：`python tools/test.py --skip-build`。
 
@@ -96,3 +96,5 @@ python tools/sfpack.py sign build/hello.sfk --seed .keys/application.seed
 显式环境示例：`runenv MODE=demo "NOTE=two words" EMPTY= -- argprobe.sfk alpha`；目录委派用 `runenvat <只读目录> NAME=VALUE -- <app> [args]`。最多八条唯一合法名字，不继承宿主环境；参数与环境共同受 512 字节限制，均为私有只读调用数据。
 
 位置无关 native 应用支持有界 `relative-v1` 相对重定位，代码/数据页保持私有且拒绝代码写修正。示例 `run pieprobe.sfk` 会在两个固定基址交替运行；这不提供安全随机化。格式、256 项上限及尚未实现的导入边界见 [native 配置](docs/NATIVE.md)。
+
+开发诊断 `channel-test` 在已挂载磁盘上并发启动两个只读应用，覆盖冷缓存块 RPC 与 namespace 请求隔离。驱动回复端点按实例创建和撤销，协议边界见 [命名空间](docs/NAMESPACE.md)。

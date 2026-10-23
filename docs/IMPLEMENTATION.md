@@ -29,6 +29,8 @@ Core 0 校验 BootInfo 大小、版本、内存映射边界、引导对象的 Lo
 
 sf-init 在一个用户态二进制中组合模块管理、sf-process、sfexec、namespace、RAMFS、SFRFS1 文件服务和简化 stdio 策略。回显服务、sf-native 和 sf-virtio-blk 分别运行在独立地址空间。shell、磁盘解析和普通文件逻辑不在内核中。
 
+块设备回复使用每个驱动实例独立的端点，开始失败或停止完成后撤销；应用 namespace 请求不会被同步块 RPC 等待消费，冷缓存并发读和反复重启验证见 SECURITY.md。
+
 sf-native 接收 `OP_NATIVE_PREPARE`，验证应用签名、类型、运行时身份与段布局，返回有界的 native 装载计划。来源可以是只读 bundle，也可以是 sf-init 从磁盘固定并通过 `OP_NATIVE_STAGE` 按序复制的 128 KiB 有界快照。sf-init 将计划与同一包核对，准备映像，再由 Core 0 独立校验映射与复制数据。native 回复有独立端点，重启时撤销重建，已有应用请求不会被装载等待消费。应用持有运行时租约，退出和失败时释放；运行时死亡返回可诊断状态并允许受控重启。
 
 管理器有生命周期状态、依赖 DAG 检查、唯一 generation、准入门和资源账本。忙停止返回阻塞，取消后恢复 ACTIVE；替换采用新旧实例并存。M5 将挂载依赖、打开对象和 DMA 账本接入实际驱动生命周期；M6 将实际同步磁盘事务接入 dirty 资源和卸载门。早期 timer、mapping、IRQ 等资源注入测试仍仅验证回收门控。跨服务通用生命周期 RPC、外部请求并发压测与在线迁移仍需后续实现。

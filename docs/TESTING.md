@@ -162,6 +162,12 @@ rpcprobe.sfk 在 legacy/modern 各一个 VM 检查四种超长请求直接在发
 
 最终源码构建后完整 `python tools/test.py --skip-build` 通过（562.15 秒、119 次启动），日志 `build/file-rpc-final-test.txt`。全部既有回归、28 组 Python 测试/3500 次变异和六个交付摘要一致。发布门增加 file_rpc_host_checks=353、file_rpc_qemu=true、file_rpc_qemu_boots=2，缺少标记的旧结果拒绝打包。
 
+## 块设备私有回复与冷并发读
+
+旧通道在真实 legacy VM 的 channel-test 中将两个只读应用的冷读取都误判失败，退出码 13/13，日志 `build/qemu-persist-block-channel-baseline.log`；磁盘未变且可正常关机。修复后 native、块设备与应用 namespace 回复分离，块设备每次实例均重新建立回复端点。
+
+新增 legacy/modern 两个 VM，每种传输八次并发冷读、卸载、停止、启动、挂载，检验目录/文件/任务/端点引用回收、驱动回复代次与持久字节保持。完整 `python tools/test.py --skip-build` 通过（580.69 秒、121 次启动），日志 `build/block-channel-final-test.txt`，原有全部回归继续通过。结果和发布门新增 block_reply_channel_qemu=true、block_reply_channel_qemu_boots=2，六项镜像/公钥/策略摘要一致；旧结果缺标记时拒绝发布。
+
 ## 外部助手审查
 
 按用户授权调用已有 DeepSeek Harness。首次宽范围审查超时，没有采用其未完成输出；随后以低推理档审查一个文件写函数，11 秒完成且未使用工具。核实并修复空写返回错误，增加容量防御检查及对应宿主断言。审查回执在 `.cache/deepseek/runs/`，不包含提交或推送权限。

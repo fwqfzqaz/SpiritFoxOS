@@ -5,7 +5,7 @@
 static SfManager*manager;
 static SfNamespace*ns;
 static SfModuleSpawn spawn;
-static uint32_t manager_ep,driver_ep,driver_pid,granted_device;
+static uint32_t driver_reply,driver_ep,driver_pid,granted_device;
 static int driver_slot=-1,fs_slot=-1,cache_index=-1;
 static uint64_t capacity,sequence=0x100000000ull;
 static SfReadFs fs;
@@ -14,7 +14,7 @@ static int writable,write_grant;
 static int call(SfMessage*m){
  if(!driver_pid||sf_sys(SYS_TASK_STATUS,driver_pid,0,0)!=SF_TASK_RUNNING)return SF_DEVICE_GONE;
  uint64_t id=++sequence;m->h.request_id=id;int r=sf_send(driver_ep,m);if(r)return r;
- long from=sf_recv(manager_ep,m,sf_deadline(2000));if(from<0){sf_sys(SYS_KILL,driver_pid,SF_DEVICE_GONE,0);return from;}
+ long from=sf_recv(driver_reply,m,sf_deadline(2000));if(from<0){sf_sys(SYS_KILL,driver_pid,SF_DEVICE_GONE,0);return from;}
  if(from!=driver_pid||m->h.request_id!=id)return SF_STALE_HANDLE;return m->status;
 }
 static int sector(void*context,uint64_t lba,uint8_t out[512]){
@@ -51,19 +51,19 @@ static int namespace_node(const char*path,unsigned type,unsigned external,uint32
   SfNode*n=&ns->nodes[i];if(n->type!=type||(r==SF_BUSY&&strcmp(path,"/disk")&&n->mount_tag!=1))return SF_BUSY;n->external=external;n->size=size;n->mount_tag=1;return 0;}
  return SF_NO_SPACE;
 }
-void sf_storage_init(SfManager*m,SfNamespace*n,uint32_t ep,SfModuleSpawn callback){manager=m;ns=n;manager_ep=ep;spawn=callback;ns->external_read=external_read;ns->mount_open=mount_open;ns->mount_close=mount_close;}
+void sf_storage_init(SfManager*m,SfNamespace*n,SfModuleSpawn callback){manager=m;ns=n;spawn=callback;ns->external_read=external_read;ns->mount_open=mount_open;ns->mount_close=mount_close;}
 static int start_driver(unsigned rights){
  if(driver_pid&&sf_sys(SYS_TASK_STATUS,driver_pid,0,0)==SF_TASK_RUNNING)return SF_BUSY;
  uint32_t device=0;for(unsigned d=0;d<32&&!device;d++)for(unsigned f=0;f<8;f++){uint32_t bdf=d*8+f;long id=sf_sys(SYS_PCI_READ,bdf,0,0);if(id==0x10011af4u||id==0x10421af4u){device=bdf+1;break;}}
  if(!device)return SF_NOT_FOUND;
  if(driver_slot<0){driver_slot=sfmod_add(manager,"org.spiritfox.virtio.blk",0,0);if(driver_slot<0)return driver_slot;}
- int r=sfmod_start(manager,driver_slot);if(r)return r;driver_ep=sf_sys(SYS_EP_CREATE,0,0,0);if((int)driver_ep<0){r=(int)driver_ep;goto fail;}
- int pid=spawn("sf-virtio-blk.sfmod",driver_ep,RIGHT_RECV,device,rights);if(pid<0){r=pid;goto fail;}driver_pid=pid;granted_device=device;
+ int r=sfmod_start(manager,driver_slot);if(r)return r;driver_reply=sf_sys(SYS_EP_CREATE,0,0,0);if((int)driver_reply<0){r=(int)driver_reply;driver_reply=0;goto fail;}driver_ep=sf_sys(SYS_EP_CREATE,0,0,0);if((int)driver_ep<0){r=(int)driver_ep;goto fail;}
+ int pid=spawn("sf-virtio-blk.sfmod",driver_ep,RIGHT_RECV,device,rights,driver_reply);if(pid<0){r=pid;goto fail;}driver_pid=pid;granted_device=device;
  SfMessage message;sf_message(&message,OP_BLOCK_INFO,0);r=call(&message);if(r)goto fail;
  if(message.length!=sizeof(SfBlockInfo)){r=SF_BAD_FORMAT;goto fail;}SfBlockInfo info;memcpy(&info,message.data,sizeof(info));if(info.sector_bytes!=512||info.readonly!=(rights?0u:1u)||!info.sectors||info.sectors>UINT64_MAX/512){r=SF_BAD_FORMAT;goto fail;}capacity=info.sectors*512;write_grant=rights!=0;writable=0;
  sfmod_acquire(manager,driver_slot,RES_DMA);return 0;
 fail:
- if(driver_pid)sf_sys(SYS_KILL,driver_pid,SF_DEVICE_GONE,0);driver_pid=0;if((int)driver_ep>0)sf_sys(SYS_CAP_REVOKE,driver_ep,0,0);driver_ep=0;
+ if(driver_pid)sf_sys(SYS_KILL,driver_pid,SF_DEVICE_GONE,0);driver_pid=0;if((int)driver_ep>0)sf_sys(SYS_CAP_REVOKE,driver_ep,0,0);driver_ep=0;if(driver_reply)sf_sys(SYS_CAP_REVOKE,driver_reply,0,0);driver_reply=0;
  sfmod_prepare(manager,driver_slot);sfmod_stop(manager,driver_slot);return r;
 }
 int sf_storage_start(void){int r=start_driver(0);return r==SF_READ_ONLY?start_driver(SF_DEVICE_WRITE):r;}
@@ -106,7 +106,7 @@ int sf_storage_stop(void){
   * device cleanup before recycling that slot; its quarantine still gates grants. */
  if(r==SF_NOT_FOUND)r=0;
  if(r){manager->modules[driver_slot].state=MOD_QUARANTINED;return r;}
- sfmod_release(manager,driver_slot,RES_DMA);r=sfmod_stop(manager,driver_slot);if(r)return r;sf_sys(SYS_KILL,driver_pid,0,0);sf_sys(SYS_CAP_REVOKE,driver_ep,0,0);driver_pid=driver_ep=0;return 0;
+ sfmod_release(manager,driver_slot,RES_DMA);r=sfmod_stop(manager,driver_slot);if(r)return r;sf_sys(SYS_KILL,driver_pid,0,0);sf_sys(SYS_CAP_REVOKE,driver_ep,0,0);sf_sys(SYS_CAP_REVOKE,driver_reply,0,0);driver_pid=driver_ep=driver_reply=0;return 0;
 }
 long sf_storage_load(const char*path,void*out,size_t capacity_bytes){
  if(strlen(path)<7||memcmp(path,"/disk/",6))return SF_INVALID;if(!fs.mounted||fs_slot<0)return SF_DEVICE_GONE;
@@ -130,7 +130,7 @@ void sf_storage_dma_probe(unsigned mode){
  sf_sys(SYS_DMA_STATUS,(uint64_t)&after,sizeof(after),0);
  sf_assert(r<0&&after.faults>before.faults&&after.last_address==before.probe_address&&after.source==granted_device-1&&after.guard_intact&&!after.active_mapping,"IOMMU blocks actual DMA outside granted arena");
  sf_assert(sf_sys(SYS_TASK_STATUS,driver_pid,0,0)==SF_DEVICE_GONE,"faulting DMA driver terminated");
- int ep=sf_sys(SYS_EP_CREATE,0,0,0);sf_assert(ep>0,"quarantine test endpoint allocated");int candidate=spawn("sf-virtio-blk.sfmod",ep,RIGHT_RECV,granted_device,0);sf_assert(candidate==SF_BUSY,"kernel refuses new owner of quarantined DMA device");sf_sys(SYS_CAP_REVOKE,ep,0,0);
+ int ep=sf_sys(SYS_EP_CREATE,0,0,0);sf_assert(ep>0,"quarantine test endpoint allocated");int candidate=spawn("sf-virtio-blk.sfmod",ep,RIGHT_RECV,granted_device,0,driver_reply);sf_assert(candidate==SF_BUSY,"kernel refuses new owner of quarantined DMA device");sf_sys(SYS_CAP_REVOKE,ep,0,0);
  sf_log("DMA PROBE PASSED: guard intact, device quarantined\n");
 }
 void sf_storage_write_tests(void){
@@ -145,7 +145,7 @@ void sf_storage_tests(void){
  sf_assert(sf_storage_stop()==SF_DEPENDENCY,"mounted filesystem pins block driver");int h=sf_ns_open(ns,1,"/","/disk/etc/readme.txt",1);sf_assert(h>0&&sf_storage_unmount()==SF_BUSY,"open disk file prevents unmount and restores admission");int dup=sf_ns_dup(ns,1,h);sf_ns_close(ns,1,h);sf_assert(sf_storage_unmount()==SF_BUSY,"duplicated disk description retains mount lease");sf_ns_close(ns,1,dup);
  sf_assert(sf_ns_open(ns,1,"/","/disk/etc/readme.txt",2)==SF_READ_ONLY&&sf_ns_create(ns,"/disk/etc/new",NODE_FILE,0)==SF_READ_ONLY,"read-only mount rejects writes and creation");
  sf_assert(!sf_storage_unmount(),"unmount drains file references");sf_message(&m,OP_BLOCK_STOP,0);sf_assert(!call(&m),"driver quiesces before process teardown");
- int candidate_ep=sf_sys(SYS_EP_CREATE,0,0,0);sf_assert(candidate_ep>0,"replacement endpoint allocated");int replacement=spawn("sf-virtio-blk.sfmod",candidate_ep,RIGHT_RECV,granted_device,0);sf_assert(replacement==SF_BUSY,"live stopped driver cannot share DMA arena with replacement");sf_sys(SYS_CAP_REVOKE,candidate_ep,0,0);
+ int candidate_ep=sf_sys(SYS_EP_CREATE,0,0,0);sf_assert(candidate_ep>0,"replacement endpoint allocated");int replacement=spawn("sf-virtio-blk.sfmod",candidate_ep,RIGHT_RECV,granted_device,0,driver_reply);sf_assert(replacement==SF_BUSY,"live stopped driver cannot share DMA arena with replacement");sf_sys(SYS_CAP_REVOKE,candidate_ep,0,0);
  sf_assert(!sf_storage_stop(),"device ownership releases after old address space teardown");sf_assert(!sf_storage_start()&&!sf_storage_mount(),"block driver and filesystem restart cleanly");
  int held=sf_ns_open(ns,1,"/","/disk/etc/readme.txt",1);sf_assert(held>0&&!sf_sys(SYS_KILL,driver_pid,SF_DEVICE_GONE,0),"driver death invokes kernel device reset");char text[64];sf_assert(sf_ns_read(ns,1,held,text,sizeof(text))==SF_DEVICE_GONE,"dead driver invalidates cached file access");sf_ns_close(ns,1,held);sf_assert(!sf_storage_unmount()&&!sf_storage_stop()&&!sf_storage_start()&&!sf_storage_mount(),"confirmed reset allows isolated driver recovery");sf_log("STORAGE READY\n");
 }
