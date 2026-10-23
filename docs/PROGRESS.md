@@ -7,7 +7,7 @@
 - status: truncate_zero_extension_tested
 - round_complete: true
 - quota_paused: false
-- 分支：`codex/boot-only-restart-20261022`；远端：`origin`。
+- 分支：`codex/boot-only-restart-20261022`；远端：`origin`，读取和推送地址均为 `https://github.com/fwqfzqaz/SpiritFoxOS.git`。
 - 最终产品源码已构建；`python tools/test.py --skip-build` 完整通过（386.03 秒），输出 `build/truncate-final-test.txt`，实际共 95 个 VM。新增 83 条截断命名空间检查、474481 条事务内部检查及 3132 个有界故障场景通过；没有遗留构建或 QEMU 进程。本轮未调用 DeepSeek。提交与推送是否完成，以 HEAD 与 origin 实际对照为准。
 
 ## 已完成
@@ -43,6 +43,10 @@
 ## 交付与续做
 
 本轮基于 `035c102` 完成统一截断与持久化零扩展。交付提交由 Git HEAD 标识，推送状态以 origin 当前分支与 HEAD 实际对照为准；不一致时续做已授权推送，不重做已通过的开发和测试。用户已明确授权：余额充足直接推进下一项，不等待再次确认；过去“不自行开始下一阶段”属于旧轮次限制。
+
+2026-10-23 按用户指定纠正 GitHub 交付地址：已将通过上述完整验证的产品源码提交 `9d072ad6bf6907bc6c815e2239f8139697d6fc2c` 推送至 `fwqfzqaz/SpiritFoxOS` 的 `codex/boot-only-restart-20261022` 分支，并核对远端 SHA 一致。该仓库的 `main` 未改动；本地 origin 的读取和推送地址已同步切换，后续交付继续使用此工作分支。
+
+原误用仓库 `xiaoniko258/SpiritFoxOS` 已按用户要求清除当前源代码树：`main` 以正常后继提交 `e498fabec8f12402d70d31b63af6e2e92b65df36` 仅保留迁移说明，并删除原有九个 `codex/*` 分支；原仓库现有分支已核对仅剩该 `main`。没有删除仓库、重写历史或强制推送。本地工作文件完整保留；清理前的十个远端分支头保存在本地 `refs/archive/spiritfoxos-before-migration-20261023/*`，迁移元数据位于忽略的 `.cache/repo-migration/migration.json`。此次迁移只改远端配置与本进度记录，产品代码和已验证镜像未变，因此沿用 `9d072ad` 的完整测试结果。
 
 后续优先依据要求和 ROADMAP 补齐密钥轮换/撤销、长期服务健康策略与更完整持久化服务。IRQ 重映射、ACS/多单元分组、真实硬件断电、真实复位失败和可信防回滚仍未验收，不能由当前 QEMU 测试替代。
 
