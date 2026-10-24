@@ -31,6 +31,8 @@
 
 ## 项目
 
+- [当前能力与剩余工作](project/STATUS.md)：已能运行的功能、近期交付和各阶段缺项。
+
 - [路线图](project/ROADMAP.md)：后续工作与尚未验收的能力。
 - [实施进度](project/PROGRESS.md)：按轮次记录的历史进度。
 

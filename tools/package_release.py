@@ -58,6 +58,8 @@ if result.get('rmdir_host_assertions') != 11359 or result.get('rmdir_qemu') is n
     raise SystemExit('Run empty directory rights, busy/nonempty, reuse and VM regressions before packaging')
 if result.get('file_client_host_assertions') != 416510 or result.get('file_client_qemu') is not True or result.get('file_client_qemu_boots') != 2:
     raise SystemExit('Run file client codec/peer/deadline/counter host and production transport VM regressions before packaging')
+if result.get('txn_compat_host_assertions') != 2046559 or result.get('txn_compat_fault_scenarios') != 783 or result.get('txn_compat_qemu') is not True or result.get('txn_compat_qemu_boots') != 6:
+    raise SystemExit('Run legacy transaction geometry, first-upgrade faults and migration/restart VM regressions before packaging')
 if result.get('trust_host_assertions') != 29 or result.get('trust_qemu') is not True:
     raise SystemExit('Run persistent revocation host and VM regressions before packaging')
 for name in ['esp/EFI/BOOT/BOOTX64.EFI','storage.img','persistent.img','development.pub','application.pub','backup.pub','trust-policy.json']:

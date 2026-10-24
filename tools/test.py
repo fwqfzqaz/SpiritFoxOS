@@ -42,6 +42,7 @@ host_test('test_truncate','tests/host/test_truncate.c','services/namespace.c')
 host_test('test_resize_txn','tests/host/test_resize_txn.c','services/txn.c','services/sha256.c',no_unused=True)
 host_test('test_storage','tests/host/test_storage.c','services/namespace.c',no_unused=True)
 host_test('test_txn','tests/host/test_txn.c','services/txn.c','services/sha256.c',no_unused=True)
+host_test('test_txn_compat','tests/host/test_txn_compat.c','services/txn.c','services/sha256.c',no_unused=True)
 host_test('test_update','tests/host/test_update.c','services/update.c','services/txn.c','services/sha256.c',no_unused=True)
 host_test('test_version','tests/host/test_version.c','services/version.c')
 host_test('test_iommu','tests/host/test_iommu.c','kernel/acpi.c','kernel/vtd_tables.c',no_unused=True)
@@ -81,6 +82,7 @@ if not args.host_only:
     subprocess.run([sys.executable, 'tests/qemu/qemu_openat_test.py'], check=True)
     subprocess.run([sys.executable, 'tests/qemu/qemu_truncate_test.py'], check=True)
     subprocess.run([sys.executable, 'tests/qemu/qemu_trust_test.py'], check=True)
+    subprocess.run([sys.executable, 'tests/qemu/qemu_txn_compat_test.py'], check=True)
 result = {'passed': True, 'elapsed_seconds': round(time.time()-started, 2), 'service_assertions': 116, 'storage_assertions': 35, 'package_tests': 'passed (11 groups, including 1500 seeded mutations)', 'readfs_tests': 'passed (5 groups, including 500 seeded metadata mutations)', 'qemu_memory_mib': [] if args.host_only else [128, 256, 512], 'storage_failure_cases': [] if args.host_only else ['missing', 'badheader', 'badhash', 'badsignature', 'writable', 'ioerror']}
 result['txn_fault_boundaries'] = 261
 result['txn_fault_modes'] = 3
@@ -157,6 +159,10 @@ result['trust_policy_qemu'] = not args.host_only
 result['trust_policy_qemu_boots'] = 0 if args.host_only else 14
 result['trust_host_assertions'] = 29
 result['trust_qemu'] = not args.host_only
+result['txn_compat_host_assertions'] = 2046559
+result['txn_compat_fault_scenarios'] = 783
+result['txn_compat_qemu'] = not args.host_only
+result['txn_compat_qemu_boots'] = 0 if args.host_only else 6
 result['artifacts_sha256'] = {name: hashlib.sha256((ROOT/'build'/name).read_bytes()).hexdigest() for name in ['esp/EFI/BOOT/BOOTX64.EFI', 'storage.img', 'persistent.img', 'development.pub', 'application.pub', 'backup.pub', 'trust-policy.json']}
 (ROOT / 'build/test-results.json').write_text(json.dumps(result, indent=2)+'\n')
 print(json.dumps(result, indent=2))

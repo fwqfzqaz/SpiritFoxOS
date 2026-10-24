@@ -294,3 +294,13 @@ M6 尝试通过工作区桥调用 deepseek-flash 审查事务引擎。两次调�
 新增 legacy/modern 两个 VM 各六十次生产 SDK 应用：普通 run 无文件根，显式目录保持只读；验证 console、openat/read/write/seek/poll/enumerate/stat/close、拒绝截断/删除和父关闭后子文件可用、回收及原始盘字节保持。全部既有 CPU 隔离、服务监督、信任、更新、版本、DMA 和文件回归通过；七项精确交付摘要校验一致。
 
 完整日志 build/file-client-author-main-full.txt，结果 build/file-client-author-test-results.json。打包门要求 file_client_host_assertions=416510、file_client_qemu=true、file_client_qemu_boots=2，旧的 149 VM 结果不能打包本轮成果。本地完整通过与新 PR 托管检查分别核对。
+
+## 原始事务几何导入与首次升级（2026-10-24）
+
+真实 8b704ae 事务引擎写出 generation 2 的 legacy-notes 后，旧的新读取器返回空 generation 1 / NOT_FOUND；修复后同一样本只读恢复 generation 2 / 完整 12 字节笔记，样本摘要不变。该对照记录在 .cache/txn-compat-baseline.json 与 .cache/txn-compat-fixed-reader-result.json。
+
+永久宿主回归使用独立旧格式编码器，2046559 项检查覆盖一千个四槽/混合几何快照、0/1/127/128/129/16383/16384 字节、所有四槽、最高代次选择、同代次歧义、修复外层摘要后的内部摘要/路径/重复键/保留字节/未用槽/尾部拒绝、挂载字节不变和五键写出。首次旧转新提交在 261 个写/flush 边界注入三类故障，共 783 场景；恢复只能得到完整旧四键或完整新五键，未确认事务关闭后续准入。
+
+六次新增 QEMU（每种传输三次）先准备已确认 0.2.0 应用和双槽/笔记，离线转为精确四记录旧几何；稳定挂载和运行 installed 不改任何字节。普通笔记写出迁移后的新几何，双槽/选择器保持原字节，再追加备用应用签名者的撤销键作为第五个文件。重启后笔记、版本、撤销保持，正常应用签名者仍可运行，原构建盘/只读底区不变。
+
+完整 python tools/test.py 包含初始构建通过（1112.0 秒、157 VM），日志 build/txn-compat-final-full.txt，结果 build/txn-compat-test-results.json。全部 SDK、内核、CPU、服务、签名/用途/撤销、DMA、目录及旧事务/更新/截断回归与七项交付摘要一致。发布门要求本轮宿主计数、783 故障场景及六次 VM 标记；托管检查仍按最新提交单独核对。

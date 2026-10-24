@@ -3,8 +3,8 @@
 更新日期：2026-10-24（北京时间）。
 
 - 工作区：`E:\SpiritFoxOS`。指定源目录的三项顶层内容已移动到这里。
-- 本轮目标：以作者已合并并通过 CI 的 f2e41bd / d6a71f2 为基础，完成 M4 文件客户端 SDK 的整套验证和独立交付。
-- status: file_client_verified_ready_to_push
+- 本轮目标：SDK 已交付 002ea46 / PR #11（151 VM、1086.09 秒）；当前修复旧四记录事务盘被错误回退的问题，保留只读挂载并在普通提交时原子升级。
+- status: txn_compat_verified_ready_to_push
 - round_complete: true
 - continuous_work: true
 - quota_paused: false
@@ -164,3 +164,19 @@ M3空目录删除完整验证通过（1166.82秒、145VM），当前全部VM关�
 以作者已合并修复为基础，完整包含初始构建的 python tools/test.py 通过（1086.09 秒、151 VM）。416510 项真实编解码/传输模型/产品分发器宿主断言、两次生产 INT80 专项通过，各传输六十次显式 RAM/磁盘/持久只读目录应用回收；无默认根、控制台、元数据/读取/定位/列举/poll/关闭、只读修改拒绝和原始高位请求探针保持。
 
 本轮仅交付 SDK 及相应验证/文档，kernel/arch.c 与 services/init.c 保持作者基线。完整记录 build/file-client-author-test-results.json，交付摘要与发布包验证另存 .cache/sdk-author-full-proof.json。当前所有本地测试/VM 已结束。下一步正常推送新 SDK 分支并创建对应 PR，核对该提交的 Windows/Linux CI；不能沿用 PR #10 的绿色状态。一轮交付后按路线继续，额度不足时保存暂停。
+
+## 旧事务盘兼容修复进行中（2026-10-24）
+
+SDK 已推送 002ea46 并创建 PR #11；本地包含初始构建的 151 VM / 1086.09 秒通过，发布 ZIP 387815 字节、29 个清单条目 CRC/摘要一致。该提交 Linux CI 已成功，Windows CI 最后查询仍在运行；继续核对，不能称为已全绿。
+
+用真实 8b704ae 事务引擎生成四记录/1024 数据起点的 v1 银行，写入 generation 2 的 legacy-notes。原新读取器回退到空 generation 1、返回 NOT_FOUND；修复后对同一原始样本只读挂载，generation 2 与完整笔记均恢复，样本字节不变。复现与修复证据分别在 .cache/txn-compat-baseline.json 和 .cache/txn-compat-fixed-reader-result.json。
+
+产品解码器在摘要验证之后接受两个严格的既有 v1 布局，保持保留字节、路径、重复键、内容摘要、零填充和完整尾部检查；最高有效代次与同代次歧义拒绝保持。挂载不写盘；下一次普通提交仍只写当前五记录布局。
+
+2046559 项宿主检查通过，覆盖一千个旧/混合快照、边界长度/全部槽位、畸形输入与 783 个首次升级提交故障场景。六次 legacy/modern VM 专项已通过，验证四键旧盘只读访问字节不变、笔记/双槽/版本保持、普通写升级、第五个撤销键及重启。现在运行包含初始构建的完整回归（目标 157 VM），尚未声明本轮完整通过或提交推送。唯一运行测试见 .cache/active-work.json。
+
+## 旧事务盘兼容完整验证完成（2026-10-24）
+
+完整含初始构建回归通过（1112.0 秒、157 VM），2046559 项兼容宿主检查与 783 个首次升级故障场景、六次迁移/重启 VM 通过；全部既有 SDK 与内核/服务/信任/更新回归保持，七项交付摘要一致。结果 build/txn-compat-test-results.json，日志 build/txn-compat-final-full.txt；当前所有本地 VM 已关闭。下一步正常提交推送工作分支并更新当前开放 PR 的最终范围，核对最新提交的 Windows/Linux CI，继续路线中的未完成工作。SDK 提交 002ea46 的已交付证明仍保留，不把旧检查状态算作本次提交通过。
+
+SDK 首轮提交 002ea46 的托管检查已实际核对：Windows run 40096585352 与 Linux run 40096584961 均成功；该结果只属于 SDK 首轮，后续兼容修复提交须重新检查。
