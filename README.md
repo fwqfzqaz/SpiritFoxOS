@@ -13,7 +13,7 @@ python tools/bootstrap.py
 python tools/test.py
 ```
 
-第一步下载并校验 Zig 0.13.0、QEMU Windows 构建和 Monocypher 4.0.3。已提供的 Monocypher 源码在 `vendor/monocypher`。第二步执行基础服务、950 条内核 IPC/内存边界、8155 条参数与 12034 条环境检查、353 条文件 RPC 分发边界、17340 条删除/槽复用、108 条 openat、83 条截断、229 条 IOMMU 与 4069 条版本策略检查、28 组 Python 测试（含 3500 次变异）、783 个事务、3132 个更新及 3132 个截断故障场景，以及含真实越界 DMA、试运行、版本策略、目录授权、持久化截断、密钥轮换/撤销与旧密钥迁移、驱动死亡和恢复的 137 次 QEMU 启动。
+第一步下载并校验 Zig 0.13.0、QEMU Windows 构建和 Monocypher 4.0.3。已提供的 Monocypher 源码在 `vendor/monocypher`。第二步执行基础服务、950 条内核 IPC/内存边界、8155 条参数与 12034 条环境检查、6180 条元数据/规范句柄、353 条文件 RPC 分发边界、17340 条删除/槽复用、108 条 openat、83 条截断、229 条 IOMMU 与 4069 条版本策略检查、28 组 Python 测试（含 3500 次变异）、783 个事务、3132 个更新及 3132 个截断故障场景，以及含真实越界 DMA、试运行、版本策略、目录授权、持久化截断、密钥轮换/撤销与旧密钥迁移、驱动死亡和恢复的 139 次 QEMU 启动。
 
 只构建：`python tools/build.py`。只运行宿主测试：`python tools/test.py --host-only`。已有镜像测试：`python tools/test.py --skip-build`。
 
@@ -114,3 +114,5 @@ echo 与 sf-native 按有界预算处理进程死亡、健康超时和协议错�
 已安装候选的无效目录委派或 native 不可用会在试运行前拒绝，保留 PENDING 供正确调用重试；坏候选仍按原规则回退，见 [UPDATES](docs/UPDATES.md)。
 
 RAM 命名空间支持 `mkdir <绝对路径>` 和 `rm <绝对路径>`，两者接受单个含引号的路径参数。rm仅删除没有任何打开引用的可写RAM普通文件，拒绝目录、特殊对象及挂载内容；普通应用的只读目录委派保持。协议和忙引用边界见 [NAMESPACE](docs/NAMESPACE.md)。
+
+`stat <绝对路径>` 查询类型、长度、偏移、描述模式和节点标志，支持单个引号路径；普通应用使用OP_STAT查询自己的已有句柄。文件RPC拒绝64位传输句柄中的非零高位，权限及代次检查保持。

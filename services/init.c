@@ -322,6 +322,15 @@ static void namespace_mutate_line(char*line,int directory){
  }
  sf_log(directory?"mkdir: ":"rm: ");if(!r)sf_log("OK\n");else{sf_log("failed code=");sf_number(-r);sf_log("\n");}
 }
+static void namespace_stat_line(char*line){
+ char*words[1];int count=sf_arguments_split(line,words,1),r=SF_INVALID;SfFileStat info;
+ if(count==1&&words[0][0]=='/'&&strlen(words[0])<=95){
+  int h=sf_ns_open(&ns,1,"/",words[0],OPEN_READ);r=h<0?h:sf_ns_stat(&ns,1,h,&info);if(h>=0)sf_ns_close(&ns,1,h);
+ }
+ if(r){sf_log("stat: failed code=");sf_number(-r);sf_log("\n");return;}
+ sf_log("stat: type=");sf_number(info.type);sf_log(" size=");sf_number(info.size);
+ sf_log(" offset=");sf_number(info.offset);sf_log(" mode=");sf_number(info.mode);sf_log(" flags=");sf_number(info.flags);sf_log("\n");
+}
 static void trust_show(void){
  if(sf_trust_validate(&sf_trust_store)){sf_log("trust: INVALID\n");return;}
  sf_log("trust: build-time keys=");sf_number(sf_trust_store.count);sf_log("\n");
@@ -332,12 +341,13 @@ static void trust_show(void){
 }
 static void command(char*line){
  if(!strcmp(line,"help")){
-  sf_log("help | ls [path] | cat <path> | write <path> <text> | truncate <path> <bytes> | rm <path> | mkdir <path> | modules | trust | echo\n");
+  sf_log("help | ls [path] | cat <path> | write <path> <text> | truncate <path> <bytes> | stat <path> | rm <path> | mkdir <path> | modules | trust | echo\n");
   sf_log("run <app or installed> [args] | runat <read-only-dir> <app> [args]\nrunenv [NAME=VALUE ...] -- <app> [args] | runenvat <dir> [NAME=VALUE ...] -- <app> [args]\n");
   sf_log("install /disk/bin/app.sfk | persist | stop echo | start echo | echo-status | echo-crash | echo-hang | echo-bad-reply | echo-bad-op | mount /disk | unmount /disk | stop disk | start disk | selftest | shutdown\n");
   sf_log("stop native | start native | native-status | native-crash | native-hang | native-bad-reply | native-bad-op\n");}
  else if(!strcmp(line,"rm")||!memcmp(line,"rm ",3))namespace_mutate_line(line+2,0);
  else if(!strcmp(line,"mkdir")||!memcmp(line,"mkdir ",6))namespace_mutate_line(line+5,1);
+ else if(!strcmp(line,"stat")||!memcmp(line,"stat ",5))namespace_stat_line(line+4);
  else if(!strcmp(line,"persist"))sf_persist_status();
  else if(!strcmp(line,"dma-test write"))sf_storage_dma_probe(0);
  else if(!strcmp(line,"dma-test read"))sf_storage_dma_probe(1);

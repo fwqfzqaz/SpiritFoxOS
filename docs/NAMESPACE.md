@@ -27,6 +27,7 @@ sf-init 在创建进程前验证目录、保留打开描述和挂载引用；包
 | `OP_ROOT (20)` | 无额外字段 | status=0，handle 为显式授予的目录；未授予或已关闭返回 SF_DENIED |
 | `OP_OPENAT (19)` | handle=本进程目录；data=相对 UTF-8 路径；length 包含唯一末尾 NUL；mode=打开模式 | status=0，handle=新的进程内句柄 |
 | `OP_ENUMERATE (18)` | handle=可读目录；length=输出容量，最多 256 | status 与 length 为实际字节数，data 为直接子节点名称，每项以换行结束 |
+| `OP_STAT (23)` | handle=本进程有效句柄；length=0 | status=0，length=32，data为下述固定元数据；handle不变，错误length=0 |
 | `OP_UNLINK (22)` | handle=可写目录；data=规范相对路径；length 包含唯一末尾 NUL | status=0，保留原目录 handle；仅删除无打开引用的 RAM 普通文件 |
 | `OP_TRUNCATE (21)` | handle=可写普通文件；offset=新的 64 位长度 | status=0；只读目录派生的文件拒绝此操作，详见 `TRUNCATE.md` |
 | `OP_READ/WRITE/CLOSE/SEEK/POLL` | 沿用现有文件句柄协议 | 权限、独立偏移、dup、挂载失效与退出清理沿用同一实现 |
@@ -90,3 +91,22 @@ echo-channel-test 在等待两个文件应用前同步调用 echo，用于验证
 普通应用仍只取得只读目录，不能借新增操作修改 RAM 或持久化内容。真实 fileprobe/readprobe 在持有子文件时通过 IPC 尝试删除，必须得到 SF_DENIED，然后继续读取并由进程退出回收。没有增加普通应用可写目录授权、孤儿打开文件、rmdir、rename 或持久化删除；`/persist/notes` 仍用原有读写/截断事务接口。
 
 `tests/test_unlink.c` 直接链接产品 namespace/file_rpc，检查能力和类型、当前只读子目录、挂载拒绝、跨所有者/dup忙引用、规范路径、Unicode/长度边界、一千次槽复用与数据清零、陈旧句柄和畸形RPC无副作用。`tools/qemu_unlink_test.py` 在两种传输中验证实际shell与只读应用IPC、每种四十次节点复用、引号、持久盘字节和卸载停止。
+
+## 句柄元数据与规范整数
+
+`OP_STAT` 只操作调用者已持有的句柄；只写描述也可查询，不授予额外读写权限。固定32字节 `SfFileStat` 在此x86_64协议中按小端整数编码：
+
+| 字节偏移 | 字段 | 语义 |
+| --- | --- | --- |
+| 0 | bytes:u32 | 固定32 |
+| 4 | type:u32 | 1目录、2RAM文件、3管道、4控制台、5磁盘文件 |
+| 8 | mode:u32 | 本打开描述的实际OPEN_*位，含权限与模式 |
+| 12 | flags:u32 | 1节点只读、2挂载对象、4可定位；其他位为零 |
+| 16 | size:u64 | 当前文件长度或管道排队字节；目录/控制台为零 |
+| 24 | offset:u64 | 此打开描述的当前位置，dup观察同一偏移 |
+
+节点只读标志与描述权限分别报告：只读委派可以指向可写RAM节点，但mode没有OPEN_WRITE；不能借flags为零扩大权限。记录不包含所有者、对象索引、路径、地址或后端指针。查询不读取后端、不改变偏移、不取得新引用；磁盘数据是当前缓存的元数据，不能用成功返回判定设备仍在线。新开句柄仍受原有挂载准入限制。
+
+受信任shell提供 `stat <单个绝对路径>`，支持引号，打开只读描述，查询后关闭；错误也回收描述。输出为数值type/size/offset/mode/flags。普通应用不能通过此协议传入路径，只能查询自己的有效句柄。未知所有者、旧代次、关闭或回收的句柄返回SF_STALE_HANDLE，错误不输出元数据；非空STAT输入返回SF_INVALID且length=0。
+
+SfMessage.handle的传输存储是64位，命名空间句柄规范值仍为32位。所有消费句柄的文件操作要求高32位为零，在窄化、后端访问和根关闭记账前拒绝，否则SF_STALE_HANDLE、length=0，保留原handle与根状态。OP_ROOT和受限OP_OPEN不消费传入的handle，按原协议处理。原所有者与generation验证继续执行；新增操作号不改变原有合法32位句柄。

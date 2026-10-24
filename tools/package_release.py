@@ -46,6 +46,8 @@ if result.get('invocation_preflight_qemu') is not True or result.get('invocation
     raise SystemExit('Run installed invocation preflight and corrupt candidate rollback regressions before packaging')
 if result.get('unlink_host_assertions') != 17340 or result.get('unlink_qemu') is not True or result.get('unlink_qemu_boots') != 2:
     raise SystemExit('Run RAM unlink rights, busy-reference, slot reuse and VM regressions before packaging')
+if result.get('stat_host_assertions') != 6180 or result.get('canonical_file_handles') is not True or result.get('stat_qemu') is not True or result.get('stat_qemu_boots') != 2:
+    raise SystemExit('Run canonical file handle and fixed metadata regressions before packaging')
 for name in ['esp/EFI/BOOT/BOOTX64.EFI','storage.img','persistent.img','development.pub','application.pub','trust-policy.json']:
     actual = hashlib.sha256((BUILD/name).read_bytes()).hexdigest()
     if result.get('artifacts_sha256',{}).get(name) != actual:
@@ -54,7 +56,7 @@ items = [(BUILD/'esp/EFI/BOOT/BOOTX64.EFI','EFI/BOOT/BOOTX64.EFI'),(BUILD/'stora
 items.append((BUILD/'trust-policy.json','trust-policy.json'))
 items.append((BUILD/'application.pub','application.pub'))
 items += [(p,'docs/'+p.name) for p in sorted((ROOT/'docs').glob('*.md'))]
-manifest = {'files_sha256': {name: hashlib.sha256(path.read_bytes()).hexdigest() for path,name in items}, 'validation': 'tools/test.py: host + legacy storage + VT-d/modern DMA isolation + persistence/update-health/version-policy/fault/restart + kernel-boundary/storage-failure security + directory-capability openat + truncate/zero-extension fault/recovery + trust-policy/rotation/revocation + native-argv/explicit-environment/read-only/preflight + relative-native/private-image/reboot + file-RPC/local-bounds/IPC-rejection + block-reply/private-channel/restart + echo-reply/per-instance/capacity-recovery + authenticated-launch-kind/suffix-independent + dependency-generation/transactional-leases + echo-supervision/bounded-restart + echo-health/hang/protocol-failure + native-capacity/lease-drain/supervision VMs + actual-task-PID exhaustion host checks + installed-invocation/preflight/corrupt-rollback + RAM-unlink/directory/rights/slot-reuse VMs'}
+manifest = {'files_sha256': {name: hashlib.sha256(path.read_bytes()).hexdigest() for path,name in items}, 'validation': 'tools/test.py: host + legacy storage + VT-d/modern DMA isolation + persistence/update-health/version-policy/fault/restart + kernel-boundary/storage-failure security + directory-capability openat + truncate/zero-extension fault/recovery + trust-policy/rotation/revocation + native-argv/explicit-environment/read-only/preflight + relative-native/private-image/reboot + file-RPC/local-bounds/IPC-rejection + block-reply/private-channel/restart + echo-reply/per-instance/capacity-recovery + authenticated-launch-kind/suffix-independent + dependency-generation/transactional-leases + echo-supervision/bounded-restart + echo-health/hang/protocol-failure + native-capacity/lease-drain/supervision VMs + actual-task-PID exhaustion host checks + installed-invocation/preflight/corrupt-rollback + RAM-unlink/directory/rights/slot-reuse + canonical-file-handle/stat VMs'}
 archive = BUILD/'SpiritFoxOS-M6-Updates.zip'
 with zipfile.ZipFile(archive,'w',zipfile.ZIP_DEFLATED) as z:
     for path,name in items:

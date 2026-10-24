@@ -4,12 +4,12 @@
 
 - 工作区：`E:\SpiritFoxOS`。指定源目录的三项顶层内容已移动到这里。
 - 本轮目标：按用户要求持续推进到任一额度剩余 10%；native argv/显式环境/PI、文件分发防御已交付，块设备及 echo 的私有回复与失败回滚现已验证，APP/MODULE 入口检查已交付，已完成 M2 依赖代次与 echo/native 故障监督，当前交付 M6 调用预检并继续 M3。
-- status: ram_unlink_verified_continuing
+- status: file_stat_and_handle_verified_continuing
 - round_complete: true
 - continuous_work: true
 - quota_paused: false
 - 分支：`codex/trust-policy-20261023`，基于已合并的 `origin/main`（`ca9e1a3`）；远端：`origin`，读取和推送地址均为 `https://github.com/fwqfzqaz/SpiritFoxOS.git`。
-- 最近已推送基线：018da40（已安装调用预检，135VM）。本轮RAM删除/目录创建完整回归已通过（966.29秒、137VM），六项摘要匹配，交付以HEAD/origin/PR实际SHA核对。
+- 最近已推送基线：037adbc（RAM删除/目录创建，137VM）。本轮规范文件句柄与元数据完整回归已通过（965.9秒、139VM），六项摘要匹配，交付以HEAD/origin/PR实际SHA核对。
 
 ## 已完成
 
@@ -86,9 +86,12 @@
 58. M3 RAM 文件删除与目录创建：可写目录句柄和规范相对路径、现有只读/挂载父节点及目标检查；任何所有者或dup的打开描述仍引用目标时BUSY，无引用才清空并回收槽。OP_UNLINK(22)保持目录句柄，shell提供带引号单路径的rm/mkdir，普通应用仍只读，持久化格式不变。
 59. 17340项产品namespace/file_rpc宿主检查含一千次节点复用、数据清零、旧句柄失效、跨所有者忙引用、只读子树和畸形消息无副作用；新增legacy/modern两个VM，各四十次复用及真实只读应用IPC拒绝，持久笔记/盘字节和卸载停止保持。完整回归通过（966.29秒、137VM），日志build/ram-unlink-final-test.txt，全部既有回归和六项摘要一致，发布门拒绝缺少新标记的135VM旧结果。
 
+60. M3固定32字节句柄元数据OP_STAT(23)：按现有所有者/代次查询类型、描述模式、节点标志、当前大小和共享偏移，不访问后端、不增加权限、不输出节点指针或所有者；shell提供支持单个引号路径的stat，错误也关闭描述。磁盘记录是缓存元数据，不代表设备健康。
+61. 修复64位消息handle窄化别名：所有消费句柄的文件操作在改变状态前拒绝非零高32位，根关闭记账保持一致。6180项真实namespace/file_rpc宿主检查含一千次大小/偏移变更、所有句柄操作/三类高位、错误无副作用与保护字节；新增legacy/modern两个VM，真实应用的高位READ/CLOSE拒绝后根/读取仍可用，目录/文件元数据和回收通过。完整回归通过（965.9秒、139VM），日志build/file-stat-final-test.txt，全部原有回归与六项摘要一致，旧137VM结果被发布门拒绝。
+
 ## 交付与续做
 
-RAM文件删除与目录创建完整验证通过（966.29秒、137VM）。交付以HEAD/origin/PR实际SHA核对为准；后续继续 .cache/next-file-stat-plan.txt 的有界句柄元数据，不因本轮交付停止。当前无遗留测试进程。
+文件句柄规范值与元数据完整验证通过（965.9秒、139VM），当前无遗留VM。交付以HEAD/origin/PR实际SHA核对为准；后续继续 .cache/next-kernel-cap-plan.txt 的内核能力整数边界，不因本轮交付停止。
 
 当前 native 参数轮次已完成全套验证，日志 `build/arguments-final-test.txt`。额度检查短期剩余 73%、长期 52%，普通使用可用；因此提交推送并继续下一项显式环境变量传递，不因本轮交付停止。已有 109 VM 结果属于签名角色分离基线，111 VM 为当前源码结果。
 

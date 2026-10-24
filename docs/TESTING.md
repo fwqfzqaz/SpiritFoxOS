@@ -232,6 +232,14 @@ native-drain-test 持有两个真实读取应用：忙显式停止保留 ACTIVE�
 
 新增legacy/modern两次VM，每次四十次创建/删除，验证root shell的rm/mkdir、引号、只读与特殊对象拒绝、目录/非法路径/额外参数拒绝、真实应用IPC拒绝、笔记与盘字节保持和卸载/停止。最终完整python tools/test.py --skip-build通过（966.29秒、137次启动），日志build/ram-unlink-final-test.txt，原有全部回归和六项摘要通过。旧135VM结果被发布门实际拒绝；新结果要求unlink_host_assertions=17340、unlink_qemu=true、unlink_qemu_boots=2。
 
+## 文件句柄规范值与固定元数据
+
+旧分发器宿主基线build/file-rpc-high-handle-baseline.txt复现高位CLOSE关闭自己的有效目录但未清除根记录：OP_ROOT仍成功，openat实际STALE。不是跨进程提权。修复先拒绝高32位，再进行原所有者/代次检查；根记录与后端均保持。
+
+6180项产品C宿主检查覆盖所有消费句柄操作的三类高位、规范长度、非空STAT输入拒绝、关闭/回收/错误所有者、保护字节及无副作用；一千次截断/定位后验证独立与dup偏移、当前大小，查询无后端I/O，目录/管道/控制台/只读及已失效磁盘的缓存元数据语义正确。
+
+新增legacy/modern两个VM，实际fileprobe/readprobe发出高位READ/CLOSE，确认拒绝后根、偏移和正常读取保持；还验证32字节记录、根关闭后STALE、shell各种类型/引号/畸形路径、四十次查询及十二轮进程回收。持久笔记/盘字节和卸载停止保持。最终完整python tools/test.py --skip-build通过（965.9秒、139次启动），日志build/file-stat-final-test.txt，全部旧回归和六项摘要通过。发布门要求stat_host_assertions=6180、canonical_file_handles=true、stat_qemu=true、stat_qemu_boots=2，实际拒绝旧137VM结果。
+
 ## 外部助手审查
 
 按用户授权调用已有 DeepSeek Harness。首次宽范围审查超时，没有采用其未完成输出；随后以低推理档审查一个文件写函数，11 秒完成且未使用工具。核实并修复空写返回错误，增加容量防御检查及对应宿主断言。审查回执在 `.cache/deepseek/runs/`，不包含提交或推送权限。

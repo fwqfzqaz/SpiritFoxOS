@@ -32,6 +32,8 @@ build.run(['-target', 'x86_64-windows-gnu', '-g0', '-O2', '-Wall', '-Wextra', '-
 subprocess.run([str(ROOT / 'build/test_services.exe')], check=True)
 build.run(['-target', 'x86_64-windows-gnu', '-g0', '-O2', '-Wall', '-Wextra', '-Werror', '-Iinclude', 'tests/test_openat.c', 'services/namespace.c', '-o', 'build/test_openat.exe'])
 subprocess.run([str(ROOT / 'build/test_openat.exe')], check=True)
+build.run(['-target', 'x86_64-windows-gnu', '-g0', '-O2', '-Wall', '-Wextra', '-Werror', '-Iinclude', 'tests/test_stat.c', 'services/namespace.c', 'services/file_rpc.c', '-o', 'build/test_stat.exe'])
+subprocess.run([str(ROOT / 'build/test_stat.exe')], check=True)
 build.run(['-target', 'x86_64-windows-gnu', '-g0', '-O2', '-Wall', '-Wextra', '-Werror', '-Iinclude', 'tests/test_unlink.c', 'services/namespace.c', 'services/file_rpc.c', '-o', 'build/test_unlink.exe'])
 subprocess.run([str(ROOT / 'build/test_unlink.exe')], check=True)
 build.run(['-target', 'x86_64-windows-gnu', '-g0', '-O2', '-Wall', '-Wextra', '-Werror', '-Iinclude', 'tests/test_truncate.c', 'services/namespace.c', '-o', 'build/test_truncate.exe'])
@@ -56,6 +58,7 @@ subprocess.run([sys.executable, 'tests/test_trust.py'], check=True)
 subprocess.run([sys.executable, 'tests/test_readfs.py'], check=True)
 subprocess.run([sys.executable, 'tests/test_native.py'], check=True)
 if not args.host_only:
+    subprocess.run([sys.executable, 'tools/qemu_stat_test.py'], check=True)
     subprocess.run([sys.executable, 'tools/qemu_unlink_test.py'], check=True)
     subprocess.run([sys.executable, 'tools/qemu_invocation_preflight_test.py'], check=True)
     subprocess.run([sys.executable, 'tools/qemu_native_supervision_test.py'], check=True)
@@ -120,6 +123,10 @@ result['native_relative_host_groups'] = 6
 result['native_relative_mutations'] = 500
 result['native_relative_qemu'] = not args.host_only
 result['native_relative_qemu_boots'] = 0 if args.host_only else 4
+result['stat_host_assertions'] = 6180
+result['stat_qemu'] = not args.host_only
+result['stat_qemu_boots'] = 0 if args.host_only else 2
+result['canonical_file_handles'] = True
 result['unlink_host_assertions'] = 17340
 result['unlink_qemu'] = not args.host_only
 result['unlink_qemu_boots'] = 0 if args.host_only else 2

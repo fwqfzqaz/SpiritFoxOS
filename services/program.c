@@ -9,6 +9,11 @@ static uint32_t native_have,native_expected;
 #endif
 static __attribute__((unused)) int rpc(const SfBootArgs*a,SfMessage*m){long r=sf_send(a->manager,m);if(r)return r;r=sf_recv(a->service,m,sf_deadline(3000));return r<0?r:(int)m->status;}
 #if ROLE == 14 || ROLE == 15
+static int file_metadata(const SfBootArgs*a,SfMessage*m,uint32_t handle,SfFileStat*out){
+ sf_message(m,OP_STAT,1);m->handle=handle;int r=rpc(a,m);if(r)return r;
+ if(m->handle!=handle||m->length!=sizeof(*out))return SF_BAD_FORMAT;
+ memcpy(out,m->data,sizeof(*out));return out->bytes==sizeof(*out)&&out->type>=NODE_DIR&&out->type<=NODE_DISK&&!(out->mode&~15u)&&!(out->flags&~7u)?0:SF_BAD_FORMAT;
+}
 static int relative_open(const SfBootArgs*a,SfMessage*m,uint32_t root,const char*path,unsigned mode){sf_message(m,OP_OPENAT,1);m->handle=root;m->length=strlen(path)+1;m->mode=mode;memcpy(m->data,path,m->length);return rpc(a,m);}
 #endif
 long sf_main(const SfBootArgs*a,size_t bytes){
@@ -87,6 +92,10 @@ long sf_main(const SfBootArgs*a,size_t bytes){
 #else
  const char*target="readme.txt";
 #endif
+ SfFileStat info;
+ sf_message(&m,OP_CLOSE,1);m.handle=(1ull<<32)|root;if(rpc(a,&m)!=SF_STALE_HANDLE||m.length)return 18;
+ sf_message(&m,OP_ROOT,1);if(rpc(a,&m)||m.handle!=root)return 19;
+ if(file_metadata(a,&m,root,&info)||info.type!=NODE_DIR||info.mode!=(OPEN_READ|OPEN_DIRECTORY)||info.size||info.offset)return 20;
  if(relative_open(a,&m,root,target,OPEN_WRITE)!=SF_DENIED)return 3;
  const char*bad[]={"../outside","/dev/console",".","sub/../notes","notes/","sub//notes"};
  for(unsigned i=0;i<sizeof(bad)/sizeof(*bad);i++)if(relative_open(a,&m,root,bad[i],OPEN_READ)!=SF_INVALID)return 4;
@@ -95,12 +104,17 @@ long sf_main(const SfBootArgs*a,size_t bytes){
  sf_message(&m,OP_OPENAT,1);m.handle=root;m.mode=OPEN_READ;memcpy(m.data,"notes\0extra",12);m.length=12;if(rpc(a,&m)!=SF_INVALID)return 7;
  sf_message(&m,OP_ENUMERATE,1);m.handle=root;m.length=sizeof(m.data);if(rpc(a,&m)<=0)return 8;
  if(relative_open(a,&m,root,target,OPEN_READ))return 9;uint32_t file=m.handle;
+ if(file_metadata(a,&m,file,&info)||(info.type!=NODE_FILE&&info.type!=NODE_DISK)||info.mode!=OPEN_READ||!info.size||info.offset)return 21;
+ sf_message(&m,OP_READ,1);m.handle=(1ull<<63)|file;m.length=1;if(rpc(a,&m)!=SF_STALE_HANDLE||m.length)return 22;
+ if(file_metadata(a,&m,file,&info)||info.offset)return 23;
  sf_message(&m,OP_TRUNCATE,1);m.handle=file;m.offset=0;if(rpc(a,&m)!=SF_DENIED)return 16;
  sf_message(&m,OP_UNLINK,1);m.handle=root;m.length=strlen(target)+1;memcpy(m.data,target,m.length);if(rpc(a,&m)!=SF_DENIED)return 17;
  sf_message(&m,OP_CLOSE,1);m.handle=root;if(rpc(a,&m))return 10;
  sf_message(&m,OP_ROOT,1);if(rpc(a,&m)!=SF_DENIED)return 11;
+ sf_message(&m,OP_STAT,1);m.handle=root;if(rpc(a,&m)!=SF_STALE_HANDLE||m.length)return 24;
  if(relative_open(a,&m,root,target,OPEN_READ)!=SF_STALE_HANDLE)return 12;
- sf_message(&m,OP_READ,1);m.handle=file;m.length=sizeof(m.data);if(rpc(a,&m)<=0)return 13;
+ sf_message(&m,OP_READ,1);m.handle=file;m.length=sizeof(m.data);int read_count=rpc(a,&m);if(read_count<=0)return 13;
+ if(file_metadata(a,&m,file,&info)||info.offset!=(unsigned)read_count)return 25;
  /* Deliberately leave the child file and stdout open: process reap must
   * release their namespace descriptions and any disk mount lease. */
  sf_message(&m,OP_OPEN,1);memcpy(m.data,"/dev/console",13);m.length=13;m.mode=OPEN_WRITE;if(rpc(a,&m))return 14;uint32_t console=m.handle;
