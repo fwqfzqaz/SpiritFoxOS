@@ -96,6 +96,7 @@ long sf_main(const SfBootArgs*a,size_t bytes){
  sf_message(&m,OP_ENUMERATE,1);m.handle=root;m.length=sizeof(m.data);if(rpc(a,&m)<=0)return 8;
  if(relative_open(a,&m,root,target,OPEN_READ))return 9;uint32_t file=m.handle;
  sf_message(&m,OP_TRUNCATE,1);m.handle=file;m.offset=0;if(rpc(a,&m)!=SF_DENIED)return 16;
+ sf_message(&m,OP_UNLINK,1);m.handle=root;m.length=strlen(target)+1;memcpy(m.data,target,m.length);if(rpc(a,&m)!=SF_DENIED)return 17;
  sf_message(&m,OP_CLOSE,1);m.handle=root;if(rpc(a,&m))return 10;
  sf_message(&m,OP_ROOT,1);if(rpc(a,&m)!=SF_DENIED)return 11;
  if(relative_open(a,&m,root,target,OPEN_READ)!=SF_STALE_HANDLE)return 12;

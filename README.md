@@ -13,7 +13,7 @@ python tools/bootstrap.py
 python tools/test.py
 ```
 
-第一步下载并校验 Zig 0.13.0、QEMU Windows 构建和 Monocypher 4.0.3。已提供的 Monocypher 源码在 `vendor/monocypher`。第二步执行基础服务、950 条内核 IPC/内存边界、8155 条参数与 12034 条环境检查、353 条文件 RPC 分发边界、108 条 openat、83 条截断、229 条 IOMMU 与 4069 条版本策略检查、28 组 Python 测试（含 3500 次变异）、783 个事务、3132 个更新及 3132 个截断故障场景，以及含真实越界 DMA、试运行、版本策略、目录授权、持久化截断、密钥轮换/撤销与旧密钥迁移、驱动死亡和恢复的 135 次 QEMU 启动。
+第一步下载并校验 Zig 0.13.0、QEMU Windows 构建和 Monocypher 4.0.3。已提供的 Monocypher 源码在 `vendor/monocypher`。第二步执行基础服务、950 条内核 IPC/内存边界、8155 条参数与 12034 条环境检查、353 条文件 RPC 分发边界、17340 条删除/槽复用、108 条 openat、83 条截断、229 条 IOMMU 与 4069 条版本策略检查、28 组 Python 测试（含 3500 次变异）、783 个事务、3132 个更新及 3132 个截断故障场景，以及含真实越界 DMA、试运行、版本策略、目录授权、持久化截断、密钥轮换/撤销与旧密钥迁移、驱动死亡和恢复的 137 次 QEMU 启动。
 
 只构建：`python tools/build.py`。只运行宿主测试：`python tools/test.py --host-only`。已有镜像测试：`python tools/test.py --skip-build`。
 
@@ -83,7 +83,7 @@ python tools/sfpack.py trust --policy build/trust-policy.json
 python tools/sfpack.py sign build/hello.sfk --seed .keys/application.seed
 ```
 
-输入 ELF 是构建中间产物，交付包使用设计说明中的 96 字节头、64 字节段描述符、确定性 CBOR 和 Ed25519 尾部。当前代码只接受静态地址 native 子集；不支持资源包、动态导入、重定位或压缩。构建脚本中列出了实际清单字段。
+输入 ELF 是构建中间产物，交付包使用设计说明中的 96 字节头、64 字节段描述符、确定性 CBOR 和 Ed25519 尾部。当前代码接受固定地址 native 和静态链接的 relative-v1 APP，有界相对重定位及私有映像；不支持资源包、动态导入、通用动态链接或压缩。构建脚本中列出了实际清单字段。
 
 默认策略分离模块与应用两个开发公钥；`python tools/build.py --trust-policy <工作区内JSON>` 可固化最多八个公钥，区分模块/应用用途并拒绝撤销密钥，shell 的 `trust` 可查询。应用密钥须先重叠信任、确认新密钥包，再撤销旧密钥并重建启动；在线策略更新和旧 EFI 防回放尚未实现，配置与限制见 [信任策略](docs/TRUST.md)。
 
@@ -112,3 +112,5 @@ echo 与 sf-native 按有界预算处理进程死亡、健康超时和协议错�
 进程标识保持正值并在每次启动内单调分配，耗尽后拒绝创建；边界机制与宿主验证范围见 [SECURITY](docs/SECURITY.md)。
 
 已安装候选的无效目录委派或 native 不可用会在试运行前拒绝，保留 PENDING 供正确调用重试；坏候选仍按原规则回退，见 [UPDATES](docs/UPDATES.md)。
+
+RAM 命名空间支持 `mkdir <绝对路径>` 和 `rm <绝对路径>`，两者接受单个含引号的路径参数。rm仅删除没有任何打开引用的可写RAM普通文件，拒绝目录、特殊对象及挂载内容；普通应用的只读目录委派保持。协议和忙引用边界见 [NAMESPACE](docs/NAMESPACE.md)。

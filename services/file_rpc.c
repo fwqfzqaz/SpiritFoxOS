@@ -8,7 +8,9 @@ long sf_file_dispatch(SfNamespace*ns,uint32_t owner,uint32_t*root,SfMessage*m){
  switch(op){
  case OP_ROOT:status=*root?0:SF_DENIED;m->handle=*root;break;
  case OP_OPENAT:
+ case OP_UNLINK:
   if(!m->length||m->length>sizeof(m->data)||m->data[m->length-1]||strlen((char*)m->data)+1!=m->length)break;
+  if(op==OP_UNLINK){status=sf_ns_unlink(ns,owner,m->handle,(char*)m->data);break;}
   status=sf_ns_openat(ns,owner,m->handle,(char*)m->data,m->mode);if(status>=0){m->handle=status;status=0;}break;
  case OP_OPEN:
   if(!m->length||m->length>sizeof(m->data)||m->data[m->length-1]||strlen((char*)m->data)+1!=m->length)break;

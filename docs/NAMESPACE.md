@@ -27,6 +27,7 @@ sf-init 在创建进程前验证目录、保留打开描述和挂载引用；包
 | `OP_ROOT (20)` | 无额外字段 | status=0，handle 为显式授予的目录；未授予或已关闭返回 SF_DENIED |
 | `OP_OPENAT (19)` | handle=本进程目录；data=相对 UTF-8 路径；length 包含唯一末尾 NUL；mode=打开模式 | status=0，handle=新的进程内句柄 |
 | `OP_ENUMERATE (18)` | handle=可读目录；length=输出容量，最多 256 | status 与 length 为实际字节数，data 为直接子节点名称，每项以换行结束 |
+| `OP_UNLINK (22)` | handle=可写目录；data=规范相对路径；length 包含唯一末尾 NUL | status=0，保留原目录 handle；仅删除无打开引用的 RAM 普通文件 |
 | `OP_TRUNCATE (21)` | handle=可写普通文件；offset=新的 64 位长度 | status=0；只读目录派生的文件拒绝此操作，详见 `TRUNCATE.md` |
 | `OP_READ/WRITE/CLOSE/SEEK/POLL` | 沿用现有文件句柄协议 | 权限、独立偏移、dup、挂载失效与退出清理沿用同一实现 |
 
@@ -75,3 +76,17 @@ OP_OPEN/OP_OPENAT 保持有界完整 NUL 字符串规则；合法读写最多 25
 channel-test 同时启动两个有只读 /disk/etc 根的 readprobe，完成各自打开、列举、读取、关闭及进程回收。首次启动或重新挂载后缓存为空，此路径会实际等待块设备回复；应用请求留在 manager 队列，不会被块 RPC 等待误取。该命令用于开发验证，要求磁盘已挂载。没有新增跨服务能力传递或并发更新事务。
 
 echo-channel-test 在等待两个文件应用前同步调用 echo，用于验证两类请求均完成。echo-capacity-test 暂停 echo、实际耗尽并释放 root 的端点能力槽，验证两条启动分配失败路径与恢复。它们是当前单线程开发环境的诊断命令，要求正常回显服务及已挂载磁盘，不提供普通应用的特权接口。
+
+## RAM 文件删除与目录创建
+
+受信任串口 shell 提供 `rm <绝对路径>` 与 `mkdir <绝对路径>`，每条只接收一个参数，支持引号及原有参数词法中的转义，不进行变量或通配符展开。例如 `mkdir "/tmp/quoted dir"`、`mkdir /tmp/work`、`write /tmp/work/item data`、`rm /tmp/work/item`。现有 write 命令仍按首个空格分隔路径与文本。
+
+`rm` 打开直接父目录的可写目录句柄，调用同一用户态 `sf_ns_unlink` 后关闭它；失败也关闭父目录。`mkdir` 调用既有受信任 `sf_ns_create`，目录必须具有已存在且可写的直接父目录。路径最多95字节，只接受规范绝对形式；容量仍为32个节点，满时返回 SF_NO_SPACE。新目录可以列举和创建子节点，本轮没有目录删除。
+
+`OP_UNLINK` 使用与 OPENAT 相同的精确 NUL/长度边界与相对路径合并。操作首先验证所有者、代次、目录类型和 OPEN_WRITE；只读委派返回 SF_DENIED，即使目标已被打开。随后重新检查目录对象、相对路径经过的现有中间目录及目标的 readonly/mount_tag。不能从较宽的目录能力穿过只读或挂载子树删除目标。没有符号链接或别名解析。
+
+只允许删除未挂载的 NODE_FILE。目录、管道、控制台和未挂载的磁盘对象返回 SF_INVALID；只读或挂载目标返回 SF_READ_ONLY。任何进程的任何打开描述仍引用目标时返回 SF_BUSY，dup 或其他进程的独立打开同样阻止删除。服务串行处理打开、删除与回收，确认没有引用后才清空节点，重用槽不会把旧文件句柄绑定到新文件。重新创建得到零长度、已清零的数据区；已关闭句柄仍因 generation 不符而失效。
+
+普通应用仍只取得只读目录，不能借新增操作修改 RAM 或持久化内容。真实 fileprobe/readprobe 在持有子文件时通过 IPC 尝试删除，必须得到 SF_DENIED，然后继续读取并由进程退出回收。没有增加普通应用可写目录授权、孤儿打开文件、rmdir、rename 或持久化删除；`/persist/notes` 仍用原有读写/截断事务接口。
+
+`tests/test_unlink.c` 直接链接产品 namespace/file_rpc，检查能力和类型、当前只读子目录、挂载拒绝、跨所有者/dup忙引用、规范路径、Unicode/长度边界、一千次槽复用与数据清零、陈旧句柄和畸形RPC无副作用。`tools/qemu_unlink_test.py` 在两种传输中验证实际shell与只读应用IPC、每种四十次节点复用、引号、持久盘字节和卸载停止。

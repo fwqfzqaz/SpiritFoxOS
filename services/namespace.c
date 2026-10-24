@@ -16,15 +16,38 @@ int sf_ns_open(SfNamespace*n,uint32_t owner,const char*root,const char*path,unsi
  int i=node_find(n,path);if(i<0)return i;SfNode*x=&n->nodes[i];if((mode&OPEN_DIRECTORY)&&x->type!=NODE_DIR)return SF_INVALID;if(x->readonly&&(mode&OPEN_WRITE))return SF_READ_ONLY;
  for(unsigned d=0;d<32;d++)if(!n->descriptions[d].refs){if(x->mount_tag&&n->mount_open){int r=n->mount_open(x->mount_tag);if(r)return r;}n->descriptions[d]=(SfDescription){i,0,mode,0};int h=handle_new(n,owner,d);if(h<0){if(x->mount_tag&&n->mount_close)n->mount_close(x->mount_tag);return h;}if(x->type==NODE_PIPE&&(mode&OPEN_WRITE))x->writers++;return h;}return SF_NO_SPACE;
 }
+static int relative_path(const SfNode*base,const char*relative,char path[96]){
+ if(!*relative||*relative=='/')return SF_INVALID;size_t a=strlen(base->path),b=strlen(relative);unsigned separator=a!=1;
+ if(b>95||a+separator+b>95)return SF_INVALID;memcpy(path,base->path,a);if(separator)path[a++]='/';memcpy(path+a,relative,b+1);
+ /* There are no symlinks or aliases: only canonical components beneath the
+  * validated directory object may contribute to a relative request. */
+ return path_ok(path)?0:SF_INVALID;
+}
 int sf_ns_openat(SfNamespace*n,uint32_t owner,uint32_t directory,const char*relative,unsigned mode){
  SfDescription*d=description(n,owner,directory);if(!d)return SF_STALE_HANDLE;
  SfNode*base=&n->nodes[d->node];if(base->type!=NODE_DIR)return SF_INVALID;
  if(!(mode&3)||(mode&~15))return SF_INVALID;if((mode&3)&~d->mode)return SF_DENIED;
- if(!*relative||*relative=='/')return SF_INVALID;size_t a=strlen(base->path),b=strlen(relative);unsigned separator=a!=1;
- if(b>95||a+separator+b>95)return SF_INVALID;char path[96];memcpy(path,base->path,a);if(separator)path[a++]='/';memcpy(path+a,relative,b+1);
- /* Canonical components only; there are no symlinks or path aliases. The
-  * validated directory object supplies the root, never the request string. */
- if(!path_ok(path))return SF_INVALID;return sf_ns_open(n,owner,base->path,path,mode);
+ char path[96];int r=relative_path(base,relative,path);return r?r:sf_ns_open(n,owner,base->path,path,mode);
+}
+int sf_ns_unlink(SfNamespace*n,uint32_t owner,uint32_t directory,const char*relative){
+ SfDescription*d=description(n,owner,directory);if(!d)return SF_STALE_HANDLE;
+ SfNode*base=&n->nodes[d->node];if(base->type!=NODE_DIR)return SF_INVALID;
+ if(!(d->mode&OPEN_WRITE))return SF_DENIED;
+ char path[96];int r=relative_path(base,relative,path);if(r)return r;
+ if(base->readonly||base->mount_tag)return SF_READ_ONLY;
+ /* Recheck every current parent, including intermediate directories reached
+  * from a wider capability. A mount or read-only subtree cannot be bypassed. */
+ for(size_t i=strlen(base->path);path[i];i++)if(path[i]=='/'){
+  path[i]=0;int parent=node_find(n,path);path[i]='/';
+  if(parent<0||n->nodes[parent].type!=NODE_DIR)return SF_NOT_FOUND;
+  if(n->nodes[parent].readonly||n->nodes[parent].mount_tag)return SF_READ_ONLY;
+ }
+ int target=node_find(n,path);if(target<0)return target;SfNode*x=&n->nodes[target];
+ if(x->readonly||x->mount_tag)return SF_READ_ONLY;if(x->type!=NODE_FILE)return SF_INVALID;
+ /* This service serializes mutation and opening. Keeping open files busy
+  * prevents an old description from ever aliasing a reused node slot. */
+ for(unsigned i=0;i<32;i++)if(n->descriptions[i].refs&&n->descriptions[i].node==(unsigned)target)return SF_BUSY;
+ memset(x,0,sizeof(*x));return 0;
 }
 int sf_ns_dup(SfNamespace*n,uint32_t owner,uint32_t h){SfDescription*d=description(n,owner,h);return d?handle_new(n,owner,d-n->descriptions):SF_STALE_HANDLE;}
 int sf_ns_close(SfNamespace*n,uint32_t owner,uint32_t h){SfDescription*d=description(n,owner,h);if(!d)return SF_STALE_HANDLE;if(!--d->refs){SfNode*x=&n->nodes[d->node];if(x->type==NODE_PIPE&&(d->mode&OPEN_WRITE))x->writers--;if(x->mount_tag&&n->mount_close)n->mount_close(x->mount_tag);}n->handles[(h&255)-1].description=0;return 0;}

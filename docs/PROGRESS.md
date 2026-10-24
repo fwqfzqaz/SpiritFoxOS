@@ -4,12 +4,12 @@
 
 - 工作区：`E:\SpiritFoxOS`。指定源目录的三项顶层内容已移动到这里。
 - 本轮目标：按用户要求持续推进到任一额度剩余 10%；native argv/显式环境/PI、文件分发防御已交付，块设备及 echo 的私有回复与失败回滚现已验证，APP/MODULE 入口检查已交付，已完成 M2 依赖代次与 echo/native 故障监督，当前交付 M6 调用预检并继续 M3。
-- status: invocation_preflight_verified_continuing
+- status: ram_unlink_verified_continuing
 - round_complete: true
 - continuous_work: true
 - quota_paused: false
 - 分支：`codex/trust-policy-20261023`，基于已合并的 `origin/main`（`ca9e1a3`）；远端：`origin`，读取和推送地址均为 `https://github.com/fwqfzqaz/SpiritFoxOS.git`。
-- 额度已实际刷新并恢复，quota_paused=false；健康期间保持五分钟接续，活跃实现只在任一剩余小于等于 10% 时保存暂停。最近完整 echo 回归已通过并推送 a5f430c（628.35 秒、123 VM）；APP/MODULE 启动意图已通过完整回归并推送 352f565（687.44 秒、125 VM）。M2 依赖代次与租约事务已完整验证并推送 79a2262（678.98 秒、125 VM）。echo 死亡监督完整回归通过并推送 803a795（736.3 秒、127 VM）。echo 周期健康期限已完整验证并推送 47c84ac（761.42 秒、129 VM）。native 生命周期已完整验证并推送 c0251d3（778.66 秒、131 VM），TLS 中断重试后远端和 PR #10 核对一致。PID 边界修复已完整验证并推送 8061264（781.16 秒、131 VM），远端与 PR #10 已核对。已安装调用预检最终完整回归已通过（802.5 秒、135 VM），六项交付摘要一致；额度刷新后继续文档收尾/打包/提交推送。最后已核对推送的提交仍为 8061264（131 VM 基线）。
+- 最近已推送基线：018da40（已安装调用预检，135VM）。本轮RAM删除/目录创建完整回归已通过（966.29秒、137VM），六项摘要匹配，交付以HEAD/origin/PR实际SHA核对。
 
 ## 已完成
 
@@ -83,9 +83,12 @@
 56. M6 已安装调用在 TRYING 前检查 native 可用性，以及有效包是否声明本次目录委派能力。拒绝无效调用时保留精确 PENDING 磁盘字节；新增只读认证预览，候选槽/摘要/版本统一选择，实际 package 入口仍拒绝 PENDING，TRYING 后继续重验。坏候选预览错误继续进入旧试运行/装载失败回退路径。
 57. 真实 8061264 基线复现无 namespace.read 的有效候选被 runat 标记试运行并回退，日志 build/qemu-persist-invocation-preflight-baseline.log。新增 legacy/modern 各两次 VM，初装/升级两版本的 runat/runenvat、native 停止拒绝保留原字节，正确重试确认；损坏候选在重启后仍经 TRIAL/ROLLBACK 回到 0.2.0，笔记、根/租约回收和原始盘保持。完整验证通过（802.5 秒、135 VM），日志 build/invocation-preflight-final-test.txt，全部既有回归和六项摘要一致，发布门新增 invocation_preflight 标记。
 
+58. M3 RAM 文件删除与目录创建：可写目录句柄和规范相对路径、现有只读/挂载父节点及目标检查；任何所有者或dup的打开描述仍引用目标时BUSY，无引用才清空并回收槽。OP_UNLINK(22)保持目录句柄，shell提供带引号单路径的rm/mkdir，普通应用仍只读，持久化格式不变。
+59. 17340项产品namespace/file_rpc宿主检查含一千次节点复用、数据清零、旧句柄失效、跨所有者忙引用、只读子树和畸形消息无副作用；新增legacy/modern两个VM，各四十次复用及真实只读应用IPC拒绝，持久笔记/盘字节和卸载停止保持。完整回归通过（966.29秒、137VM），日志build/ram-unlink-final-test.txt，全部既有回归和六项摘要一致，发布门拒绝缺少新标记的135VM旧结果。
+
 ## 交付与续做
 
-2026-10-24 额度已实际刷新，短期99%、长期85%，ordinaryUsageAllowed=true，已恢复。115项源码与六项构建产物均匹配保存点，沿用已完成的135 VM验证，不重复启动测试。当前收尾文档、打包与推送，然后继续有界 M3 RAM 文件删除/目录创建。
+RAM文件删除与目录创建完整验证通过（966.29秒、137VM）。交付以HEAD/origin/PR实际SHA核对为准；后续继续 .cache/next-file-stat-plan.txt 的有界句柄元数据，不因本轮交付停止。当前无遗留测试进程。
 
 当前 native 参数轮次已完成全套验证，日志 `build/arguments-final-test.txt`。额度检查短期剩余 73%、长期 52%，普通使用可用；因此提交推送并继续下一项显式环境变量传递，不因本轮交付停止。已有 109 VM 结果属于签名角色分离基线，111 VM 为当前源码结果。
 

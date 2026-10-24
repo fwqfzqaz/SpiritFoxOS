@@ -226,6 +226,12 @@ native-drain-test 持有两个真实读取应用：忙显式停止保留 ACTIVE�
 
 最终源码构建后完整 python tools/test.py --skip-build 通过（802.5 秒、135 次启动），日志 build/invocation-preflight-final-test.txt。5022 项 Core、97101 项监督、25080 项管理器及全部既有回归继续通过，六项摘要一致；发布门要求 invocation_preflight_qemu=true、invocation_preflight_qemu_boots=4，旧结果拒绝测试通过。
 
+## RAM删除、忙引用与节点复用
+
+17340项产品namespace/file_rpc检查覆盖只读/挂载边界、跨进程和dup忙引用、完整规范路径/Unicode/长度、畸形消息保护字节与无副作用，以及一千次数据清零、节点复用和旧句柄失效。未增加普通应用可写目录授权，真实fileprobe/readprobe以只读根发起OP_UNLINK，必须返回DENIED。
+
+新增legacy/modern两次VM，每次四十次创建/删除，验证root shell的rm/mkdir、引号、只读与特殊对象拒绝、目录/非法路径/额外参数拒绝、真实应用IPC拒绝、笔记与盘字节保持和卸载/停止。最终完整python tools/test.py --skip-build通过（966.29秒、137次启动），日志build/ram-unlink-final-test.txt，原有全部回归和六项摘要通过。旧135VM结果被发布门实际拒绝；新结果要求unlink_host_assertions=17340、unlink_qemu=true、unlink_qemu_boots=2。
+
 ## 外部助手审查
 
 按用户授权调用已有 DeepSeek Harness。首次宽范围审查超时，没有采用其未完成输出；随后以低推理档审查一个文件写函数，11 秒完成且未使用工具。核实并修复空写返回错误，增加容量防御检查及对应宿主断言。审查回执在 `.cache/deepseek/runs/`，不包含提交或推送权限。
