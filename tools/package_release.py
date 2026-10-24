@@ -40,7 +40,7 @@ if result.get('echo_health_qemu') is not True or result.get('echo_health_qemu_bo
     raise SystemExit('Run authenticated echo health timeout and protocol failure regressions before packaging')
 if result.get('native_supervision_qemu') is not True or result.get('native_supervision_qemu_boots') != 2:
     raise SystemExit('Run native capacity, lease drain and bounded death/health recovery before packaging')
-if result.get('task_pid_host_checks') != 5022:
+if result.get('task_pid_host_checks') != 8022:
     raise SystemExit('Run actual task_new PID exhaustion and publication regressions before packaging')
 if result.get('invocation_preflight_qemu') is not True or result.get('invocation_preflight_qemu_boots') != 4:
     raise SystemExit('Run installed invocation preflight and corrupt candidate rollback regressions before packaging')
@@ -48,6 +48,12 @@ if result.get('unlink_host_assertions') != 17340 or result.get('unlink_qemu') is
     raise SystemExit('Run RAM unlink rights, busy-reference, slot reuse and VM regressions before packaging')
 if result.get('stat_host_assertions') != 6180 or result.get('canonical_file_handles') is not True or result.get('stat_qemu') is not True or result.get('stat_qemu_boots') != 2:
     raise SystemExit('Run canonical file handle and fixed metadata regressions before packaging')
+if result.get('ipc_host_assertions') != 40908 or result.get('kernel_capability_width') is not True or result.get('capability_width_qemu') is not True or result.get('capability_width_qemu_boots') != 2:
+    raise SystemExit('Run canonical kernel capability host and VM regressions before packaging')
+if result.get('fpu_task_init_host_checks') != 3000 or result.get('fpu_profile') != 'fxsave64-x87-mmx-sse' or result.get('fpu_context_qemu') is not True or result.get('fpu_context_qemu_boots') != 2:
+    raise SystemExit('Run fresh/interleaved FP context and isolated exception VM regressions before packaging')
+if set(result.get('fpu_simd_exception_observation',{})) != {'legacy','modern'} or any(v not in ('exception-delivered','tcg-status-only') for v in result['fpu_simd_exception_observation'].values()):
+    raise SystemExit('Record actual SIMD exception delivery limitations before packaging')
 for name in ['esp/EFI/BOOT/BOOTX64.EFI','storage.img','persistent.img','development.pub','application.pub','trust-policy.json']:
     actual = hashlib.sha256((BUILD/name).read_bytes()).hexdigest()
     if result.get('artifacts_sha256',{}).get(name) != actual:
@@ -56,7 +62,7 @@ items = [(BUILD/'esp/EFI/BOOT/BOOTX64.EFI','EFI/BOOT/BOOTX64.EFI'),(BUILD/'stora
 items.append((BUILD/'trust-policy.json','trust-policy.json'))
 items.append((BUILD/'application.pub','application.pub'))
 items += [(p,'docs/'+p.name) for p in sorted((ROOT/'docs').glob('*.md'))]
-manifest = {'files_sha256': {name: hashlib.sha256(path.read_bytes()).hexdigest() for path,name in items}, 'validation': 'tools/test.py: host + legacy storage + VT-d/modern DMA isolation + persistence/update-health/version-policy/fault/restart + kernel-boundary/storage-failure security + directory-capability openat + truncate/zero-extension fault/recovery + trust-policy/rotation/revocation + native-argv/explicit-environment/read-only/preflight + relative-native/private-image/reboot + file-RPC/local-bounds/IPC-rejection + block-reply/private-channel/restart + echo-reply/per-instance/capacity-recovery + authenticated-launch-kind/suffix-independent + dependency-generation/transactional-leases + echo-supervision/bounded-restart + echo-health/hang/protocol-failure + native-capacity/lease-drain/supervision VMs + actual-task-PID exhaustion host checks + installed-invocation/preflight/corrupt-rollback + RAM-unlink/directory/rights/slot-reuse + canonical-file-handle/stat VMs'}
+manifest = {'files_sha256': {name: hashlib.sha256(path.read_bytes()).hexdigest() for path,name in items}, 'validation': 'tools/test.py: host + legacy storage + VT-d/modern DMA isolation + persistence/update-health/version-policy/fault/restart + kernel-boundary/storage-failure security + directory-capability openat + truncate/zero-extension fault/recovery + trust-policy/rotation/revocation + native-argv/explicit-environment/read-only/preflight + relative-native/private-image/reboot + file-RPC/local-bounds/IPC-rejection + block-reply/private-channel/restart + echo-reply/per-instance/capacity-recovery + authenticated-launch-kind/suffix-independent + dependency-generation/transactional-leases + echo-supervision/bounded-restart + echo-health/hang/protocol-failure + native-capacity/lease-drain/supervision VMs + actual-task-PID exhaustion host checks + installed-invocation/preflight/corrupt-rollback + RAM-unlink/directory/rights/slot-reuse + canonical-file-handle/stat VMs + canonical-kernel-capabilities + eager-FP-context/fresh/interleaved/timer/fault VMs'}
 archive = BUILD/'SpiritFoxOS-M6-Updates.zip'
 with zipfile.ZipFile(archive,'w',zipfile.ZIP_DEFLATED) as z:
     for path,name in items:

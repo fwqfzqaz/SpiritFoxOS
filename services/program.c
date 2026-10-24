@@ -75,8 +75,21 @@ long sf_main(const SfBootArgs*a,size_t bytes){
  uint8_t code[]={0x90,0xc3};((void(*)(void))code)();return 1;
 #elif ROLE == 8
  for(unsigned i=0;i<128;i++){long ep=sf_sys(SYS_EP_CREATE,0,0,0);if(ep<0||sf_sys(SYS_CAP_CLOSE,ep,0,0))return 9;}
+ long owned=sf_sys(SYS_EP_CREATE,0,0,0);if(owned<=0)return 30;SfMessage probe_message;sf_message(&probe_message,OP_ECHO,0xcab123);
+ uint64_t masks[]={1ull<<32,1ull<<63,0xffffffff00000000ull};
+ for(unsigned width=0;width<sizeof(masks)/sizeof(*masks);width++){
+  uint64_t invalid=masks[width]|(uint32_t)owned;
+  if(sf_sys(SYS_SEND,invalid,(uint64_t)&probe_message,0)!=SF_STALE_HANDLE)return 31;
+  if(sf_sys(SYS_RECV,invalid,(uint64_t)&probe_message,sf_deadline(100))!=SF_STALE_HANDLE)return 32;
+  if(sf_sys(SYS_CAP_CLOSE,invalid,0,0)!=SF_STALE_HANDLE)return 33;
+  if(sf_sys(SYS_CAP_DERIVE,invalid,RIGHT_SEND|RIGHT_RECV,0)!=SF_DENIED)return 34;
+  if(sf_sys(SYS_CAP_REVOKE,invalid,0,0)!=SF_DENIED)return 35;
+ }
+ if(sf_send(owned,&probe_message)||sf_recv(owned,&probe_message,sf_deadline(100))!=a->pid||probe_message.h.request_id!=0xcab123||probe_message.h.flags!=a->pid)return 36;
+ long held=sf_sys(SYS_CAP_DERIVE,owned,RIGHT_SEND|RIGHT_RECV,0);if(held<=0||sf_sys(SYS_CAP_CLOSE,owned,0,0))return 37;
+ if(sf_send(held,&probe_message)||sf_recv(held,&probe_message,sf_deadline(100))!=a->pid||sf_sys(SYS_CAP_CLOSE,held,0,0))return 38;
  int ok=sf_sys(SYS_SPAWN,0,0,0)==SF_DENIED&&sf_sys(SYS_LOG,0x100000,16,0)==SF_DENIED&&sf_sys(SYS_MAP_TEST,SF_BASE,7,0)==SF_DENIED&&sf_sys(SYS_SEND,0x1234,0,0)==SF_STALE_HANDLE&&sf_sys(SYS_CAP_DERIVE,a->manager,7,0)==SF_DENIED&&sf_sys(SYS_PCI_READ,0,0,0)==SF_DENIED&&sf_sys(SYS_PORT_IO,0xcf8,4,0)==SF_DENIED;
- ok=ok&&sf_sys(SYS_DMA_STATUS,0,0,0)==SF_DENIED;SfMessage m;sf_message(&m,OP_HELLO,1);m.status=ok?0:SF_DENIED;sf_send(a->manager,&m);return ok?0:1;
+ ok=ok&&sf_sys(SYS_DMA_STATUS,0,0,0)==SF_DENIED;SfMessage m;sf_message(&m,OP_HELLO,1);m.status=ok?0:SF_DENIED;if(ok)sf_log("CAPABILITY WIDTH APP PASSED\n");sf_send(a->manager,&m);return ok?0:1;
 #elif ROLE == 10
  return *(volatile uint32_t*)0xfed90000ull;
 #elif ROLE == 11

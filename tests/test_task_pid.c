@@ -10,7 +10,7 @@ static Task saved[SF_MAX_TASKS];static unsigned allocated,allocation_calls,space
 static uint32_t freed_pid;
 #define CHECK(x) do{checks++;if(!(x)){printf("FAIL line %d: %s (next=%u, slot1_pid=%u, state=%u, allocations=%u)\n",__LINE__,#x,next_pid,tasks[1].pid,tasks[1].state,allocation_calls);return 1;}}while(0)
 void serial(const char*s){(void)s;}void hex(uint64_t x){(void)x;}void panic(const char*s){fprintf(stderr,"Unexpected panic: %s\n",s);abort();}
-void console_irq(void){}long console_read(void){return SF_WOULD_BLOCK;}void arch_init(void){}void arch_task(Task*t){(void)t;abort();}void arch_enter(Frame*f){(void)f;abort();}
+void console_irq(void){}long console_read(void){return SF_WOULD_BLOCK;}void arch_init(void){}void arch_task(Task*t){(void)t;abort();}void arch_save(Task*t){(void)t;abort();}void arch_enter(Frame*f){(void)f;abort();}
 void*page_alloc(uint32_t owner){(void)owner;allocation_calls++;if(allocated>=fail_after||allocated>=64)return 0;void*p=mock_pages[allocated++];memset(p,0,4096);return p;}
 void pages_free(uint32_t owner){freed++;freed_pid=owner;}uint64_t space_new(uint32_t owner){(void)owner;space_calls++;return 4096;}
 int space_map(Task*t,uint64_t a,uint64_t b,uint32_t flags){(void)t;(void)a;(void)b;(void)flags;return 0;}
@@ -44,5 +44,11 @@ int main(void){
  reset(100);p.count=0;memcpy(saved,tasks,sizeof(tasks));CHECK(task_new(&p,0)==SF_INVALID);CHECK(next_pid==100&&!allocation_calls&&!space_calls&&!memcmp(saved,tasks,sizeof(tasks)));p=plan();
  reset(100);for(unsigned i=0;i<SF_MAX_TASKS;i++){tasks[i].state=T_READY;tasks[i].pid=i+1;}memcpy(saved,tasks,sizeof(tasks));CHECK(task_new(&p,0)==SF_NO_SPACE);CHECK(next_pid==100&&!allocation_calls&&!space_calls&&!memcmp(saved,tasks,sizeof(tasks)));
  reset(100);tasks[0].pid=2;Frame f={0};f.rax=SYS_SPAWN;f.rdi=(uint64_t)(uintptr_t)&p;memcpy(saved,tasks,sizeof(tasks));CHECK(syscall(&f)==SF_DENIED);CHECK(next_pid==100&&!allocation_calls&&!space_calls&&!memcmp(saved,tasks,sizeof(tasks)));
- printf("TASK PID PASS: %u checks; actual task_new, 1000 seeded states, positive final identity, no allocation/publication on exhaustion and failed allocation never reuses PID\n",checks);return 0;
+ for(unsigned i=0;i<1000;i++){
+  reset(100+i);tasks[1].state=T_DEAD;memset(tasks[1].fxstate,0xa5,sizeof(tasks[1].fxstate));
+  CHECK(task_new(&p,0)==(int)(100+i));
+  uint8_t clean[512]={0};clean[0]=0x7f;clean[1]=3;clean[24]=0x80;clean[25]=0x1f;
+  CHECK(!memcmp(tasks[1].fxstate,clean,sizeof(clean)));CHECK(!((uintptr_t)tasks[1].fxstate&15));
+ }
+ printf("TASK PID PASS: %u checks; actual task_new, 1000 seeded PID states and 1000 dirty FP slot reuses; no allocation/publication on exhaustion, fresh aligned FP image and failed allocation never reuses PID\n",checks);return 0;
 }

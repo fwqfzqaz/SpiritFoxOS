@@ -101,3 +101,10 @@ RAM删除保持能力边界：只读委派先返回DENIED，不能通过错误�
 文件RPC的64位handle过去会窄化为32位再查表。宿主基线build/file-rpc-high-handle-baseline.txt中，(1<<32)|root的CLOSE返回0并关闭自己的有效目录，却因完整64位值不等于Child.root而未清零根；随后OP_ROOT仍返回成功，实际openat却STALE。所有者与generation校验未被越过，不把它描述为跨进程提权。修复在分发入口拒绝所有消费句柄操作的非零高位，后端与根记账均保持；真实隔离应用还验证高位READ/CLOSE被拒绝后正常根、元数据和读取仍可用。
 
 STAT仅序列化显式初始化的32字节记录，原始节点、指针和所有者不进入响应；错误length=0。数据来自现有打开描述与节点，只读授权和设备准入策略保持，缓存元数据不代表设备健康。
+
+
+## 内核能力整数与扩展 CPU 状态
+
+内核 cap 原接收 uint32_t，却由 64 位 syscall 参数直接传入。真实 ipc.c 的宿主基线复现高位 SEND、CLOSE、DERIVE 和 REVOKE 与调用者自己的合法能力成为别名；没有越过任务归属、epoch、generation 或 rights。现在统一查询保留 uint64_t 并在窄化前拒绝高 32 位，不更改各操作原错误码，非法能力在用户缓冲复制前即失败。
+
+更严重的 CPU 状态基线见 CPU_CONTEXT.md：两个真实签名应用能跨退出读到 XMM0。现在每任务独立 FXSAVE64/FXRSTOR64，任务复用从完整清零状态开始，保留 x87/MMX/SSE 控制及数据；明确禁用未保存的 AVX 配置。最终完整回归通过（1074.85秒、143VM）；覆盖及硬件限制见 CPU_CONTEXT.md。

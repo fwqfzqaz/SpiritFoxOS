@@ -3,13 +3,15 @@
 更新日期：2026-10-24（北京时间）。
 
 - 工作区：`E:\SpiritFoxOS`。指定源目录的三项顶层内容已移动到这里。
-- 本轮目标：按用户要求持续推进到任一额度剩余 10%；native argv/显式环境/PI、文件分发防御已交付，块设备及 echo 的私有回复与失败回滚现已验证，APP/MODULE 入口检查已交付，已完成 M2 依赖代次与 echo/native 故障监督，当前交付 M6 调用预检并继续 M3。
-- status: file_stat_and_handle_verified_continuing
+- 本轮目标：按用户要求持续推进到任一额度剩余 10%；native argv/显式环境/PI、文件分发防御已交付，块设备及 echo 的私有回复与失败回滚现已验证，APP/MODULE 入口检查已交付，已完成 M2 依赖代次与 echo/native 故障监督，当前修复 M1 内核能力整数边界与已复现的 XMM 跨进程状态泄漏。
+- status: kernel_cpu_isolation_verified_continuing
 - round_complete: true
 - continuous_work: true
 - quota_paused: false
+- user_paused: false
+- pause_reason: none
 - 分支：`codex/trust-policy-20261023`，基于已合并的 `origin/main`（`ca9e1a3`）；远端：`origin`，读取和推送地址均为 `https://github.com/fwqfzqaz/SpiritFoxOS.git`。
-- 最近已推送基线：037adbc（RAM删除/目录创建，137VM）。本轮规范文件句柄与元数据完整回归已通过（965.9秒、139VM），六项摘要匹配，交付以HEAD/origin/PR实际SHA核对。
+- 最近已推送基线：c565c40（139VM）。本轮内核能力与FP隔离完整验证通过（1074.85秒、143VM），六项摘要一致；提交/推送以HEAD、origin及PR实际SHA核对。
 
 ## 已完成
 
@@ -89,25 +91,18 @@
 60. M3固定32字节句柄元数据OP_STAT(23)：按现有所有者/代次查询类型、描述模式、节点标志、当前大小和共享偏移，不访问后端、不增加权限、不输出节点指针或所有者；shell提供支持单个引号路径的stat，错误也关闭描述。磁盘记录是缓存元数据，不代表设备健康。
 61. 修复64位消息handle窄化别名：所有消费句柄的文件操作在改变状态前拒绝非零高32位，根关闭记账保持一致。6180项真实namespace/file_rpc宿主检查含一千次大小/偏移变更、所有句柄操作/三类高位、错误无副作用与保护字节；新增legacy/modern两个VM，真实应用的高位READ/CLOSE拒绝后根/读取仍可用，目录/文件元数据和回收通过。完整回归通过（965.9秒、139VM），日志build/file-stat-final-test.txt，全部原有回归与六项摘要一致，旧137VM结果被发布门拒绝。
 
+62. M1规范内核能力：cap保留64位参数并在查表前拒绝高位别名，CLOSE/SEND/RECV保持STALE、DERIVE/REVOKE保持DENIED。40908项实际IPC宿主检查含一千次分配/回收，三类高位、五操作无复制/无副作用和正常端点保持；两个新增VM各四十次实际probe进程，普通/PI/文件IPC和持久字节保持。基线仅能别名调用者自己的有效能力，不越过所有者/代次/权限。
+63. M1修复两个真实签名应用可跨退出读到XMM0的泄漏。每任务私有FXSAVE64/FXRSTOR64、创建/复用清零、默认控制字，关闭OSXSAVE/FFXSR，并在恢复前用无等待/零FLDENV清理异常指针。实际task_new新增一千个脏FP槽复用检查，共8022项创建路径断言；两个新增max CPU VM各十二组同时存活应用验证x87/MMX/XMM0–15、舍入/状态及yield/定时抢占保持，异常/超时后清零与服务/盘保持。TCG的SIMD仅标志无#XM、非零异常指针完整恢复限制已如实记录。最终完整回归通过（1074.85秒、143VM），日志build/kernel-cpu-isolation-final-test.txt，全部既有回归和六项摘要一致；旧139VM结果被发布门拒绝。
+
 ## 交付与续做
 
-文件句柄规范值与元数据完整验证通过（965.9秒、139VM），当前无遗留VM。交付以HEAD/origin/PR实际SHA核对为准；后续继续 .cache/next-kernel-cap-plan.txt 的内核能力整数边界，不因本轮交付停止。
+本轮内核能力整数与FP状态隔离完整验证通过（1074.85秒、143VM），当前全部VM已关闭。正常提交推送当前origin分支并核对PR10；不因一轮交付停止。后续按.cache/rmdir-prototype.json继续有界RAM空目录删除，先确认原始摘要、并入真实产品并验证，再做对应完整回归。独立原型11359项检查通过尚不代表该功能已安装或交付。
 
-当前 native 参数轮次已完成全套验证，日志 `build/arguments-final-test.txt`。额度检查短期剩余 73%、长期 52%，普通使用可用；因此提交推送并继续下一项显式环境变量传递，不因本轮交付停止。已有 109 VM 结果属于签名角色分离基线，111 VM 为当前源码结果。
+用户于2026-10-24携电脑出门时要求暂停，20个文件已备份至.cache/checkpoints/user-pause-20261024-102451.zip；随后明确继续，user_paused=false，自动任务已恢复ACTIVE与五分钟接续。暂停期间未运行完整回归，也未将未验证成果推送。本次143VM结果取代暂停前的局部结果。
 
-2026-10-23 22:57 额度刷新后启动本轮，短期剩余 100%、长期 56%，ordinaryUsageAllowed=true。PR #10（https://github.com/fwqfzqaz/SpiritFoxOS/pull/10）在完整验证结束时仍打开，继续向同一功能分支交付签名角色分离并更新该 PR；所有 VM 已关闭。旧单密钥安装必须显式迁移，具体步骤见 `docs/TRUST.md`，不能把旧应用拒绝误判成可忽略签名错误。上一轮 105 VM 结果属于 `145ac99` 基线，本轮 109 VM 为当前最终源码结果。
+指定仓库为https://github.com/fwqfzqaz/SpiritFoxOS，PR10持续更新当前codex/trust-policy-20261023分支，不强制推送。此前PR9已由外部合并为main ca9e1a3。原误用xiaoniko258/SpiritFoxOS的当前代码树已按用户要求清除并保留迁移README；不再次操作该仓库。原分支头和迁移元数据在此前本地refs/archive与.cache/repo-migration中保留。
 
-已向指定仓库提交合并请求 https://github.com/fwqfzqaz/SpiritFoxOS/pull/9（原工作分支 → main），初始 head 为 `6c0ecfd`；GitHub 已显示该请求合并为 `ca9e1a3`，合并由外部完成。本轮从该 main 新建上述功能分支，避免继续更新已关闭的 PR。构建时信任库、查询工具、用途/撤销规则及完整回归均已完成，交付仍以当前分支与 origin 同名分支的 SHA 对照为准；动态在线策略更新和独立生产根保护不在本轮范围。
-
-上一轮基于 `035c102` 完成统一截断与持久化零扩展，产品源码为 `9d072ad`；本轮在其已合并成果上新增信任策略。交付提交由 Git HEAD 标识，推送状态以 origin 同名分支与 HEAD 实际对照为准；不一致时续做已授权推送，不重做已通过的开发和测试。用户已明确授权：余额充足直接推进下一项，不等待再次确认；过去“不自行开始下一阶段”属于旧轮次限制。
-
-2026-10-23 按用户指定纠正 GitHub 交付地址：已将通过上述完整验证的产品源码提交 `9d072ad6bf6907bc6c815e2239f8139697d6fc2c` 推送至 `fwqfzqaz/SpiritFoxOS` 的 `codex/boot-only-restart-20261022` 分支，并核对远端 SHA 一致。当时迁移未改动 `main`；本地 origin 的读取和推送地址已同步切换，后续交付以本文顶部的当前功能分支为准。
-
-原误用仓库 `xiaoniko258/SpiritFoxOS` 已按用户要求清除当前源代码树：`main` 以正常后继提交 `e498fabec8f12402d70d31b63af6e2e92b65df36` 仅保留迁移说明，并删除原有九个 `codex/*` 分支；原仓库现有分支已核对仅剩该 `main`。没有删除仓库、重写历史或强制推送。本地工作文件完整保留；清理前的十个远端分支头保存在本地 `refs/archive/spiritfoxos-before-migration-20261023/*`，迁移元数据位于忽略的 `.cache/repo-migration/migration.json`。此次迁移只改远端配置与本进度记录，产品代码和已验证镜像未变，因此沿用 `9d072ad` 的完整测试结果。
-
-后续优先依据要求和 ROADMAP 补齐在线信任策略更新/独立生产根保护、长期服务健康策略与更完整持久化服务。IRQ 重映射、ACS/多单元分组、真实硬件断电、真实复位失败和可信防回滚仍未验收，不能由当前 QEMU 测试替代。
-
-交互：`python tools/qemu_test.py --interactive --persistent --iommu`。首次创建 `build/user-persistent.img`，后续继续使用该副本；构建只覆盖原始 `persistent.img`。操作与格式见 `docs/PERSISTENCE.md` 和 `docs/IOMMU.md`。
+更完整持久化服务、在线信任/独立生产根、通用IRQ/设备隔离、真实硬件断电、多核/网络/图形仍未完成，详见ROADMAP。当前QEMU验证不能替代物理硬件验收。
 
 ## 额度保护
 

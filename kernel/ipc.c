@@ -2,7 +2,7 @@
 #define ENDPOINTS 64
 typedef struct {uint32_t owner,epoch,head,count;SfMessage queue[8];} Endpoint;
 static Endpoint endpoints[ENDPOINTS];
-static Cap *cap(Task*t,uint32_t h,uint32_t rights){unsigned i=(h&255);if(!i||i>32)return 0;Cap*c=&t->caps[i-1];if(!c->endpoint||c->generation!=(h>>8)||(c->rights&rights)!=rights)return 0;Endpoint*e=&endpoints[c->endpoint-1];return e->owner&&c->epoch==e->epoch?c:0;}
+static Cap *cap(Task*t,uint64_t h,uint32_t rights){if(h>UINT32_MAX)return 0;unsigned i=(h&255);if(!i||i>32)return 0;Cap*c=&t->caps[i-1];if(!c->endpoint||c->generation!=(h>>8)||(c->rights&rights)!=rights)return 0;Endpoint*e=&endpoints[c->endpoint-1];return e->owner&&c->epoch==e->epoch?c:0;}
 static int install(Task*t,unsigned ep,unsigned rights){for(unsigned i=0;i<32;i++)if(!t->caps[i].endpoint){Cap*c=&t->caps[i];if(c->generation>=0x7fffff)continue;c->generation++;c->endpoint=ep+1;c->epoch=endpoints[ep].epoch;c->rights=rights;return(int)((c->generation<<8)|(i+1));}return SF_NO_SPACE;}
 int ipc_grant(Task*from,Task*to,uint32_t handle,uint32_t rights){Cap*c=cap(from,handle,RIGHT_DELEGATE);if(!c||(rights&c->rights)!=rights)return SF_DENIED;return install(to,c->endpoint-1,rights);}
 static void invalidate(unsigned i){Endpoint*e=&endpoints[i];e->owner=0;e->count=0;e->epoch++;for(unsigned j=0;j<SF_MAX_TASKS;j++){Task*t=&tasks[j];if(t->state==T_BLOCKED&&t->wait_endpoint==i+1){t->frame->rax=SF_REVOKED;t->state=T_READY;}for(unsigned k=0;k<32;k++)if(t->caps[k].endpoint==i+1)t->caps[k].endpoint=0;}}

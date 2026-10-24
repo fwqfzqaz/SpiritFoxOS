@@ -16,10 +16,12 @@ ROOT = qemu_test.ROOT
 
 
 class VM:
-    def __init__(self, disk, name, extra=(), debug=None, stop_on_error=False, iommu=False, writable=True, memory=256, iommu_options=None, legacy=False):
+    def __init__(self, disk, name, extra=(), debug=None, stop_on_error=False, iommu=False, writable=True, memory=256, iommu_options=None, legacy=False, cpu=None):
         print('Persistence VM: '+name,flush=True)
         shutil.copyfile(ROOT/'.tools/qemu/share/edk2-i386-vars.fd', ROOT/'build/OVMF_VARS.fd')
         args = qemu_test.command(memory=memory,disk=disk,writable=writable,iommu=iommu)
+        if cpu:
+            args[args.index('-cpu')+1]=cpu
         if iommu_options:
             args[args.index(next(x for x in args if x.startswith('intel-iommu,')))]=iommu_options
         if legacy:

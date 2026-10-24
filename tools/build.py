@@ -118,6 +118,9 @@ def main(policy_path=None):
     rpc_image = link_elf('rpcprobe',shared+objects('rpcprobe',['services/rpcprobe.c']),'services/user.ld')
     rpc_manifest = {'app_id':'org.spiritfox.rpcprobe','version':'0.1.0','runtime_id':'org.spiritfox.native','app_abi':1,'requested_caps':['stdio','namespace.read']}
     packages.append(('rpcprobe.sfk',pack(rpc_manifest,rpc_image,2,application_seed)))
+    fp_image = link_elf('fpprobe',shared+objects('fpprobe',['services/fpprobe.c']),'services/user.ld')
+    fp_manifest = {'app_id':'org.spiritfox.fpprobe','version':'0.1.0','runtime_id':'org.spiritfox.native','app_abi':1,'requested_caps':['stdio']}
+    packages.append(('fpprobe.sfk',pack(fp_manifest,fp_image,2,application_seed)))
     pie_shared = objects('pie-common', ['services/start.S','services/memory.c','services/libsf.c','services/arguments.c'], defines=['-fpie'])
     pie_objs = pie_shared + objects('pieprobe',['services/pieprobe.c'],defines=['-fpie'])
     run(['-target','x86_64-freestanding-none','-nostdlib','-fpie','-pie','-Wl,-Bsymbolic','-Wl,-e,_sf_start','-Wl,-T,services/user-pie.ld','-Wl,--build-id=none',*pie_objs,'-o','build/pieprobe.elf'])

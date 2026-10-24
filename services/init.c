@@ -373,6 +373,11 @@ static void command(char*line){
  else if(!strcmp(line,"native-status"))native_status();
  else if(!strcmp(line,"native-capacity-test"))native_capacity_test();
  else if(!strcmp(line,"native-drain-test"))native_drain_test();
+ else if(!strcmp(line,"cpu-state-test")){
+  int a=launch_app("fpprobe.sfk"),b=launch_app("fpprobe.sfk");
+  sf_assert(a>0&&b>0&&sf_sys(SYS_TASK_STATUS,a,0,0)==SF_TASK_RUNNING&&sf_sys(SYS_TASK_STATUS,b,0,0)==SF_TASK_RUNNING,"two CPU state probes overlap");
+  int ar=wait_app(a),br=wait_app(b);sf_assert(!ar&&!br,"interleaved private x87/MMX/SSE contexts");sf_log("CPU STATE PAIR PASSED\n");
+ }
  else if(!strcmp(line,"native-crash")){int r=native_watch.state==SF_SUP_RUNNING&&runtime_pid?sf_sys(SYS_KILL,runtime_pid,SF_DEVICE_GONE,0):SF_STALE_HANDLE;sf_log(!r?"native: crash injected\n":"native: crash refused\n");}
  else if(!strcmp(line,"native-hang")||!strcmp(line,"native-bad-reply")||!strcmp(line,"native-bad-op")){
   unsigned mode=!strcmp(line,"native-hang")?1:!strcmp(line,"native-bad-reply")?2:3;SfMessage m;sf_message(&m,OP_NATIVE_DIAGNOSTIC,++requests);m.mode=mode;

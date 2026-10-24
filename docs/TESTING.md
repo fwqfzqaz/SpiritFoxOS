@@ -240,6 +240,16 @@ native-drain-test 持有两个真实读取应用：忙显式停止保留 ACTIVE�
 
 新增legacy/modern两个VM，实际fileprobe/readprobe发出高位READ/CLOSE，确认拒绝后根、偏移和正常读取保持；还验证32字节记录、根关闭后STALE、shell各种类型/引号/畸形路径、四十次查询及十二轮进程回收。持久笔记/盘字节和卸载停止保持。最终完整python tools/test.py --skip-build通过（965.9秒、139次启动），日志build/file-stat-final-test.txt，全部旧回归和六项摘要通过。发布门要求stat_host_assertions=6180、canonical_file_handles=true、stat_qemu=true、stat_qemu_boots=2，实际拒绝旧137VM结果。
 
+## 内核能力值与浮点上下文
+
+内核高位能力宿主基线直接调用原ipc.c，复现自己的能力被高位SEND/CLOSE/DERIVE/REVOKE当作别名，不宣称跨所有者提权。最终实际产品40908项IPC断言覆盖三类高位、五个操作、无用户复制/任务状态变化、一千次分配回收及合法IPC保持。两个新增legacy/modern VM各四十次真实签名probe进程，保留普通/PI/argv/env/目录文件调用与持久字节。
+
+CPU基线在c565c40的两种真实VM中以连续签名应用复现XMM0跨退出泄漏。实际task_new模型新增一千次带脏FP槽复用，完整512字节初始映像和对齐检查使总数为8022。两个新增max CPU VM实际宣告AVX/XSAVE硬件但OSXSAVE关闭；每种十二组同时存活应用、每任务不同x87/MMX/XMM0–15与舍入/状态，经历yield及非主动让出的TSC循环；AVX/x87/待处理异常与超时仅回收原任务，随后新任务清零且服务/持久字节保持。
+
+本地QEMU11.0.92 TCG对未屏蔽SSE 0/0仅记录0x1f01而无#XM。测试另外检查该标志跨yield保持，将两种传输的status-only观察写入总结果，不把它称为真实SIMD异常交付已通过。非零异常指针完整恢复受模型限制；恢复前清零环境，初始指针以FNSTENV实测；真实CPU语义仍待扩展验证，见CPU_CONTEXT.md。
+
+最终完整python tools/test.py --skip-build通过（1074.85秒、143次启动），日志build/kernel-cpu-isolation-final-test.txt。全部既有宿主/VM回归及六项交付摘要一致；新版发布门拒绝缺少新标记的139VM结果，并要求实际能力/FP两组VM与SIMD观察记录。
+
 ## 外部助手审查
 
 按用户授权调用已有 DeepSeek Harness。首次宽范围审查超时，没有采用其未完成输出；随后以低推理档审查一个文件写函数，11 秒完成且未使用工具。核实并修复空写返回错误，增加容量防御检查及对应宿主断言。审查回执在 `.cache/deepseek/runs/`，不包含提交或推送权限。
