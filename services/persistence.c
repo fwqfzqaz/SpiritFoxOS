@@ -92,16 +92,18 @@ int sf_persist_finish(int success){
  r=sf_update_finish(&state,success);if(r)return r;r=state_commit(&state);if(r){sf_log("update: health commit failed\n");return r;}
  sf_log(success?"update: CONFIRMED\n":"update: ROLLED BACK\n");return 0;
 }
-long sf_persist_package(void*out,size_t capacity){
+static long selected_package(void*out,size_t capacity,int preview){
  if(!sf_storage_writable())return SF_DEVICE_GONE;SfUpdate state;int r=state_read(&state);if(r)return r;
- if(state.phase==SF_UPDATE_PENDING)return SF_BUSY;char selected=state.phase==SF_UPDATE_TRYING?state.candidate:state.good;if(!selected)return SF_NOT_FOUND;
+ if(state.phase==SF_UPDATE_PENDING&&!preview)return SF_BUSY;int candidate=state.phase!=SF_UPDATE_STABLE;char selected=candidate?state.candidate:state.good;if(!selected)return SF_NOT_FOUND;
  long n=sf_txn_get(&volume,slot_path(selected),out,capacity);if(n<0)return n;uint8_t hash[32];sf_sha256(hash,out,n);
- if(memcmp(hash,state.phase==SF_UPDATE_TRYING?state.candidate_hash:state.good_hash,32))return SF_BAD_SIGNATURE;
+ if(memcmp(hash,candidate?state.candidate_hash:state.good_hash,32))return SF_BAD_SIGNATURE;
  char id[64];SfVersion version;r=package_policy(out,n,id,&version);if(r)return r;if(strcmp(id,state.app_id))return SF_DEPENDENCY;
  /* Recheck pending records created by an older implementation, too. */
- if(state.phase==SF_UPDATE_TRYING&&state.good){SfVersion floor;r=confirmed_version(&state,&floor);if(r)return r;r=sf_version_upgrade(&floor,state.good_hash,&version,hash);if(r<0)return r;}
+ if(candidate&&state.good){SfVersion floor;r=confirmed_version(&state,&floor);if(r)return r;r=sf_version_upgrade(&floor,state.good_hash,&version,hash);if(r<0)return r;}
  return n;
 }
+long sf_persist_package(void*out,size_t capacity){return selected_package(out,capacity,0);}
+long sf_persist_preview(void*out,size_t capacity){return selected_package(out,capacity,1);}
 void sf_persist_status(void){
  sf_log(volume.ready&&sf_storage_writable()?"persist: ACTIVE generation=":"persist: UNAVAILABLE generation=");sf_number(volume.generation);sf_log("\n");
  SfUpdate state;if(!sf_storage_writable()||state_read(&state))return;

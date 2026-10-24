@@ -270,9 +270,23 @@ static void runtime_tests(void){
  sf_assert(launch_app("hello.sfk")==SF_STALE_HANDLE,"missing runtime returns diagnostic error");sfmod_start(&manager,runtime_slot);
  sf_sys(SYS_KILL,runtime_pid,SF_DEVICE_GONE,0);sf_assert(launch_app("hello.sfk")==SF_DEVICE_GONE&&!echo_call(echo_ep,echo_pid),"runtime death is diagnosed without harming other services");uint32_t old_reply=runtime_reply;sf_assert(!native_stop_service()&&!native_start_service(),"runtime restarts after failure");sf_assert(runtime_reply&&runtime_reply!=old_reply,"runtime reply endpoint recreated after failure");
 }
+static int installed_preflight(const char*root){
+ unsigned state=manager.modules[runtime_slot].state;
+ if(state==MOD_QUIESCING||state==MOD_DRAINING)return SF_DRAINING;
+ if(state!=MOD_ACTIVE)return SF_STALE_HANDLE;
+ if(!runtime_pid||!runtime_ep||!runtime_reply||sf_sys(SYS_TASK_STATUS,runtime_pid,0,0)!=SF_TASK_RUNNING)return SF_DEVICE_GONE;
+ if(root){
+  long n=sf_persist_preview(package_snapshot,sizeof(package_snapshot));SfPackage p;
+  /* Only a valid package's unsupported invocation is rejected here. A bad
+   * package still enters the existing trial/load/rollback path below. */
+  if(n>=0&&!sf_package_open_trusted(&p,package_snapshot,n,&sf_trust_store)&&p.kind==2&&sf_manifest_capability(&p,"namespace.read")==0)return SF_DENIED;
+ }
+ return 0;
+}
 static void run_command(const char*name,const char*root,const SfArguments*arguments){
- int status=0;if(root){int h=sf_ns_open(&ns,1,"/",root,OPEN_READ|OPEN_DIRECTORY);if(h<0)status=h;else sf_ns_close(&ns,1,h);}
- if(!status){int installed=!strcmp(name,"installed")||!strcmp(name,"/installed.sfk");int trial=installed?sf_persist_begin():0;status=trial;
+ int installed=!strcmp(name,"installed")||!strcmp(name,"/installed.sfk"),status=0;if(root){int h=sf_ns_open(&ns,1,"/",root,OPEN_READ|OPEN_DIRECTORY);if(h<0)status=h;else sf_ns_close(&ns,1,h);}
+ if(!status&&installed)status=installed_preflight(root);
+ if(!status){int trial=installed?sf_persist_begin():0;status=trial;
   if(trial>=0){int pid=launch_app_root_args(name,root,arguments);status=pid>0?wait_app(pid):pid;if(trial){int r=sf_persist_finish(!status);if(r)status=r;}}
  }
  if(!status)sf_log("sfexec: exit 0\n");else{sf_log("sfexec: failed code=");sf_number(status<0?-status:status);sf_log("\n");}

@@ -218,6 +218,14 @@ native-drain-test 持有两个真实读取应用：忙显式停止保留 ACTIVE�
 
 最终源码构建后完整 python tools/test.py --skip-build 通过（781.16 秒、131 次启动），日志 build/task-pid-final-test.txt；全部既有回归及六项摘要一致，发布门要求 task_pid_host_checks=5022，缺标记旧结果拒绝打包。
 
+## 已安装调用预检与坏候选回退
+
+基线真实 VM 中，runat /disk/etc installed 对无 namespace.read 的有效候选返回 DENIED，但已经 TRIAL/ROLLED BACK，候选丢失；日志 build/qemu-persist-invocation-preflight-baseline.log。新增 legacy/modern 各两次、合计四次 VM：0.1.0 初装和 0.2.0 升级时，runat/runenvat 能力拒绝、native 停止时 run/runenv 拒绝均保持整盘原字节和 PENDING；正确重试才健康确认。
+
+随后安装 0.3.0 并重启，离线修改候选且修复事务校验、保留原选择器候选摘要。runat 的预览错误继续进入既有 TRIAL/ROLLBACK，拒绝坏候选并保留已确认 0.2.0；笔记和根/租约回收正常。原始构建盘保持原字节。
+
+最终源码构建后完整 python tools/test.py --skip-build 通过（802.5 秒、135 次启动），日志 build/invocation-preflight-final-test.txt。5022 项 Core、97101 项监督、25080 项管理器及全部既有回归继续通过，六项摘要一致；发布门要求 invocation_preflight_qemu=true、invocation_preflight_qemu_boots=4，旧结果拒绝测试通过。
+
 ## 外部助手审查
 
 按用户授权调用已有 DeepSeek Harness。首次宽范围审查超时，没有采用其未完成输出；随后以低推理档审查一个文件写函数，11 秒完成且未使用工具。核实并修复空写返回错误，增加容量防御检查及对应宿主断言。审查回执在 `.cache/deepseek/runs/`，不包含提交或推送权限。

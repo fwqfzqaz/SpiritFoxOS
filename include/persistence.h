@@ -7,5 +7,7 @@ int sf_persist_install(const char*);
 int sf_persist_begin(void);
 int sf_persist_finish(int success);
 long sf_persist_package(void*,size_t);
+/* Read-only authenticated preview; execution still requires begin + package. */
+long sf_persist_preview(void*,size_t);
 void sf_persist_status(void);
 #endif

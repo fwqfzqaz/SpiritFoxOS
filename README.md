@@ -13,7 +13,7 @@ python tools/bootstrap.py
 python tools/test.py
 ```
 
-第一步下载并校验 Zig 0.13.0、QEMU Windows 构建和 Monocypher 4.0.3。已提供的 Monocypher 源码在 `vendor/monocypher`。第二步执行基础服务、950 条内核 IPC/内存边界、8155 条参数与 12034 条环境检查、353 条文件 RPC 分发边界、108 条 openat、83 条截断、229 条 IOMMU 与 4069 条版本策略检查、28 组 Python 测试（含 3500 次变异）、783 个事务、3132 个更新及 3132 个截断故障场景，以及含真实越界 DMA、试运行、版本策略、目录授权、持久化截断、密钥轮换/撤销与旧密钥迁移、驱动死亡和恢复的 131 次 QEMU 启动。
+第一步下载并校验 Zig 0.13.0、QEMU Windows 构建和 Monocypher 4.0.3。已提供的 Monocypher 源码在 `vendor/monocypher`。第二步执行基础服务、950 条内核 IPC/内存边界、8155 条参数与 12034 条环境检查、353 条文件 RPC 分发边界、108 条 openat、83 条截断、229 条 IOMMU 与 4069 条版本策略检查、28 组 Python 测试（含 3500 次变异）、783 个事务、3132 个更新及 3132 个截断故障场景，以及含真实越界 DMA、试运行、版本策略、目录授权、持久化截断、密钥轮换/撤销与旧密钥迁移、驱动死亡和恢复的 135 次 QEMU 启动。
 
 只构建：`python tools/build.py`。只运行宿主测试：`python tools/test.py --host-only`。已有镜像测试：`python tools/test.py --skip-build`。
 
@@ -110,3 +110,5 @@ echo 与 sf-native 按有界预算处理进程死亡、健康超时和协议错�
 `stop echo` / `start echo`、`stop native` / `start native` 控制监督，`echo-status` / `native-status` 查询状态。root 故障诊断覆盖死亡、自旋、错误回复和实际能力/进程容量耗尽；操作和限制见 [LIFECYCLE](docs/LIFECYCLE.md)。
 
 进程标识保持正值并在每次启动内单调分配，耗尽后拒绝创建；边界机制与宿主验证范围见 [SECURITY](docs/SECURITY.md)。
+
+已安装候选的无效目录委派或 native 不可用会在试运行前拒绝，保留 PENDING 供正确调用重试；坏候选仍按原规则回退，见 [UPDATES](docs/UPDATES.md)。

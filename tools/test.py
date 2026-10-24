@@ -54,6 +54,7 @@ subprocess.run([sys.executable, 'tests/test_trust.py'], check=True)
 subprocess.run([sys.executable, 'tests/test_readfs.py'], check=True)
 subprocess.run([sys.executable, 'tests/test_native.py'], check=True)
 if not args.host_only:
+    subprocess.run([sys.executable, 'tools/qemu_invocation_preflight_test.py'], check=True)
     subprocess.run([sys.executable, 'tools/qemu_native_supervision_test.py'], check=True)
     subprocess.run([sys.executable, 'tools/qemu_echo_health_test.py'], check=True)
     subprocess.run([sys.executable, 'tools/qemu_supervision_test.py'], check=True)
@@ -93,6 +94,8 @@ result['openat_qemu'] = not args.host_only
 result['truncate_host_assertions'] = 83
 result['resize_fault_scenarios'] = 4*261*3
 result['truncate_qemu'] = not args.host_only
+result['invocation_preflight_qemu'] = not args.host_only
+result['invocation_preflight_qemu_boots'] = 0 if args.host_only else 4
 result['task_pid_host_checks'] = 5022
 result['native_supervision_qemu'] = not args.host_only
 result['native_supervision_qemu_boots'] = 0 if args.host_only else 2
