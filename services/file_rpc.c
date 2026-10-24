@@ -6,7 +6,7 @@ long sf_file_dispatch(SfNamespace*ns,uint32_t owner,uint32_t*root,SfMessage*m){
   * Reject aliases before conversion, mutation or root-handle bookkeeping. */
  if(m->handle>UINT32_MAX)switch(op){
   case OP_READ:case OP_WRITE:case OP_CLOSE:case OP_SEEK:case OP_POLL:
-  case OP_ENUMERATE:case OP_OPENAT:case OP_TRUNCATE:case OP_UNLINK:case OP_STAT:
+  case OP_ENUMERATE:case OP_OPENAT:case OP_TRUNCATE:case OP_UNLINK:case OP_RMDIR:case OP_STAT:
    m->length=0;m->status=SF_STALE_HANDLE;return SF_STALE_HANDLE;
  }
  if((op==OP_READ||op==OP_WRITE||op==OP_ENUMERATE)&&m->length>sizeof(m->data)){
@@ -21,7 +21,9 @@ long sf_file_dispatch(SfNamespace*ns,uint32_t owner,uint32_t*root,SfMessage*m){
  case OP_ROOT:status=*root?0:SF_DENIED;m->handle=*root;break;
  case OP_OPENAT:
  case OP_UNLINK:
+ case OP_RMDIR:
   if(!m->length||m->length>sizeof(m->data)||m->data[m->length-1]||strlen((char*)m->data)+1!=m->length)break;
+  if(op==OP_RMDIR){status=sf_ns_rmdir(ns,owner,m->handle,(char*)m->data);break;}
   if(op==OP_UNLINK){status=sf_ns_unlink(ns,owner,m->handle,(char*)m->data);break;}
   status=sf_ns_openat(ns,owner,m->handle,(char*)m->data,m->mode);if(status>=0){m->handle=status;status=0;}break;
  case OP_OPEN:

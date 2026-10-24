@@ -1,6 +1,6 @@
 # 目录能力与相对打开
 
-日期：2026-10-23。目录和文件逻辑继续位于用户态 sf-init 的命名空间服务中；内核只提供带真实发送者身份的 IPC。此阶段补齐受限 `openat` 与显式只读目录委派。
+日期：2026-10-24。目录和文件逻辑继续位于用户态 sf-init 的命名空间服务中；内核只提供带真实发送者身份的 IPC。此阶段补齐受限 `openat` 与显式只读目录委派。
 
 ## 授权与使用
 
@@ -28,6 +28,7 @@ sf-init 在创建进程前验证目录、保留打开描述和挂载引用；包
 | `OP_OPENAT (19)` | handle=本进程目录；data=相对 UTF-8 路径；length 包含唯一末尾 NUL；mode=打开模式 | status=0，handle=新的进程内句柄 |
 | `OP_ENUMERATE (18)` | handle=可读目录；length=输出容量，最多 256 | status 与 length 为实际字节数，data 为直接子节点名称，每项以换行结束 |
 | `OP_STAT (23)` | handle=本进程有效句柄；length=0 | status=0，length=32，data为下述固定元数据；handle不变，错误length=0 |
+| `OP_RMDIR (24)` | handle=可写目录；data=规范相对路径；length含唯一末尾NUL | status=0并保留目录handle；仅回收无引用、无后代的未挂载RAM目录 |
 | `OP_UNLINK (22)` | handle=可写目录；data=规范相对路径；length 包含唯一末尾 NUL | status=0，保留原目录 handle；仅删除无打开引用的 RAM 普通文件 |
 | `OP_TRUNCATE (21)` | handle=可写普通文件；offset=新的 64 位长度 | status=0；只读目录派生的文件拒绝此操作，详见 `TRUNCATE.md` |
 | `OP_READ/WRITE/CLOSE/SEEK/POLL` | 沿用现有文件句柄协议 | 权限、独立偏移、dup、挂载失效与退出清理沿用同一实现 |
@@ -82,13 +83,13 @@ echo-channel-test 在等待两个文件应用前同步调用 echo，用于验证
 
 受信任串口 shell 提供 `rm <绝对路径>` 与 `mkdir <绝对路径>`，每条只接收一个参数，支持引号及原有参数词法中的转义，不进行变量或通配符展开。例如 `mkdir "/tmp/quoted dir"`、`mkdir /tmp/work`、`write /tmp/work/item data`、`rm /tmp/work/item`。现有 write 命令仍按首个空格分隔路径与文本。
 
-`rm` 打开直接父目录的可写目录句柄，调用同一用户态 `sf_ns_unlink` 后关闭它；失败也关闭父目录。`mkdir` 调用既有受信任 `sf_ns_create`，目录必须具有已存在且可写的直接父目录。路径最多95字节，只接受规范绝对形式；容量仍为32个节点，满时返回 SF_NO_SPACE。新目录可以列举和创建子节点，本轮没有目录删除。
+`rm` 打开直接父目录的可写目录句柄，调用同一用户态 `sf_ns_unlink` 后关闭它；失败也关闭父目录。`mkdir` 调用既有受信任 `sf_ns_create`，目录必须具有已存在且可写的直接父目录。路径最多95字节，只接受规范绝对形式；容量仍为32个节点，满时返回 SF_NO_SPACE。新目录可以列举和创建子节点，空目录删除规则见下节。
 
 `OP_UNLINK` 使用与 OPENAT 相同的精确 NUL/长度边界与相对路径合并。操作首先验证所有者、代次、目录类型和 OPEN_WRITE；只读委派返回 SF_DENIED，即使目标已被打开。随后重新检查目录对象、相对路径经过的现有中间目录及目标的 readonly/mount_tag。不能从较宽的目录能力穿过只读或挂载子树删除目标。没有符号链接或别名解析。
 
 只允许删除未挂载的 NODE_FILE。目录、管道、控制台和未挂载的磁盘对象返回 SF_INVALID；只读或挂载目标返回 SF_READ_ONLY。任何进程的任何打开描述仍引用目标时返回 SF_BUSY，dup 或其他进程的独立打开同样阻止删除。服务串行处理打开、删除与回收，确认没有引用后才清空节点，重用槽不会把旧文件句柄绑定到新文件。重新创建得到零长度、已清零的数据区；已关闭句柄仍因 generation 不符而失效。
 
-普通应用仍只取得只读目录，不能借新增操作修改 RAM 或持久化内容。真实 fileprobe/readprobe 在持有子文件时通过 IPC 尝试删除，必须得到 SF_DENIED，然后继续读取并由进程退出回收。没有增加普通应用可写目录授权、孤儿打开文件、rmdir、rename 或持久化删除；`/persist/notes` 仍用原有读写/截断事务接口。
+普通应用仍只取得只读目录，不能借新增操作修改 RAM 或持久化内容。真实 fileprobe/readprobe 在持有子文件时通过 IPC 尝试删除，必须得到 SF_DENIED，然后继续读取并由进程退出回收。没有增加普通应用可写目录授权、孤儿打开文件、rename 或持久化删除；`/persist/notes` 仍用原有读写/截断事务接口。
 
 `tests/test_unlink.c` 直接链接产品 namespace/file_rpc，检查能力和类型、当前只读子目录、挂载拒绝、跨所有者/dup忙引用、规范路径、Unicode/长度边界、一千次槽复用与数据清零、陈旧句柄和畸形RPC无副作用。`tools/qemu_unlink_test.py` 在两种传输中验证实际shell与只读应用IPC、每种四十次节点复用、引号、持久盘字节和卸载停止。
 
@@ -110,3 +111,12 @@ echo-channel-test 在等待两个文件应用前同步调用 echo，用于验证
 受信任shell提供 `stat <单个绝对路径>`，支持引号，打开只读描述，查询后关闭；错误也回收描述。输出为数值type/size/offset/mode/flags。普通应用不能通过此协议传入路径，只能查询自己的有效句柄。未知所有者、旧代次、关闭或回收的句柄返回SF_STALE_HANDLE，错误不输出元数据；非空STAT输入返回SF_INVALID且length=0。
 
 SfMessage.handle的传输存储是64位，命名空间句柄规范值仍为32位。所有消费句柄的文件操作要求高32位为零，在窄化、后端访问和根关闭记账前拒绝，否则SF_STALE_HANDLE、length=0，保留原handle与根状态。OP_ROOT和受限OP_OPEN不消费传入的handle，按原协议处理。原所有者与generation验证继续执行；新增操作号不改变原有合法32位句柄。
+
+
+## 空目录回收
+
+受信任shell提供 rmdir <单个绝对路径>，支持引号；打开直接父目录的可写目录描述，调用sf_ns_rmdir并在成功或失败后关闭。它与rm共用精确路径/权限/当前只读和挂载祖先检查，OP_RMDIR(24)也要求规范32位句柄、唯一末尾NUL及长度边界。普通应用仍只授予只读目录；真实fileprobe/readprobe通过IPC发出的RMDIR必须返回SF_DENIED，即使目标实际为文件也不能越过权限检查。
+
+只有NODE_DIR可回收；只读或挂载对象返回SF_READ_ONLY，其他类型SF_INVALID。任何进程的打开描述、dup或目录委派仍引用目标时SF_BUSY。检查所有32个节点：只要存在以目标路径加斜线为前缀的后代，即返回SF_BUSY；前缀相似的相邻名称不阻止删除。检查完成才清空槽，避免旧目录能力变为对新节点的访问。根目录不能作为任何规范相对路径的目标，也不提供递归删除。
+
+该操作只回收空RAM目录，不修改持久化格式、挂载租约或普通应用授权。宿主覆盖一千次目录/子文件复用、跨所有者忙引用、陈旧句柄、规范/UTF-8边界、只读/挂载拒绝及高位/畸形RPC无副作用；实际VM覆盖嵌套非空拒绝、引号、前缀边界、四十次回收和真实只读应用拒绝。完整回归结果见TESTING.md。

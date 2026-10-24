@@ -35,7 +35,7 @@ int sf_ns_openat(SfNamespace*n,uint32_t owner,uint32_t directory,const char*rela
  if(!(mode&3)||(mode&~15))return SF_INVALID;if((mode&3)&~d->mode)return SF_DENIED;
  char path[96];int r=relative_path(base,relative,path);return r?r:sf_ns_open(n,owner,base->path,path,mode);
 }
-int sf_ns_unlink(SfNamespace*n,uint32_t owner,uint32_t directory,const char*relative){
+static int remove_node(SfNamespace*n,uint32_t owner,uint32_t directory,const char*relative,unsigned kind){
  SfDescription*d=description(n,owner,directory);if(!d)return SF_STALE_HANDLE;
  SfNode*base=&n->nodes[d->node];if(base->type!=NODE_DIR)return SF_INVALID;
  if(!(d->mode&OPEN_WRITE))return SF_DENIED;
@@ -49,12 +49,17 @@ int sf_ns_unlink(SfNamespace*n,uint32_t owner,uint32_t directory,const char*rela
   if(n->nodes[parent].readonly||n->nodes[parent].mount_tag)return SF_READ_ONLY;
  }
  int target=node_find(n,path);if(target<0)return target;SfNode*x=&n->nodes[target];
- if(x->readonly||x->mount_tag)return SF_READ_ONLY;if(x->type!=NODE_FILE)return SF_INVALID;
+ if(x->readonly||x->mount_tag)return SF_READ_ONLY;if(x->type!=kind)return SF_INVALID;
  /* This service serializes mutation and opening. Keeping open files busy
   * prevents an old description from ever aliasing a reused node slot. */
  for(unsigned i=0;i<32;i++)if(n->descriptions[i].refs&&n->descriptions[i].node==(unsigned)target)return SF_BUSY;
+ if(kind==NODE_DIR){size_t length=strlen(path);
+  for(unsigned i=0;i<32;i++)if(n->nodes[i].type&&strlen(n->nodes[i].path)>length&&!memcmp(n->nodes[i].path,path,length)&&n->nodes[i].path[length]=='/')return SF_BUSY;
+ }
  memset(x,0,sizeof(*x));return 0;
 }
+int sf_ns_unlink(SfNamespace*n,uint32_t owner,uint32_t directory,const char*relative){return remove_node(n,owner,directory,relative,NODE_FILE);}
+int sf_ns_rmdir(SfNamespace*n,uint32_t owner,uint32_t directory,const char*relative){return remove_node(n,owner,directory,relative,NODE_DIR);}
 int sf_ns_dup(SfNamespace*n,uint32_t owner,uint32_t h){SfDescription*d=description(n,owner,h);return d?handle_new(n,owner,d-n->descriptions):SF_STALE_HANDLE;}
 int sf_ns_close(SfNamespace*n,uint32_t owner,uint32_t h){SfDescription*d=description(n,owner,h);if(!d)return SF_STALE_HANDLE;if(!--d->refs){SfNode*x=&n->nodes[d->node];if(x->type==NODE_PIPE&&(d->mode&OPEN_WRITE))x->writers--;if(x->mount_tag&&n->mount_close)n->mount_close(x->mount_tag);}n->handles[(h&255)-1].description=0;return 0;}
 long sf_ns_read(SfNamespace*n,uint32_t owner,uint32_t h,void*out,size_t bytes){SfDescription*d=description(n,owner,h);if(!d)return SF_STALE_HANDLE;if(!(d->mode&OPEN_READ))return SF_DENIED;SfNode*x=&n->nodes[d->node];if(x->type==NODE_DIR)return SF_INVALID;if(!bytes)return 0;if(x->type==NODE_CONSOLE)return SF_WOULD_BLOCK;

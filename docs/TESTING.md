@@ -250,6 +250,14 @@ CPU基线在c565c40的两种真实VM中以连续签名应用复现XMM0跨退出�
 
 最终完整python tools/test.py --skip-build通过（1074.85秒、143次启动），日志build/kernel-cpu-isolation-final-test.txt。全部既有宿主/VM回归及六项交付摘要一致；新版发布门拒绝缺少新标记的139VM结果，并要求实际能力/FP两组VM与SIMD观察记录。
 
+## RAM空目录回收
+
+11359项实际产品namespace/file_rpc宿主检查覆盖目录写权限、当前只读/挂载父节点和目标、跨所有者/dup忙引用、文件/子目录/深层后代非空拒绝、相邻前缀名称、UTF-8/长度/规范路径、高位与畸形请求无副作用；一千次目录及子文件创建/回收保证已关闭句柄仍失效。原17340项unlink及6180项元数据检查继续通过。
+
+新增legacy/modern两个实际VM，各四十次目录/子文件回收，检查带引号路径、嵌套非空和相邻前缀、根/特殊/只读/挂载节点拒绝；十二轮fileprobe/readprobe发出真实RMDIR，确认只读根先返回DENIED、之后正常读取与引用回收仍可用。笔记、完整持久盘字节及卸载/停止保持。
+
+最终完整python tools/test.py --skip-build通过（1166.82秒、145次启动），日志build/ram-rmdir-final-test.txt，全部旧回归及六项交付摘要一致。发布门实际拒绝旧143VM结果，要求rmdir_host_assertions=11359、rmdir_qemu=true、rmdir_qemu_boots=2。
+
 ## 外部助手审查
 
 按用户授权调用已有 DeepSeek Harness。首次宽范围审查超时，没有采用其未完成输出；随后以低推理档审查一个文件写函数，11 秒完成且未使用工具。核实并修复空写返回错误，增加容量防御检查及对应宿主断言。审查回执在 `.cache/deepseek/runs/`，不包含提交或推送权限。

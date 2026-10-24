@@ -12,6 +12,7 @@ int sf_ns_create(SfNamespace*,const char*,unsigned,int);
 int sf_ns_open(SfNamespace*,uint32_t,const char*,const char*,unsigned);
 int sf_ns_openat(SfNamespace*,uint32_t,uint32_t,const char*,unsigned);
 int sf_ns_unlink(SfNamespace*,uint32_t,uint32_t,const char*);
+int sf_ns_rmdir(SfNamespace*,uint32_t,uint32_t,const char*);
 int sf_ns_stat(SfNamespace*,uint32_t,uint32_t,SfFileStat*);
 int sf_ns_dup(SfNamespace*,uint32_t,uint32_t);
 int sf_ns_close(SfNamespace*,uint32_t,uint32_t);

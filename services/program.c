@@ -122,6 +122,7 @@ long sf_main(const SfBootArgs*a,size_t bytes){
  if(file_metadata(a,&m,file,&info)||info.offset)return 23;
  sf_message(&m,OP_TRUNCATE,1);m.handle=file;m.offset=0;if(rpc(a,&m)!=SF_DENIED)return 16;
  sf_message(&m,OP_UNLINK,1);m.handle=root;m.length=strlen(target)+1;memcpy(m.data,target,m.length);if(rpc(a,&m)!=SF_DENIED)return 17;
+ sf_message(&m,OP_RMDIR,1);m.handle=root;m.length=strlen(target)+1;memcpy(m.data,target,m.length);if(rpc(a,&m)!=SF_DENIED)return 26;
  sf_message(&m,OP_CLOSE,1);m.handle=root;if(rpc(a,&m))return 10;
  sf_message(&m,OP_ROOT,1);if(rpc(a,&m)!=SF_DENIED)return 11;
  sf_message(&m,OP_STAT,1);m.handle=root;if(rpc(a,&m)!=SF_STALE_HANDLE||m.length)return 24;

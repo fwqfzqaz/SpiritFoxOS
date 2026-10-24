@@ -3,15 +3,15 @@
 更新日期：2026-10-24（北京时间）。
 
 - 工作区：`E:\SpiritFoxOS`。指定源目录的三项顶层内容已移动到这里。
-- 本轮目标：按用户要求持续推进到任一额度剩余 10%；native argv/显式环境/PI、文件分发防御已交付，块设备及 echo 的私有回复与失败回滚现已验证，APP/MODULE 入口检查已交付，已完成 M2 依赖代次与 echo/native 故障监督，当前修复 M1 内核能力整数边界与已复现的 XMM 跨进程状态泄漏。
-- status: kernel_cpu_isolation_verified_continuing
+- 本轮目标：按用户要求持续推进到任一额度剩余 10%；native argv/显式环境/PI、文件分发防御已交付，块设备及 echo 的私有回复与失败回滚现已验证，APP/MODULE 入口检查已交付，已完成 M2 依赖代次与 echo/native 故障监督，M1内核能力与FP隔离已推送8aeb118，当前补齐M3受控空目录删除。
+- status: ram_rmdir_verified_continuing
 - round_complete: true
 - continuous_work: true
 - quota_paused: false
 - user_paused: false
 - pause_reason: none
 - 分支：`codex/trust-policy-20261023`，基于已合并的 `origin/main`（`ca9e1a3`）；远端：`origin`，读取和推送地址均为 `https://github.com/fwqfzqaz/SpiritFoxOS.git`。
-- 最近已推送基线：c565c40（139VM）。本轮内核能力与FP隔离完整验证通过（1074.85秒、143VM），六项摘要一致；提交/推送以HEAD、origin及PR实际SHA核对。
+- 最近已推送基线：8aeb118（内核隔离，143VM）。本轮空目录删除完整回归通过（1166.82秒、145VM），六项摘要一致，交付以HEAD/origin/PR实际SHA核对。
 
 ## 已完成
 
@@ -94,9 +94,14 @@
 62. M1规范内核能力：cap保留64位参数并在查表前拒绝高位别名，CLOSE/SEND/RECV保持STALE、DERIVE/REVOKE保持DENIED。40908项实际IPC宿主检查含一千次分配/回收，三类高位、五操作无复制/无副作用和正常端点保持；两个新增VM各四十次实际probe进程，普通/PI/文件IPC和持久字节保持。基线仅能别名调用者自己的有效能力，不越过所有者/代次/权限。
 63. M1修复两个真实签名应用可跨退出读到XMM0的泄漏。每任务私有FXSAVE64/FXRSTOR64、创建/复用清零、默认控制字，关闭OSXSAVE/FFXSR，并在恢复前用无等待/零FLDENV清理异常指针。实际task_new新增一千个脏FP槽复用检查，共8022项创建路径断言；两个新增max CPU VM各十二组同时存活应用验证x87/MMX/XMM0–15、舍入/状态及yield/定时抢占保持，异常/超时后清零与服务/盘保持。TCG的SIMD仅标志无#XM、非零异常指针完整恢复限制已如实记录。最终完整回归通过（1074.85秒、143VM），日志build/kernel-cpu-isolation-final-test.txt，全部既有回归和六项摘要一致；旧139VM结果被发布门拒绝。
 
+64. M3空目录回收：OP_RMDIR(24)和带引号单路径shell rmdir，与unlink共用目录写能力、规范路径及当前只读/挂载祖先检查。仅未挂载RAM目录，任何打开引用或任何后代均BUSY，路径组件边界区分相邻前缀，检查后才清空槽；普通应用仍只读，根和递归删除不支持。
+65. 11359项实际namespace/file_rpc宿主检查含一千次目录/子文件复用、跨所有者/dup忙引用、旧句柄、高位及畸形RPC无副作用；新增两个legacy/modern VM各四十次回收、嵌套非空/只读/挂载/特殊节点拒绝、引号/前缀边界，以及十二轮实际只读APP的RMDIR拒绝和回收。完整回归通过（1166.82秒、145VM），日志build/ram-rmdir-final-test.txt，全部已有宿主/VM回归和六项摘要一致；发布门实际拒绝旧143VM结果。
+
 ## 交付与续做
 
-本轮内核能力整数与FP状态隔离完整验证通过（1074.85秒、143VM），当前全部VM已关闭。正常提交推送当前origin分支并核对PR10；不因一轮交付停止。后续按.cache/rmdir-prototype.json继续有界RAM空目录删除，先确认原始摘要、并入真实产品并验证，再做对应完整回归。独立原型11359项检查通过尚不代表该功能已安装或交付。
+M3空目录删除完整验证通过（1166.82秒、145VM），当前全部VM关闭。正常提交推送当前origin分支、核对PR10后继续下一有界任务；不得因本轮交付停止。下一候选为M4公开文件客户端SDK，设计在.cache/next-file-sdk-plan.txt，独立原型已编译并通过416510项宿主模型/实际分发器检查，摘要记录.cache/file-sdk-prototype.json；尚未并入产品或完成guest验证。保留当前只读授权与全部旧协议/探针。
+
+内核能力与FP隔离已推送8aeb118、通过143VM。额外入口审查在两种实际VM中检查NT/DF/AC、SYSCALL/SYSENTER及FSGSBASE，均安全返回或只隔离原调用者，六项摘要与持久字节保持；记录build/entry-audit-results.json，未复现新漏洞，不把审查候选当成已确认漏洞。
 
 用户于2026-10-24携电脑出门时要求暂停，20个文件已备份至.cache/checkpoints/user-pause-20261024-102451.zip；随后明确继续，user_paused=false，自动任务已恢复ACTIVE与五分钟接续。暂停期间未运行完整回归，也未将未验证成果推送。本次143VM结果取代暂停前的局部结果。
 
