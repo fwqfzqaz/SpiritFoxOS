@@ -284,3 +284,13 @@ M6 尝试通过工作区桥调用 deepseek-flash 审查事务引擎。两次调�
 宿主包括 29 条撤销容量/幂等/隔离检查；29 组 Python 测试含用途策略与运行期拒绝层组合、已撤销签名者的签名损坏仍拒绝、不可变撤销不被空覆盖层恢复。事务/更新/截断三类故障场景保持通过，新增第五个事务键及数据布局使用主分支版本。备用 APP 密钥夹具替换已有磁盘条目，保留原 32 节点配额及持久挂载空间。
 
 所有测试/VM 已结束，发布门要求两套信任测试及七项精确摘要。Windows CI 限时调整为 45 分钟以容纳完整套件；本地通过不代表托管 CI 已完成。先前 SDK 中止的套件与本轮交付无关，未混入合并。
+
+## 文件客户端 SDK 与作者修复基线（2026-10-24）
+
+基于已合并 main f2e41bd / d6a71f2，执行完整 python tools/test.py（包含初始构建），1086.09 秒、151 次真实 VM 启动全部通过。该入口保留作者的独立构建进程，密钥轮换重建与默认策略恢复也实际完成，没有使用 --skip-build 绕开 Windows DLL 占用路径。
+
+新增 SDK 有 416510 项产品 C 编解码宿主检查，替换 INT80 传输并与真实 namespace/file_rpc 组合；涵盖一千条正常序列、保护字节、畸形身份/头部/编号/操作码/计数/元数据、固定绝对期限、有界旧回复、错误不交付输出、重新初始化不复用编号、末次 64 位编号和耗尽无发送。边界计数由宿主注入，不宣称 guest 执行 2^64 次调用。
+
+新增 legacy/modern 两个 VM 各六十次生产 SDK 应用：普通 run 无文件根，显式目录保持只读；验证 console、openat/read/write/seek/poll/enumerate/stat/close、拒绝截断/删除和父关闭后子文件可用、回收及原始盘字节保持。全部既有 CPU 隔离、服务监督、信任、更新、版本、DMA 和文件回归通过；七项精确交付摘要校验一致。
+
+完整日志 build/file-client-author-main-full.txt，结果 build/file-client-author-test-results.json。打包门要求 file_client_host_assertions=416510、file_client_qemu=true、file_client_qemu_boots=2，旧的 149 VM 结果不能打包本轮成果。本地完整通过与新 PR 托管检查分别核对。

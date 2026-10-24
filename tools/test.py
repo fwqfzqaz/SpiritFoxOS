@@ -34,6 +34,7 @@ host_test('test_supervisor','tests/host/test_supervisor.c','services/supervisor.
 host_test('test_manager','tests/host/test_manager.c','services/manager.c')
 host_test('test_services','tests/host/test_services.c','services/manager.c','services/namespace.c')
 host_test('test_openat','tests/host/test_openat.c','services/namespace.c')
+host_test('test_file_client','tests/host/test_file_client.c','services/namespace.c','services/file_rpc.c')
 host_test('test_stat','tests/host/test_stat.c','services/namespace.c','services/file_rpc.c')
 host_test('test_rmdir','tests/host/test_rmdir.c','services/namespace.c','services/file_rpc.c')
 host_test('test_unlink','tests/host/test_unlink.c','services/namespace.c','services/file_rpc.c')
@@ -54,6 +55,7 @@ subprocess.run([sys.executable,'tests/integration/test_native.py'],check=True)
 if not args.host_only:
     subprocess.run([sys.executable, 'tests/qemu/qemu_capability_test.py'], check=True)
     subprocess.run([sys.executable, 'tests/qemu/qemu_fpu_test.py'], check=True)
+    subprocess.run([sys.executable, 'tests/qemu/qemu_file_client_test.py'], check=True)
     subprocess.run([sys.executable, 'tests/qemu/qemu_rmdir_test.py'], check=True)
     subprocess.run([sys.executable, 'tests/qemu/qemu_stat_test.py'], check=True)
     subprocess.run([sys.executable, 'tests/qemu/qemu_unlink_test.py'], check=True)
@@ -129,6 +131,9 @@ result['native_relative_host_groups'] = 6
 result['native_relative_mutations'] = 500
 result['native_relative_qemu'] = not args.host_only
 result['native_relative_qemu_boots'] = 0 if args.host_only else 4
+result['file_client_host_assertions'] = 416510
+result['file_client_qemu'] = not args.host_only
+result['file_client_qemu_boots'] = 0 if args.host_only else 2
 result['rmdir_host_assertions'] = 11359
 result['rmdir_qemu'] = not args.host_only
 result['rmdir_qemu_boots'] = 0 if args.host_only else 2

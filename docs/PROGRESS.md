@@ -1,5 +1,3 @@
 # 进度文件位置
 
-规范进度已迁移至 [project/PROGRESS.md](project/PROGRESS.md)。
-
-quota_paused=false；PR #10 合并后完整 149 VM 验证通过。未交付 SDK 保存在 stash bbbbf630329e88e41f656c1ce3da59b2a575ea82，恢复前先读规范进度并检查 HEAD/origin/PR 状态。
+规范进度见 [project/PROGRESS.md](project/PROGRESS.md)。user_paused=false；quota_paused=false；文件客户端 SDK 在作者最新主分支上通过包含初始构建的完整 151 VM 验证，交付与托管 CI 状态以当前分支和 PR 为准。

@@ -22,6 +22,8 @@
 - [生命周期](architecture/LIFECYCLE.md)：依赖代次、租约与有界监督。
 - [CPU 上下文](architecture/CPU_CONTEXT.md)：x87/MMX/SSE 隔离与验证边界。
 
+- [文件客户端 SDK](architecture/FILE_SDK.md)：现有文件协议的有界 C 客户端及错误/超时契约。
+
 ## 质量与验证
 
 - [安全审查与修复](quality/SECURITY.md)：权限边界、已修复缺陷与回归范围。
