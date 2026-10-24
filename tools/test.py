@@ -34,6 +34,7 @@ host_test('test_supervisor','tests/host/test_supervisor.c','services/supervisor.
 host_test('test_manager','tests/host/test_manager.c','services/manager.c')
 host_test('test_services','tests/host/test_services.c','services/manager.c','services/namespace.c')
 host_test('test_openat','tests/host/test_openat.c','services/namespace.c')
+host_test('test_file_client','tests/host/test_file_client.c','services/namespace.c','services/file_rpc.c')
 host_test('test_stat','tests/host/test_stat.c','services/namespace.c','services/file_rpc.c')
 host_test('test_rmdir','tests/host/test_rmdir.c','services/namespace.c','services/file_rpc.c')
 host_test('test_unlink','tests/host/test_unlink.c','services/namespace.c','services/file_rpc.c')
@@ -41,6 +42,7 @@ host_test('test_truncate','tests/host/test_truncate.c','services/namespace.c')
 host_test('test_resize_txn','tests/host/test_resize_txn.c','services/txn.c','services/sha256.c',no_unused=True)
 host_test('test_storage','tests/host/test_storage.c','services/namespace.c',no_unused=True)
 host_test('test_txn','tests/host/test_txn.c','services/txn.c','services/sha256.c',no_unused=True)
+host_test('test_txn_compat','tests/host/test_txn_compat.c','services/txn.c','services/sha256.c',no_unused=True)
 host_test('test_update','tests/host/test_update.c','services/update.c','services/txn.c','services/sha256.c',no_unused=True)
 host_test('test_version','tests/host/test_version.c','services/version.c')
 host_test('test_iommu','tests/host/test_iommu.c','kernel/acpi.c','kernel/vtd_tables.c',no_unused=True)
@@ -54,6 +56,7 @@ subprocess.run([sys.executable,'tests/integration/test_native.py'],check=True)
 if not args.host_only:
     subprocess.run([sys.executable, 'tests/qemu/qemu_capability_test.py'], check=True)
     subprocess.run([sys.executable, 'tests/qemu/qemu_fpu_test.py'], check=True)
+    subprocess.run([sys.executable, 'tests/qemu/qemu_file_client_test.py'], check=True)
     subprocess.run([sys.executable, 'tests/qemu/qemu_rmdir_test.py'], check=True)
     subprocess.run([sys.executable, 'tests/qemu/qemu_stat_test.py'], check=True)
     subprocess.run([sys.executable, 'tests/qemu/qemu_unlink_test.py'], check=True)
@@ -79,6 +82,7 @@ if not args.host_only:
     subprocess.run([sys.executable, 'tests/qemu/qemu_openat_test.py'], check=True)
     subprocess.run([sys.executable, 'tests/qemu/qemu_truncate_test.py'], check=True)
     subprocess.run([sys.executable, 'tests/qemu/qemu_trust_test.py'], check=True)
+    subprocess.run([sys.executable, 'tests/qemu/qemu_txn_compat_test.py'], check=True)
 result = {'passed': True, 'elapsed_seconds': round(time.time()-started, 2), 'service_assertions': 116, 'storage_assertions': 35, 'package_tests': 'passed (11 groups, including 1500 seeded mutations)', 'readfs_tests': 'passed (5 groups, including 500 seeded metadata mutations)', 'qemu_memory_mib': [] if args.host_only else [128, 256, 512], 'storage_failure_cases': [] if args.host_only else ['missing', 'badheader', 'badhash', 'badsignature', 'writable', 'ioerror']}
 result['txn_fault_boundaries'] = 261
 result['txn_fault_modes'] = 3
@@ -129,6 +133,9 @@ result['native_relative_host_groups'] = 6
 result['native_relative_mutations'] = 500
 result['native_relative_qemu'] = not args.host_only
 result['native_relative_qemu_boots'] = 0 if args.host_only else 4
+result['file_client_host_assertions'] = 416510
+result['file_client_qemu'] = not args.host_only
+result['file_client_qemu_boots'] = 0 if args.host_only else 2
 result['rmdir_host_assertions'] = 11359
 result['rmdir_qemu'] = not args.host_only
 result['rmdir_qemu_boots'] = 0 if args.host_only else 2
@@ -152,6 +159,10 @@ result['trust_policy_qemu'] = not args.host_only
 result['trust_policy_qemu_boots'] = 0 if args.host_only else 14
 result['trust_host_assertions'] = 29
 result['trust_qemu'] = not args.host_only
+result['txn_compat_host_assertions'] = 2046559
+result['txn_compat_fault_scenarios'] = 783
+result['txn_compat_qemu'] = not args.host_only
+result['txn_compat_qemu_boots'] = 0 if args.host_only else 6
 result['artifacts_sha256'] = {name: hashlib.sha256((ROOT/'build'/name).read_bytes()).hexdigest() for name in ['esp/EFI/BOOT/BOOTX64.EFI', 'storage.img', 'persistent.img', 'development.pub', 'application.pub', 'backup.pub', 'trust-policy.json']}
 (ROOT / 'build/test-results.json').write_text(json.dumps(result, indent=2)+'\n')
 print(json.dumps(result, indent=2))

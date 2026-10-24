@@ -137,6 +137,9 @@ def main(policy_path=None):
     fp_image = link_elf('fpprobe',shared+objects('fpprobe',['services/fpprobe.c']),'services/user.ld')
     fp_manifest = {'app_id':'org.spiritfox.fpprobe','version':'0.1.0','runtime_id':'org.spiritfox.native','app_abi':1,'requested_caps':['stdio']}
     packages.append(('fpprobe.sfk',pack(fp_manifest,fp_image,2,application_seed)))
+    client_image = link_elf('fileclient',shared+objects('file-client',['services/file_client.c'])+objects('fileclient',['services/fileclient_probe.c']),'services/user.ld')
+    client_manifest = {'app_id':'org.spiritfox.fileclient','version':'0.1.0','runtime_id':'org.spiritfox.native','app_abi':1,'requested_caps':['stdio','namespace.read']}
+    packages.append(('fileclient.sfk',pack(client_manifest,client_image,2,application_seed)))
     pie_shared = objects('pie-common', ['services/start.S','services/memory.c','services/libsf.c','services/arguments.c'], defines=['-fpie'])
     pie_objs = pie_shared + objects('pieprobe',['services/pieprobe.c'],defines=['-fpie'])
     run(['-target','x86_64-freestanding-none','-nostdlib','-fpie','-pie','-Wl,-Bsymbolic','-Wl,-e,_sf_start','-Wl,-T,services/user-pie.ld','-Wl,--build-id=none',*pie_objs,'-o','build/pieprobe.elf'])
