@@ -121,6 +121,7 @@ def run(memory=256, interactive=False, storage='normal', persistent=False, iommu
                     raise RuntimeError(line)
     try:
         expect('BOOT TESTS PASSED', 60)
+        expect('DEPENDENCY GENERATION TESTS PASSED')
         if iommu and b'[IOMMU] VT-d active' not in output:
             raise RuntimeError('VT-d not active')
         if iommu and storage == 'normal' and b'MMIO BUFFER TESTS PASSED' not in output:

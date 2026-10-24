@@ -1,15 +1,18 @@
 """Build entirely inside the workspace using the pinned local Zig C toolchain."""
 import concurrent.futures
 import hashlib
+import json
 import os
 from pathlib import Path
 import subprocess
+import struct
 import sys
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'tools' / 'package'))
 from sfpack import Crypto, pack, bundle
 from mkreadfs import create as create_readfs
 from mkpersist import create as create_persist
+import trust_policy
 
 os.chdir(ROOT)
 (ROOT / 'build').mkdir(exist_ok=True)
@@ -55,11 +58,10 @@ def link_elf(name, objs, script):
     return Path(out).read_bytes()
 
 
-def main():
+def main(policy_path=None):
     print('Building host package verifier', flush=True)
-    crypto_lib = 'build/sfcrypto.dll' if not LINUX else 'build/sfcrypto.so'
-    pic = ['-fPIC'] if LINUX else []
-    run(['-target', HOST, '-shared', '-O2', *pic, '-Iinclude', '-Ivendor/monocypher', 'tools/package/crypto_host.c', 'services/readfs.c', *CRYPTO, '-o', crypto_lib])
+    crypto_lib = 'build/sfcrypto.so' if LINUX else 'build/sfcrypto.dll'
+    run(['-target', HOST, '-shared', '-O2', *(['-fPIC'] if LINUX else []), '-Iinclude', '-Ivendor/monocypher', 'tools/package/crypto_host.c', 'services/readfs.c', 'services/native_image.c', *CRYPTO, '-o', crypto_lib])
     keys = ROOT / '.keys'
     keys.mkdir(exist_ok=True)
     seedfile = keys / 'development.seed'
@@ -68,30 +70,48 @@ def main():
     seed = seedfile.read_bytes()
     crypto = Crypto()
     pub = crypto.key(seed)[1]
-    # Two anchors: the active development key plus the standby key used for
-    # rotation. Both sign valid packages; revocation (services/trust.c) is what
-    # retires a signer after the fact.
+    # Separate module/app signing roles, plus an app-only standby anchor for
+    # runtime revocation workflows. Explicit policies remain authoritative.
     backup = keys / 'backup.seed'
     if not backup.exists():
         backup.write_bytes(os.urandom(32))
     backup_pub = crypto.key(backup.read_bytes())[1]
     Path('build/development.pub').write_bytes(pub)
     Path('build/backup.pub').write_bytes(backup_pub)
-    anchors = '#define sf_trust_count 2u\nstatic const unsigned char sf_trust_keys[sf_trust_count][32]={' + ','.join('{'+','.join(map(str, k))+'}' for k in (pub, backup_pub)) + '};\n'
-    Path('build/trust.h').write_text(anchors)
+    application_seedfile = keys / 'application.seed'
+    if not application_seedfile.exists():
+        application_seedfile.write_bytes(os.urandom(32))
+    application_seed = application_seedfile.read_bytes()
+    application_pub = Crypto().key(application_seed)[1]
+    if application_pub == pub:
+        raise ValueError('Module and application signing keys must be distinct')
+    Path('build/application.pub').write_bytes(application_pub)
+    explicit_policy = policy_path is not None
+    policy_path = Path(policy_path) if explicit_policy else keys / 'trust-policy.json'
+    policy_path = policy_path.resolve()
+    if not policy_path.is_relative_to(ROOT):
+        raise ValueError('Trust policy must be inside the workspace')
+    policy = trust_policy.load(policy_path) if explicit_policy or policy_path.exists() else trust_policy.development(pub, application_pub)
+    if not explicit_policy and not policy_path.exists():
+        policy['keys'].append({'public_key':backup_pub.hex(),'usage':['app'],'revoked':False})
+    for signer, usage in [(pub, 'module'), (application_pub, 'app')]:
+        if not any(k['public_key'] == signer.hex() and not k['revoked'] and usage in k['usage'] for k in policy['keys']):
+            raise ValueError('Current build requires an active ' + usage + ' signing key in the trust policy')
+    Path('build/trust.h').write_text(trust_policy.header(policy))
+    Path('build/trust-policy.json').write_text(json.dumps(policy, indent=2)+'\n')
     print('Building userspace packages', flush=True)
-    shared = objects('user-common', ['services/start.S', 'services/memory.c', 'services/libsf.c'])
-    init = shared + objects('init', ['services/init.c', 'services/storage.c', 'services/readfs.c', 'services/txn.c', 'services/update.c', 'services/version.c', 'services/persistence.c', 'services/manager.c', 'services/namespace.c', *CRYPTO])
+    shared = objects('user-common', ['services/start.S', 'services/memory.c', 'services/libsf.c', 'services/arguments.c'])
+    init = shared + objects('init', ['services/init.c', 'services/file_rpc.c', 'services/native_image.c', 'services/argparse.c', 'services/storage.c', 'services/readfs.c', 'services/txn.c', 'services/update.c', 'services/version.c', 'services/persistence.c', 'services/manager.c', 'services/supervisor.c', 'services/namespace.c', *CRYPTO])
     packages = []
     image = link_elf('sf-init', init, 'services/user.ld')
     manifest = {'module_id': 'org.spiritfox.init', 'version': '0.1.0', 'category': 'bootstrap', 'requested_caps': ['bootstrap'], 'resource_limits': {'memory': 2097152}}
     packages.append(('sf-init.sfmod', pack(manifest, image, 1, seed)))
     disk_files = {'/etc/readme.txt': b'SpiritFoxOS read-only disk mounted through user-space virtio-blk.\n'}
-    for name, role, kind in [('echo', 1, 1), ('sf-native', 2, 1), ('hello', 3, 2), ('fault', 4, 2), ('illegal', 5, 2), ('spinner', 6, 2), ('nx', 7, 2), ('probe', 8, 2), ('mmio', 10, 2), ('exitbusy', 12, 2), ('badrsp', 13, 2), ('fileprobe', 14, 2), ('readprobe', 15, 2), ('disk-echo', 1, 1), ('diskhello', 9, 2), ('diskupdate', 9, 2), ('disknext', 9, 2), ('diskfault', 4, 2), ('diskexit', 11, 2), ('diskspin', 6, 2), ('diskother', 9, 2)]:
+    for name, role, kind in [('echo', 1, 1), ('sf-native', 2, 1), ('hello', 3, 2), ('fault', 4, 2), ('illegal', 5, 2), ('spinner', 6, 2), ('nx', 7, 2), ('probe', 8, 2), ('mmio', 10, 2), ('exitbusy', 12, 2), ('badrsp', 13, 2), ('fileprobe', 14, 2), ('readprobe', 15, 2), ('argprobe', 16, 2), ('disk-echo', 1, 1), ('diskhello', 9, 2), ('diskupdate', 9, 2), ('disknext', 9, 2), ('diskfault', 4, 2), ('diskexit', 11, 2), ('diskspin', 6, 2), ('diskother', 9, 2)]:
         native_crypto = objects('native-crypto', CRYPTO) if role == 2 else []
         image = link_elf(name, shared + native_crypto + objects(name, ['services/program.c'], defines=['-DROLE='+str(role)]), 'services/user.ld')
         manifest = {('module_id' if kind == 1 else 'app_id'): 'org.spiritfox.'+('native' if name == 'sf-native' else name), 'version': '0.1.0', 'requested_caps': ['stdio'] if role in (3, 9) else [], 'resource_limits': {'memory': 262144 if role == 2 else 131072}}
-        if name in ('fileprobe','readprobe','fault','spinner'):
+        if name in ('fileprobe','readprobe','fault','spinner','argprobe'):
             manifest['requested_caps'] = ['stdio','namespace.read']
         if name in ('diskfault', 'diskexit', 'diskspin', 'disknext', 'diskupdate'):
             manifest.update(app_id='org.spiritfox.diskhello', version='0.2.0' if name=='diskupdate' else '0.3.0')
@@ -101,19 +121,29 @@ def main():
             manifest['runtime_id'] = 'org.spiritfox.native'
             manifest['app_abi'] = 1
         package_name = name+('.sfmod' if kind == 1 else '.sfk')
-        package_bytes = pack(manifest, image, kind, seed)
-        if name == 'diskhello':
-            # Same manifest, signed by the standby anchor: proves revocation of
-            # the active key does not break packages from other anchors.
-            disk_files['/bin/backuphello.sfk'] = pack(manifest, image, kind, backup.read_bytes())
+        signing_seed = seed if kind == 1 else application_seed
+        package_bytes = pack(manifest, image, kind, signing_seed)
         if name=='disknext':
             for label,version in [('short','0.3'),('leading','00.3.0'),('overflow','4294967296.0.0'),('suffix','0.3.0-alpha')]:
-                Path('build/version-'+label+'.sfk').write_bytes(pack(dict(manifest,version=version),image,kind,seed))
+                Path('build/version-'+label+'.sfk').write_bytes(pack(dict(manifest,version=version),image,kind,signing_seed))
         if name.startswith('disk'):
             disk_files[('/modules/' if kind == 1 else '/bin/')+package_name] = package_bytes
             Path('build/'+package_name).write_bytes(package_bytes)
         else:
             packages.append((package_name, package_bytes))
+    rpc_image = link_elf('rpcprobe',shared+objects('rpcprobe',['services/rpcprobe.c']),'services/user.ld')
+    rpc_manifest = {'app_id':'org.spiritfox.rpcprobe','version':'0.1.0','runtime_id':'org.spiritfox.native','app_abi':1,'requested_caps':['stdio','namespace.read']}
+    packages.append(('rpcprobe.sfk',pack(rpc_manifest,rpc_image,2,application_seed)))
+    fp_image = link_elf('fpprobe',shared+objects('fpprobe',['services/fpprobe.c']),'services/user.ld')
+    fp_manifest = {'app_id':'org.spiritfox.fpprobe','version':'0.1.0','runtime_id':'org.spiritfox.native','app_abi':1,'requested_caps':['stdio']}
+    packages.append(('fpprobe.sfk',pack(fp_manifest,fp_image,2,application_seed)))
+    pie_shared = objects('pie-common', ['services/start.S','services/memory.c','services/libsf.c','services/arguments.c'], defines=['-fpie'])
+    pie_objs = pie_shared + objects('pieprobe',['services/pieprobe.c'],defines=['-fpie'])
+    run(['-target','x86_64-freestanding-none','-nostdlib','-fpie','-pie','-Wl,-Bsymbolic','-Wl,-e,_sf_start','-Wl,-T,services/user-pie.ld','-Wl,--build-id=none',*pie_objs,'-o','build/pieprobe.elf'])
+    pie_manifest = {'app_id':'org.spiritfox.pieprobe','version':'0.1.0','runtime_id':'org.spiritfox.native','app_abi':1,'native_profile':'relative-v1','requested_caps':['stdio','namespace.read']}
+    pie_package = pack(pie_manifest,Path('build/pieprobe.elf').read_bytes(),2,application_seed)
+    packages.append(('pieprobe.sfk',pie_package))
+    disk_files['/bin/pieprobe.sfk'] = pie_package
     image = link_elf('sf-virtio-blk', shared + objects('virtio-blk', ['services/virtio_blk.c']), 'services/user.ld')
     packages.append(('sf-virtio-blk.sfmod', pack({'module_id': 'org.spiritfox.virtio.blk', 'version': '0.1.0', 'category': 'driver', 'requested_caps': ['device.virtio-blk.trusted'], 'resource_limits': {'memory': 131072}}, image, 1, seed)))
     Path('build/storage.img').write_bytes(create_readfs(disk_files))
@@ -131,7 +161,7 @@ def main():
     asm += ['.section .rodata', '.global isr_table', 'isr_table:'] + [f'.quad isr_{i}' for i in range(256)]
     Path('build/interrupts.S').write_text('\n'.join(asm)+'\n')
     print('Building Core 0', flush=True)
-    kernel = objects('kernel', ['kernel/entry.S', 'kernel/arch.c', 'kernel/core.c', 'kernel/memory.c', 'kernel/ipc.c', 'kernel/device.c', 'kernel/acpi.c', 'kernel/vtd_tables.c', 'kernel/iommu.c', 'services/memory.c', 'build/interrupts.S'])
+    kernel = objects('kernel', ['kernel/entry.S', 'kernel/arch.c', 'kernel/core.c', 'kernel/pid.c', 'kernel/memory.c', 'kernel/ipc.c', 'kernel/device.c', 'kernel/acpi.c', 'kernel/vtd_tables.c', 'kernel/iommu.c', 'services/memory.c', 'services/arguments.c', 'build/interrupts.S'])
     link_elf('kernel', kernel, 'kernel/linker.ld')
     # Content-addressed incbin inputs prevent assembler caches reusing old bytes.
     embedded = {}
@@ -145,9 +175,24 @@ def main():
     efi = objects('efi', ['boot/efi_stub/crt0-efi-x86_64.S', 'boot/efi_stub/efi_main.c', 'build/payload.S', 'services/memory.c', *CRYPTO], 'x86_64-windows-gnu')
     esp = Path('build/esp/EFI/BOOT')
     esp.mkdir(parents=True, exist_ok=True)
-    run(['-target', 'x86_64-windows-gnu', '-nostdlib', '-s', '-Wl,--entry,_start', '-Wl,--subsystem,efi_application', '-Wl,--image-base,0x10000000', *efi, '-o', str(esp / 'BOOTX64.EFI')])
+    efi_path = esp / 'BOOTX64.EFI'
+    run(['-target', 'x86_64-windows-gnu', '-nostdlib', '-s', '-Wl,--entry,_start', '-Wl,--subsystem,efi_application', '-Wl,--image-base,0x10000000', *efi, '-o', str(efi_path)])
+    # Zig 0.13's PE linker inserts wall-clock metadata. Normalize the optional
+    # timestamp/checksum fields before testing this unsigned development image.
+    pe_image = bytearray(efi_path.read_bytes())
+    pe = struct.unpack_from('<I', pe_image, 60)[0]
+    assert pe_image[pe:pe+4] == b'PE\0\0' and struct.unpack_from('<H', pe_image, pe+24)[0] == 0x20b
+    struct.pack_into('<I', pe_image, pe+8, 0)
+    struct.pack_into('<I', pe_image, pe+24+64, 0)
+    efi_path.write_bytes(pe_image)
     print('Build complete:', (esp / 'BOOTX64.EFI').resolve(), flush=True)
 
 
 if __name__ == '__main__':
-    main()
+    import argparse
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--trust-policy', type=Path)
+    args = parser.parse_args()
+    if args.trust_policy and not args.trust_policy.exists():
+        parser.error('Explicit trust policy does not exist')
+    main(args.trust_policy)

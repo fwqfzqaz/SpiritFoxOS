@@ -16,6 +16,12 @@
 - [应用更新与回退](architecture/UPDATES.md)：双槽试运行、确认与健康回退。
 - [截断与补零扩展](architecture/TRUNCATE.md)：文件长度变更语义与故障边界。
 
+- [包信任策略](architecture/TRUST.md)：用途受限签名、重叠轮换与运行期撤销。
+- [native 配置](architecture/NATIVE.md)：静态/relative-v1 装载与限制。
+- [命令行参数与显式环境](architecture/ARGUMENTS.md)：私有只读调用数据。
+- [生命周期](architecture/LIFECYCLE.md)：依赖代次、租约与有界监督。
+- [CPU 上下文](architecture/CPU_CONTEXT.md)：x87/MMX/SSE 隔离与验证边界。
+
 ## 质量与验证
 
 - [安全审查与修复](quality/SECURITY.md)：权限边界、已修复缺陷与回归范围。

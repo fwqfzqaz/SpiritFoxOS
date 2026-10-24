@@ -60,9 +60,60 @@ static int app_abi(const SfPackage*p){
   if(!item(&c,1))return 0;
  }return 0;
 }
-int sf_package_open_set(SfPackage*p,const void*data,uint64_t bytes,const uint8_t (*keys)[32],unsigned key_count){
- const uint8_t*d=data;memset(p,0,sizeof(*p));
- if(!key_count||key_count>SF_TRUST_MAX||!keys)return SF_INVALID;
+static int manifest_value(const SfPackage*p,const char*key,Cbor*out){
+ Cbor c={p->manifest,p->manifest+p->manifest_bytes};uint8_t t;uint64_t n;
+ if(!head(&c,&t,&n)||t!=5)return SF_BAD_FORMAT;
+ for(uint64_t i=0;i<n;i++){uint64_t len;if(!head(&c,&t,&len)||t!=3||!span(0,len,c.end-c.p))return SF_BAD_FORMAT;
+  int match=len==strlen(key)&&!memcmp(c.p,key,len);c.p+=len;if(match){*out=c;return 0;}if(!item(&c,1))return SF_BAD_FORMAT;
+ }return SF_NOT_FOUND;
+}
+int sf_native_relocations_validate(const SfPackage*p){
+ if(!p||p->count>64||p->native_profile>SF_NATIVE_RELATIVE||p->relocation_count>SF_RELOCATION_MAX)return SF_BAD_FORMAT;
+ if(p->native_profile==SF_NATIVE_STATIC)return p->relocation_count||p->relocation_offset?SF_BAD_FORMAT:0;
+ if(p->kind!=2||!span(p->relocation_offset,p->relocation_count*16ull,p->bytes))return SF_BAD_FORMAT;
+ uint64_t previous=0;
+ for(unsigned i=0;i<p->relocation_count;i++){
+  const uint8_t*r=p->data+p->relocation_offset+i*16;uint64_t target=sf_u64(r),addend=sf_u64(r+8);int write=0,value=0;
+  if((target&7)||(i&&target<=previous)||addend>=SF_IMAGE_MAX)return SF_BAD_FORMAT;previous=target;
+  for(unsigned j=0;j<p->count;j++){const SfSection*s=&p->sections[j];if(s->type>3)continue;
+   if(s->type==3&&target>=s->rva&&span(target-s->rva,8,s->memory))write=1;
+   if(addend>=s->rva&&addend-s->rva<s->memory)value=1;
+  }
+  if(!write||!value)return SF_BAD_FORMAT;
+ }return 0;
+}
+static int native_profile(SfPackage*p){
+ char profile[32];int r=sf_manifest_text(p,"native_profile",profile,sizeof(profile));Cbor c;
+ if(r!=SF_NOT_FOUND&&(r||strcmp(profile,"static-v1"))){
+  if(r||strcmp(profile,"relative-v1")||p->kind!=2)return SF_BAD_FORMAT;p->native_profile=SF_NATIVE_RELATIVE;
+ }
+ /* Recognized import metadata cannot silently become a relative-only image. */
+ if(manifest_value(p,"import_relocations",&c)!=SF_NOT_FOUND||manifest_value(p,"native_imports",&c)!=SF_NOT_FOUND)return SF_BAD_FORMAT;
+ r=manifest_value(p,"relative_relocations",&c);
+ if(!p->native_profile){if(r!=SF_NOT_FOUND)return SF_BAD_FORMAT;for(unsigned i=0;i<p->count;i++)if(p->sections[i].type==4&&p->sections[i].bytes)return SF_BAD_FORMAT;return 0;}
+ uint8_t t;uint64_t n,section=UINT64_MAX,offset=UINT64_MAX,bytes=UINT64_MAX;
+ if(r||!head(&c,&t,&n)||t!=5||n!=3)return SF_BAD_FORMAT;
+ for(unsigned i=0;i<3;i++){uint64_t len,v;if(!head(&c,&t,&len)||t!=3||!span(0,len,c.end-c.p))return SF_BAD_FORMAT;
+  const uint8_t*key=c.p;c.p+=len;if(!head(&c,&t,&v)||t!=0)return SF_BAD_FORMAT;
+  if(len==7&&!memcmp(key,"section",7))section=v;else if(len==6&&!memcmp(key,"offset",6))offset=v;else if(len==5&&!memcmp(key,"bytes",5))bytes=v;else return SF_BAD_FORMAT;
+ }
+ if(section>=p->count||offset||bytes>SF_RELOCATION_MAX*16ull||(bytes&15))return SF_BAD_FORMAT;
+ const SfSection*s=&p->sections[section];if(s->type!=4||bytes!=s->bytes)return SF_BAD_FORMAT;
+ for(unsigned i=0;i<p->count;i++)if(i!=section&&p->sections[i].type==4)return SF_BAD_FORMAT;
+ p->relocation_offset=s->offset;p->relocation_count=bytes/16;return sf_native_relocations_validate(p);
+}
+int sf_trust_validate(const SfTrustStore*trust){
+ if(!trust||!trust->keys||!trust->count||trust->count>SF_TRUST_MAX)return SF_BAD_FORMAT;
+ for(unsigned i=0;i<trust->count;i++){
+  const SfTrustKey*k=&trust->keys[i];
+  if(!k->usage||(k->usage&~(SF_TRUST_MODULE|SF_TRUST_APP))||k->revoked>1)return SF_BAD_FORMAT;
+  for(unsigned j=0;j<i;j++)if(!memcmp(k->public_key,trust->keys[j].public_key,32))return SF_BAD_FORMAT;
+ }return 0;
+}
+int sf_package_open_trusted(SfPackage*p,const void*data,uint64_t bytes,const SfTrustStore*trust){
+ if(!p)return SF_INVALID;memset(p,0,sizeof(*p));
+ int valid=sf_trust_validate(trust);if(valid)return valid;
+ const uint8_t*d=data;if(!d)return SF_INVALID;
  if(bytes<264||bytes>SF_PACKAGE_MAX)return SF_BAD_FORMAT;
  int mod=!memcmp(d,"SFMOD1\0\0",8),app=!memcmp(d,"SFK1\r\n\032\n",8);
  if(!mod&&!app)return SF_BAD_FORMAT;
@@ -93,20 +144,31 @@ int sf_package_open_set(SfPackage*p,const void*data,uint64_t bytes,const uint8_t
  char text[96];if(sf_manifest_text(p,mod?"module_id":"app_id",text,sizeof(text))||!text[0]||sf_manifest_text(p,"version",text,sizeof(text)))return SF_BAD_FORMAT;
  if(app&&sf_manifest_text(p,"runtime_id",text,sizeof(text)))return SF_BAD_FORMAT;
  if(app&&!app_abi(p))return SF_ABI_MISMATCH;
- /* This static native profile intentionally has no relocation/import tables. */
- for(unsigned i=0;i<count;i++)if(p->sections[i].type==4&&p->sections[i].bytes)return SF_BAD_FORMAT;
  if(sf_u16(d+sig+32)!=1||sf_u16(d+sig+34)||sf_u32(d+sig+36)!=64)return SF_BAD_FORMAT;
- /* The tail's key_id selects the anchor; an unknown signer is rejected before
-  * any Ed25519 work so packages cannot probe which keys the store holds. */
- const uint8_t*key=0;for(unsigned i=0;i<key_count;i++){uint8_t digest[32];sf_sha256(digest,keys[i],32);if(!memcmp(digest,d+sig,32)){key=keys[i];break;}}
+ const SfTrustKey*key=0;uint8_t hash[32],message[55];
+ for(unsigned i=0;i<trust->count;i++){sf_sha256(hash,trust->keys[i].public_key,32);if(!memcmp(hash,d+sig,32))key=&trust->keys[i];}
  if(!key)return SF_BAD_SIGNATURE;
- p->key_id=d+sig;
- uint8_t message[55];static const uint8_t domain[]="SpiritFoxOS-Package-v1";
+ if(key->revoked)return SF_REVOKED;
+ if(!(key->usage&(mod?SF_TRUST_MODULE:SF_TRUST_APP)))return SF_DENIED;
+ static const uint8_t domain[]="SpiritFoxOS-Package-v1";
  _Static_assert(sizeof(domain)==23,"signature domain");memcpy(message,domain,sizeof(domain));sf_sha256(message+sizeof(domain),d,bytes-64);
- return crypto_ed25519_check(d+bytes-64,key,message,sizeof(message))?SF_BAD_SIGNATURE:SF_OK;
+ if(crypto_ed25519_check(d+bytes-64,key->public_key,message,sizeof(message)))return SF_BAD_SIGNATURE;
+ int r=native_profile(p);if(!r)p->key_id=d+sig;return r;
 }
+/* Explicit-key verification is retained for offline authoring tools. Runtime
+ * consumers use the complete policy and must never fall back to this API. */
 int sf_package_open(SfPackage*p,const void*data,uint64_t bytes,const uint8_t pub[32]){
- return sf_package_open_set(p,data,bytes,(const uint8_t (*)[32])pub,1);
+ if(!pub){if(p)memset(p,0,sizeof(*p));return SF_INVALID;}
+ SfTrustKey key={{0},SF_TRUST_MODULE|SF_TRUST_APP,0};memcpy(key.public_key,pub,32);
+ SfTrustStore trust={&key,1};return sf_package_open_trusted(p,data,bytes,&trust);
+}
+/* Explicit anchor sets are an offline compatibility API, never a runtime
+ * fallback. The runtime always retains immutable usage/revocation rules. */
+int sf_package_open_set(SfPackage*p,const void*data,uint64_t bytes,const uint8_t (*keys)[32],unsigned count){
+ if(!keys||!count||count>SF_TRUST_MAX){if(p)memset(p,0,sizeof(*p));return SF_INVALID;}
+ SfTrustKey entries[SF_TRUST_MAX];memset(entries,0,sizeof(entries));
+ for(unsigned i=0;i<count;i++){memcpy(entries[i].public_key,keys[i],32);entries[i].usage=SF_TRUST_MODULE|SF_TRUST_APP;}
+ SfTrustStore policy={entries,count};return sf_package_open_trusted(p,data,bytes,&policy);
 }
 int sf_bundle_find(const void*data,uint64_t bytes,const char*name,const uint8_t**out,uint64_t*length){
  const uint8_t*d=data;if(bytes<16||memcmp(d,"SFB1",4)||sf_u32(d+4)>32||sf_u64(d+8)!=bytes)return SF_BAD_FORMAT;uint32_t n=sf_u32(d+4);

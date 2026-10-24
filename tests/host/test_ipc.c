@@ -1,14 +1,14 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include "../kernel/kernel.h"
+#include "../../kernel/kernel.h"
 
 Task tasks[SF_MAX_TASKS];
 int current;
 uint64_t ticks;
 static Frame frames[SF_MAX_TASKS];
 static SfMessage messages[SF_MAX_TASKS];
-static unsigned checks;
+static unsigned checks,copies;
 #define CHECK(x) do{checks++;if(!(x)){fprintf(stderr,"IPC FAIL line %d: %s\n",__LINE__,#x);exit(1);}}while(0)
 
 /* Only each task's message buffer is accessible to the copy stubs. The real
@@ -17,8 +17,8 @@ int user_range(Task*t,uint64_t address,uint64_t bytes,int write){
  (void)write;uint64_t base=(uint64_t)&messages[t-tasks];
  return address>=base&&address-base<=sizeof(SfMessage)&&bytes<=sizeof(SfMessage)-(address-base);
 }
-int copy_in(Task*t,void*out,uint64_t address,size_t bytes){if(!user_range(t,address,bytes,0))return SF_DENIED;memcpy(out,(void*)address,bytes);return 0;}
-int copy_out(Task*t,uint64_t address,const void*in,size_t bytes){if(!user_range(t,address,bytes,1))return SF_DENIED;memcpy((void*)address,in,bytes);return 0;}
+int copy_in(Task*t,void*out,uint64_t address,size_t bytes){copies++;if(!user_range(t,address,bytes,0))return SF_DENIED;memcpy(out,(void*)address,bytes);return 0;}
+int copy_out(Task*t,uint64_t address,const void*in,size_t bytes){copies++;if(!user_range(t,address,bytes,1))return SF_DENIED;memcpy((void*)address,in,bytes);return 0;}
 void panic(const char*message){fprintf(stderr,"unexpected IPC panic: %s\n",message);exit(1);}
 
 static long call(unsigned operation,uint64_t a,uint64_t b,uint64_t c){return ipc_syscall(operation,a,b,c);}
@@ -31,7 +31,7 @@ static void reset(void){
  for(unsigned i=0;i<SF_MAX_TASKS;i++)ipc_cleanup(&tasks[i]);
  memset(tasks,0,sizeof(tasks));memset(frames,0,sizeof(frames));memset(messages,0,sizeof(messages));
  for(unsigned i=0;i<SF_MAX_TASKS;i++){tasks[i].pid=i+1;tasks[i].state=T_READY;tasks[i].frame=&frames[i];}
- ticks=0;current=0;
+ ticks=0;current=0;copies=0;
 }
 
 static void churn_and_capacity(void){
@@ -92,4 +92,22 @@ static void retired_slot(void){
  CHECK(create()==SF_NO_SPACE);current=1;CHECK(create()>0);
 }
 
-int main(void){churn_and_capacity();derived_references();cross_task_references();revoke_and_owner_exit();deadlines_and_validation();retired_slot();reset();printf("IPC tests passed: %u assertions\n",checks);return 0;}
+static void canonical_width(void){
+ for(unsigned iteration=0;iteration<1000;iteration++){
+  reset();long owner=create();CHECK(owner>0);current=1;long unrelated=create();CHECK(unrelated>0);current=0;message();
+  Task saved_tasks[SF_MAX_TASKS];Frame saved_frames[SF_MAX_TASKS];SfMessage saved_messages[SF_MAX_TASKS];
+  memcpy(saved_tasks,tasks,sizeof(tasks));memcpy(saved_frames,frames,sizeof(frames));memcpy(saved_messages,messages,sizeof(messages));
+  uint64_t high[]={1ull<<32,1ull<<63,0xffffffff00000000ull};
+  for(unsigned i=0;i<sizeof(high)/sizeof(*high);i++){
+   uint64_t invalid=high[i]|(unsigned)owner;unsigned before=copies;
+   CHECK(call(SYS_SEND,invalid,0,0)==SF_STALE_HANDLE);CHECK(call(SYS_RECV,invalid,0,0)==SF_STALE_HANDLE);
+   CHECK(call(SYS_CAP_CLOSE,invalid,0,0)==SF_STALE_HANDLE);CHECK(call(SYS_CAP_DERIVE,invalid,7,0)==SF_DENIED);CHECK(call(SYS_CAP_REVOKE,invalid,0,0)==SF_DENIED);
+   CHECK(copies==before);CHECK(!memcmp(tasks,saved_tasks,sizeof(tasks)));CHECK(!memcmp(frames,saved_frames,sizeof(frames)));CHECK(!memcmp(messages,saved_messages,sizeof(messages)));
+  }
+  CHECK(!send(owner));CHECK(receive(owner,0)==1);CHECK(messages[0].h.request_id==123&&messages[0].h.flags==1);
+  long duplicate=call(SYS_CAP_DERIVE,owner,RIGHT_SEND|RIGHT_RECV,0);CHECK(duplicate>0);CHECK(!call(SYS_CAP_CLOSE,owner,0,0));message();CHECK(!send(duplicate));CHECK(receive(duplicate,0)==1);CHECK(!call(SYS_CAP_CLOSE,duplicate,0,0));
+  current=1;message();CHECK(!send(unrelated));CHECK(receive(unrelated,0)==2);CHECK(!call(SYS_CAP_CLOSE,unrelated,0,0));
+ }
+}
+
+int main(void){canonical_width();churn_and_capacity();derived_references();cross_task_references();revoke_and_owner_exit();deadlines_and_validation();retired_slot();reset();printf("IPC tests passed: %u assertions\n",checks);return 0;}

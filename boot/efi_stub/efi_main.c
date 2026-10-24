@@ -33,7 +33,7 @@ static EFI_STATUS core_load(void**entry){
 static EFI_STATUS bootstrap_load(BootInfo*b){
  const uint8_t*data;uint64_t n;uint64_t bundle_bytes=__bundle_end-__bundle_start;
  if(sf_bundle_find(__bundle_start,bundle_bytes,"sf-init.sfmod",&data,&n))return EFI_LOAD_ERROR;
- SfPackage p;if(sf_package_open_set(&p,data,n,sf_trust_keys,sf_trust_count)||p.kind!=1)return EFI_LOAD_ERROR;
+ SfPackage p;if(sf_package_open_trusted(&p,data,n,&sf_trust_store)||p.kind!=1)return EFI_LOAD_ERROR;
  char id[96];if(sf_manifest_text(&p,"module_id",id,sizeof(id))||strcmp(id,"org.spiritfox.init"))return EFI_LOAD_ERROR;
  b->init_entry=p.entry;b->bundle=(uint64_t)__bundle_start;b->bundle_bytes=bundle_bytes;
  for(unsigned i=0;i<p.count;i++){SfSection*s=&p.sections[i];if(s->type>3)continue;if(b->init_segment_count==8)return EFI_LOAD_ERROR;uint64_t addr;EFI_STATUS status=allocate(s->memory,&addr);if(status)return status;

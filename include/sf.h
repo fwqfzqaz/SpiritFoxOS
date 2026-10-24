@@ -6,13 +6,22 @@
 #define SF_PAGE 4096ull
 #define SF_BASE 0x40000000ull
 #define SF_IMAGE_MAX 0x200000ull
+#define SF_PIE_MIN 0x44000000ull
+#define SF_NATIVE_STATIC 0u
+#define SF_NATIVE_RELATIVE 1u
+#define SF_RELOCATION_MAX 256u
 #define SF_STACK 0x41010000ull
 #define SF_ARGS 0x42000000ull
 #define SF_BUNDLE 0x60000000ull
 #define SF_DMA 0x50000000ull
 #define SF_DMA_BYTES 65536u
+/* Relocatable images occupy a separate, 2 MiB aligned arena below DMA. */
+static inline int sf_image_base_valid(uint64_t base){return !base||base==SF_BASE||(base>=SF_PIE_MIN&&base<=SF_DMA-SF_IMAGE_MAX&&!(base&(SF_IMAGE_MAX-1)));}
 #define SF_MAX_TASKS 12
 #define SF_MSG_BYTES 256
+#define SF_ARGUMENT_MAX 8u
+#define SF_ENVIRONMENT_MAX 8u
+#define SF_ARGUMENT_BYTES 512u
 /* SYS_TASK_STATUS must not confuse a live task with any int32_t exit code. */
 #define SF_TASK_RUNNING 0x100000000ll
 enum { SF_OK=0, SF_INVALID=-1, SF_DENIED=-2, SF_BAD_FORMAT=-3,
@@ -31,10 +40,14 @@ enum { SYS_EXIT, SYS_YIELD, SYS_LOG, SYS_TICKS, SYS_EP_CREATE,
  SYS_CONSOLE_READ, SYS_SHUTDOWN, SYS_CAP_DERIVE, SYS_CAP_CLOSE,
  SYS_MAP_TEST, SYS_CAP_REVOKE, SYS_PCI_READ, SYS_PORT_IO, SYS_DEVICE_RELEASE, SYS_DMA_STATUS };
 enum { RIGHT_SEND=1, RIGHT_RECV=2, RIGHT_DELEGATE=4 };
-enum { OP_ECHO=1, OP_OPEN=10, OP_READ, OP_WRITE, OP_CLOSE, OP_SEEK,
- OP_POLL, OP_CREATE, OP_DESCRIBE, OP_ENUMERATE, OP_OPENAT, OP_ROOT, OP_TRUNCATE, OP_HELLO=30, OP_NATIVE_PREPARE=40,
- OP_NATIVE_STAGE, OP_BLOCK_INFO=50, OP_BLOCK_READ, OP_BLOCK_WRITE, OP_BLOCK_STOP,
+enum { OP_ECHO=1, OP_ECHO_DIAGNOSTIC=2, OP_OPEN=10, OP_READ, OP_WRITE, OP_CLOSE, OP_SEEK,
+ OP_POLL, OP_CREATE, OP_DESCRIBE, OP_ENUMERATE, OP_OPENAT, OP_ROOT, OP_TRUNCATE, OP_UNLINK, OP_STAT, OP_RMDIR, OP_HELLO=30, OP_NATIVE_PREPARE=40,
+ OP_NATIVE_STAGE, OP_NATIVE_HEALTH, OP_NATIVE_DIAGNOSTIC, OP_BLOCK_INFO=50, OP_BLOCK_READ, OP_BLOCK_WRITE, OP_BLOCK_STOP,
  OP_BLOCK_FLUSH, OP_BLOCK_WRITE_RANGE, OP_BLOCK_DMA_PROBE };
+enum { SF_FILE_READ_ONLY=1, SF_FILE_MOUNTED=2, SF_FILE_SEEKABLE=4 };
+typedef struct {uint32_t bytes,type,mode,flags;uint64_t size,offset;} SfFileStat;
+_Static_assert(sizeof(SfFileStat)==32,"file stat ABI");
+
 typedef struct {
  uint32_t size,mode,owner,faults; uint64_t last_address,probe_address;
  uint32_t source,reason,guard_intact,active_mapping;
@@ -70,14 +83,17 @@ typedef struct {
  SfBootSegment init_segments[8];
 } SfBootInfo;
 typedef struct { uint64_t rva,bytes,data; uint32_t flags,reserved; } SfLoadSegment;
+typedef struct { uint32_t count,bytes,env_count,reserved; uint8_t data[SF_ARGUMENT_BYTES]; } SfArguments;
 typedef struct {
- uint32_t size,count; uint64_t entry;
+ uint32_t size,count; uint64_t entry,image_base;
  uint32_t grant_manager,grant_service,service_rights,grant_bundle;
  uint32_t grant_device,device_rights;
  SfLoadSegment segments[8];
+ SfArguments arguments;
 } SfLoadPlan;
 typedef struct {uint64_t rva,memory,offset,bytes;uint32_t flags,reserved;} SfNativeSegment;
-typedef struct {uint64_t entry;uint32_t count,reserved;SfNativeSegment segments[5];} SfNativePlan;
+typedef struct {uint64_t entry,image_base,relocation_offset;uint32_t count,profile,relocation_count,reserved;SfNativeSegment segments[5];} SfNativePlan;
+_Static_assert(sizeof(SfNativePlan)<=SF_MSG_BYTES,"native plan fits copied IPC");
 void *memcpy(void *,const void *,size_t);
 void *memset(void *,int,size_t);
 int memcmp(const void *,const void *,size_t);

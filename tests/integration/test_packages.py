@@ -15,7 +15,7 @@ class Packages(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.crypto = Crypto()
-        cls.seed = (ROOT / '.keys/development.seed').read_bytes()
+        cls.seed = (ROOT / '.keys/application.seed').read_bytes()
         cls.pub = cls.crypto.key(cls.seed)[1]
         cls.good = (ROOT / 'build/hello.sfk').read_bytes()
 
@@ -30,7 +30,8 @@ class Packages(unittest.TestCase):
     def test_valid_every_built_package(self):
         for path in list((ROOT / 'build').glob('*.sfmod')) + list((ROOT / 'build').glob('*.sfk')):
             with self.subTest(package=path.name):
-                self.assertEqual(self.crypto.verify(path.read_bytes(), self.pub), 0)
+                public = (ROOT/'build/development.pub').read_bytes() if path.suffix == '.sfmod' else self.pub
+                self.assertEqual(self.crypto.verify(path.read_bytes(), public), 0)
 
     def test_sha256_vectors(self):
         for data in [b'', b'abc', b'a'*55, b'a'*56, b'a'*64, b'a'*1000000]:
@@ -139,17 +140,17 @@ class Packages(unittest.TestCase):
         hello_stranger = pack({'app_id': 'org.spiritfox.hello', 'version': '0.1.0', 'runtime_id': 'org.spiritfox.native', 'app_abi': 1, 'requested_caps': ['stdio']},
                               (ROOT/'build/hello.elf').read_bytes(), 2, bytes(range(32)))
         self.assertEqual(self.crypto.lib.sf_check_set(bytes(hello_stranger), len(hello_stranger), keys, 2), -4)
-        for count in [0, 5]:
+        for count in [0, 9]:
             self.assertEqual(self.crypto.lib.sf_check_set(self.good, len(self.good), keys, count), -1)
         # Revocation: an anchor-signed package is accepted until its signer is
         # revoked, then sf_trust_open reports SF_REVOKED (-13). The helper takes
         # the revocation set explicitly so the result is deterministic.
-        self.assertEqual(self.crypto.lib.sf_trust_check(self.good, len(self.good), keys, 2), 0)
-        self.assertEqual(self.crypto.lib.sf_trust_check(bytes(hello_backup), len(hello_backup), keys, 2), 0)
+        self.assertEqual(self.crypto.lib.sf_runtime_trust_check(self.good, len(self.good), keys, 2, None, 0), 0)
+        self.assertEqual(self.crypto.lib.sf_runtime_trust_check(bytes(hello_backup), len(hello_backup), keys, 2, None, 0), 0)
         backup_id = hashlib.sha256(backup).digest()
         revoked = (C.c_ubyte*32).from_buffer_copy(backup_id)
-        self.assertEqual(self.crypto.lib.sf_trust_check_revoked(bytes(hello_backup), len(hello_backup), keys, 2, revoked, 1), -13)
-        self.assertEqual(self.crypto.lib.sf_trust_check_revoked(self.good, len(self.good), keys, 2, revoked, 1), 0)
+        self.assertEqual(self.crypto.lib.sf_runtime_trust_check(bytes(hello_backup), len(hello_backup), keys, 2, revoked, 1), -13)
+        self.assertEqual(self.crypto.lib.sf_runtime_trust_check(self.good, len(self.good), keys, 2, revoked, 1), 0)
         self.assertEqual(self.crypto.lib.sf_trust_revoke_id(keys, 2, backup_id), 0)
 
 

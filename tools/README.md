@@ -23,7 +23,7 @@
 这些模块不是独立入口；从仓库根目录运行，例如：
 
 ```bash
-python3 tools/package/sfpack.py inspect build/hello.sfk --public-key build/development.pub
+python3 tools/package/sfpack.py inspect build/hello.sfk --public-key build/application.pub
 ```
 
 ## 开发辅助

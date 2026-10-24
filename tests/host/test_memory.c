@@ -1,5 +1,5 @@
 #include <stdio.h>
-#include "../kernel/kernel.h"
+#include "../../kernel/kernel.h"
 static unsigned checks;
 #define CHECK(x) do{checks++;if(!(x)){printf("Memory FAIL line %d: %s\n",__LINE__,#x);return 1;}}while(0)
 int main(void){

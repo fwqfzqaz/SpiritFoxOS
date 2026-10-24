@@ -3,8 +3,8 @@
 #include "manager.h"
 #include "namespace.h"
 #include "readfs.h"
-typedef int (*SfModuleSpawn)(const char*,uint32_t,uint32_t,uint32_t,uint32_t);
-void sf_storage_init(SfManager*,SfNamespace*,uint32_t,SfModuleSpawn);
+typedef int (*SfModuleSpawn)(const char*,uint32_t,uint32_t,uint32_t,uint32_t,uint32_t);
+void sf_storage_init(SfManager*,SfNamespace*,SfModuleSpawn);
 int sf_storage_start(void);
 int sf_storage_mount(void);
 int sf_storage_unmount(void);

@@ -13,11 +13,10 @@ static int commit(const char*const*paths,const void*const*data,const uint32_t*by
 }
 static const char*slot_path(char slot){return slot=='a'?"/slots/a.sfk":"/slots/b.sfk";}
 static int package_policy(const void*data,size_t bytes,char id[64],SfVersion*version,int enforce,const uint8_t**key_id){
- SfPackage p;int r=sf_trust_open(&sf_trust,&p,data,bytes);char runtime[64];
- /* State accounting only proves package integrity; callers decide whether a
-  * revoked signer may still be executed or staged. */
- if(r==SF_REVOKED&&!enforce)r=0;
- if(r)return r;
+ /* Accounting may tolerate runtime revocation after authenticating the package,
+  * but immutable revoked keys and wrong-purpose signers always fail closed. */
+ SfPackage p;int r=sf_package_open_trusted(&p,data,bytes,&sf_trust_store);if(r)return r;char runtime[64];
+ if(enforce&&sf_trust_revoked(&sf_trust,p.key_id))return SF_REVOKED;
  if(key_id)*key_id=p.key_id;
  if(p.kind!=2||sf_manifest_text(&p,"runtime_id",runtime,sizeof(runtime))||strcmp(runtime,"org.spiritfox.native"))return SF_DEPENDENCY;
  memset(id,0,64);r=sf_manifest_text(&p,"app_id",id,64);if(r)return r;
@@ -120,22 +119,24 @@ int sf_persist_revoke(const char*source){
  return commit(paths,data,lengths,1);
 }
 void sf_persist_trust_status(void){
- sf_log("trust: anchors=");sf_number(sf_trust.count);sf_log(" revoked=");sf_number(sf_trust.revoked);sf_log("\n");
+ sf_log("trust: anchors=");sf_number(sf_trust.policy.count);sf_log(" revoked=");sf_number(sf_trust.revoked);sf_log("\n");
  static const char hex[]="0123456789abcdef";
  for(unsigned i=0;i<sf_trust.revoked;i++){sf_log("trust: revoked key=");char text[17];
   for(unsigned j=0;j<8;j++){text[j*2]=hex[sf_trust.revoked_ids[i][j]>>4];text[j*2+1]=hex[sf_trust.revoked_ids[i][j]&15];}
   text[16]=0;sf_log(text);sf_log("...\n");}
 }
-long sf_persist_package(void*out,size_t capacity){
+static long selected_package(void*out,size_t capacity,int preview){
  if(!sf_storage_writable())return SF_DEVICE_GONE;SfUpdate state;int r=state_read(&state);if(r)return r;
- if(state.phase==SF_UPDATE_PENDING)return SF_BUSY;char selected=state.phase==SF_UPDATE_TRYING?state.candidate:state.good;if(!selected)return SF_NOT_FOUND;
+ if(state.phase==SF_UPDATE_PENDING&&!preview)return SF_BUSY;int candidate=state.phase!=SF_UPDATE_STABLE;char selected=candidate?state.candidate:state.good;if(!selected)return SF_NOT_FOUND;
  long n=sf_txn_get(&volume,slot_path(selected),out,capacity);if(n<0)return n;uint8_t hash[32];sf_sha256(hash,out,n);
- if(memcmp(hash,state.phase==SF_UPDATE_TRYING?state.candidate_hash:state.good_hash,32))return SF_BAD_SIGNATURE;
+ if(memcmp(hash,candidate?state.candidate_hash:state.good_hash,32))return SF_BAD_SIGNATURE;
  char id[64];SfVersion version;r=package_policy(out,n,id,&version,1,0);if(r)return r;if(strcmp(id,state.app_id))return SF_DEPENDENCY;
  /* Recheck pending records created by an older implementation, too. */
- if(state.phase==SF_UPDATE_TRYING&&state.good){SfVersion floor;r=confirmed_version(&state,&floor);if(r)return r;r=sf_version_upgrade(&floor,state.good_hash,&version,hash);if(r<0)return r;}
+ if(candidate&&state.good){SfVersion floor;r=confirmed_version(&state,&floor);if(r)return r;r=sf_version_upgrade(&floor,state.good_hash,&version,hash);if(r<0)return r;}
  return n;
 }
+long sf_persist_package(void*out,size_t capacity){return selected_package(out,capacity,0);}
+long sf_persist_preview(void*out,size_t capacity){return selected_package(out,capacity,1);}
 void sf_persist_status(void){
  sf_log(volume.ready&&sf_storage_writable()?"persist: ACTIVE generation=":"persist: UNAVAILABLE generation=");sf_number(volume.generation);sf_log("\n");
  SfUpdate state;if(!sf_storage_writable()||state_read(&state))return;
