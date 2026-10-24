@@ -3,8 +3,8 @@ typedef struct __attribute__((packed)){uint16_t lo,selector;uint8_t ist,attr;uin
 typedef struct __attribute__((packed)){uint16_t limit;uint64_t base;} Descriptor;
 typedef struct __attribute__((packed)){uint32_t reserved;uint64_t rsp0,rsp1,rsp2,reserved2,ist[7],reserved3;uint16_t reserved4,iomap;} Tss;
 static uint64_t gdt[7]={0,0x00af9a000000ffff,0x00cf92000000ffff,0x00affa000000ffff,0x00cff2000000ffff,0,0};
-/* 28-byte protected-mode FLDENV image: no instruction/data pointers. */
-static const uint32_t empty_fpenv[7]={0x037f,0,0xffff,0,0,0,0};
+/* 28-byte protected-mode FLDENV image: CW, SW, TW|FOP, zero pointers. */
+static const uint32_t empty_fpenv[7]={0x037f,0xffff,0,0,0,0,0};
 static Tss tss;static Gate idt[256];static uint8_t fault_stack[16384] __attribute__((aligned(16)));
 static uint8_t input[256];static unsigned input_head,input_count,input_overflow;
 void console_irq(void){while(inb(0x3fd)&1){uint8_t c=inb(0x3f8);if(input_count<sizeof(input)){input[(input_head+input_count)%sizeof(input)]=c;input_count++;}else input_overflow=1;}outb(0x20,0x20);}

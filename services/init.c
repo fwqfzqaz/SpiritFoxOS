@@ -178,7 +178,7 @@ static void echo_capacity_test(void){
  sf_assert(!sf_sys(SYS_CAP_REVOKE,held[--used],0,0),"echo capacity test releases one slot");
  sf_assert(echo_start_service()==SF_NO_SPACE&&manager.modules[echo_slot].state==MOD_STOPPED,"failed echo reply allocation reclaims service endpoint");
  while(used)sf_assert(!sf_sys(SYS_CAP_REVOKE,held[--used],0,0),"echo capacity test reclaims temporary endpoint");
- sf_assert(!echo_start_service()&&!echo_call(echo_ep,echo_pid),"echo restarts after endpoint allocation failures");sf_log("ECHO CAPACITY TEST PASSED\n");
+ sf_assert(!echo_start_service()&&!echo_call(echo_ep,echo_pid),"echo restarts after endpoint allocation failures");sf_supervisor_enable(&echo_watch,sf_ticks(),1);echo_health_at=echo_after(sf_ticks(),100);sf_log("ECHO CAPACITY TEST PASSED\n");
 }
 static void native_capacity_test(void){
  sf_assert(!native_stop_service(),"native capacity test stops current instance");int held[64],used=0,r=0;

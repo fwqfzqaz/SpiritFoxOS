@@ -94,13 +94,13 @@ revoke-key /disk/bin/diskexit.sfk
 
 ## 包工具
 
-```powershell
-python tools/package/sfpack.py module --manifest echo.json --image echo.elf --out echo.sfmod --seed .keys/development.seed
-python tools/package/sfpack.py app --manifest hello.json --image hello.elf --out hello.sfk --seed .keys/application.seed
-python tools/package/sfpack.py inspect build/hello.sfk --public-key build/application.pub
-python tools/package/sfpack.py inspect build/hello.sfk --trust-policy build/trust-policy.json
-python tools/package/sfpack.py trust --policy build/trust-policy.json
-python tools/package/sfpack.py sign build/hello.sfk --seed .keys/application.seed
+```bash
+python3 tools/package/sfpack.py module --manifest echo.json --image echo.elf --out echo.sfmod --seed .keys/development.seed
+python3 tools/package/sfpack.py app --manifest hello.json --image hello.elf --out hello.sfk --seed .keys/application.seed
+python3 tools/package/sfpack.py inspect build/hello.sfk --public-key build/application.pub
+python3 tools/package/sfpack.py inspect build/hello.sfk --trust-policy build/trust-policy.json
+python3 tools/package/sfpack.py trust --policy build/trust-policy.json
+python3 tools/package/sfpack.py sign build/hello.sfk --seed .keys/application.seed
 ```
 
 输入 ELF 是构建中间产物，交付包使用设计说明中的 96 字节头、64 字节段描述符、确定性 CBOR 和 Ed25519 尾部。当前代码接受固定地址 native 和静态链接的 relative-v1 APP，有界相对重定位及私有映像；不支持资源包、动态导入、通用动态链接或压缩。构建脚本中列出了实际清单字段。

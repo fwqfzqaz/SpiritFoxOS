@@ -9,13 +9,17 @@ import time
 import build
 
 ROOT = Path(__file__).resolve().parents[1]
+(ROOT / 'build').mkdir(exist_ok=True)
+(ROOT / 'build/test-results.json').unlink(missing_ok=True)
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument('--skip-build', action='store_true')
 parser.add_argument('--host-only', action='store_true')
 args = parser.parse_args()
 started = time.time()
 if not args.skip_build:
-    build.main()
+    # Keep Crypto()/sfcrypto.dll out of this long-lived parent process: on
+    # Windows a loaded DLL blocks the trust-policy tests from rebuilding it.
+    subprocess.run([sys.executable, str(ROOT / 'tools' / 'build.py')], check=True)
 def host_test(name,*sources,no_unused=False):
     flags=['-target',build.HOST,'-g0','-O2','-Wall','-Wextra','-Werror']
     if no_unused: flags.append('-Wno-unused-parameter')
