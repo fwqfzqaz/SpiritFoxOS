@@ -9,5 +9,8 @@ int sf_persist_finish(int success);
 long sf_persist_package(void*,size_t);
 /* Read-only authenticated preview; execution still requires begin + package. */
 long sf_persist_preview(void*,size_t);
+/* 0 revokes a stored package's signer; 1 means it was already revoked. */
+int sf_persist_revoke(const char*);
+void sf_persist_trust_status(void);
 void sf_persist_status(void);
 #endif

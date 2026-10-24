@@ -153,7 +153,7 @@ int sf_package_open_trusted(SfPackage*p,const void*data,uint64_t bytes,const SfT
  static const uint8_t domain[]="SpiritFoxOS-Package-v1";
  _Static_assert(sizeof(domain)==23,"signature domain");memcpy(message,domain,sizeof(domain));sf_sha256(message+sizeof(domain),d,bytes-64);
  if(crypto_ed25519_check(d+bytes-64,key->public_key,message,sizeof(message)))return SF_BAD_SIGNATURE;
- return native_profile(p);
+ int r=native_profile(p);if(!r)p->key_id=d+sig;return r;
 }
 /* Explicit-key verification is retained for offline authoring tools. Runtime
  * consumers use the complete policy and must never fall back to this API. */
@@ -161,6 +161,14 @@ int sf_package_open(SfPackage*p,const void*data,uint64_t bytes,const uint8_t pub
  if(!pub){if(p)memset(p,0,sizeof(*p));return SF_INVALID;}
  SfTrustKey key={{0},SF_TRUST_MODULE|SF_TRUST_APP,0};memcpy(key.public_key,pub,32);
  SfTrustStore trust={&key,1};return sf_package_open_trusted(p,data,bytes,&trust);
+}
+/* Explicit anchor sets are an offline compatibility API, never a runtime
+ * fallback. The runtime always retains immutable usage/revocation rules. */
+int sf_package_open_set(SfPackage*p,const void*data,uint64_t bytes,const uint8_t (*keys)[32],unsigned count){
+ if(!keys||!count||count>SF_TRUST_MAX){if(p)memset(p,0,sizeof(*p));return SF_INVALID;}
+ SfTrustKey entries[SF_TRUST_MAX];memset(entries,0,sizeof(entries));
+ for(unsigned i=0;i<count;i++){memcpy(entries[i].public_key,keys[i],32);entries[i].usage=SF_TRUST_MODULE|SF_TRUST_APP;}
+ SfTrustStore policy={entries,count};return sf_package_open_trusted(p,data,bytes,&policy);
 }
 int sf_bundle_find(const void*data,uint64_t bytes,const char*name,const uint8_t**out,uint64_t*length){
  const uint8_t*d=data;if(bytes<16||memcmp(d,"SFB1",4)||sf_u32(d+4)>32||sf_u64(d+8)!=bytes)return SF_BAD_FORMAT;uint32_t n=sf_u32(d+4);

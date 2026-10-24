@@ -7,12 +7,13 @@ from pathlib import Path
 import subprocess
 import struct
 import sys
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / 'tools' / 'package'))
 from sfpack import Crypto, pack, bundle
 from mkreadfs import create as create_readfs
 from mkpersist import create as create_persist
 import trust_policy
 
-ROOT = Path(__file__).resolve().parents[1]
 os.chdir(ROOT)
 (ROOT / 'build').mkdir(exist_ok=True)
 (ROOT / '.cache').mkdir(exist_ok=True)
@@ -20,9 +21,13 @@ for key in ['TEMP', 'TMP', 'TMPDIR', 'XDG_CACHE_HOME', 'ZIG_GLOBAL_CACHE_DIR', '
     os.environ[key] = str(ROOT / '.cache' / key.lower())
     Path(os.environ[key]).mkdir(exist_ok=True)
 os.environ['PYTHONPYCACHEPREFIX'] = str(ROOT / '.cache' / 'pycache')
-ZIG = str(ROOT / '.tools/zig/zig.exe')
+LINUX = hasattr(os, 'uname') and os.uname().sysname == 'Linux'
+ZIG = str(ROOT / ('.tools/zig/zig' if LINUX else '.tools/zig/zig.exe'))
+# Host tests run natively; the EFI stub stays PE/COFF through the windows-gnu target.
+HOST = 'x86_64-linux-gnu' if LINUX else 'x86_64-windows-gnu'
+EXE = '' if LINUX else '.exe'
 COMMON = ['-Iinclude', '-Ivendor/monocypher', '-Ibuild', '-g0', '-ffreestanding', '-fno-builtin', '-fno-stack-protector', '-fno-unwind-tables', '-fno-asynchronous-unwind-tables', '-O2', '-Wall', '-Wextra', '-Werror', '-Wno-unused-parameter', '-mno-red-zone', '-mno-mmx', '-mno-sse', '-mno-sse2']
-CRYPTO = ['services/package.c', 'services/sha256.c', 'vendor/monocypher/monocypher.c', 'vendor/monocypher/monocypher-ed25519.c']
+CRYPTO = ['services/trust.c', 'services/package.c', 'services/sha256.c', 'vendor/monocypher/monocypher.c', 'vendor/monocypher/monocypher-ed25519.c']
 
 
 def run(args):
@@ -55,15 +60,24 @@ def link_elf(name, objs, script):
 
 def main(policy_path=None):
     print('Building host package verifier', flush=True)
-    run(['-target', 'x86_64-windows-gnu', '-shared', '-O2', '-Iinclude', '-Ivendor/monocypher', 'tools/crypto_host.c', 'services/readfs.c', 'services/native_image.c', *CRYPTO, '-o', 'build/sfcrypto.dll'])
+    crypto_lib = 'build/sfcrypto.so' if LINUX else 'build/sfcrypto.dll'
+    run(['-target', HOST, '-shared', '-O2', *(['-fPIC'] if LINUX else []), '-Iinclude', '-Ivendor/monocypher', 'tools/package/crypto_host.c', 'services/readfs.c', 'services/native_image.c', *CRYPTO, '-o', crypto_lib])
     keys = ROOT / '.keys'
     keys.mkdir(exist_ok=True)
     seedfile = keys / 'development.seed'
     if not seedfile.exists():
         seedfile.write_bytes(os.urandom(32))
     seed = seedfile.read_bytes()
-    pub = Crypto().key(seed)[1]
+    crypto = Crypto()
+    pub = crypto.key(seed)[1]
+    # Separate module/app signing roles, plus an app-only standby anchor for
+    # runtime revocation workflows. Explicit policies remain authoritative.
+    backup = keys / 'backup.seed'
+    if not backup.exists():
+        backup.write_bytes(os.urandom(32))
+    backup_pub = crypto.key(backup.read_bytes())[1]
     Path('build/development.pub').write_bytes(pub)
+    Path('build/backup.pub').write_bytes(backup_pub)
     application_seedfile = keys / 'application.seed'
     if not application_seedfile.exists():
         application_seedfile.write_bytes(os.urandom(32))
@@ -78,6 +92,8 @@ def main(policy_path=None):
     if not policy_path.is_relative_to(ROOT):
         raise ValueError('Trust policy must be inside the workspace')
     policy = trust_policy.load(policy_path) if explicit_policy or policy_path.exists() else trust_policy.development(pub, application_pub)
+    if not explicit_policy and not policy_path.exists():
+        policy['keys'].append({'public_key':backup_pub.hex(),'usage':['app'],'revoked':False})
     for signer, usage in [(pub, 'module'), (application_pub, 'app')]:
         if not any(k['public_key'] == signer.hex() and not k['revoked'] and usage in k['usage'] for k in policy['keys']):
             raise ValueError('Current build requires an active ' + usage + ' signing key in the trust policy')

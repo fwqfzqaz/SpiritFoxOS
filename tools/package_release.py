@@ -56,15 +56,18 @@ if set(result.get('fpu_simd_exception_observation',{})) != {'legacy','modern'} o
     raise SystemExit('Record actual SIMD exception delivery limitations before packaging')
 if result.get('rmdir_host_assertions') != 11359 or result.get('rmdir_qemu') is not True or result.get('rmdir_qemu_boots') != 2:
     raise SystemExit('Run empty directory rights, busy/nonempty, reuse and VM regressions before packaging')
-for name in ['esp/EFI/BOOT/BOOTX64.EFI','storage.img','persistent.img','development.pub','application.pub','trust-policy.json']:
+if result.get('trust_host_assertions') != 29 or result.get('trust_qemu') is not True:
+    raise SystemExit('Run persistent revocation host and VM regressions before packaging')
+for name in ['esp/EFI/BOOT/BOOTX64.EFI','storage.img','persistent.img','development.pub','application.pub','backup.pub','trust-policy.json']:
     actual = hashlib.sha256((BUILD/name).read_bytes()).hexdigest()
     if result.get('artifacts_sha256',{}).get(name) != actual:
         raise SystemExit('Artifact changed since validation: '+name)
 items = [(BUILD/'esp/EFI/BOOT/BOOTX64.EFI','EFI/BOOT/BOOTX64.EFI'),(BUILD/'storage.img','storage.img'),(BUILD/'persistent.img','persistent.img'),(BUILD/'development.pub','development.pub'),(BUILD/'test-results.json','test-results.json'),(ROOT/'README.md','README.md')]
 items.append((BUILD/'trust-policy.json','trust-policy.json'))
 items.append((BUILD/'application.pub','application.pub'))
-items += [(p,'docs/'+p.name) for p in sorted((ROOT/'docs').glob('*.md'))]
-manifest = {'files_sha256': {name: hashlib.sha256(path.read_bytes()).hexdigest() for path,name in items}, 'validation': 'tools/test.py: host + legacy storage + VT-d/modern DMA isolation + persistence/update-health/version-policy/fault/restart + kernel-boundary/storage-failure security + directory-capability openat + truncate/zero-extension fault/recovery + trust-policy/rotation/revocation + native-argv/explicit-environment/read-only/preflight + relative-native/private-image/reboot + file-RPC/local-bounds/IPC-rejection + block-reply/private-channel/restart + echo-reply/per-instance/capacity-recovery + authenticated-launch-kind/suffix-independent + dependency-generation/transactional-leases + echo-supervision/bounded-restart + echo-health/hang/protocol-failure + native-capacity/lease-drain/supervision VMs + actual-task-PID exhaustion host checks + installed-invocation/preflight/corrupt-rollback + RAM-unlink/directory/rights/slot-reuse + canonical-file-handle/stat VMs + canonical-kernel-capabilities + eager-FP-context/fresh/interleaved/timer/fault VMs + empty-RAM-directory/rmdir/rights/nonempty/reuse VMs'}
+items.append((BUILD/'backup.pub','backup.pub'))
+items += [(p,p.relative_to(ROOT).as_posix()) for p in sorted((ROOT/'docs').rglob('*.md'))]
+manifest = {'files_sha256': {name: hashlib.sha256(path.read_bytes()).hexdigest() for path,name in items}, 'validation': 'tools/test.py: host + legacy storage + VT-d/modern DMA isolation + persistence/update-health/version-policy/fault/restart + kernel-boundary/storage-failure security + directory-capability openat + truncate/zero-extension fault/recovery + trust-policy/rotation/immutable-and-durable-runtime-revocation + native-argv/explicit-environment/read-only/preflight + relative-native/private-image/reboot + file-RPC/local-bounds/IPC-rejection + block-reply/private-channel/restart + echo-reply/per-instance/capacity-recovery + authenticated-launch-kind/suffix-independent + dependency-generation/transactional-leases + echo-supervision/bounded-restart + echo-health/hang/protocol-failure + native-capacity/lease-drain/supervision VMs + actual-task-PID exhaustion host checks + installed-invocation/preflight/corrupt-rollback + RAM-unlink/directory/rights/slot-reuse + canonical-file-handle/stat VMs + canonical-kernel-capabilities + eager-FP-context/fresh/interleaved/timer/fault VMs + empty-RAM-directory/rmdir/rights/nonempty/reuse VMs'}
 archive = BUILD/'SpiritFoxOS-M6-Updates.zip'
 with zipfile.ZipFile(archive,'w',zipfile.ZIP_DEFLATED) as z:
     for path,name in items:

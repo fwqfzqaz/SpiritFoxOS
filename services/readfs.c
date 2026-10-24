@@ -1,4 +1,4 @@
-/* SFRFS1 is a small, fixed-directory, read-only disk format; see docs/STORAGE.md. */
+/* SFRFS1 is a small, fixed-directory, read-only disk format; see docs/architecture/STORAGE.md. */
 #include "readfs.h"
 static int zero(const uint8_t*p,size_t n){while(n--)if(*p++)return 0;return 1;}
 int sf_readfs_path(const char*p){

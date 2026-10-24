@@ -1,0 +1,32 @@
+name: Linux host tests
+
+on: [push, pull_request]
+
+jobs:
+  host:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Cache workspace toolchain
+        uses: actions/cache@v4
+        with:
+          path: .tools
+          key: zig-0.13.0-${{ runner.os }}
+      - name: Install QEMU and OVMF
+        run: sudo apt-get update && sudo apt-get install -y qemu-system-x86 ovmf
+      - name: Bootstrap workspace toolchain
+        run: python3 tools/bootstrap.py
+      - name: Build and run host tests
+        run: python3 tools/test.py --host-only
+      - name: Upload host test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: spiritfoxos-linux-host-results
+          path: |
+            build/test-results.json
+            build/esp/EFI/BOOT/BOOTX64.EFI

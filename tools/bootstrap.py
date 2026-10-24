@@ -13,6 +13,8 @@ ROOT = Path(__file__).resolve().parents[1]
 STORE = ROOT / '.tools'
 STORE.mkdir(exist_ok=True)
 os.environ['TEMP'] = os.environ['TMP'] = str(ROOT / '.cache')
+LINUX = os.uname().sysname == 'Linux' if hasattr(os, 'uname') else False
+ZIG_BIN = STORE / 'zig' / ('zig' if LINUX else 'zig.exe')
 
 
 def fetch(url, name, digest=None, algorithm='sha256'):
@@ -27,19 +29,42 @@ def fetch(url, name, digest=None, algorithm='sha256'):
 
 
 def zig():
-    if (STORE / 'zig' / 'zig.exe').exists():
+    if ZIG_BIN.exists():
         return
     index = json.load(urllib.request.urlopen('https://ziglang.org/download/index.json'))
-    item = index['0.13.0']['x86_64-windows']
-    archive = fetch(item['tarball'], 'zig.zip', item['shasum'])
-    with zipfile.ZipFile(archive) as z:
-        prefix = z.namelist()[0].split('/')[0]
-        z.extractall(STORE)
-    (STORE / prefix).rename(STORE / 'zig')
+    item = index['0.13.0']['x86_64-linux' if LINUX else 'x86_64-windows']
+    if LINUX:
+        archive = fetch(item['tarball'], 'zig.tar.xz', item['shasum'])
+        with tarfile.open(archive) as t:
+            t.extractall(STORE, filter='data')
+    else:
+        archive = fetch(item['tarball'], 'zig.zip', item['shasum'])
+        with zipfile.ZipFile(archive) as z:
+            z.extractall(STORE)
+    prefix = next(STORE.glob('zig-*'))
+    prefix.rename(STORE / 'zig')
     print('Zig ready', flush=True)
 
 
 def qemu():
+    if LINUX:
+        import shutil
+        system = shutil.which('qemu-system-x86_64')
+        firmware = None
+        for base in ('/usr/share/ovmf/x64', '/usr/share/OVMF', '/usr/share/edk2/x64'):
+            for code_name, vars_name in (('OVMF_CODE.4m.fd', 'OVMF_VARS.4m.fd'),
+                                         ('OVMF_CODE_4M.fd', 'OVMF_VARS_4M.fd'),
+                                         ('OVMF_CODE.fd', 'OVMF_VARS.fd')):
+                code, vars_ = Path(base) / code_name, Path(base) / vars_name
+                if code.exists() and vars_.exists():
+                    firmware = (code, vars_)
+                    break
+            if firmware:
+                break
+        if not system or not firmware:
+            raise RuntimeError('Linux needs qemu-system-x86_64 and OVMF (ovmf package) installed')
+        print('Using system QEMU', system, flush=True)
+        return
     if (STORE / 'qemu' / 'qemu-system-x86_64.exe').exists():
         return
     base = 'https://qemu.weilnetz.de/w64/qemu-w64-setup-20260729'
