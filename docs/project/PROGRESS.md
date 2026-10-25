@@ -3,18 +3,17 @@
 更新日期：2026-10-24（北京时间）。
 
 - 工作区：`E:\SpiritFoxOS`。指定源目录的三项顶层内容已移动到这里。
-- 本轮目标：解决 PR #10 与 origin/main 的合并冲突，保留两边实现与主分支目录结构。
-- status: pr10_merge_verified_ready_to_push
+- 本轮目标：SDK 已交付 002ea46 / PR #11（151 VM、1086.09 秒）；当前修复旧四记录事务盘被错误回退的问题，保留只读挂载并在普通提交时原子升级。
+- status: txn_compat_verified_ready_to_push
 - round_complete: true
 - continuous_work: true
 - quota_paused: false
 - user_paused: false
 - pause_reason: none
-- 分支：`codex/trust-policy-20261023`；origin 为 `https://github.com/fwqfzqaz/SpiritFoxOS.git`。
-- 最近已推送基线：`8b704ae`，空目录删除完整回归 145 VM / 1166.82 秒。此结果仅描述合并前基线，不作为当前合并结果的验证。
-- 正在合并：`origin/main` 的 `741b8db`，含 `66abb2d` 持久化密钥撤销、Linux 宿主支持及文档/测试/包工具分层。
-- 当前验证：合并源码已重新构建，完整 `python tools/test.py --skip-build` 通过（1001.23 秒、149 VM），日志 `build/pr10-merge-final-full.txt`；七项摘要与临时策略前基线一致。当前全部测试/VM 已结束。未交付 SDK 仍保存在 stash `bbbbf630329e88e41f656c1ce3da59b2a575ea82` 与 `.cache/checkpoints/sdk-quota-paused-20261024-122016.zip`，未混入此次合并。SDK 原先中止的 147 VM 回归不计为通过。
-- 交付步骤：正常提交推送当前 PR 分支，核对 GitHub 可合并状态；以 HEAD、origin 和 PR 实际 SHA 为准。然后按新路径恢复上述 SDK 存档，先迁移改动与验证脚本，再重新完成全部相应测试；不能覆盖本次合并内容或使用旧回归结果冒充通过。
+- 分支：`codex/file-client-sdk-20261024`；origin 为 `https://github.com/fwqfzqaz/SpiritFoxOS.git`。
+- 当前基线：`origin/main` 的 `f2e41bd`，包含作者 d6a71f2 的浮点环境布局、echo 监督状态和 Windows 构建入口修复；PR #10 已合并，两项托管 CI 均成功。
+- 当前验证：`python tools/test.py` 包含初始构建，完整通过（1086.09 秒、151 VM）；416510 项 SDK 宿主、两种传输专项及全部既有回归通过，七项交付摘要一致。日志 `build/file-client-author-main-full.txt`。此前中断记录仍不计为通过。
+- 下一步：验证、更新文档、打包后正常推送 SDK 分支并创建新 PR；核对新的 Windows/Linux 检查，不能把旧 PR 的通过结果套用到本轮。
 
 ## 已完成
 
@@ -127,3 +126,57 @@ M3空目录删除完整验证通过（1166.82秒、145VM），当前全部VM关�
 运行期撤销作为既有八密钥不可变用途策略上的附加拒绝层；它不能恢复构建时已撤销或错误用途的签名者。版本状态记账只允许忽略经过不可变策略认证后的运行期撤销，执行、安装和预览继续执行完整策略。主分支的 Linux 宿主目标、共享库后缀与 QEMU/OVMF 选择保留，本机实际验证为 Windows，不宣称在 Linux 执行过本次合并测试。
 
 合并验证通过：1001.23 秒、149 VM；29 组 Python 测试/3500 次变异、29 条运行期信任宿主检查及全部原有回归。Windows 本地通过，Linux 构建和宿主路径保留，托管 CI 状态单独核对。主分支的备用签名包改用已有磁盘条目作为测试夹具，避免额外目录节点耗尽固定命名空间配额。
+
+## SDK 从保存点恢复（2026-10-24）
+
+合并修复 db9c0a5 已正常推送，149 VM / 1001.23 秒通过，GitHub 确认冲突消除；托管 CI 正在运行。SDK 六个新文件从 stash bbbbf630 恢复时逐个校验 LF SHA-256，C 宿主相对包含路径与构建/测试/打包入口按主分支分层迁移，保留七项交付摘要和两套信任验证。完整回归目标为 151 VM，旧 147 VM 中断记录不算通过。
+
+## 用户暂停保存点（2026-10-24）
+
+用户确认合并问题已解决后要求暂停其余开发，等待下一步指示。合并修复已正常推送 db9c0a5，PR #10 的 GitHub mergeable=true；149 VM / 1001.23 秒完整回归记录另存 build/pr10-merge-test-results.json。Linux 托管宿主 CI 已成功，Windows 托管完整 CI 最后查询仍在运行；未取消远端已交付代码的 CI。
+
+当前 SDK 改动已按新目录恢复到工作树，尚未提交或推送。新构建和 416510 项 SDK 宿主检查、legacy/modern 两个 SDK 专项 VM 已通过，但 151 VM 完整套件在启动第 7 个 VM 时按用户要求停止，不计为完整通过。验证归档 build/file-client-user-interrupted-results.json；完整输出 build/file-client-merged-final-test.txt。
+
+已核验并终止本聊天 PID 51564 的测试进程及子 VM，执行器已返回退出码 1；没有遗留本轮本地测试/VM。该退出是主动暂停，不能称为产品测试失败。自动任务 spiritfoxos-2 已设为 PAUSED，除非用户明确继续，不自动恢复开发或额度唤醒。
+
+恢复时直接使用当前已迁移 SDK 工作树，不要再次运行 stash 恢复脚本；旧 stash bbbbf630 保留作为额外备份。先核对额度、工作树和进程，再完成新的完整 151 VM 回归；只有通过后才更新文档、打包、提交推送。合并提交 db9c0a5 与未完成 SDK 必须分别对待。
+
+## Windows CI 红叉调查保存点（2026-10-24）
+
+用户指出历史提交的检查红叉后，已读取首批提交与最近两次 Windows Actions 日志；它们均在密钥轮换重建 sfcrypto.dll 时出现 Permission denied。最新已推送 db9c0a5 的合并冲突已消除、Linux CI 成功，但 Windows CI 失败，不能称为整条交付已绿。
+
+原因：tools/test.py 初始直接调用 build.main，ctypes 把 DLL 留在测试父进程中，后续独立构建进程不能替换。先前本地 --skip-build 绕开了此问题。已在干净 db9c0a5 快照内真实复现同一错误；本地修改改为子进程执行初始 tools/build.py。独立补丁 .cache/ci-dll-lock-fix.patch 仅包含这一入口改动，不包含暂停的 SDK。
+
+修复后在 .cache/ci-dll-lock-db9c0a5 中执行与 CI 相同的 python tools/test.py（包含初始构建），宿主与部分 VM 通过；149 VM 全套在启动 40 个 VM 后因短期剩余 10% 停止，不能标为完整通过。进程 55780 及已核验子进程/VM 已终止；完整日志 build/ci-dll-fixed-full.txt，状态 .cache/ci-dll-repro-state.json 与 build/ci-dll-interrupted-results.json。修复尚未提交、未推送，GitHub 的 Windows 失败状态尚未解决。
+
+用户要求的其余开发暂停继续有效；自动任务 spiritfoxos-2 保持 PAUSED，不因额度刷新擅自重启。恢复 CI 修复前须获得用户继续指示并满足额度条件。先从默认策略重建隔离快照，避免沿用被中断密钥测试的临时策略产物，再完成 149 VM/打包验证；只暂存独立 CI 补丁和对应验证文档，正常推送后核对 Windows/Linux 托管检查。暂停的 SDK 工作树与 151 VM 未完成记录仍单独保留，不混入此修复。
+
+## 作者修复合并后继续（2026-10-24）
+
+用户明确授权继续，额度短期 100%、长期 55%，已清除用户/额度暂停并恢复五分钟接续。远端 PR #10 已合并为 main f2e41bd，作者 d6a71f2 的 Windows 和 Linux CI 均成功。旧的本地 DLL 修复已被作者修复覆盖，不再重复验证或提交。
+
+未完成工作先保存到 stash bb363147e95c1a6a02a3380986807d9e192f5cb9，再以最新 main 建立独立 SDK 分支；仅 tools/test.py 的重复 DLL 修复产生冲突，采用作者版本并保留三个 SDK 测试入口。其余五个 SDK 源文件的规范化 SHA-256 与保存点逐项一致；作者 kernel/arch.c、services/init.c、README.md 保持其基线内容。
+
+恢复后的完整测试会包含初始构建，避免再次漏测 CI 路径。进行中进程与日志见 .cache/active-work.json；不得并发启动第二套 VM。
+
+## 文件客户端 SDK 验证完成（2026-10-24）
+
+以作者已合并修复为基础，完整包含初始构建的 python tools/test.py 通过（1086.09 秒、151 VM）。416510 项真实编解码/传输模型/产品分发器宿主断言、两次生产 INT80 专项通过，各传输六十次显式 RAM/磁盘/持久只读目录应用回收；无默认根、控制台、元数据/读取/定位/列举/poll/关闭、只读修改拒绝和原始高位请求探针保持。
+
+本轮仅交付 SDK 及相应验证/文档，kernel/arch.c 与 services/init.c 保持作者基线。完整记录 build/file-client-author-test-results.json，交付摘要与发布包验证另存 .cache/sdk-author-full-proof.json。当前所有本地测试/VM 已结束。下一步正常推送新 SDK 分支并创建对应 PR，核对该提交的 Windows/Linux CI；不能沿用 PR #10 的绿色状态。一轮交付后按路线继续，额度不足时保存暂停。
+
+## 旧事务盘兼容修复进行中（2026-10-24）
+
+SDK 已推送 002ea46 并创建 PR #11；本地包含初始构建的 151 VM / 1086.09 秒通过，发布 ZIP 387815 字节、29 个清单条目 CRC/摘要一致。该提交 Linux CI 已成功，Windows CI 最后查询仍在运行；继续核对，不能称为已全绿。
+
+用真实 8b704ae 事务引擎生成四记录/1024 数据起点的 v1 银行，写入 generation 2 的 legacy-notes。原新读取器回退到空 generation 1、返回 NOT_FOUND；修复后对同一原始样本只读挂载，generation 2 与完整笔记均恢复，样本字节不变。复现与修复证据分别在 .cache/txn-compat-baseline.json 和 .cache/txn-compat-fixed-reader-result.json。
+
+产品解码器在摘要验证之后接受两个严格的既有 v1 布局，保持保留字节、路径、重复键、内容摘要、零填充和完整尾部检查；最高有效代次与同代次歧义拒绝保持。挂载不写盘；下一次普通提交仍只写当前五记录布局。
+
+2046559 项宿主检查通过，覆盖一千个旧/混合快照、边界长度/全部槽位、畸形输入与 783 个首次升级提交故障场景。六次 legacy/modern VM 专项已通过，验证四键旧盘只读访问字节不变、笔记/双槽/版本保持、普通写升级、第五个撤销键及重启。现在运行包含初始构建的完整回归（目标 157 VM），尚未声明本轮完整通过或提交推送。唯一运行测试见 .cache/active-work.json。
+
+## 旧事务盘兼容完整验证完成（2026-10-24）
+
+完整含初始构建回归通过（1112.0 秒、157 VM），2046559 项兼容宿主检查与 783 个首次升级故障场景、六次迁移/重启 VM 通过；全部既有 SDK 与内核/服务/信任/更新回归保持，七项交付摘要一致。结果 build/txn-compat-test-results.json，日志 build/txn-compat-final-full.txt；当前所有本地 VM 已关闭。下一步正常提交推送工作分支并更新当前开放 PR 的最终范围，核对最新提交的 Windows/Linux CI，继续路线中的未完成工作。SDK 提交 002ea46 的已交付证明仍保留，不把旧检查状态算作本次提交通过。
+
+SDK 首轮提交 002ea46 的托管检查已实际核对：Windows run 40096585352 与 Linux run 40096584961 均成功；该结果只属于 SDK 首轮，后续兼容修复提交须重新检查。
