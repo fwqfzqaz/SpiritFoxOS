@@ -1,93 +1,96 @@
 # SpiritFoxOS
 
-基于 x86_64 UEFI 的可启动微内核原型。保留提供的 EFI 引导入口，按 [设计说明 v0.2](docs/design/DESIGN-v0.2.md) 实现用户态 sfmod、模块装卸、文件对象、native 运行时，以及从只读 virtio 磁盘验证并运行应用。
+[![Linux](https://github.com/fwqfzqaz/SpiritFoxOS/actions/workflows/linux.yml/badge.svg?branch=main)](https://github.com/fwqfzqaz/SpiritFoxOS/actions/workflows/linux.yml)
+[![Windows](https://github.com/fwqfzqaz/SpiritFoxOS/actions/workflows/windows.yml/badge.svg?branch=main)](https://github.com/fwqfzqaz/SpiritFoxOS/actions/workflows/windows.yml)
+[![Design](https://img.shields.io/badge/design-v0.2-blue)](docs/design/DESIGN-v0.2.md)
+[![Status](https://img.shields.io/badge/status-M7%20network%20slice-orange)](docs/project/ROADMAP.md)
 
-当前推进到 M7 的网络纵向切片：在 M6 的 legacy/modern virtio-blk、SFRFS1、双银行事务、签名应用双槽与 QEMU q35 Intel VT-d DMA 隔离之上，新增 ring-3 legacy virtio-net 驱动与有界 ARP/IPv4/ICMP/UDP/TCP 服务（`ifconfig`、`ping`、`udp`、`tcp`）。图形、用户会话、多核、其余 M7 方向以及网络 DHCP、IRQ、磁盘与网络同时授权尚未完成；其余扩展保留在路线图中。
+面向 x86_64 UEFI 的**微内核操作系统原型**。Core 0 只保留内存、IPC、设备与 ACPI/VT-d；文件系统、驱动、native 运行时和网络协议运行在 ring-3 的 `.sfmod` 中；应用以签名 `.sfk` 包从只读磁盘验证后装载。
 
-## 仓库结构
+> 这是研究型原型，不是生产系统。当前完成到 M7 的网络纵向切片，完整边界见[实现说明](docs/architecture/IMPLEMENTATION.md)。
 
-| 路径 | 内容 |
+## 亮点
+
+| 能力 | 当前状态 |
 | --- | --- |
-| `boot/` | UEFI 引导桩、ELF 重定位与 payload 链接。 |
-| `kernel/` | Core 0：入口、内存、IPC、设备、ACPI 与 VT-d。 |
-| `services/` | ring-3 sfmod 与服务：init、namespace、package、txn、storage、trust、virtio、net。 |
-| `include/` | 内核与服务共享的 ABI、结构与常量。 |
-| `tests/` | [测试目录](tests/README.md)：`host/` C 测试、`integration/` Python 测试、`qemu/` 端到端测试。 |
-| `tools/` | [工具目录](tools/README.md)：构建/测试/打包入口与 `package/` 格式实现。 |
-| `docs/` | [文档索引](docs/README.md)：设计、架构、质量与项目文档。 |
-| `vendor/` | 固定版本 Monocypher 4.0.3。 |
-| `build/` | 忽略提交的构建产物、镜像与测试结果。 |
+| 启动与隔离 | UEFI 验证签名启动包，ExitBootServices 后进入独立页表的 CPL3 `sf-init` |
+| 包格式 | 96 字节头 + 64 字节段描述符 + 确定性 CBOR + Ed25519 尾部，W^X 与段布局校验 |
+| 微内核边界 | 内核不解析路径、ELF、CBOR 或包格式；驱动与服务均为用户态模块 |
+| 存储 | legacy/modern `virtio-blk`、SFRFS1 只读盘、双银行事务持久化、掉电故障恢复 |
+| 更新与信任 | 应用 A/B 试运行、健康确认与回退、用途受限公钥、持久化密钥撤销、版本下限 |
+| DMA 隔离 | QEMU q35 Intel VT-d，按设备授予有界 IOVA，拒绝越界 DMA |
+| native 运行时 | static 与 `relative-v1` 位置无关装载、私有映像、有界 argv/env、有界 libc SDK |
+| 网络切片 | ring-3 legacy `virtio-net`、ARP/IPv4/ICMP、一次性 UDP/TCP，`ifconfig`/`ping`/`udp`/`tcp` |
 
-## 构建和测试
+## 架构
 
-构建宿主为 Linux x64（qemu-system-x86_64 与 OVMF 固件来自系统包）或 Windows x64 + Python 3.11 或更新版本。所有工具、缓存、密钥和输出都位于仓库内，不需要全局安装器或修改 PATH。
-
-```bash
-python3 tools/bootstrap.py
-python3 tools/test.py
+```mermaid
+flowchart LR
+    FW[UEFI 固件] --> EFI[BOOTX64.EFI<br/>验证启动包]
+    EFI --> CORE[Core 0 微内核<br/>内存 · IPC · 设备 · ACPI/VT-d]
+    CORE <-->|能力 IPC| INIT[sf-init<br/>manager · namespace · RAMFS · process]
+    INIT --> NATIVE[sf-native<br/>装载与运行]
+    INIT --> BLK[virtio-blk<br/>SFRFS1 · 事务盘]
+    INIT --> NET[virtio-net<br/>ARP · IPv4 · ICMP · UDP · TCP]
+    NATIVE --> APP[hello.sfk<br/>签名应用]
 ```
 
-第一步下载并校验 Zig 0.13.0 与 Monocypher 4.0.3；Linux 使用系统 QEMU/OVMF，Windows 下载 QEMU 构建。已提供的 Monocypher 源码在 `vendor/monocypher`。第二步执行基础服务、40950 条内核 IPC/内存边界及 8022 项实际任务创建/PID/FP复用、8155 条参数与 12034 条环境检查、6180 条元数据/规范句柄、353 条文件 RPC 分发边界、11359 条空目录回收、17340 条删除/槽复用、108 条 openat、83 条截断、229 条 IOMMU、4069 条版本策略与 14084 条网络协议检查、29 组 Python 测试（含 3500 次变异）、783 个事务、3132 个更新及 3132 个截断故障场景，以及含真实越界 DMA、试运行、版本策略、目录授权、持久化截断、密钥轮换/撤销与旧密钥迁移、驱动死亡和恢复、无盘 virtio-net ARP/ICMP/UDP/TCP 往返的 150 次 QEMU 启动（含主分支持久化撤销回归）。
+设计目标是“内核机制最小化、策略与服务用户态化”。当前把一个用户态二进制内的 manager、namespace、RAMFS 与 process 组合为 `sf-init`，协议边界仍以 IPC 与文件 RPC 保持。详见[设计说明 v0.2](docs/design/DESIGN-v0.2.md)。
 
-只构建：`python3 tools/build.py`。只运行宿主测试：`python3 tools/test.py --host-only`。已有镜像测试：`python3 tools/test.py --skip-build`。
+## 快速开始
 
-也可以使用根目录 `Makefile` 的统一入口；它只是上述 Python 命令的薄封装，不改变构建逻辑：
+环境：Linux x64（使用系统 QEMU 与 OVMF），或 Windows x64 + Python 3.11+。工具链、缓存和密钥都在仓库内，无需全局安装或修改 `PATH`。
 
-| 目标 | 作用 |
-| --- | --- |
-| `make` / `make help` | 列出全部目标。 |
-| `make bootstrap` | 下载并校验 Zig/Monocypher，检查系统 QEMU/OVMF。 |
-| `make build` | 构建内核、UEFI 镜像、签名包与测试盘；`TRUST_POLICY=<工作区内JSON>` 可固化信任策略。 |
-| `make test` / `make test-host` | 完整测试，或只构建并运行宿主/集成测试。 |
-| `make test-reuse` | 复用已有镜像重跑宿主、集成与 QEMU 测试（`--skip-build`）。 |
-| `make run` / `make run-persist` / `make run-iommu` | 交互启动；后两者使用可写持久盘，`run-iommu` 另启 Intel VT-d。 |
-| `make qemu-test` | 非交互运行基础 QEMU 场景。 |
-| `make qemu-<场景>` | 运行单个场景，例如 `make qemu-trust`、`make qemu-file-rpc`；`make qemu-list` 列出全部场景。 |
-| `make release` / `make dist` | 依据已通过的完整测试生成发布 ZIP，或先跑完整测试再打包。 |
-| `make inspect PACKAGE=...` / `make show-trust` | 用镜像信任策略检查包，或打印实际生效的策略。 |
-| `make clean` / `make distclean` / `make clean-tools` | 删除 `build/`；额外清理 `.cache/` 与 Python 缓存；删除可重新下载的 `.tools/`。 |
+```bash
+python3 tools/bootstrap.py     # 下载并校验 Zig 0.13.0 与 Monocypher
+python3 tools/test.py          # 构建 + 宿主/集成/QEMU 全量测试
+```
 
-`make run` 不会隐式重建镜像，缺失时会提示先执行 `make build`。`PYTHON`、`QEMU_ARGS`、`TEST_ARGS`、`PACKAGE` 可覆盖，例如 `make run QEMU_ARGS="--memory 128"`。`make clean` 不会删除 `.keys/`。
+常用变体：
 
-构建产物：
+```bash
+python3 tools/build.py                 # 只构建
+python3 tools/test.py --host-only      # 只跑宿主测试
+python3 tools/test.py --skip-build     # 复用已有镜像
+```
 
-- `build/esp/EFI/BOOT/BOOTX64.EFI`：包含内核和已签名启动包的 UEFI 应用。
-- `build/*.sfmod`、`build/*.sfk`：实际构建出的模块与应用。
-- `build/storage.img`：1 MiB 的只读测试盘，含 `diskhello.sfk`、`disk-echo.sfmod`、更新故障测试包和说明文件；diskhello 与 disk-echo 不在启动包中，pieprobe 同时在 bundle 与盘上提供。
-- `build/persistent.img`：2 MiB 新格式事务盘，具有相同只读包区；请复制后作为可写盘使用，重新构建会覆盖原始构建镜像。
-- `build/development.pub`、`build/application.pub`、`build/backup.pub`：分别用于模块与应用的开发公钥；两个私钥种子位于忽略提交的 `.keys/development.seed`、`.keys/application.seed`。
-- `build/trust-policy.json`：镜像中实际生效的公开包信任策略，包含用途和撤销规则。
-- `build/qemu-128.log`、`build/qemu-256.log`、`build/qemu-512.log`：串口验证记录。
-- `build/test-results.json`：本次测试结果。
+根目录 [Makefile](Makefile) 是同一套 Python 命令的薄封装：
 
-完整测试通过后，执行 `python3 tools/package_release.py` 生成 `build/SpiritFoxOS-M6-Updates.zip`，其中包含 EFI 镜像、两种测试盘、公钥、文档、测试结果与内容摘要。
+```bash
+make build          # 构建 EFI、模块、应用与测试盘
+make test           # 完整测试
+make run            # 交互启动
+make run-persist    # 可写持久盘
+make run-iommu      # 启用 VT-d
+make qemu-list      # 列出单场景
+make dist           # 全量测试后打包发布 ZIP
+```
 
-重新构建保持工作区中现有的两个开发密钥。删除任一种子后会生成新的签名身份，不能自动认证旧安装。旧单密钥原型的迁移须显式启用过渡策略，步骤见 [信任策略](docs/architecture/TRUST.md)；这里没有生产密钥、Secure Boot 配置或发布签名流程。
+`make`、`make help` 会列出全部目标；`QEMU_ARGS`、`TEST_ARGS`、`PACKAGE`、`PYTHON` 可覆盖默认参数。
 
-## 启动与交互
+## 交互
 
 ```bash
 python3 tests/qemu/qemu_test.py --interactive
+python3 tests/qemu/qemu_test.py --interactive --persistent --iommu
 ```
 
-进入系统后通过串口看到 `fox>`。除 `help`、`modules`、`echo`、RAMFS 读写和 `run hello.sfk` 外，还支持：
+进入系统后通过串口得到 `fox>`。常用命令：
 
 ```text
+help
+modules
 ls /disk/bin
 cat /disk/etc/readme.txt
+run hello.sfk
 run /disk/bin/diskhello.sfk
 run argprobe.sfk alpha "two words" ''
-trust
-revoke-key /disk/bin/diskexit.sfk
-unmount /disk
-stop disk
-start disk
-mount /disk
+write /persist/notes durable-note
+install /disk/bin/diskhello.sfk
+stat /tmp/notes
 ```
 
-`/tmp` 等 RAMFS 文件关机后清空；`/disk` 只读，不接收写入。挂载时不能停止块驱动，打开的文件或目录会阻止卸载。缺盘、坏元数据和 I/O 错误会显示诊断并保留串口环境；坏签名应用被拒绝。串口输入有界，自动化驱动按字节节流。
-
-网络纵向切片只在无盘启动时接入（设备的全局所有者与固定 64 KiB DMA arena 只能授予一个驱动）。端到端测试 `python3 tests/qemu/qemu_net_test.py` 不挂盘、带 legacy virtio-net 并使用 QEMU user-mode 网络；接入后串口 shell 新增：
+磁盘模式支持只读 `/disk` 与事务盘 `/persist`；RAMFS 在关机后清空。网络切片需要**无盘启动**（磁盘与网络共享固定 64 KiB DMA arena，只能授予一个驱动）：
 
 ```text
 ifconfig
@@ -96,72 +99,75 @@ udp 10.0.2.2 56001 hello
 tcp 10.0.2.2 56002 hello
 ```
 
-`ifconfig` 显示 virtio 设备配置读出的 MAC、静态 `10.0.2.15/24`、网关 `10.0.2.2` 与 RX/TX 帧计数；`ping` 先做有界 ARP 解析，再发送三十二字节以内的 ICMP echo，超时返回诊断。`udp` 发送一条不超过 248 字节的数据报并等待一条来自同一对端的回复；`tcp` 执行一次有界 TCP 交换（握手、一段数据、一段回复、关闭），同样受 248 字节与固定超时限制，不向应用暴露连接对象。当前只有 legacy virtio-net（`0x10001af4`）、轮询队列、无中断路由，也没有 DHCP；VT-d 模式会拒绝 legacy 网络设备。
-
-默认配置使用 legacy 可信驱动模式。加上 `--iommu` 可启用受限 Intel VT-d 与 modern PCI ACCESS_PLATFORM 传输；此时 legacy 旁路设备会被拒绝，DMA 只能访问获授区域。启动日志会明确报告实际模式。尚不支持通用硬件、virtio MMIO 或 IRQ 重映射，详见 [DMA 隔离与验证边界](docs/architecture/IOMMU.md)。
-
-持久化端到端测试：`python3 tests/qemu/qemu_persist_test.py`，在镜像副本上自动验证写入、包安装、重启与故障恢复。交互启动：`python3 tests/qemu/qemu_test.py --interactive --persistent`，首次创建 `build/user-persistent.img`，以后继续使用该副本。挂载事务盘后支持：
-
-```text
-write /persist/notes durable-note
-install /disk/bin/diskhello.sfk
-run installed
-persist
-trust
-revoke-key /disk/bin/diskexit.sfk
-```
-
-成功写入与安装均等待设备 flush。`truncate /persist/notes <字节数>` 可缩短、清空或补零扩展笔记，同长度不写盘；RAMFS 普通文件也支持截断。任何写/flush 错误会停止卷的后续读写与截断，需重新挂载或重启恢复；错误时不能假定新版本一定没有落盘。当前配额为五个 16 KiB 文件，只对笔记与一个应用提供入口。
-
-安装提交候选包，第一次运行前持久记录试运行，按时退出 0 才确认。失败或未确认时重启回退已确认包；待更新期间拒绝覆盖安装。此回退只改变应用选择器，不能撤销外部副作用；格式、旧版兼容与健康标准见 [应用更新](docs/architecture/UPDATES.md)。
-
-签名信任采用最多八个构建时用途受限锚点（默认模块、应用、备用应用三个公钥）；`revoke-key /disk/bin/pkg` 撤销指定磁盘包的签名者并通过事务持久化，重启后仍生效，被撤销签名者的包按 `SF_REVOKED` 拒绝执行。`trust` 查询锚点与撤销状态；语义与限制见 [事务持久化](docs/architecture/PERSISTENCE.md)。
-
-已确认版本形成软件下限：拒绝降级及同版本换包，精确重装返回 `UNCHANGED` 且不写盘；`persist` 可查询实际已确认版本。下限在健康确认时才随已确认包更新，不防止离线回放旧磁盘镜像。
-
-隔离模式交互：`python3 tests/qemu/qemu_test.py --interactive --persistent --iommu`；专项验证：`python3 tests/qemu/qemu_iommu_test.py`。诊断 `dma-test read/write` 会刻意触发设备隔离故障并使该 VM 的磁盘驱动停止至重启，请只在测试 VM 使用。
+当前网络只支持 legacy virtio-net、轮询队列、静态 IP 与一次性 UDP/TCP 交换，无 IRQ、DHCP、连接对象或 `/net` 视图。
 
 ## 包工具
 
 ```bash
-python3 tools/package/sfpack.py module --manifest echo.json --image echo.elf --out echo.sfmod --seed .keys/development.seed
-python3 tools/package/sfpack.py app --manifest hello.json --image hello.elf --out hello.sfk --seed .keys/application.seed
-python3 tools/package/sfpack.py inspect build/hello.sfk --public-key build/application.pub
+python3 tools/package/sfpack.py module --manifest echo.json --image echo.elf \
+  --out echo.sfmod --seed .keys/development.seed
+python3 tools/package/sfpack.py app --manifest hello.json --image hello.elf \
+  --out hello.sfk --seed .keys/application.seed
 python3 tools/package/sfpack.py inspect build/hello.sfk --trust-policy build/trust-policy.json
 python3 tools/package/sfpack.py trust --policy build/trust-policy.json
-python3 tools/package/sfpack.py sign build/hello.sfk --seed .keys/application.seed
 ```
 
-输入 ELF 是构建中间产物，交付包使用设计说明中的 96 字节头、64 字节段描述符、确定性 CBOR 和 Ed25519 尾部。当前代码接受固定地址 native 和静态链接的 relative-v1 APP，有界相对重定位及私有映像；不支持资源包、动态导入、通用动态链接或压缩。构建脚本中列出了实际清单字段。
+当前支持固定地址 native 与静态链接的 `relative-v1` 应用；不支持资源包、动态导入、通用动态链接或压缩。只有应用清单显式声明 `namespace.read` 且通过 `runat`/`runenvat` 指定目录时，才会获得只读目录能力。
 
-默认策略分离模块与应用两个开发公钥，并准入仅 app 用途的备用应用公钥；`python tools/build.py --trust-policy <工作区内JSON>` 可固化最多八个公钥，区分模块/应用用途并拒绝撤销密钥，shell 的 `trust` 可查询。应用密钥须先重叠信任、确认新密钥包，再撤销旧密钥并重建启动；在线策略更新和旧 EFI 防回放尚未实现，配置与限制见 [信任策略](docs/architecture/TRUST.md)。
+## 仓库结构
 
-目录授权示例：`runat /tmp fileprobe.sfk`、`runat /disk/etc readprobe.sfk`。只有显式选择目录且应用签名清单声明 namespace.read 时才授予只读访问；普通 run 不授予文件根。
+| 路径 | 内容 |
+| --- | --- |
+| `boot/` | UEFI 引导桩、ELF 重定位与 payload 链接 |
+| `kernel/` | Core 0：入口、内存、IPC、设备、ACPI、VT-d |
+| `services/` | ring-3 服务与驱动：init、namespace、package、txn、storage、trust、virtio、net、SDK |
+| `include/` | 内核与服务共享的 ABI、结构与常量 |
+| `tests/` | [宿主](tests/host)、[集成](tests/integration)、[QEMU](tests/qemu) 测试 |
+| `tools/` | [构建/测试/打包](tools/README.md) 入口与包格式实现 |
+| `docs/` | [设计、架构、质量与项目文档](docs/README.md) |
+| `vendor/` | 固定版本 Monocypher 4.0.3 |
+| `build/` | 忽略提交的镜像、日志与测试结果 |
 
-详见 [截断与补零扩展](docs/architecture/TRUNCATE.md)、[目录能力与 openat](docs/architecture/NAMESPACE.md)、[存储协议与磁盘格式](docs/architecture/STORAGE.md)、[事务持久化](docs/architecture/PERSISTENCE.md)、[实现边界](docs/architecture/IMPLEMENTATION.md)、[安全审查与修复](docs/quality/SECURITY.md)、[测试记录](docs/quality/TESTING.md) 和 [后续路线](docs/project/ROADMAP.md)。
+`recovered/` 是重构前实现的冻结快照，仅供协议与算法参考，不参与构建。
 
-`run`/`runat` 可显式传递最多八个参数（含 argv[0]），支持引号、空字符串和转义。参数位于只读 BootArgs 页，解析错误不启动更新试运行；无额外参数保留空 argv 布局。SDK 和兼容边界见 [命令行参数](docs/architecture/ARGUMENTS.md)。
+## 验证
 
-显式环境示例：`runenv MODE=demo "NOTE=two words" EMPTY= -- argprobe.sfk alpha`；目录委派用 `runenvat <只读目录> NAME=VALUE -- <app> [args]`。最多八条唯一合法名字，不继承宿主环境；参数与环境共同受 512 字节限制，均为私有只读调用数据。
+- 宿主：内核 IPC/内存/任务边界、文件 RPC、openat、截断、命名空间、事务与更新故障、信任撤销、IOMMU、版本策略，以及以宿主 glibc 为独立参照的 SDK 检查。
+- 集成：包格式、SFRFS1、变异测试与构建脚本。
+- QEMU：128/256/512 MiB 启动、签名验证、CPL3 服务、模块生命周期、持久化/更新/IOMMU/网络场景。
+- 最近一次 `python3 tools/test.py --host-only` 在本机通过（约 50 秒）。
 
-位置无关 native 应用支持有界 `relative-v1` 相对重定位，代码/数据页保持私有且拒绝代码写修正。示例 `run pieprobe.sfk` 会在两个固定基址交替运行；这不提供安全随机化。格式、256 项上限及尚未实现的导入边界见 [native 配置](docs/architecture/NATIVE.md)。
+详细数量、环境与失败边界见[测试记录](docs/quality/TESTING.md)；安全审查见[SECURITY](docs/quality/SECURITY.md)。
 
-开发诊断 `channel-test` 在已挂载磁盘上并发启动两个只读应用，覆盖冷缓存块 RPC 与 namespace 请求隔离。驱动回复端点按实例创建和撤销，协议边界见 [命名空间](docs/architecture/NAMESPACE.md)。
+## 当前状态与下一步
 
-`echo-channel-test` 同时验证回显回复与两个冷缓存只读应用，`echo-capacity-test` 验证实际端点能力耗尽后的启动回滚和恢复。echo 回复按实例隔离，新旧代并存时各自持有回复队列。
+| 阶段 | 状态 | 下一步 |
+| --- | --- | --- |
+| M0–M2 | 包格式、CPL3、能力 IPC、模块依赖与有界监督 | 完整生命周期 RPC、能力转移/派生撤销、动态配额 |
+| M3 | RAMFS、管道、poll、openat、只读目录委派、空目录回收 | proc/sys 适配、事件队列、符号链接策略、按进程挂载视图 |
+| M4–M6 | native 运行时、SFRFS1、双银行事务、A/B 更新、VT-d、密钥轮换/撤销 | 通用现代设备、独立文件系统 sfmod、生产级信任与防回滚 |
+| M7 | 网络纵向切片 | DHCP、网络 IRQ、连接对象、`/net`、磁盘与网络同时授权；图形、用户会话、多核 |
 
-启动按认证后的包类型区分 MODULE 与 APP；run/runat/runenv 只接受 APP，模块启动只接受 MODULE，后缀不决定授权。
+优先级：先补齐持久化服务与签名/更新策略，再扩展设备、网络和运行时能力。完整清单见[路线图](docs/project/ROADMAP.md)与[实施进度](docs/project/PROGRESS.md)。
 
-模块依赖绑定提供者登记代次；槽复用必须显式重新登记消费者。全部依赖租约统一预检和记账，约束与尚未实现的生命周期功能见 [LIFECYCLE](docs/architecture/LIFECYCLE.md)。
+## 已知限制
 
-echo 与 sf-native 按有界预算处理进程死亡、健康超时和协议错误：退避重试，最多三次连续自动启动，稳定运行后获得新预算。native 在故障时关闭新准入，已有私有映像应用完成文件请求并释放租约后才重建。设备 DMA 隔离和显式恢复策略保持。
+- 原型无 Secure Boot 配置、生产密钥或发布签名流程；不支持物理断电与真实硬件复位验证。
+- 网络与磁盘互斥；VT-d 模式拒绝 legacy 设备；尚无 IRQ 重映射或通用设备隔离。
+- 无图形、用户会话与多核支持；无通用硬件、virtio MMIO 或热迁移。
+- 无动态链接、资源包、导入表或完整 POSIX 兼容层。
+- `relative-v1` 提供有界基址切换，不是安全随机化；应用隔离依赖页表与 W^X，而非完整沙箱。
 
-`stop echo` / `start echo`、`stop native` / `start native` 控制监督，`echo-status` / `native-status` 查询状态。root 故障诊断覆盖死亡、自旋、错误回复和实际能力/进程容量耗尽；操作和限制见 [LIFECYCLE](docs/architecture/LIFECYCLE.md)。
+## 文档导航
 
-进程标识保持正值并在每次启动内单调分配，耗尽后拒绝创建；边界机制与宿主验证范围见 [SECURITY](docs/quality/SECURITY.md)。
+| 文档 | 内容 |
+| --- | --- |
+| [设计说明 v0.2](docs/design/DESIGN-v0.2.md) | 目标架构、ABI 与安全模型 |
+| [实现边界](docs/architecture/IMPLEMENTATION.md) | 当前真实行为与未完成项 |
+| [命名空间](docs/architecture/NAMESPACE.md) / [存储](docs/architecture/STORAGE.md) | 文件对象、openat、SFRFS1 |
+| [持久化](docs/architecture/PERSISTENCE.md) / [更新](docs/architecture/UPDATES.md) | 双银行事务、A/B 与回退 |
+| [信任策略](docs/architecture/TRUST.md) / [native](docs/architecture/NATIVE.md) | 公钥用途、撤销、装载格式 |
+| [生命周期](docs/architecture/LIFECYCLE.md) / [CPU 上下文](docs/architecture/CPU_CONTEXT.md) | 依赖代次、租约、FPU 隔离 |
+| [测试记录](docs/quality/TESTING.md) / [安全审查](docs/quality/SECURITY.md) | 验证范围与已修复边界 |
 
-已安装候选的无效目录委派或 native 不可用会在试运行前拒绝，保留 PENDING 供正确调用重试；坏候选仍按原规则回退，见 [UPDATES](docs/architecture/UPDATES.md)。
-
-RAM 命名空间支持 `mkdir <绝对路径>` 和 `rm <绝对路径>`，两者接受单个含引号的路径参数。rm仅删除没有任何打开引用的可写RAM普通文件，拒绝目录、特殊对象及挂载内容；普通应用的只读目录委派保持。协议和忙引用边界见 [NAMESPACE](docs/architecture/NAMESPACE.md)。
-
-`stat <绝对路径>` 查询类型、长度、偏移、描述模式和节点标志，支持单个引号路径；普通应用使用OP_STAT查询自己的已有句柄。文件RPC拒绝64位传输句柄中的非零高位，权限及代次检查保持。
+欢迎通过 Issue 反馈问题；提交前请先运行 `python3 tools/test.py`，并保持 `-Wall -Wextra -Werror` 零告警。
