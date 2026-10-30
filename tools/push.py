@@ -11,6 +11,7 @@ import base64
 import os
 import re
 import shutil
+import signal
 import socket
 import subprocess
 import sys
@@ -24,7 +25,8 @@ DEFAULT_PROXY = "socks5h://127.0.0.1:7890"
 SENSITIVE_DIRS = {".cache", ".tools", ".keys", "build"}
 SENSITIVE_NAMES = ("credential", "password", "secret")
 START_TIMEOUT = 30
-PUSH_TIMEOUT = 180
+PUSH_TIMEOUT = 600
+AUTH_TIMEOUT = 8
 
 
 def git(*args, env=None, check=True, timeout=60):
@@ -162,11 +164,40 @@ def start_proxy(proxy):
 def stop_proxy(process):
     if not process or process.poll() is not None:
         return
-    process.terminate()
+    # The wrapper starts the tunnel as a child in the same session; signal the
+    # whole group so the tunnel does not outlive the push.
+    try:
+        os.killpg(os.getpgid(process.pid), signal.SIGTERM)
+    except OSError:
+        process.terminate()
     try:
         process.wait(timeout=3)
     except subprocess.TimeoutExpired:
-        process.kill()
+        try:
+            os.killpg(os.getpgid(process.pid), signal.SIGKILL)
+        except OSError:
+            process.kill()
+
+
+def credentials_present(url, env):
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https"):
+        return True
+    payload = f"protocol={parsed.scheme}\nhost={parsed.hostname}\n\n"
+    try:
+        result = subprocess.run(
+            ["git", "credential", "fill"],
+            cwd=ROOT,
+            env=env,
+            input=payload,
+            text=True,
+            capture_output=True,
+            timeout=AUTH_TIMEOUT,
+            check=False,
+        )
+    except subprocess.TimeoutExpired:
+        return False
+    return result.returncode == 0 and "username=" in result.stdout and "password=" in result.stdout
 
 
 def push_env(proxy, token):
@@ -181,6 +212,8 @@ def push_env(proxy, token):
         env["GIT_CONFIG_VALUE_0"] = ""
         env["GIT_CONFIG_KEY_1"] = "http.extraHeader"
         env["GIT_CONFIG_VALUE_1"] = f"Authorization: Basic {basic}"
+        # Fail fast on a rejected token instead of waiting on an interactive prompt.
+        env["GIT_ASKPASS"] = "/bin/false"
     return env
 
 
@@ -189,6 +222,7 @@ def reject_embedded_credentials(remote):
     parsed = urlparse(url)
     if parsed.username or parsed.password:
         raise SystemExit(f"remote {remote} embeds credentials in its URL; refusing to push")
+    return url
 
 
 def main():
@@ -198,6 +232,7 @@ def main():
     parser.add_argument("--branch", help="branch to push; defaults to the current branch")
     parser.add_argument("--proxy", default=DEFAULT_PROXY, help=f"local SOCKS proxy ({DEFAULT_PROXY})")
     parser.add_argument("--no-proxy", action="store_true", help="push without starting the accelerator")
+    parser.add_argument("--push-timeout", type=int, default=PUSH_TIMEOUT, help=f"seconds before giving up on git push ({PUSH_TIMEOUT})")
     parser.add_argument("--dry-run", action="store_true", help="show what would be staged and exit")
     parser.add_argument("--test", action="store_true", help="run host-only tests before committing")
     args = parser.parse_args()
@@ -231,17 +266,24 @@ def main():
     else:
         print("nothing to commit")
 
-    reject_embedded_credentials(args.remote)
+    url = reject_embedded_credentials(args.remote)
+    token = os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN")
+    if not token and not credentials_present(url, push_env(None, None)):
+        raise SystemExit(
+            f"no usable git credentials for {url}; export GITHUB_TOKEN or GH_TOKEN, "
+            "or run from a terminal where the git askpass helper works. "
+            "Refusing to hang on a credential prompt."
+        )
+
     process = None
     proxy = None if args.no_proxy else args.proxy
     try:
         if proxy:
             process = start_proxy(proxy)
-        token = os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN")
         env = push_env(proxy, token)
-        git("push", args.remote, branch, env=env, timeout=PUSH_TIMEOUT)
+        git("push", args.remote, branch, env=env, timeout=args.push_timeout)
         local = git_text("rev-parse", "HEAD")
-        remote_line = git_text("ls-remote", args.remote, f"refs/heads/{branch}", env=env, timeout=PUSH_TIMEOUT)
+        remote_line = git_text("ls-remote", args.remote, f"refs/heads/{branch}", env=env, timeout=args.push_timeout)
         remote = remote_line.split()[0] if remote_line else ""
         if remote != local:
             raise SystemExit(f"remote {branch} is {remote or 'missing'}, local HEAD is {local}")
