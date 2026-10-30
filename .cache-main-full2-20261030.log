@@ -1630,3 +1630,79 @@ Persistence VM: update-recovery-error
 Persistence VM: update-trial-recovery
 Persistence VM: update-substituted-candidate
 Persistence VM: update-confirm-stage
+Traceback (most recent call last):
+  File "/home/fwqfzqaz/work/SpiritFoxOS/tests/qemu/qemu_persist_test.py", line 541, in <module>
+    run(parser.parse_args().iommu)
+    ~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/fwqfzqaz/work/SpiritFoxOS/tests/qemu/qemu_persist_test.py", line 530, in run
+    update_health(machine,disk,pristine,committed)
+    ~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/fwqfzqaz/work/SpiritFoxOS/tests/qemu/qemu_persist_test.py", line 362, in update_health
+    vm.command('install /disk/bin/disknext.sfk','install: COMMITTED')
+    ~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/fwqfzqaz/work/SpiritFoxOS/tests/qemu/qemu_persist_test.py", line 93, in command
+    self.expect(marker, self.send(command))
+    ~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/fwqfzqaz/work/SpiritFoxOS/tests/qemu/qemu_persist_test.py", line 76, in expect
+    raise RuntimeError(self.name+': missing '+text+'\n'+self.output[-2500:].decode(errors='replace'))
+RuntimeError: update-confirm-stage: missing install: COMMITTED
+nded IPC queue accepts capacity
+[PASS] bounded IPC queue accepts capacity
+[PASS] bounded IPC queue accepts capacity
+[PASS] full IPC queue applies backpressure
+[PASS] blocked receive expires on monotonic deadline
+[PASS] sfexec validates and launches hello.sfk
+[PASS] application pins runtime lease
+Hello from hello.sfk!
+[PASS] hello.sfk writes through namespace RPC and exits
+PIE PASS base=0x44000000 counter=8
+PIE PASS base=0x46000000 counter=8
+[PASS] two relocated images retain private pointers and independent writable data
+NATIVE PRIVATE IMAGES PASSED
+CAPABILITY WIDTH APP PASSED
+[PASS] forged handles pointers RWX and privilege amplification rejected
+OPENAT APP PASSED
+[PASS] directory capability reads file and rejects escape and write amplification
+[PASS] exit code SF_BUSY is distinct from a live task
+[CORE] isolated user fault pid=0x000000000000000b vector=0x000000000000000e
+[PASS] user kernel-memory write isolated
+[CORE] isolated user fault pid=0x000000000000000c vector=0x0000000000000006
+[PASS] illegal instruction isolated
+[CORE] isolated user fault pid=0x000000000000000d vector=0x000000000000000e
+[PASS] non-executable user stack enforced
+[CORE] isolated user fault pid=0x000000000000000e vector=0x000000000000000e
+[PASS] IOMMU control MMIO inaccessible to ordinary user task
+[PASS] noncanonical user stack is isolated before kernel return
+[PASS] timer preempts noncooperating user task
+[PASS] runtime releases lease after application exit
+[PASS] missing runtime returns diagnostic error
+[PASS] runtime death is diagnosed without harming other services
+[PASS] runtime restarts after failure
+[PASS] runtime reply endpoint recreated after failure
+[VIRTIO] device initialization refused
+[VIRTIO] flush-capable write service in ring 3
+[PASS] write grant cannot overwrite immutable disk region
+[PASS] sector write rejects capacity and wrapped LBA before multiplication
+[PASS] write service rejects missing first fragment
+[PASS] transaction acquires dirty resource
+[PASS] dirty transaction prevents unmount and restores admission
+[PASS] transaction releases dirty resource
+PERSIST READY generation=8
+[PASS] signed sfmod loaded from disk without bundle fallback
+Hello from diskhello.sfk!
+[PASS] signed disk application runs through native runtime
+[PASS] echo restart policy configured
+[PASS] native restart policy configured
+BOOT TESTS PASSED
+SpiritFoxOS ready. Type help.
+fox> install /disk/bin/disknext.sfk
+install: failed code=20
+fox> 
+Traceback (most recent call last):
+  File "/home/fwqfzqaz/work/SpiritFoxOS/tools/test.py", line 78, in <module>
+    subprocess.run([sys.executable, 'tests/qemu/qemu_persist_test.py'], check=True)
+    ~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.14/subprocess.py", line 578, in run
+    raise CalledProcessError(retcode, process.args,
+                             output=stdout, stderr=stderr)
+subprocess.CalledProcessError: Command '['/usr/bin/python3', 'tests/qemu/qemu_persist_test.py']' returned non-zero exit status 1.

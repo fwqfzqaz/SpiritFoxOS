@@ -10,6 +10,7 @@
 | `build.py` | 构建内核、UEFI 镜像、sfmod、应用与测试盘。 |
 | `test.py` | 构建并运行宿主与 QEMU 测试，写出 `build/test-results.json`。 |
 | `package_release.py` | 校验测试结果与镜像摘要后生成发布包。 |
+| `push.py` | 提交当前改动并通过本地 spv SOCKS 代理推送；拒绝凭据类路径。 |
 
 根目录 `Makefile` 把上述入口映射为 `make bootstrap`、`make build`、`make test`、`make release` 等目标，并透传相同参数。
 

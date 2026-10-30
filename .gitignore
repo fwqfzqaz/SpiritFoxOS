@@ -4,6 +4,11 @@
 __pycache__/
 *.pyc
 /.keys/
+# local accelerator credentials and logs never belong in the repository
+/spv
+/spv_tosoes
+*.spv
+spv-*.log
 .DS_Store
 Thumbs.db
 *.swp
