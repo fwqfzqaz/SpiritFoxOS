@@ -8,7 +8,7 @@ Core 0 的单核任务现在拥有私有、16 字节对齐的 512 字节 FXSAVE6
 
 ## 实现
 
-初始化要求 CPUID 的 x87、FXSR、SSE 和 SSE2；CR0 保留 WP，设置 MP/NE，清除 EM/TS。CR4 设置 OSFXSR/OSXMMEXCPT，明确清除 OSXSAVE；EFER 清除 FFXSR，确保 CPL0 不省略 XMM 的保存/恢复。只支持 x87、MMX、XMM0–15 和 MXCSR；AVX/AVX-512、XSAVE 扩展、AMX 和完整 TLS 不在当前配置内。CPU 宣告 AVX 硬件不代表本操作系统启用了 AVX。
+初始化要求 CPUID 的 x87、FXSR、SSE 和 SSE2；CR0 保留 WP，设置 MP/NE，清除 EM/TS。CR4 设置 OSFXSR/OSXMMEXCPT，CPU 宣告时同时启用 SMEP 与 SMAP，明确清除 OSXSAVE；EFER 清除 FFXSR，确保 CPL0 不省略 XMM 的保存/恢复。内核 RAM 访问走恒等映射，SMAP 不需要在用户窗口临时置 AC。只支持 x87、MMX、XMM0–15 和 MXCSR；AVX/AVX-512、XSAVE 扩展、AMX 和完整 TLS 不在当前配置内。CPU 宣告 AVX 硬件不代表本操作系统启用了 AVX。
 
 每次从用户态进入中断/系统调用后，在可能结束或切换任务前以 FXSAVE64 保存当前任务。调度选中下一任务、更新 CR3 后，先以无等待 FNINIT 和固定零指针 FLDENV 环境清理旧状态，再以 FXRSTOR64 恢复其私有状态；初次进入同样恢复。内核 C 继续禁用编译器 SSE/MMX，内核 IRQ 路径不使用浮点，保存操作不等待未屏蔽的 x87 异常。用户的待处理异常由其后续用户指令触发，不能在其他任务中继承。
 

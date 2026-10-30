@@ -18,7 +18,7 @@ class Native(unittest.TestCase):
         cls.pub=cls.crypto.key(cls.seed)[1]
         cls.good=(ROOT/'build/pieprobe.sfk').read_bytes()
         cls.elf=(ROOT/'build/pieprobe.elf').read_bytes()
-        cls.manifest={'app_id':'org.spiritfox.pieprobe','version':'0.1.0','runtime_id':'org.spiritfox.native','app_abi':1,'native_profile':'relative-v1','requested_caps':['stdio','namespace.read'],'relative_relocations':{'section':3,'offset':0,'bytes':48}}
+        cls.manifest={'app_id':'org.spiritfox.pieprobe','version':'0.1.0','runtime_id':'org.spiritfox.native','app_abi':1,'native_profile':'relative-v1','requested_caps':['stdio','namespace.read'],'resource_limits':{'memory':131072},'relative_relocations':{'section':3,'offset':0,'bytes':48}}
         cls.sections=[struct.unpack_from('<IIQQQQQ16s',cls.good,96+i*64) for i in range(4)]
         cls.records=[struct.unpack_from('<Qq',cls.good,cls.sections[3][2]+i*16) for i in range(3)]
         cls.prepare=cls.crypto.lib.sf_image_prepare

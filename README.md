@@ -2,7 +2,7 @@
 
 基于 x86_64 UEFI 的可启动微内核原型。保留提供的 EFI 引导入口，按 [设计说明 v0.2](docs/design/DESIGN-v0.2.md) 实现用户态 sfmod、模块装卸、文件对象、native 运行时，以及从只读 virtio 磁盘验证并运行应用。
 
-当前推进到 M6 的受限实现：legacy/modern virtio-blk、SFRFS1、双银行事务、签名应用双槽试运行/确认/失败回退，以及 QEMU q35 Intel VT-d 对 DMA RAM 访问的隔离。通用设备/IRQ 隔离、真实硬件断电保证、网络、图形与多核尚未完成；其余扩展保留在路线图中。
+当前推进到 M7 的网络纵向切片：在 M6 的 legacy/modern virtio-blk、SFRFS1、双银行事务、签名应用双槽与 QEMU q35 Intel VT-d DMA 隔离之上，新增 ring-3 legacy virtio-net 驱动与有界 ARP/IPv4/ICMP/UDP/TCP 服务（`ifconfig`、`ping`、`udp`、`tcp`）。图形、用户会话、多核、其余 M7 方向以及网络 DHCP、IRQ、磁盘与网络同时授权尚未完成；其余扩展保留在路线图中。
 
 ## 仓库结构
 
@@ -10,7 +10,7 @@
 | --- | --- |
 | `boot/` | UEFI 引导桩、ELF 重定位与 payload 链接。 |
 | `kernel/` | Core 0：入口、内存、IPC、设备、ACPI 与 VT-d。 |
-| `services/` | ring-3 sfmod 与服务：init、namespace、package、txn、storage、trust、virtio。 |
+| `services/` | ring-3 sfmod 与服务：init、namespace、package、txn、storage、trust、virtio、net。 |
 | `include/` | 内核与服务共享的 ABI、结构与常量。 |
 | `tests/` | [测试目录](tests/README.md)：`host/` C 测试、`integration/` Python 测试、`qemu/` 端到端测试。 |
 | `tools/` | [工具目录](tools/README.md)：构建/测试/打包入口与 `package/` 格式实现。 |
@@ -27,9 +27,27 @@ python3 tools/bootstrap.py
 python3 tools/test.py
 ```
 
-第一步下载并校验 Zig 0.13.0 与 Monocypher 4.0.3；Linux 使用系统 QEMU/OVMF，Windows 下载 QEMU 构建。已提供的 Monocypher 源码在 `vendor/monocypher`。第二步执行基础服务、40950 条内核 IPC/内存边界及 8022 项实际任务创建/PID/FP复用、8155 条参数与 12034 条环境检查、6180 条元数据/规范句柄、353 条文件 RPC 分发边界、11359 条空目录回收、17340 条删除/槽复用、108 条 openat、83 条截断、229 条 IOMMU 与 4069 条版本策略检查、29 组 Python 测试（含 3500 次变异）、783 个事务、3132 个更新及 3132 个截断故障场景，以及含真实越界 DMA、试运行、版本策略、目录授权、持久化截断、密钥轮换/撤销与旧密钥迁移、驱动死亡和恢复的 149 次 QEMU 启动（含主分支持久化撤销回归）。
+第一步下载并校验 Zig 0.13.0 与 Monocypher 4.0.3；Linux 使用系统 QEMU/OVMF，Windows 下载 QEMU 构建。已提供的 Monocypher 源码在 `vendor/monocypher`。第二步执行基础服务、40950 条内核 IPC/内存边界及 8022 项实际任务创建/PID/FP复用、8155 条参数与 12034 条环境检查、6180 条元数据/规范句柄、353 条文件 RPC 分发边界、11359 条空目录回收、17340 条删除/槽复用、108 条 openat、83 条截断、229 条 IOMMU、4069 条版本策略与 14084 条网络协议检查、29 组 Python 测试（含 3500 次变异）、783 个事务、3132 个更新及 3132 个截断故障场景，以及含真实越界 DMA、试运行、版本策略、目录授权、持久化截断、密钥轮换/撤销与旧密钥迁移、驱动死亡和恢复、无盘 virtio-net ARP/ICMP/UDP/TCP 往返的 150 次 QEMU 启动（含主分支持久化撤销回归）。
 
 只构建：`python3 tools/build.py`。只运行宿主测试：`python3 tools/test.py --host-only`。已有镜像测试：`python3 tools/test.py --skip-build`。
+
+也可以使用根目录 `Makefile` 的统一入口；它只是上述 Python 命令的薄封装，不改变构建逻辑：
+
+| 目标 | 作用 |
+| --- | --- |
+| `make` / `make help` | 列出全部目标。 |
+| `make bootstrap` | 下载并校验 Zig/Monocypher，检查系统 QEMU/OVMF。 |
+| `make build` | 构建内核、UEFI 镜像、签名包与测试盘；`TRUST_POLICY=<工作区内JSON>` 可固化信任策略。 |
+| `make test` / `make test-host` | 完整测试，或只构建并运行宿主/集成测试。 |
+| `make test-reuse` | 复用已有镜像重跑宿主、集成与 QEMU 测试（`--skip-build`）。 |
+| `make run` / `make run-persist` / `make run-iommu` | 交互启动；后两者使用可写持久盘，`run-iommu` 另启 Intel VT-d。 |
+| `make qemu-test` | 非交互运行基础 QEMU 场景。 |
+| `make qemu-<场景>` | 运行单个场景，例如 `make qemu-trust`、`make qemu-file-rpc`；`make qemu-list` 列出全部场景。 |
+| `make release` / `make dist` | 依据已通过的完整测试生成发布 ZIP，或先跑完整测试再打包。 |
+| `make inspect PACKAGE=...` / `make show-trust` | 用镜像信任策略检查包，或打印实际生效的策略。 |
+| `make clean` / `make distclean` / `make clean-tools` | 删除 `build/`；额外清理 `.cache/` 与 Python 缓存；删除可重新下载的 `.tools/`。 |
+
+`make run` 不会隐式重建镜像，缺失时会提示先执行 `make build`。`PYTHON`、`QEMU_ARGS`、`TEST_ARGS`、`PACKAGE` 可覆盖，例如 `make run QEMU_ARGS="--memory 128"`。`make clean` 不会删除 `.keys/`。
 
 构建产物：
 
@@ -68,6 +86,17 @@ mount /disk
 ```
 
 `/tmp` 等 RAMFS 文件关机后清空；`/disk` 只读，不接收写入。挂载时不能停止块驱动，打开的文件或目录会阻止卸载。缺盘、坏元数据和 I/O 错误会显示诊断并保留串口环境；坏签名应用被拒绝。串口输入有界，自动化驱动按字节节流。
+
+网络纵向切片只在无盘启动时接入（设备的全局所有者与固定 64 KiB DMA arena 只能授予一个驱动）。端到端测试 `python3 tests/qemu/qemu_net_test.py` 不挂盘、带 legacy virtio-net 并使用 QEMU user-mode 网络；接入后串口 shell 新增：
+
+```text
+ifconfig
+ping 10.0.2.2
+udp 10.0.2.2 56001 hello
+tcp 10.0.2.2 56002 hello
+```
+
+`ifconfig` 显示 virtio 设备配置读出的 MAC、静态 `10.0.2.15/24`、网关 `10.0.2.2` 与 RX/TX 帧计数；`ping` 先做有界 ARP 解析，再发送三十二字节以内的 ICMP echo，超时返回诊断。`udp` 发送一条不超过 248 字节的数据报并等待一条来自同一对端的回复；`tcp` 执行一次有界 TCP 交换（握手、一段数据、一段回复、关闭），同样受 248 字节与固定超时限制，不向应用暴露连接对象。当前只有 legacy virtio-net（`0x10001af4`）、轮询队列、无中断路由，也没有 DHCP；VT-d 模式会拒绝 legacy 网络设备。
 
 默认配置使用 legacy 可信驱动模式。加上 `--iommu` 可启用受限 Intel VT-d 与 modern PCI ACCESS_PLATFORM 传输；此时 legacy 旁路设备会被拒绝，DMA 只能访问获授区域。启动日志会明确报告实际模式。尚不支持通用硬件、virtio MMIO 或 IRQ 重映射，详见 [DMA 隔离与验证边界](docs/architecture/IOMMU.md)。
 

@@ -38,7 +38,7 @@ def make_fixtures():
         if phase=='revoked':
             policy['keys'][2]['revoked'] = True
         (FIXTURES/(phase+'.json')).write_text(json.dumps(policy),encoding='utf-8')
-    manifest = {'app_id':'org.spiritfox.diskhello','version':'0.4.0','runtime_id':'org.spiritfox.native','app_abi':1,'requested_caps':['stdio']}
+    manifest = {'app_id':'org.spiritfox.diskhello','version':'0.4.0','runtime_id':'org.spiritfox.native','app_abi':1,'requested_caps':['stdio'],'resource_limits':{'memory':131072}}
     image = (ROOT/'build/diskhello.elf').read_bytes()
     for name,version,signer in [('old','0.4.0','old'),('next','0.5.0','next'),('oldnext','0.6.0','old'),('revoked','0.6.0','revoked'),('module','0.6.0','module'),('unknown','0.6.0','unknown')]:
         (FIXTURES/(name+'.sfk')).write_bytes(pack(dict(manifest,version=version),image,2,SEEDS[signer]))

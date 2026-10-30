@@ -43,6 +43,8 @@ host_test('test_storage','tests/host/test_storage.c','services/namespace.c',no_u
 host_test('test_txn','tests/host/test_txn.c','services/txn.c','services/sha256.c',no_unused=True)
 host_test('test_update','tests/host/test_update.c','services/update.c','services/txn.c','services/sha256.c',no_unused=True)
 host_test('test_version','tests/host/test_version.c','services/version.c')
+host_test('test_net','tests/host/test_net.c','services/net_proto.c')
+host_test('test_sdk','tests/host/test_sdk.c','services/sdk.c')
 host_test('test_iommu','tests/host/test_iommu.c','kernel/acpi.c','kernel/vtd_tables.c',no_unused=True)
 for name,source in [('ipc','kernel/ipc.c'),('memory','kernel/memory.c')]:
     host_test('test_'+name,'tests/host/test_'+name+'.c',source,no_unused=True)
@@ -74,6 +76,7 @@ if not args.host_only:
     for case in ['missing', 'badheader', 'badhash', 'badsignature', 'writable', 'ioerror']:
         subprocess.run([sys.executable, 'tests/qemu/qemu_test.py', '--storage', case], check=True)
     subprocess.run([sys.executable, 'tests/qemu/qemu_persist_test.py'], check=True)
+    subprocess.run([sys.executable, 'tests/qemu/qemu_net_test.py'], check=True)
     subprocess.run([sys.executable, 'tests/qemu/qemu_iommu_test.py'], check=True)
     subprocess.run([sys.executable, 'tests/qemu/qemu_security_test.py'], check=True)
     subprocess.run([sys.executable, 'tests/qemu/qemu_openat_test.py'], check=True)
@@ -92,6 +95,10 @@ result['iommu_qemu'] = not args.host_only
 result['security_host'] = True
 result['security_qemu'] = not args.host_only
 result['ipc_host_assertions'] = 40908
+result['net_host_checks'] = 14084
+result['sdk_host_checks'] = 171738
+result['net_qemu'] = not args.host_only
+result['net_qemu_boots'] = 0 if args.host_only else 1
 result['memory_host_assertions'] = 42
 result['openat_host_assertions'] = 108
 result['openat_qemu'] = not args.host_only

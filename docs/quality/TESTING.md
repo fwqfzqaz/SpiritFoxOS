@@ -26,6 +26,7 @@ Linux 下 OVMF 文件名因发行版而异，QEMU 测试同时识别 `OVMF_CODE.
 - 229 条 IOMMU C 检查：ACPI 校验和、RSDT/XSDT、DMAR 长度/范围/重复、DRHD segment、端点覆盖；独立页表遍历验证获授 IOVA 的每个半扇区、前后边界、其他请求者和 CPU 物理地址均不能意外获得映射。
 - 更新状态机与真实事务引擎组合测试：规范编码、截断与逐位变异、身份及槽约束、首装失败；stage/begin/confirm/rollback 四个提交点各 261 个边界 × 三种故障，共 3132 个失败场景。恢复时包摘要、状态和回退槽保持一致，未确认试运行不会升级为已确认。
 - 4069 条版本策略检查：规范数字版本、最大 32 位分量、溢出/前导零/后缀拒绝、整数次序而非字符串次序、降级/同版本换包拒绝和精确重装识别，以及 1000 次固定种子版本字符串往返。与用户态安装器共用 `services/version.c`。
+- 171738 条 SDK 宿主检查：以宿主 glibc 为独立参照，覆盖内存/字符串/ctype 固定与随机输入、1000 组 strtol/strtoul、700 组格式化、0 到 40 字节截断的返回值/终止/字节一致性和 100 组 bsearch；SDK 自身不调用宿主库，也不含 syscall、分配、全局状态或流。
 
 ## QEMU 端到端
 
@@ -284,3 +285,13 @@ M6 尝试通过工作区桥调用 deepseek-flash 审查事务引擎。两次调�
 宿主包括 29 条撤销容量/幂等/隔离检查；29 组 Python 测试含用途策略与运行期拒绝层组合、已撤销签名者的签名损坏仍拒绝、不可变撤销不被空覆盖层恢复。事务/更新/截断三类故障场景保持通过，新增第五个事务键及数据布局使用主分支版本。备用 APP 密钥夹具替换已有磁盘条目，保留原 32 节点配额及持久挂载空间。
 
 所有测试/VM 已结束，发布门要求两套信任测试及七项精确摘要。Windows CI 限时调整为 45 分钟以容纳完整套件；本地通过不代表托管 CI 已完成。先前 SDK 中止的套件与本轮交付无关，未混入合并。
+
+## M7 网络纵向切片（2026-10-30）
+
+宿主 `test_net` 直接链接实际 `services/net_proto.c`，共 14084 条检查：严格点分十进制解析/格式化拒绝空段、前导零、超界、非数字与越界字节；ARP 请求长度/固定前缀/目标 IP 及回复校验；IPv4 头长度/校验和/协议/源地址与 ICMP echo 校验；UDP 构包（以太网 14 + IPv4 20 + UDP 8 + 载荷、伪头校验和、缺省校验和合法而错误校验和拒绝）与解包（长度/端口/源地址/分片/截断拒绝）；TCP 构包（20 字节头、data offset、序号/确认/标志/窗口、强制校验和）与解包（data offset 下界与越界、端口、分片、协议、截断与篡改校验和拒绝）；另含 ICMP、UDP、TCP 各一千组固定种子随机往返与超长载荷拒绝。未覆盖真实网卡收发，网卡路径由 QEMU 场景验证。
+
+新增 `tests/qemu/qemu_net_test.py`：128 MiB 无盘启动，`-netdev user,id=net0` 加 legacy virtio-net（`disable-modern=on,disable-legacy=off`），断言启动出现 `net: READY` 且没有存储就绪。串口依次执行 `ifconfig`（校验 `10.0.2.15/24`、网关 `10.0.2.2`、`255.255.255.0` 与 `link=up`）、`ping 10.0.2.2`（真实 ARP 后 ICMP 往返）、再次 `ifconfig`（正则校验 MAC `52:54:00:12:34:56` 与 RX/TX 计数增长）、再次 ping、`udp 10.0.2.2 56001 hello` 与 `tcp 10.0.2.2 56002 hello`（宿主 `127.0.0.1` 上的 UDP/TCP 回显服务经 slirp 映射往返 `ACK:hello`），最后 `shutdown` 并以退出码 1 结束。此前真实基线显示 RX 未跳过 10 字节 legacy `virtio_net_hdr`、TX 未添加该头，导致 ARP 可见而 ICMP 超时；修复后往返通过。
+
+本轮 TCP 首次实测中，握手成功但回复超时：等待循环把“纯 ACK（0 载荷）”当成结束条件立即退出，导致对端数据段被丢弃；改为纯 ACK 继续等待、RST/FIN 才终止后才通过。该修复只在真实 QEMU 往返中暴露，宿主边界测试无法覆盖。
+
+协议扩展的验证结果：`python3 tools/test.py --skip-build --host-only` 通过（47.55 秒），`net_host_checks=14084`；`python3 tests/qemu/qemu_net_test.py` 通过并输出 `NETWORK QEMU PASS (rx/tx advanced, ARP, ICMP, UDP and TCP over slirp)`，日志 `build/qemu-net.log`。限制：网络只在无盘启动接入，modern 网卡与 VT-d 隔离模式拒绝 legacy 设备，轮询无 IRQ，无 DHCP、无连接对象与 `/net` 命名空间视图，UDP/TCP 均为单次有界交换；图形、用户会话、多核与服务状态迁移未实现。本轮未重跑 150 VM 完整回归，M7 切片记录见 PROGRESS 第 66、67 项。

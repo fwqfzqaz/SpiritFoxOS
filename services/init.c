@@ -9,6 +9,7 @@
 #include "arguments.h"
 #include "native_image.h"
 #include "file_rpc.h"
+#include "net.h"
 static const SfBootArgs*boot;
 static uint32_t manager_ep;static SfManager manager;static SfNamespace ns;
 static int runtime_slot,echo_slot;static uint32_t runtime_pid,runtime_ep,runtime_reply,echo_pid,echo_ep;
@@ -18,6 +19,7 @@ static uint8_t package_snapshot[SF_READFS_FILE_MAX];
 typedef struct {uint32_t pid,reply,root;int lease;} Child;
 static Child children[16];static uint64_t requests;
 typedef struct {uint32_t pid,service,reply;} EchoPeer;
+static int net_slot=-1;static uint32_t net_pid,net_ep,net_reply;static int net_ready;static SfNetInfo net_info;
 static EchoPeer echo_peers[16];static SfSupervisor echo_watch;static uint64_t echo_health_at;static SfSupervisor native_watch;static uint64_t native_health_at;static int native_draining;
 static int echo_request(uint32_t,uint32_t,unsigned);
 static uint64_t echo_after(uint64_t now,uint64_t delay){return delay>UINT64_MAX-now?UINT64_MAX:now+delay;}
@@ -45,6 +47,80 @@ static int spawn_package_policy(const char*name,uint32_t service,uint32_t rights
 static int spawn_package_device(const char*name,uint32_t service,uint32_t rights,uint32_t device,uint32_t device_rights){return spawn_package_policy(name,service,rights,device,device_rights,0,0,0,1);}
 static int spawn_storage_package(const char*name,uint32_t service,uint32_t rights,uint32_t device,uint32_t device_rights,uint32_t reply){return spawn_package_policy(name,service,rights,device,device_rights,0,0,reply,1);}
 static int spawn_package(const char*name,uint32_t service,uint32_t rights){return spawn_package_device(name,service,rights,0,0);}
+static int net_call(SfMessage*m){
+ if(!net_pid||sf_sys(SYS_TASK_STATUS,net_pid,0,0)!=SF_TASK_RUNNING)return SF_DEVICE_GONE;
+ uint64_t id=++requests;m->h.request_id=id;int r=sf_send(net_ep,m);if(r)return r;
+ long from=sf_recv(net_reply,m,sf_deadline(2000));if(from<0){sf_sys(SYS_KILL,net_pid,SF_DEVICE_GONE,0);return(int)from;}
+ if(from!=(long)net_pid||m->h.request_id!=id)return SF_STALE_HANDLE;return(int)m->status;
+}
+/* The device model has one owner and one DMA arena. Network starts only when
+ * storage is absent, so a disk boot never competes for the block device grant. */
+static int net_start(void){
+ if(net_pid||net_ep||net_reply)return SF_BUSY;
+ uint32_t device=0;for(unsigned d=0;d<32&&!device;d++)for(unsigned f=0;f<8;f++){uint32_t bdf=d*8+f;long id=sf_sys(SYS_PCI_READ,bdf,0,0);if(id==0x10001af4u){device=bdf+1;break;}}
+ if(!device)return SF_NOT_FOUND;
+ if(net_slot<0){net_slot=sfmod_add(&manager,"org.spiritfox.virtio.net",0,0);if(net_slot<0)return net_slot;}
+ int r=sfmod_start(&manager,net_slot);if(r)return r;
+ net_reply=sf_sys(SYS_EP_CREATE,0,0,0);if((int)net_reply<0){r=(int)net_reply;net_reply=0;goto fail;}
+ net_ep=sf_sys(SYS_EP_CREATE,0,0,0);if((int)net_ep<0){r=(int)net_ep;net_ep=0;goto fail;}
+ int pid=spawn_storage_package("sf-virtio-net.sfmod",net_ep,RIGHT_RECV,device,0,net_reply);if(pid<0){r=pid;goto fail;}
+ net_pid=pid;SfMessage m;sf_message(&m,OP_NET_INFO,0);r=net_call(&m);if(r)goto fail;
+ if(m.length!=sizeof(SfNetInfo)){r=SF_BAD_FORMAT;goto fail;}
+ SfNetInfo info;memcpy(&info,m.data,sizeof(info));
+ if(info.reserved||!info.link||info.ip!=SF_NET_IPV4_LEN||info.gateway!=SF_NET_GATEWAY||info.netmask!=SF_NET_NETMASK){r=SF_BAD_FORMAT;goto fail;}
+ net_info=info;sfmod_acquire(&manager,net_slot,RES_DMA);net_ready=1;return 0;
+fail:
+ if(net_pid)sf_sys(SYS_KILL,net_pid,SF_DEVICE_GONE,0);net_pid=0;
+ if(net_ep)sf_sys(SYS_CAP_REVOKE,net_ep,0,0);net_ep=0;
+ if(net_reply)sf_sys(SYS_CAP_REVOKE,net_reply,0,0);net_reply=0;
+ sfmod_prepare(&manager,net_slot);sfmod_stop(&manager,net_slot);net_ready=0;return r;
+}
+static void net_status(void){
+ if(!net_ready){sf_log("net: DOWN\n");return;}
+ SfMessage m;sf_message(&m,OP_NET_INFO,0);int r=net_call(&m);
+ if(r||m.length!=sizeof(SfNetInfo)){sf_log("net: status failed code=");sf_number(r<0?-r:r);sf_log("\n");return;}
+ memcpy(&net_info,m.data,sizeof(net_info));
+ char mac[18];for(unsigned i=0;i<6;i++){mac[i*3]="0123456789abcdef"[net_info.mac[i]>>4];mac[i*3+1]="0123456789abcdef"[net_info.mac[i]&15];mac[i*3+2]=i==5?0:':';}
+ char ip[16],gateway[16],mask[16];sf_net_format_ipv4(net_info.ip,ip);sf_net_format_ipv4(net_info.gateway,gateway);sf_net_format_ipv4(net_info.netmask,mask);
+ sf_log("net: mac=");sf_log(mac);sf_log(" ip=");sf_log(ip);sf_log(" gateway=");sf_log(gateway);sf_log(" netmask=");sf_log(mask);
+ sf_log(" rx=");sf_number(net_info.rx_frames);sf_log(" tx=");sf_number(net_info.tx_frames);sf_log(net_info.link?" link=up\n":" link=down\n");
+}
+static void net_ping_line(char*line){
+ uint32_t ip=0;size_t bytes=strlen(line);
+ if(bytes>63||sf_net_parse_ipv4(line,&ip)){sf_log("ping: invalid address\n");return;}
+ SfMessage m;sf_message(&m,OP_NET_PING,0);memcpy(m.data,line,bytes);m.data[bytes]=0;m.length=bytes+1;int r=net_call(&m);
+ if(r){sf_log("ping: failed code=");sf_number(-r);sf_log("\n");return;}
+ sf_log("ping: reply from ");sf_log(line);sf_log(" in ");sf_number((uint64_t)m.mode*10);sf_log(" ms\n");
+}
+static int parse_port(const char*text,uint16_t*out){
+ if(!text||!*text)return SF_INVALID;unsigned value=0;
+ while(*text){if(*text<'0'||*text>'9')return SF_INVALID;value=value*10u+(unsigned)(*text-'0');if(value>65535u)return SF_INVALID;text++;}
+ if(!value)return SF_INVALID;*out=(uint16_t)value;return SF_OK;
+}
+static char* split_space(char*text){while(*text&&*text!=' ')text++;return *text?text:0;}
+static void net_packet_line(char*line,uint32_t opcode,const char*name){
+ char*second=split_space(line);
+ if(!second){sf_log(name);sf_log(": expected <ip> <port> <text>\n");return;}
+ *second=0;uint32_t ip=0;
+ if(sf_net_parse_ipv4(line,&ip)){sf_log(name);sf_log(": invalid address\n");return;}
+ char*rest=second+1;while(*rest==' ')rest++;
+ char*third=split_space(rest);
+ if(!third){sf_log(name);sf_log(": expected <ip> <port> <text>\n");return;}
+ *third=0;uint16_t port=0;
+ if(parse_port(rest,&port)){sf_log(name);sf_log(": invalid port\n");return;}
+ const char*payload=third+1;size_t bytes=strlen(payload);
+ if(bytes>SF_NET_PAYLOAD_MAX){sf_log(name);sf_log(": payload too long\n");return;}
+ SfNetPacket packet;memset(&packet,0,sizeof(packet));packet.ip=ip;packet.port=port;packet.bytes=(uint16_t)bytes;
+ memcpy(packet.data,payload,bytes);
+ SfMessage m;sf_message(&m,opcode,0);m.length=sizeof(packet);memcpy(m.data,&packet,sizeof(packet));
+ int r=net_call(&m);
+ if(r||m.length!=sizeof(packet)){sf_log(name);sf_log(": failed code=");sf_number(r<0?-r:r);sf_log("\n");return;}
+ memcpy(&packet,m.data,sizeof(packet));
+ if(packet.bytes>SF_NET_PAYLOAD_MAX){sf_log(name);sf_log(": bad reply\n");return;}
+ char from[16];sf_net_format_ipv4(packet.ip,from);char text[SF_NET_PAYLOAD_MAX+1];
+ memcpy(text,packet.data,packet.bytes);text[packet.bytes]=0;
+ sf_log(name);sf_log(": reply from ");sf_log(from);sf_log(":");sf_number(packet.port);sf_log(" \"");sf_log(text);sf_log("\" in ");sf_number((uint64_t)m.mode*10);sf_log(" ms\n");
+}
 static void native_forget(void){
  if(runtime_pid)sf_sys(SYS_KILL,runtime_pid,SF_DEVICE_GONE,0);
  if(runtime_ep)sf_sys(SYS_CAP_REVOKE,runtime_ep,0,0);if(runtime_reply)sf_sys(SYS_CAP_REVOKE,runtime_reply,0,0);
@@ -344,7 +420,7 @@ static void command(char*line){
   sf_log("help | ls [path] | cat <path> | write <path> <text> | truncate <path> <bytes> | stat <path> | rm <path> | mkdir <path> | rmdir <path> | modules | trust | revoke-key /disk/pkg | echo\n");
   sf_log("run <app or installed> [args] | runat <read-only-dir> <app> [args]\nrunenv [NAME=VALUE ...] -- <app> [args] | runenvat <dir> [NAME=VALUE ...] -- <app> [args]\n");
   sf_log("install /disk/bin/app.sfk | persist | stop echo | start echo | echo-status | echo-crash | echo-hang | echo-bad-reply | echo-bad-op | mount /disk | unmount /disk | stop disk | start disk | selftest | shutdown\n");
-  sf_log("stop native | start native | native-status | native-crash | native-hang | native-bad-reply | native-bad-op\n");}
+  sf_log("ifconfig | ping <ip> | udp <ip> <port> <text> | tcp <ip> <port> <text> | stop native | start native | native-status | native-crash | native-hang | native-bad-reply | native-bad-op\n");}
  else if(!strcmp(line,"rm")||!memcmp(line,"rm ",3))namespace_mutate_line(line+2,0);
  else if(!strcmp(line,"mkdir")||!memcmp(line,"mkdir ",6))namespace_mutate_line(line+5,1);
  else if(!strcmp(line,"rmdir")||!memcmp(line,"rmdir ",6))namespace_mutate_line(line+5,2);
@@ -358,6 +434,10 @@ static void command(char*line){
  else if(!memcmp(line,"revoke-key ",11)){int r=sf_persist_revoke(line+11);if(!r)sf_log("revoke: OK\n");else if(r==1)sf_log("revoke: UNCHANGED\n");else{sf_log("revoke: failed code=");sf_number(-r);sf_log("\n");}}
  else if(!strcmp(line,"modules")){sf_log("sf-init ACTIVE pinned; sf-native ");sf_log(manager.modules[runtime_slot].state==MOD_ACTIVE?"ACTIVE":"STOPPED");sf_log("; echo ");sf_log(manager.modules[echo_slot].state==MOD_ACTIVE?"ACTIVE\n":"STOPPED\n");}
  else if(!strcmp(line,"echo")){sf_log(echo_call(echo_ep,echo_pid)==0?"echo: ping\n":"echo: service unavailable\n");}
+ else if(!strcmp(line,"ifconfig"))net_status();
+ else if(!memcmp(line,"ping ",5))net_ping_line(line+5);
+ else if(!memcmp(line,"udp ",4))net_packet_line(line+4,OP_NET_UDP,"udp");
+ else if(!memcmp(line,"tcp ",4))net_packet_line(line+4,OP_NET_TCP,"tcp");
  else if(!memcmp(line,"run ",4))run_line(line+4,0);
  else if(!memcmp(line,"runat ",6))run_line(line+6,1);
  else if(!memcmp(line,"runenv ",7))run_environment_line(line+7,0);
@@ -415,6 +495,7 @@ long sf_main(const SfBootArgs*a,size_t size){
  else{sf_storage_tests();if(sf_storage_writable()){int r=sf_persist_mount(&ns);if(r){sf_log("PERSIST UNAVAILABLE code=");sf_number(-r);sf_log("\n");}}int ep=sf_sys(SYS_EP_CREATE,0,0,0);int disk_module=spawn_echo("/disk/modules/disk-echo.sfmod",ep,RIGHT_RECV);
   if(disk_module>0){int slot=sfmod_add(&manager,"org.spiritfox.disk-echo",0,0);sf_assert(slot>=0&&!sfmod_start(&manager,slot)&&!echo_call(ep,disk_module),"signed sfmod loaded from disk without bundle fallback");sfmod_prepare(&manager,slot);sfmod_stop(&manager,slot);sf_sys(SYS_KILL,disk_module,0,0);echo_forget(disk_module);sfmod_unload(&manager,slot);}else{sf_log("DISK PACKAGE REJECTED module code=");sf_number(-disk_module);sf_log("\n");}sf_sys(SYS_CAP_REVOKE,ep,0,0);
   int app=launch_app("/disk/bin/diskhello.sfk");if(app>0)sf_assert(wait_app(app)==0,"signed disk application runs through native runtime");else{sf_log("DISK PACKAGE REJECTED app code=");sf_number(-app);sf_log("\n");}}
+ {int net=net_start();if(!net)sf_log("net: READY\n");else if(net!=SF_NOT_FOUND){sf_log("NET UNAVAILABLE code=");sf_number(-net);sf_log("\n");}}
  sf_assert(!sf_supervisor_init(&echo_watch,3,25,1000),"echo restart policy configured");sf_supervisor_enable(&echo_watch,sf_ticks(),1);echo_health_at=echo_after(sf_ticks(),100);
  sf_assert(!sf_supervisor_init(&native_watch,3,25,1000),"native restart policy configured");sf_supervisor_enable(&native_watch,sf_ticks(),1);native_health_at=echo_after(sf_ticks(),100);
  sf_log("BOOT TESTS PASSED\nSpiritFoxOS ready. Type help.\nfox> ");char line[192]={0};unsigned used=0;

@@ -102,6 +102,26 @@ static int native_profile(SfPackage*p){
  for(unsigned i=0;i<p->count;i++)if(i!=section&&p->sections[i].type==4)return SF_BAD_FORMAT;
  p->relocation_offset=s->offset;p->relocation_count=bytes/16;return sf_native_relocations_validate(p);
 }
+/* Applications must declare bounded capabilities and a resource budget that
+ * covers their mapped image. Module manifests keep their existing schema. */
+static int app_manifest(const SfPackage*p){
+ Cbor c;uint8_t t;uint64_t n;
+ if(manifest_value(p,"requested_caps",&c))return 0;
+ if(!head(&c,&t,&n)||t!=4||n>32)return 0;
+ for(uint64_t i=0;i<n;i++){uint64_t len;if(!head(&c,&t,&len)||t!=3||!len||len>64||!span(0,len,c.end-c.p)||!utf8(c.p,len))return 0;c.p+=len;}
+ if(manifest_value(p,"resource_limits",&c))return 0;
+ if(!head(&c,&t,&n)||t!=5||!n||n>16)return 0;
+ uint64_t memory=0;int declared=0;
+ for(uint64_t i=0;i<n;i++){
+  uint64_t len;if(!head(&c,&t,&len)||t!=3||!span(0,len,c.end-c.p))return 0;const uint8_t*key=c.p;c.p+=len;
+  if(len==6&&!memcmp(key,"memory",6)){if(declared||!head(&c,&t,&memory)||t!=0)return 0;declared=1;}
+  else if(!item(&c,1))return 0;
+ }
+ if(!declared)return 0;
+ uint64_t mapped=0;
+ for(unsigned i=0;i<p->count;i++)if(p->sections[i].type<=3){if(mapped>UINT64_MAX-p->sections[i].memory)return 0;mapped+=p->sections[i].memory;}
+ return memory>=mapped&&memory<=SF_PACKAGE_MAX;
+}
 int sf_trust_validate(const SfTrustStore*trust){
  if(!trust||!trust->keys||!trust->count||trust->count>SF_TRUST_MAX)return SF_BAD_FORMAT;
  for(unsigned i=0;i<trust->count;i++){
@@ -144,6 +164,7 @@ int sf_package_open_trusted(SfPackage*p,const void*data,uint64_t bytes,const SfT
  char text[96];if(sf_manifest_text(p,mod?"module_id":"app_id",text,sizeof(text))||!text[0]||sf_manifest_text(p,"version",text,sizeof(text)))return SF_BAD_FORMAT;
  if(app&&sf_manifest_text(p,"runtime_id",text,sizeof(text)))return SF_BAD_FORMAT;
  if(app&&!app_abi(p))return SF_ABI_MISMATCH;
+ if(app&&!app_manifest(p))return SF_BAD_FORMAT;
  if(sf_u16(d+sig+32)!=1||sf_u16(d+sig+34)||sf_u32(d+sig+36)!=64)return SF_BAD_FORMAT;
  const SfTrustKey*key=0;uint8_t hash[32],message[55];
  for(unsigned i=0;i<trust->count;i++){sf_sha256(hash,trust->keys[i].public_key,32);if(!memcmp(hash,d+sig,32))key=&trust->keys[i];}

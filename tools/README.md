@@ -11,6 +11,8 @@
 | `test.py` | 构建并运行宿主与 QEMU 测试，写出 `build/test-results.json`。 |
 | `package_release.py` | 校验测试结果与镜像摘要后生成发布包。 |
 
+根目录 `Makefile` 把上述入口映射为 `make bootstrap`、`make build`、`make test`、`make release` 等目标，并透传相同参数。
+
 ## 包工具
 
 `package/` 保存磁盘与包格式实现，被构建、测试与发布共用：

@@ -100,8 +100,8 @@ def main(policy_path=None):
     Path('build/trust.h').write_text(trust_policy.header(policy))
     Path('build/trust-policy.json').write_text(json.dumps(policy, indent=2)+'\n')
     print('Building userspace packages', flush=True)
-    shared = objects('user-common', ['services/start.S', 'services/memory.c', 'services/libsf.c', 'services/arguments.c'])
-    init = shared + objects('init', ['services/init.c', 'services/file_rpc.c', 'services/native_image.c', 'services/argparse.c', 'services/storage.c', 'services/readfs.c', 'services/txn.c', 'services/update.c', 'services/version.c', 'services/persistence.c', 'services/manager.c', 'services/supervisor.c', 'services/namespace.c', *CRYPTO])
+    shared = objects('user-common', ['services/start.S', 'services/memory.c', 'services/libsf.c', 'services/arguments.c', 'services/sdk.c'])
+    init = shared + objects('init', ['services/init.c', 'services/file_rpc.c', 'services/native_image.c', 'services/argparse.c', 'services/storage.c', 'services/readfs.c', 'services/txn.c', 'services/update.c', 'services/version.c', 'services/persistence.c', 'services/manager.c', 'services/supervisor.c', 'services/namespace.c', 'services/net_proto.c', *CRYPTO])
     packages = []
     image = link_elf('sf-init', init, 'services/user.ld')
     manifest = {'module_id': 'org.spiritfox.init', 'version': '0.1.0', 'category': 'bootstrap', 'requested_caps': ['bootstrap'], 'resource_limits': {'memory': 2097152}}
@@ -132,20 +132,22 @@ def main(policy_path=None):
         else:
             packages.append((package_name, package_bytes))
     rpc_image = link_elf('rpcprobe',shared+objects('rpcprobe',['services/rpcprobe.c']),'services/user.ld')
-    rpc_manifest = {'app_id':'org.spiritfox.rpcprobe','version':'0.1.0','runtime_id':'org.spiritfox.native','app_abi':1,'requested_caps':['stdio','namespace.read']}
+    rpc_manifest = {'app_id':'org.spiritfox.rpcprobe','version':'0.1.0','runtime_id':'org.spiritfox.native','app_abi':1,'requested_caps':['stdio','namespace.read'],'resource_limits':{'memory':131072}}
     packages.append(('rpcprobe.sfk',pack(rpc_manifest,rpc_image,2,application_seed)))
     fp_image = link_elf('fpprobe',shared+objects('fpprobe',['services/fpprobe.c']),'services/user.ld')
-    fp_manifest = {'app_id':'org.spiritfox.fpprobe','version':'0.1.0','runtime_id':'org.spiritfox.native','app_abi':1,'requested_caps':['stdio']}
+    fp_manifest = {'app_id':'org.spiritfox.fpprobe','version':'0.1.0','runtime_id':'org.spiritfox.native','app_abi':1,'requested_caps':['stdio'],'resource_limits':{'memory':131072}}
     packages.append(('fpprobe.sfk',pack(fp_manifest,fp_image,2,application_seed)))
     pie_shared = objects('pie-common', ['services/start.S','services/memory.c','services/libsf.c','services/arguments.c'], defines=['-fpie'])
     pie_objs = pie_shared + objects('pieprobe',['services/pieprobe.c'],defines=['-fpie'])
     run(['-target','x86_64-freestanding-none','-nostdlib','-fpie','-pie','-Wl,-Bsymbolic','-Wl,-e,_sf_start','-Wl,-T,services/user-pie.ld','-Wl,--build-id=none',*pie_objs,'-o','build/pieprobe.elf'])
-    pie_manifest = {'app_id':'org.spiritfox.pieprobe','version':'0.1.0','runtime_id':'org.spiritfox.native','app_abi':1,'native_profile':'relative-v1','requested_caps':['stdio','namespace.read']}
+    pie_manifest = {'app_id':'org.spiritfox.pieprobe','version':'0.1.0','runtime_id':'org.spiritfox.native','app_abi':1,'native_profile':'relative-v1','requested_caps':['stdio','namespace.read'],'resource_limits':{'memory':131072}}
     pie_package = pack(pie_manifest,Path('build/pieprobe.elf').read_bytes(),2,application_seed)
     packages.append(('pieprobe.sfk',pie_package))
     disk_files['/bin/pieprobe.sfk'] = pie_package
     image = link_elf('sf-virtio-blk', shared + objects('virtio-blk', ['services/virtio_blk.c']), 'services/user.ld')
     packages.append(('sf-virtio-blk.sfmod', pack({'module_id': 'org.spiritfox.virtio.blk', 'version': '0.1.0', 'category': 'driver', 'requested_caps': ['device.virtio-blk.trusted'], 'resource_limits': {'memory': 131072}}, image, 1, seed)))
+    image = link_elf('sf-virtio-net', shared + objects('virtio-net', ['services/virtio_net.c', 'services/net_proto.c']), 'services/user.ld')
+    packages.append(('sf-virtio-net.sfmod', pack({'module_id': 'org.spiritfox.virtio.net', 'version': '0.1.0', 'category': 'driver', 'requested_caps': ['device.virtio-net.trusted'], 'resource_limits': {'memory': 131072}}, image, 1, seed)))
     Path('build/storage.img').write_bytes(create_readfs(disk_files))
     Path('build/persistent.img').write_bytes(create_persist(disk_files))
     for name, data in packages:

@@ -46,7 +46,7 @@ void device_poll(void){
 int device_grant(Task*t,uint32_t bdf_plus_one,uint32_t rights,SfBootArgs*args){
  if(!bdf_plus_one||bdf_plus_one>65536)return SF_INVALID;
  if(device_owner||quarantined)return SF_BUSY;if(iommu_mode()==2)return SF_DEVICE_GONE;
- uint32_t bdf=bdf_plus_one-1,identity=config_read(bdf,0);int modern=identity==0x10421af4u;if(identity!=0x10011af4u&&!modern)return SF_DENIED;
+ uint32_t bdf=bdf_plus_one-1,identity=config_read(bdf,0);int modern=identity==0x10421af4u;int legacy_net=identity==0x10001af4u;if(identity!=0x10011af4u&&!legacy_net&&!modern)return SF_DENIED;
  if(iommu_mode()==1&&!modern)return SF_DENIED; /* Legacy virtio bypasses platform DMA. */
  uint32_t bar=config_read(bdf,modern?32:16);uint64_t physical=0;
  if(modern){

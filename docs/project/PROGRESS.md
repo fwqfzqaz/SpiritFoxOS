@@ -1,8 +1,8 @@
 # SpiritFoxOS 实施进度
 
-更新日期：2026-10-24（北京时间）。
+更新日期：2026-10-30（北京时间）。
 
-- 工作区：`E:\SpiritFoxOS`。指定源目录的三项顶层内容已移动到这里。
+- 工作区：`/home/fwqfzqaz/work/SpiritFoxOS`。指定源目录的三项顶层内容已移动到这里。
 - 本轮目标：解决 PR #10 与 origin/main 的合并冲突，保留两边实现与主分支目录结构。
 - status: pr10_merge_verified_ready_to_push
 - round_complete: true
@@ -13,7 +13,7 @@
 - 分支：`codex/trust-policy-20261023`；origin 为 `https://github.com/fwqfzqaz/SpiritFoxOS.git`。
 - 最近已推送基线：`8b704ae`，空目录删除完整回归 145 VM / 1166.82 秒。此结果仅描述合并前基线，不作为当前合并结果的验证。
 - 正在合并：`origin/main` 的 `741b8db`，含 `66abb2d` 持久化密钥撤销、Linux 宿主支持及文档/测试/包工具分层。
-- 当前验证：合并源码已重新构建，完整 `python tools/test.py --skip-build` 通过（1001.23 秒、149 VM），日志 `build/pr10-merge-final-full.txt`；七项摘要与临时策略前基线一致。当前全部测试/VM 已结束。未交付 SDK 仍保存在 stash `bbbbf630329e88e41f656c1ce3da59b2a575ea82` 与 `.cache/checkpoints/sdk-quota-paused-20261024-122016.zip`，未混入此次合并。SDK 原先中止的 147 VM 回归不计为通过。
+- 当前验证：合并源码已重新构建。网络与有界 SDK 已按第 66-68 条并入当前工作树并通过宿主/集成回归；本轮第 69 条修复应用清单校验、SMEP/SMAP 与文档不一致后，host-only 套件 46.74 秒通过，256 MiB 默认与 max CPU VM 均通过。未交付的旧文件 SDK 原型仍保存在 stash `bbbbf630329e88e41f656c1ce3da59b2a575ea82` 与 `.cache/checkpoints/sdk-quota-paused-20261024-122016.zip`，与本轮有界 SDK 无关。
 - 交付步骤：正常提交推送当前 PR 分支，核对 GitHub 可合并状态；以 HEAD、origin 和 PR 实际 SHA 为准。然后按新路径恢复上述 SDK 存档，先迁移改动与验证脚本，再重新完成全部相应测试；不能覆盖本次合并内容或使用旧回归结果冒充通过。
 
 ## 已完成
@@ -100,9 +100,17 @@
 64. M3空目录回收：OP_RMDIR(24)和带引号单路径shell rmdir，与unlink共用目录写能力、规范路径及当前只读/挂载祖先检查。仅未挂载RAM目录，任何打开引用或任何后代均BUSY，路径组件边界区分相邻前缀，检查后才清空槽；普通应用仍只读，根和递归删除不支持。
 65. 11359项实际namespace/file_rpc宿主检查含一千次目录/子文件复用、跨所有者/dup忙引用、旧句柄、高位及畸形RPC无副作用；新增两个legacy/modern VM各四十次回收、嵌套非空/只读/挂载/特殊节点拒绝、引号/前缀边界，以及十二轮实际只读APP的RMDIR拒绝和回收。完整回归通过（1166.82秒、145VM），日志build/ram-rmdir-final-test.txt，全部已有宿主/VM回归和六项摘要一致；发布门实际拒绝旧143VM结果。
 
+66. M7网络纵向切片：ring-3用户态legacy virtio-net（0x10001af4）驱动，仅协商VIRTIO_NET_F_MAC，单队列对描述符/avail/used轮询收发；新增net.h ABI与OP_NET_INFO(60)/OP_NET_PING(61)，有界ARP解析与IPv4/ICMP echo（含校验和、分片拒绝、固定超时），shell新增ifconfig与ping。设备仍为全局唯一所有者与固定64 KiB DMA arena，因此网络只在无盘启动时接入；modern网卡与VT-d隔离模式拒绝legacy设备。5043项宿主协议检查（含一千组随机往返）与其余既有宿主检查继续通过。完整python tools/test.py --skip-build通过（1007.15秒、150VM），日志build/m7-network-final-test.txt；新增无盘QEMU网络场景，slirp下MAC/静态IP/网关、ARP与ICMP往返、rx/tx计数增长、二次ping与关机退出均实际验证，其余全部旧回归与七项摘要一致。图形、用户会话、多核、服务状态迁移以及DHCP/UDP/TCP、IRQ、磁盘与网络同时授权仍未完成。
+
+67. M7一次性UDP/TCP交换：在既有net服务上新增OP_NET_UDP(62)与OP_NET_TCP(63)，统一SfNetPacket（ip/port/bytes/248字节数据，正好256字节IPC正文），未把socket、连接或端口表放进内核。services/net_proto.c增加UDP/TCP伪头校验和、UDP构包与严格解包（IPv4版本/IHL/总长/分片/源地址/IP校验和/长度/端口；IPv4允许缺省UDP校验和，存在则必须通过）、TCP构包（20字节头、data offset 0x50、序号/确认/标志/窗口）与解包（强制校验和、选项偏移边界、载荷上限）。virtio_net.c的tcp_exchange按ARP→SYN→SYN-ACK→ACK→单段PSH/ACK数据→等待对端一段回复→ACK+FIN的顺序执行，SYN最多三次且数据最多重传两次，纯ACK不算回复，时长以tick为界；shell新增udp/tcp <ip> <port> <text>并以耗时毫秒回显。宿主test_net扩到14084项检查（含1000组TCP构包/解包随机往返、校验和篡改、data offset与分片/协议拒绝、超长拒绝），tools/test.py的net_host_checks同步为14084。host-only套件47.55秒通过；qemu_net_test.py新增宿主UDP(127.0.0.1:56001)与TCP(127.0.0.1:56002)回显服务，slirp下实际往返`ACK:hello`通过，日志build/qemu-net.log。限制仍为legacy轮询无IRQ、仅无盘启动、无DHCP、无连接对象与`/net`视图、磁盘与网络不能同时授权；本轮未重跑150VM完整回归。
+
+68. M4有界用户态SDK：把recovered/libc的纯函数子集移植为include/sdk.h与services/sdk.c，全部符号加sf_前缀，只含内存/字符串/ctype/数字转换/bsearch/格式化（sf_vsnprintf），不含syscall、malloc、全局状态、流或Linux ABI；字符串长度和格式化宽度/精度上限4096，格式化始终在size内终止并正确计数，h/hh/l/ll/z按实际类型读取，无符号转换忽略+与空格标志，INT64_MIN无未定义行为。按DESIGN-v0.2，recovered/runtime的ELF/ET_REL装载器不迁入Core 0：公开交付格式仍是.sfmod/.sfk，构建期ELF中间产物由sfpack转换，依赖排序/回滚/受限导入元数据已由manager.c与package.c覆盖。tests/host/test_sdk.c以宿主glibc为独立参照，固定用例加1000组随机转换、700组随机格式化、0..40截断和100组bsearch，共171738项检查通过；sdk.c已加入build.py的user-common，host-only套件46.2秒通过，发布结果新增sdk_host_checks=171738。
+
+69. 修复未声明的文档/代码缺口：应用清单现在强制声明并校验requested_caps（1..32项、非空UTF-8、每项不超过64字节）与resource_limits（含memory整数，必须覆盖映像映射总量且不超过32 MiB），缺失/空/低报/字符串或负值都在签名验证前按SF_BAD_FORMAT拒绝；模块清单保持原schema。CR4在CPUID宣告时启用SMEP与SMAP，内核RAM访问走恒等映射，不需要STAC窗口；QEMU默认CPU不宣告时打印诊断但不强制。Makefile纳入版本控制，PROGRESS工作区路径改为实际Linux工作区，SDK归档说明与第68条区分。host-only套件46.74秒通过（新增应用资源上限用例），256 MiB默认与max CPU各一次QEMU回归通过，max CPU日志无SMEP/SMAP不可用诊断。
+
 ## 交付与续做
 
-M3空目录删除完整验证通过（1166.82秒、145VM），当前全部VM关闭。正常提交推送当前origin分支、核对PR10后继续下一有界任务；不得因本轮交付停止。下一候选为M4公开文件客户端SDK，设计在.cache/next-file-sdk-plan.txt，独立原型已编译并通过416510项宿主模型/实际分发器检查，摘要记录.cache/file-sdk-prototype.json；尚未并入产品或完成guest验证。保留当前只读授权与全部旧协议/探针。
+M3空目录删除完整验证通过（1166.82秒、145VM），当前全部VM关闭。正常提交推送当前origin分支、核对PR10后继续下一有界任务；不得因本轮交付停止。M4有界用户态SDK已并入并通过171738项宿主检查；下一有界事项按既有顺序从文件系统/存储子系统的有界能力开始，runtime ELF装载器按DESIGN-v0.2不迁入。保留当前只读授权与全部旧协议/探针。
 
 内核能力与FP隔离已推送8aeb118、通过143VM。额外入口审查在两种实际VM中检查NT/DF/AC、SYSCALL/SYSENTER及FSGSBASE，均安全返回或只隔离原调用者，六项摘要与持久字节保持；记录build/entry-audit-results.json，未复现新漏洞，不把审查候选当成已确认漏洞。
 
@@ -110,7 +118,7 @@ M3空目录删除完整验证通过（1166.82秒、145VM），当前全部VM关�
 
 指定仓库为https://github.com/fwqfzqaz/SpiritFoxOS，PR10持续更新当前codex/trust-policy-20261023分支，不强制推送。此前PR9已由外部合并为main ca9e1a3。原误用xiaoniko258/SpiritFoxOS的当前代码树已按用户要求清除并保留迁移README；不再次操作该仓库。原分支头和迁移元数据在此前本地refs/archive与.cache/repo-migration中保留。
 
-更完整持久化服务、在线信任/独立生产根、通用IRQ/设备隔离、真实硬件断电、多核/网络/图形仍未完成，详见ROADMAP。当前QEMU验证不能替代物理硬件验收。
+更完整持久化服务、在线信任/独立生产根、通用IRQ/设备隔离、真实硬件断电仍未完成；网络仅在无盘启动且legacy模式可用，已支持一次性UDP/TCP交换但无DHCP、连接对象与`/net`命名空间视图；IRQ、图形、用户会话、多核与选定服务状态迁移仍未完成，详见ROADMAP。当前QEMU验证不能替代物理硬件验收。
 
 ## 额度保护
 

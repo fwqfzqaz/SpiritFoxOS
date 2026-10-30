@@ -24,7 +24,15 @@ void arch_init(void){
  uint32_t eax,ebx,ecx,edx;__asm__ volatile("cpuid":"=a"(eax),"=b"(ebx),"=c"(ecx),"=d"(edx):"a"(1),"c"(0));
  if((edx&0x07000001u)!=0x07000001u)panic("x87/FXSR/SSE2 required");
  uint64_t cr0,cr4;__asm__ volatile("mov %%cr0,%0":"=r"(cr0));cr0=(cr0|((1ull<<16)|(1ull<<5)|(1ull<<1)))&~((1ull<<2)|(1ull<<3));__asm__ volatile("mov %0,%%cr0"::"r"(cr0):"memory");
- __asm__ volatile("mov %%cr4,%0":"=r"(cr4));cr4=(cr4|(1ull<<9)|(1ull<<10))&~(1ull<<18);__asm__ volatile("mov %0,%%cr4"::"r"(cr4):"memory");
+ /* SMEP/SMAP stay off when the CPU does not advertise them. Kernel RAM
+  * accesses use the identity map, so SMAP never needs a user-window STAC. */
+ uint32_t max_leaf,ebx7=0;__asm__ volatile("cpuid":"=a"(max_leaf),"=b"(ebx),"=c"(ecx),"=d"(edx):"a"(0),"c"(0));
+ if(max_leaf>=7)__asm__ volatile("cpuid":"=a"(eax),"=b"(ebx7),"=c"(ecx),"=d"(edx):"a"(7),"c"(0));
+ __asm__ volatile("mov %%cr4,%0":"=r"(cr4));
+ cr4=(cr4|(1ull<<9)|(1ull<<10)|((ebx7&(1u<<7))?(1ull<<20):0ull)|((ebx7&(1u<<20))?(1ull<<21):0ull))&~(1ull<<18);
+ __asm__ volatile("mov %0,%%cr4"::"r"(cr4):"memory");
+ if(!(ebx7&(1u<<7)))serial("[arch] SMEP unavailable\n");
+ if(!(ebx7&(1u<<20)))serial("[arch] SMAP unavailable\n");
  /* PIC, PIT channel 0: 100Hz; all other IRQs remain masked. */
  outb(0x20,0x11);outb(0xa0,0x11);outb(0x21,32);outb(0xa1,40);outb(0x21,4);outb(0xa1,2);outb(0x21,1);outb(0xa1,1);outb(0x21,0xee);outb(0xa1,0xff);outb(0x3f9,1);
  outb(0x43,0x36);outb(0x40,11932&255);outb(0x40,11932>>8);

@@ -40,16 +40,33 @@ class Packages(unittest.TestCase):
             self.assertEqual(digest.raw, hashlib.sha256(data).digest())
 
     def test_requested_directory_capability(self):
-        manifest = {'app_id':'org.spiritfox.cap-test','version':'0.1.0','runtime_id':'org.spiritfox.native','app_abi':1}
+        manifest = {'app_id':'org.spiritfox.cap-test','version':'0.1.0','runtime_id':'org.spiritfox.native','app_abi':1,'resource_limits':{'memory':131072}}
         image = (ROOT/'build/hello.elf').read_bytes()
-        for caps, expected in [(None,0),([],0),(['stdio'],0),(['namespace.read'],1),(['namespace.read.extra'],0),(['stdio','namespace.read'],1),('namespace.read',-3),([1],-3),(['namespace.read',1],-3),({'namespace.read':True},-3)]:
+        for caps, expected in [(None,None),([],0),(['stdio'],0),(['namespace.read'],1),(['namespace.read.extra'],0),(['stdio','namespace.read'],1),('namespace.read',None),([1],None),(['namespace.read',1],None),({'namespace.read':True},None)]:
             with self.subTest(caps=caps):
                 fields = dict(manifest)
                 if caps is not None:
                     fields['requested_caps'] = caps
+                if expected is None:
+                    with self.assertRaisesRegex(ValueError, 'C loader rejected generated package: -3'):
+                        pack(fields,image,2,self.seed)
+                    continue
                 data = pack(fields,image,2,self.seed)
                 self.assertEqual(self.crypto.lib.sf_cap_check(data,len(data),self.pub,b'namespace.read'),expected)
                 self.assertEqual(self.crypto.lib.sf_cap_check(data,len(data),bytes(32),b'namespace.read'),-4)
+
+    def test_application_resource_limits(self):
+        base = {'app_id':'org.spiritfox.limit-test','version':'0.1.0','runtime_id':'org.spiritfox.native','app_abi':1,'requested_caps':['stdio']}
+        image = (ROOT/'build/hello.elf').read_bytes()
+        for limits in [None, {}, {'memory':0}, {'memory':1}, {'memory':'131072'}, {'memory':-1}, {'memory':33554433}, {'other':1}]:
+            with self.subTest(limits=limits):
+                fields = dict(base)
+                if limits is not None:
+                    fields['resource_limits'] = limits
+                with self.assertRaisesRegex(ValueError, 'C loader rejected generated package: -3'):
+                    pack(fields,image,2,self.seed)
+        data = pack(dict(base,resource_limits={'memory':131072}),image,2,self.seed)
+        self.assertEqual(self.crypto.verify(data,self.pub),0)
 
     def test_rfc8032_ed25519_vector(self):
         seed = bytes.fromhex('9d61b19deffd5a60ba844af492ec2cc44449c5697b326919703bac031cae7f60')
@@ -130,14 +147,14 @@ class Packages(unittest.TestCase):
         # A single-key call still works; the stranger's package fails; the
         # anchor set accepts both development- and backup-signed packages.
         self.assertEqual(self.crypto.lib.sf_check_set(self.good, len(self.good), (C.c_ubyte*32).from_buffer_copy(good_key), 1), 0)
-        hello_backup = pack({'app_id': 'org.spiritfox.hello', 'version': '0.1.0', 'runtime_id': 'org.spiritfox.native', 'app_abi': 1, 'requested_caps': ['stdio']},
+        hello_backup = pack({'app_id': 'org.spiritfox.hello', 'version': '0.1.0', 'runtime_id': 'org.spiritfox.native', 'app_abi': 1, 'requested_caps': ['stdio'], 'resource_limits': {'memory': 131072}},
                             (ROOT/'build/hello.elf').read_bytes(), 2, (ROOT/'.keys/backup.seed').read_bytes())
         keys = (C.c_ubyte*32*2).from_buffer_copy(good_key+backup)
         self.assertEqual(self.crypto.lib.sf_check_set(bytes(hello_backup), len(hello_backup), keys, 2), 0)
         self.assertEqual(self.crypto.lib.sf_check_set(self.good, len(self.good), keys, 2), 0)
         # A package signed by a key outside the anchor set is rejected even
         # when the set itself is otherwise valid.
-        hello_stranger = pack({'app_id': 'org.spiritfox.hello', 'version': '0.1.0', 'runtime_id': 'org.spiritfox.native', 'app_abi': 1, 'requested_caps': ['stdio']},
+        hello_stranger = pack({'app_id': 'org.spiritfox.hello', 'version': '0.1.0', 'runtime_id': 'org.spiritfox.native', 'app_abi': 1, 'requested_caps': ['stdio'], 'resource_limits': {'memory': 131072}},
                               (ROOT/'build/hello.elf').read_bytes(), 2, bytes(range(32)))
         self.assertEqual(self.crypto.lib.sf_check_set(bytes(hello_stranger), len(hello_stranger), keys, 2), -4)
         for count in [0, 9]:
