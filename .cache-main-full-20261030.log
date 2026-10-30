@@ -1,0 +1,163 @@
+ARGUMENTS PASS: 8155 checks; bounded canonical payload, lexer, 1000 roundtrips and malformed offsets
+ENVIRONMENT PASS: 12034 checks; explicit bounded names/values, empty/missing distinction and 1000 roundtrips
+FILE RPC PASS: 353 checks; bounded copied payload, canaries, unchanged offsets/state, rights and delegated-root lifecycle
+TASK PID PASS: 8022 checks; actual task_new, 1000 seeded PID states and 1000 dirty FP slot reuses; no allocation/publication on exhaustion, fresh aligned FP image and failed allocation never reuses PID
+SUPERVISOR PASS: 97101 checks; 1000 bounded restart traces, exact stable boundary, backoff, explicit stop/retry and saturating deadlines
+MANAGER PASS: 25080 checks; generation-bound dependencies, transactional lease accounting and 1000 replacement cycles
+Service tests passed: 116 assertions
+OPENAT PASS: 108 assertions
+STAT PASS: 6180 assertions
+RMDIR PASS: 11359 assertions
+UNLINK PASS: 17340 assertions
+TRUNCATE PASS: 83 namespace assertions
+RESIZE TXN PASS: 474740 checks, 3132 fault scenarios (4 transitions x 261 boundaries x 3 modes); zero extension, idempotence and independent files preserved
+Storage service tests passed: 35 assertions
+TXN PASS: 108315 checks, 261 operation boundaries x 3 fault modes; acknowledged commit and corruption recovery
+UPDATE PASS: 861499 checks, stage/begin/confirm/rollback x 261 boundaries x 3 fault modes; canonical state and interrupted-trial recovery
+VERSION PASS: 4069 checks, canonical numeric versions, overflow and monotonic digest-bound policy
+NET PASS: 14084 checks, bounded IPv4/ARP/ICMP/UDP/TCP framing and checksum validation
+SDK PASS 171738
+IOMMU HOST PASS: 229 checks (ACPI/DMAR bounds, scopes, checksums, DMA domain boundaries)
+IPC tests passed: 40908 assertions
+Memory tests passed: 42 assertions
+TRUST PASS: 29 checks, anchor validation, idempotent revocation, capacity cap, store isolation
+test_anchor_set_and_revocation (__main__.Packages.test_anchor_set_and_revocation) ... ok
+test_application_abi (__main__.Packages.test_application_abi) ... ok
+test_application_resource_limits (__main__.Packages.test_application_resource_limits) ... ok
+test_canonical_manifest (__main__.Packages.test_canonical_manifest) ... ok
+test_header_boundaries (__main__.Packages.test_header_boundaries) ... ok
+test_requested_directory_capability (__main__.Packages.test_requested_directory_capability) ... ok
+test_rfc8032_ed25519_vector (__main__.Packages.test_rfc8032_ed25519_vector) ... ok
+test_sections_and_zero_padding (__main__.Packages.test_sections_and_zero_padding) ... ok
+test_seeded_mutations (__main__.Packages.test_seeded_mutations) ... ok
+test_sha256_vectors (__main__.Packages.test_sha256_vectors) ... ok
+test_tamper_and_unknown_signer (__main__.Packages.test_tamper_and_unknown_signer) ... ok
+test_valid_every_built_package (__main__.Packages.test_valid_every_built_package) ... ok
+
+----------------------------------------------------------------------
+Ran 12 tests in 0.541s
+
+OK
+test_bounded_c_policy (__main__.Trust.test_bounded_c_policy) ... ok
+test_default_signing_roles (__main__.Trust.test_default_signing_roles) ... ok
+test_multiple_signers_and_usage (__main__.Trust.test_multiple_signers_and_usage) ... ok
+test_public_policy_roundtrip (__main__.Trust.test_public_policy_roundtrip) ... ok
+test_python_policy_rejection (__main__.Trust.test_python_policy_rejection) ... ok
+test_revocation_and_no_fallback (__main__.Trust.test_revocation_and_no_fallback) ... ok
+test_seeded_signed_mutations (__main__.Trust.test_seeded_signed_mutations) ... ok
+
+----------------------------------------------------------------------
+Ran 7 tests in 0.738s
+
+OK
+test_contents_hash_is_checked (__main__.ReadFs.test_contents_hash_is_checked) ... ok
+test_header_bounds (__main__.ReadFs.test_header_bounds) ... ok
+test_seeded_metadata_mutations (__main__.ReadFs.test_seeded_metadata_mutations) ... ok
+test_signed_metadata_cannot_bypass_bounds (__main__.ReadFs.test_signed_metadata_cannot_bypass_bounds) ... ok
+test_valid_disk_and_builder (__main__.ReadFs.test_valid_disk_and_builder) ... ok
+
+----------------------------------------------------------------------
+Ran 5 tests in 0.311s
+
+OK
+test_count_limits_and_bss_targets (__main__.Native.test_count_limits_and_bss_targets) ... ok
+test_elf_restrictions_and_roundtrip (__main__.Native.test_elf_restrictions_and_roundtrip) ... ok
+test_exact_fixture_and_preparation (__main__.Native.test_exact_fixture_and_preparation) ... ok
+test_manifest_profile_and_subtable (__main__.Native.test_manifest_profile_and_subtable) ... ok
+test_signed_seeded_record_mutations (__main__.Native.test_signed_seeded_record_mutations) ... ok
+test_signed_target_and_addend_rejection (__main__.Native.test_signed_target_and_addend_rejection) ... ok
+
+----------------------------------------------------------------------
+Ran 6 tests in 0.352s
+
+OK
+Persistence VM: capability-width-legacy
+Persistence VM: capability-width-modern
+CAPABILITY WIDTH QEMU PASS: 2 boots; high-bit SEND/RECV/CLOSE/DERIVE/REVOKE rejected, valid IPC and last-reference cleanup, 40 task reuses, normal native/file RPC and persistent bytes preserved
+Persistence VM: cpu-state-legacy
+Persistence VM: cpu-state-modern
+CPU STATE QEMU PASS: 2 boots; AVX-capable CPUs with AVX disabled, fresh physical FP/XMM/pointers/controls, 12 simultaneous pairs, private x87/MMX/XMM0-15 and rounding through yield/timer, isolated pending x87/AVX faults and timeout reuse; SIMD delivery observation={'legacy': 'tcg-status-only', 'modern': 'tcg-status-only'}
+Persistence VM: ram-rmdir-legacy
+Persistence VM: ram-rmdir-modern
+RAM RMDIR QEMU PASS: 2 boots; nested nonempty/readonly/mounted/special refusal, quoted empty directories, prefix boundary and 40 reuse cycles, real read-only delegated RPC denial and persistent bytes/cleanup preserved
+Persistence VM: file-stat-legacy
+Persistence VM: file-stat-modern
+FILE STAT QEMU PASS: 2 boots; fixed metadata/current sizes, no authority expansion, real high-handle rejection/root preserved, repeated RPC/descriptor cleanup and persistent bytes unchanged
+Persistence VM: ram-unlink-legacy
+Persistence VM: ram-unlink-modern
+RAM UNLINK QEMU PASS: 2 boots; 40 slot reuse cycles per transport, quoted mkdir/rm, read-only/special/path refusal, real delegated RPC denied, persistent bytes and cleanup preserved
+Persistence VM: invocation-preflight-legacy
+Traceback (most recent call last):
+  File "/home/fwqfzqaz/work/SpiritFoxOS/tests/qemu/qemu_invocation_preflight_test.py", line 45, in <module>
+    if __name__=='__main__':run()
+                            ~~~^^
+  File "/home/fwqfzqaz/work/SpiritFoxOS/tests/qemu/qemu_invocation_preflight_test.py", line 20, in run
+    vm.command('install /disk/bin/'+package+'.sfk','install: COMMITTED');pending=disk.read_bytes()
+    ~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/fwqfzqaz/work/SpiritFoxOS/tests/qemu/qemu_persist_test.py", line 93, in command
+    self.expect(marker, self.send(command))
+    ~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/fwqfzqaz/work/SpiritFoxOS/tests/qemu/qemu_persist_test.py", line 76, in expect
+    raise RuntimeError(self.name+': missing '+text+'\n'+self.output[-2500:].decode(errors='replace'))
+RuntimeError: invocation-preflight-legacy: missing install: COMMITTED
+ccepts capacity
+[PASS] bounded IPC queue accepts capacity
+[PASS] full IPC queue applies backpressure
+[PASS] blocked receive expires on monotonic deadline
+[PASS] sfexec validates and launches hello.sfk
+[PASS] application pins runtime lease
+Hello from hello.sfk!
+[PASS] hello.sfk writes through namespace RPC and exits
+PIE PASS base=0x44000000 counter=8
+PIE PASS base=0x46000000 counter=8
+[PASS] two relocated images retain private pointers and independent writable data
+NATIVE PRIVATE IMAGES PASSED
+CAPABILITY WIDTH APP PASSED
+[PASS] forged handles pointers RWX and privilege amplification rejected
+OPENAT APP PASSED
+[PASS] directory capability reads file and rejects escape and write amplification
+[PASS] exit code SF_BUSY is distinct from a live task
+[CORE] isolated user fault pid=0x000000000000000b vector=0x000000000000000e
+[PASS] user kernel-memory write isolated
+[CORE] isolated user fault pid=0x000000000000000c vector=0x0000000000000006
+[PASS] illegal instruction isolated
+[CORE] isolated user fault pid=0x000000000000000d vector=0x000000000000000e
+[PASS] non-executable user stack enforced
+[CORE] isolated user fault pid=0x000000000000000e vector=0x000000000000000e
+[PASS] IOMMU control MMIO inaccessible to ordinary user task
+[PASS] noncanonical user stack is isolated before kernel return
+[PASS] timer preempts noncooperating user task
+[PASS] runtime releases lease after application exit
+[PASS] missing runtime returns diagnostic error
+[PASS] runtime death is diagnosed without harming other services
+[PASS] runtime restarts after failure
+[PASS] runtime reply endpoint recreated after failure
+[VIRTIO] device initialization refused
+[VIRTIO] flush-capable write service in ring 3
+[PASS] write grant cannot overwrite immutable disk region
+[PASS] sector write rejects capacity and wrapped LBA before multiplication
+[PASS] write service rejects missing first fragment
+[PASS] transaction acquires dirty resource
+[PASS] dirty transaction prevents unmount and restores admission
+[PASS] transaction releases dirty resource
+PERSIST READY generation=1
+[PASS] signed sfmod loaded from disk without bundle fallback
+Hello from diskhello.sfk!
+[PASS] signed disk application runs through native runtime
+[PASS] echo restart policy configured
+[PASS] native restart policy configured
+BOOT TESTS PASSED
+SpiritFoxOS ready. Type help.
+fox> write /persist/notes PREFLIGHT-PRESERVED
+write: OK
+fox> install /disk/bin/diskhello.sfk
+install: failed code=18
+fox> 
+Traceback (most recent call last):
+  File "/home/fwqfzqaz/work/SpiritFoxOS/tools/test.py", line 62, in <module>
+    subprocess.run([sys.executable, 'tests/qemu/qemu_invocation_preflight_test.py'], check=True)
+    ~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.14/subprocess.py", line 578, in run
+    raise CalledProcessError(retcode, process.args,
+                             output=stdout, stderr=stderr)
+subprocess.CalledProcessError: Command '['/usr/bin/python3', 'tests/qemu/qemu_invocation_preflight_test.py']' returned non-zero exit status 1.

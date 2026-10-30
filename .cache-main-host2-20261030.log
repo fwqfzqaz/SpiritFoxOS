@@ -1,0 +1,173 @@
+Building host package verifier
+Building userspace packages
+Building Core 0
+Building UEFI image
+Build complete: /home/fwqfzqaz/work/SpiritFoxOS/build/esp/EFI/BOOT/BOOTX64.EFI
+ARGUMENTS PASS: 8155 checks; bounded canonical payload, lexer, 1000 roundtrips and malformed offsets
+ENVIRONMENT PASS: 12034 checks; explicit bounded names/values, empty/missing distinction and 1000 roundtrips
+FILE RPC PASS: 353 checks; bounded copied payload, canaries, unchanged offsets/state, rights and delegated-root lifecycle
+TASK PID PASS: 8022 checks; actual task_new, 1000 seeded PID states and 1000 dirty FP slot reuses; no allocation/publication on exhaustion, fresh aligned FP image and failed allocation never reuses PID
+SUPERVISOR PASS: 97101 checks; 1000 bounded restart traces, exact stable boundary, backoff, explicit stop/retry and saturating deadlines
+MANAGER PASS: 25080 checks; generation-bound dependencies, transactional lease accounting and 1000 replacement cycles
+Service tests passed: 116 assertions
+OPENAT PASS: 108 assertions
+STAT PASS: 6180 assertions
+RMDIR PASS: 11359 assertions
+UNLINK PASS: 17340 assertions
+TRUNCATE PASS: 83 namespace assertions
+RESIZE TXN PASS: 474740 checks, 3132 fault scenarios (4 transitions x 261 boundaries x 3 modes); zero extension, idempotence and independent files preserved
+Storage service tests passed: 35 assertions
+TXN PASS: 108315 checks, 261 operation boundaries x 3 fault modes; acknowledged commit and corruption recovery
+UPDATE PASS: 861499 checks, stage/begin/confirm/rollback x 261 boundaries x 3 fault modes; canonical state and interrupted-trial recovery
+VERSION PASS: 4069 checks, canonical numeric versions, overflow and monotonic digest-bound policy
+NET PASS: 14084 checks, bounded IPv4/ARP/ICMP/UDP/TCP framing and checksum validation
+SDK PASS 171738
+IOMMU HOST PASS: 229 checks (ACPI/DMAR bounds, scopes, checksums, DMA domain boundaries)
+IPC tests passed: 40908 assertions
+Memory tests passed: 42 assertions
+TRUST PASS: 29 checks, anchor validation, idempotent revocation, capacity cap, store isolation
+test_anchor_set_and_revocation (__main__.Packages.test_anchor_set_and_revocation) ... ok
+test_application_abi (__main__.Packages.test_application_abi) ... ok
+test_application_resource_limits (__main__.Packages.test_application_resource_limits) ... ok
+test_canonical_manifest (__main__.Packages.test_canonical_manifest) ... ok
+test_header_boundaries (__main__.Packages.test_header_boundaries) ... ok
+test_requested_directory_capability (__main__.Packages.test_requested_directory_capability) ... ok
+test_rfc8032_ed25519_vector (__main__.Packages.test_rfc8032_ed25519_vector) ... ok
+test_sections_and_zero_padding (__main__.Packages.test_sections_and_zero_padding) ... ok
+test_seeded_mutations (__main__.Packages.test_seeded_mutations) ... ok
+test_sha256_vectors (__main__.Packages.test_sha256_vectors) ... ok
+test_tamper_and_unknown_signer (__main__.Packages.test_tamper_and_unknown_signer) ... ok
+test_valid_every_built_package (__main__.Packages.test_valid_every_built_package) ... ok
+
+----------------------------------------------------------------------
+Ran 12 tests in 0.214s
+
+OK
+test_bounded_c_policy (__main__.Trust.test_bounded_c_policy) ... ok
+test_default_signing_roles (__main__.Trust.test_default_signing_roles) ... ok
+test_multiple_signers_and_usage (__main__.Trust.test_multiple_signers_and_usage) ... ok
+test_public_policy_roundtrip (__main__.Trust.test_public_policy_roundtrip) ... ok
+test_python_policy_rejection (__main__.Trust.test_python_policy_rejection) ... ok
+test_revocation_and_no_fallback (__main__.Trust.test_revocation_and_no_fallback) ... ok
+test_seeded_signed_mutations (__main__.Trust.test_seeded_signed_mutations) ... ok
+
+----------------------------------------------------------------------
+Ran 7 tests in 0.693s
+
+OK
+test_contents_hash_is_checked (__main__.ReadFs.test_contents_hash_is_checked) ... ok
+test_header_bounds (__main__.ReadFs.test_header_bounds) ... ok
+test_seeded_metadata_mutations (__main__.ReadFs.test_seeded_metadata_mutations) ... ok
+test_signed_metadata_cannot_bypass_bounds (__main__.ReadFs.test_signed_metadata_cannot_bypass_bounds) ... ok
+test_valid_disk_and_builder (__main__.ReadFs.test_valid_disk_and_builder) ... ok
+
+----------------------------------------------------------------------
+Ran 5 tests in 0.289s
+
+OK
+test_count_limits_and_bss_targets (__main__.Native.test_count_limits_and_bss_targets) ... ok
+test_elf_restrictions_and_roundtrip (__main__.Native.test_elf_restrictions_and_roundtrip) ... ok
+test_exact_fixture_and_preparation (__main__.Native.test_exact_fixture_and_preparation) ... ok
+test_manifest_profile_and_subtable (__main__.Native.test_manifest_profile_and_subtable) ... ok
+test_signed_seeded_record_mutations (__main__.Native.test_signed_seeded_record_mutations) ... ok
+test_signed_target_and_addend_rejection (__main__.Native.test_signed_target_and_addend_rejection) ... ok
+
+----------------------------------------------------------------------
+Ran 6 tests in 0.349s
+
+OK
+{
+  "passed": true,
+  "elapsed_seconds": 49.98,
+  "service_assertions": 116,
+  "storage_assertions": 35,
+  "package_tests": "passed (11 groups, including 1500 seeded mutations)",
+  "readfs_tests": "passed (5 groups, including 500 seeded metadata mutations)",
+  "qemu_memory_mib": [],
+  "storage_failure_cases": [],
+  "txn_fault_boundaries": 261,
+  "txn_fault_modes": 3,
+  "persistence_qemu": false,
+  "update_fault_scenarios": 3132,
+  "update_health_qemu": false,
+  "version_policy_host": true,
+  "version_policy_qemu": false,
+  "iommu_host_assertions": 229,
+  "iommu_qemu": false,
+  "security_host": true,
+  "security_qemu": false,
+  "ipc_host_assertions": 40908,
+  "net_host_checks": 14084,
+  "sdk_host_checks": 171738,
+  "net_qemu": false,
+  "net_qemu_boots": 0,
+  "memory_host_assertions": 42,
+  "openat_host_assertions": 108,
+  "openat_qemu": false,
+  "truncate_host_assertions": 83,
+  "resize_fault_scenarios": 3132,
+  "truncate_qemu": false,
+  "invocation_preflight_qemu": false,
+  "invocation_preflight_qemu_boots": 0,
+  "task_pid_host_checks": 8022,
+  "fpu_task_init_host_checks": 3000,
+  "kernel_capability_width": true,
+  "capability_width_qemu": false,
+  "capability_width_qemu_boots": 0,
+  "fpu_profile": "fxsave64-x87-mmx-sse",
+  "fpu_context_qemu": false,
+  "fpu_context_qemu_boots": 0,
+  "fpu_simd_exception_observation": {},
+  "native_supervision_qemu": false,
+  "native_supervision_qemu_boots": 0,
+  "echo_health_qemu": false,
+  "echo_health_qemu_boots": 0,
+  "supervisor_host_checks": 97101,
+  "supervisor_qemu": false,
+  "supervisor_qemu_boots": 0,
+  "manager_dependency_host_checks": 25080,
+  "manager_dependency_qemu": false,
+  "trust_policy_host": true,
+  "trust_policy_host_groups": 7,
+  "separate_signing_keys": true,
+  "arguments_host_checks": 8155,
+  "arguments_qemu": false,
+  "environment_host_checks": 12034,
+  "environment_qemu": false,
+  "native_relative_host_groups": 6,
+  "native_relative_mutations": 500,
+  "native_relative_qemu": false,
+  "native_relative_qemu_boots": 0,
+  "rmdir_host_assertions": 11359,
+  "rmdir_qemu": false,
+  "rmdir_qemu_boots": 0,
+  "stat_host_assertions": 6180,
+  "stat_qemu": false,
+  "stat_qemu_boots": 0,
+  "canonical_file_handles": true,
+  "unlink_host_assertions": 17340,
+  "unlink_qemu": false,
+  "unlink_qemu_boots": 0,
+  "file_rpc_host_checks": 353,
+  "file_rpc_qemu": false,
+  "file_rpc_qemu_boots": 0,
+  "block_reply_channel_qemu": false,
+  "block_reply_channel_qemu_boots": 0,
+  "launch_kind_qemu": false,
+  "launch_kind_qemu_boots": 0,
+  "echo_reply_channel_qemu": false,
+  "echo_reply_channel_qemu_boots": 0,
+  "trust_policy_qemu": false,
+  "trust_policy_qemu_boots": 0,
+  "trust_host_assertions": 29,
+  "trust_qemu": false,
+  "artifacts_sha256": {
+    "esp/EFI/BOOT/BOOTX64.EFI": "44c720301fe335549813760de8796db498fb8415cfa1ebf10aeb7aab849e7356",
+    "storage.img": "bed66dd885149af6b2ae5f4427559f15abeca9ad56c6f547199c8e6a14d3b47b",
+    "persistent.img": "e1ef23f1e1a5b9adf043208c889daece0ba59c9575d0a2184f642b6d85949a1d",
+    "development.pub": "9adddbc066a059802ba29469176b175fd5520e686f80d7aa76256987a10f2489",
+    "application.pub": "7665488a40a6823e77b6365f8a46635fe3ef1d2b7e524e58a1e6fada3a656abb",
+    "backup.pub": "72e5212316f57310d86372e149abc67d0d705410bd69b1c8cf61215789befd8c",
+    "trust-policy.json": "2fcddb58afaaf248d183de0b0bb8f9c3b0dd9bb0a86677630ba8383520dbea52"
+  }
+}

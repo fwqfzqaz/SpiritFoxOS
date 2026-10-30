@@ -1,0 +1,1632 @@
+ARGUMENTS PASS: 8155 checks; bounded canonical payload, lexer, 1000 roundtrips and malformed offsets
+ENVIRONMENT PASS: 12034 checks; explicit bounded names/values, empty/missing distinction and 1000 roundtrips
+FILE RPC PASS: 353 checks; bounded copied payload, canaries, unchanged offsets/state, rights and delegated-root lifecycle
+TASK PID PASS: 8022 checks; actual task_new, 1000 seeded PID states and 1000 dirty FP slot reuses; no allocation/publication on exhaustion, fresh aligned FP image and failed allocation never reuses PID
+SUPERVISOR PASS: 97101 checks; 1000 bounded restart traces, exact stable boundary, backoff, explicit stop/retry and saturating deadlines
+MANAGER PASS: 25080 checks; generation-bound dependencies, transactional lease accounting and 1000 replacement cycles
+Service tests passed: 116 assertions
+OPENAT PASS: 108 assertions
+STAT PASS: 6180 assertions
+RMDIR PASS: 11359 assertions
+UNLINK PASS: 17340 assertions
+TRUNCATE PASS: 83 namespace assertions
+RESIZE TXN PASS: 474740 checks, 3132 fault scenarios (4 transitions x 261 boundaries x 3 modes); zero extension, idempotence and independent files preserved
+Storage service tests passed: 35 assertions
+TXN PASS: 108315 checks, 261 operation boundaries x 3 fault modes; acknowledged commit and corruption recovery
+UPDATE PASS: 861499 checks, stage/begin/confirm/rollback x 261 boundaries x 3 fault modes; canonical state and interrupted-trial recovery
+VERSION PASS: 4069 checks, canonical numeric versions, overflow and monotonic digest-bound policy
+NET PASS: 14084 checks, bounded IPv4/ARP/ICMP/UDP/TCP framing and checksum validation
+SDK PASS 171738
+IOMMU HOST PASS: 229 checks (ACPI/DMAR bounds, scopes, checksums, DMA domain boundaries)
+IPC tests passed: 40908 assertions
+Memory tests passed: 42 assertions
+TRUST PASS: 29 checks, anchor validation, idempotent revocation, capacity cap, store isolation
+test_anchor_set_and_revocation (__main__.Packages.test_anchor_set_and_revocation) ... ok
+test_application_abi (__main__.Packages.test_application_abi) ... ok
+test_application_resource_limits (__main__.Packages.test_application_resource_limits) ... ok
+test_canonical_manifest (__main__.Packages.test_canonical_manifest) ... ok
+test_header_boundaries (__main__.Packages.test_header_boundaries) ... ok
+test_requested_directory_capability (__main__.Packages.test_requested_directory_capability) ... ok
+test_rfc8032_ed25519_vector (__main__.Packages.test_rfc8032_ed25519_vector) ... ok
+test_sections_and_zero_padding (__main__.Packages.test_sections_and_zero_padding) ... ok
+test_seeded_mutations (__main__.Packages.test_seeded_mutations) ... ok
+test_sha256_vectors (__main__.Packages.test_sha256_vectors) ... ok
+test_tamper_and_unknown_signer (__main__.Packages.test_tamper_and_unknown_signer) ... ok
+test_valid_every_built_package (__main__.Packages.test_valid_every_built_package) ... ok
+
+----------------------------------------------------------------------
+Ran 12 tests in 0.215s
+
+OK
+test_bounded_c_policy (__main__.Trust.test_bounded_c_policy) ... ok
+test_default_signing_roles (__main__.Trust.test_default_signing_roles) ... ok
+test_multiple_signers_and_usage (__main__.Trust.test_multiple_signers_and_usage) ... ok
+test_public_policy_roundtrip (__main__.Trust.test_public_policy_roundtrip) ... ok
+test_python_policy_rejection (__main__.Trust.test_python_policy_rejection) ... ok
+test_revocation_and_no_fallback (__main__.Trust.test_revocation_and_no_fallback) ... ok
+test_seeded_signed_mutations (__main__.Trust.test_seeded_signed_mutations) ... ok
+
+----------------------------------------------------------------------
+Ran 7 tests in 0.686s
+
+OK
+test_contents_hash_is_checked (__main__.ReadFs.test_contents_hash_is_checked) ... ok
+test_header_bounds (__main__.ReadFs.test_header_bounds) ... ok
+test_seeded_metadata_mutations (__main__.ReadFs.test_seeded_metadata_mutations) ... ok
+test_signed_metadata_cannot_bypass_bounds (__main__.ReadFs.test_signed_metadata_cannot_bypass_bounds) ... ok
+test_valid_disk_and_builder (__main__.ReadFs.test_valid_disk_and_builder) ... ok
+
+----------------------------------------------------------------------
+Ran 5 tests in 0.286s
+
+OK
+test_count_limits_and_bss_targets (__main__.Native.test_count_limits_and_bss_targets) ... ok
+test_elf_restrictions_and_roundtrip (__main__.Native.test_elf_restrictions_and_roundtrip) ... ok
+test_exact_fixture_and_preparation (__main__.Native.test_exact_fixture_and_preparation) ... ok
+test_manifest_profile_and_subtable (__main__.Native.test_manifest_profile_and_subtable) ... ok
+test_signed_seeded_record_mutations (__main__.Native.test_signed_seeded_record_mutations) ... ok
+test_signed_target_and_addend_rejection (__main__.Native.test_signed_target_and_addend_rejection) ... ok
+
+----------------------------------------------------------------------
+Ran 6 tests in 0.358s
+
+OK
+Persistence VM: capability-width-legacy
+Persistence VM: capability-width-modern
+CAPABILITY WIDTH QEMU PASS: 2 boots; high-bit SEND/RECV/CLOSE/DERIVE/REVOKE rejected, valid IPC and last-reference cleanup, 40 task reuses, normal native/file RPC and persistent bytes preserved
+Persistence VM: cpu-state-legacy
+Persistence VM: cpu-state-modern
+CPU STATE QEMU PASS: 2 boots; AVX-capable CPUs with AVX disabled, fresh physical FP/XMM/pointers/controls, 12 simultaneous pairs, private x87/MMX/XMM0-15 and rounding through yield/timer, isolated pending x87/AVX faults and timeout reuse; SIMD delivery observation={'legacy': 'tcg-status-only', 'modern': 'tcg-status-only'}
+Persistence VM: ram-rmdir-legacy
+Persistence VM: ram-rmdir-modern
+RAM RMDIR QEMU PASS: 2 boots; nested nonempty/readonly/mounted/special refusal, quoted empty directories, prefix boundary and 40 reuse cycles, real read-only delegated RPC denial and persistent bytes/cleanup preserved
+Persistence VM: file-stat-legacy
+Persistence VM: file-stat-modern
+FILE STAT QEMU PASS: 2 boots; fixed metadata/current sizes, no authority expansion, real high-handle rejection/root preserved, repeated RPC/descriptor cleanup and persistent bytes unchanged
+Persistence VM: ram-unlink-legacy
+Persistence VM: ram-unlink-modern
+RAM UNLINK QEMU PASS: 2 boots; 40 slot reuse cycles per transport, quoted mkdir/rm, read-only/special/path refusal, real delegated RPC denied, persistent bytes and cleanup preserved
+Persistence VM: invocation-preflight-legacy
+Persistence VM: invocation-preflight-corrupt-legacy
+Persistence VM: invocation-preflight-modern
+Persistence VM: invocation-preflight-corrupt-modern
+INVOCATION PREFLIGHT QEMU PASS: 4 boots; invalid root capability/native unavailable preserve exact PENDING bytes, valid retry confirms, corrupt candidate still trials/rolls back, good version/notes and cleanup preserved
+Persistence VM: native-supervision-legacy
+Persistence VM: native-supervision-modern
+NATIVE SUPERVISION QEMU PASS: 2 boots; actual capability/process allocation rollback, live app lease drain, bounded death/hang/protocol recovery, explicit stop/retry and private endpoint cleanup
+Persistence VM: echo-health-legacy
+Persistence VM: echo-health-modern
+ECHO HEALTH QEMU PASS: 2 boots; actual preemptible hang, authenticated error/wrong-opcode replies, 3 recoveries then blocked, explicit retry, apps and cold concurrent reads preserved
+Persistence VM: supervision-legacy
+Persistence VM: supervision-modern
+SUPERVISION QEMU PASS: 2 boots; actual echo deaths, 3 automatic restarts then blocked, shell/disk/apps intact, explicit stop/retry, stable interval resets budget and endpoints/tasks reclaimed
+Persistence VM: launch-kind-legacy
+Persistence VM: launch-kind-modern
+LAUNCH KIND QEMU PASS: 2 boots; authenticated module/app intent, suffix independence, repeated failure cleanup, ordinary and PI apps, runtime availability and disk bytes preserved
+Persistence VM: echo-channel-legacy
+Persistence VM: echo-channel-modern
+ECHO CHANNEL QEMU PASS: 2 boots; per-instance replies, concurrent echo plus cold directory reads, 40 stop/start generations per transport, old/new coexistence, actual allocation-failure rollback, endpoint/task/namespace cleanup and persistent bytes unchanged
+Persistence VM: block-channel-legacy
+Persistence VM: block-channel-modern
+BLOCK CHANNEL QEMU PASS: 2 boots; cold concurrent directory reads, 8 driver restarts per transport, private reply generations, file/directory/task/endpoint cleanup and persistent bytes unchanged
+Persistence VM: file-rpc-legacy
+Persistence VM: file-rpc-modern
+FILE RPC QEMU PASS: 2 boots; IPC rejects 257/512/2^31/UINT32_MAX read/write/enumerate, later bounded large-file read, console/persistent data/rights preserved and repeated cleanup
+Persistence VM: native-legacy
+Persistence VM: native-legacy-reboot
+Persistence VM: native-modern
+Persistence VM: native-modern-reboot
+NATIVE QEMU PASS: 4 boots; two-base relocation, simultaneous private images, BSS/function/data pointers, RO code fault, argv/env, signed malformed refusal without writes, install confirmation, repeated reap and reboot
+Persistence VM: environment-legacy
+Persistence VM: environment-modern
+ENVIRONMENT QEMU PASS: 2 boots; explicit values only, absent/empty distinction, argv+env max counts, identifier/duplicate preflight, no trial writes, read-only environment fault, runenvat, reap and no persistence
+Persistence VM: arguments-legacy
+Persistence VM: arguments-modern
+ARGUMENTS QEMU PASS: 2 boots; canonical argv, quoting/empty/escapes, max count, malformed preflight without writes, read-only payload fault, reap/reuse, runat and installed health confirmation
+Persistence VM: trust-key-migration-legacy
+Persistence VM: trust-key-migration-modern
+Persistence VM: trust-key-migrated-strict-legacy
+Persistence VM: trust-key-migrated-strict-modern
+Persistence VM: trust-bootstrap-next
+Persistence VM: trust-bootstrap-revoked
+Persistence VM: trust-overlap-legacy
+Persistence VM: trust-overlap-modern
+Persistence VM: trust-revoked-old-confirmed-legacy
+Persistence VM: trust-revoked-stable-legacy
+Persistence VM: trust-revoked-pending-legacy
+Persistence VM: trust-revoked-old-confirmed-modern
+Persistence VM: trust-revoked-stable-modern
+Persistence VM: trust-revoked-pending-modern
+TRUST QEMU PASS: 14 boots; separate default keys and explicit legacy signer migration, bootstrap purpose/revocation rejection, cross-key install/confirm, revoked/unknown/wrong-purpose rejection without writes, revoked confirmed floor fails closed, pending revoked trial rollback, legacy and modern, original artifacts restored
+[2J[001;001H[=3h[2J[001;001H[2J[001;001H[8;042;160t[2J[001;001H[2J[001;001H[8;056;240t[2J[001;001HBdsDxe: failed to load Boot0002 "UEFI Misc Device" from PciRoot(0x0)/Pci(0x5,0x0): Not Found
+BdsDxe: loading Boot0003 "UEFI QEMU HARDDISK QM00001 " from PciRoot(0x0)/Pci(0x1F,0x2)/Sata(0x0,0xFFFF,0x0)
+BdsDxe: starting Boot0003 "UEFI QEMU HARDDISK QM00001 " from PciRoot(0x0)/Pci(0x1F,0x2)/Sata(0x0,0xFFFF,0x0)
+[EFISTUB] SpiritFoxOS UEFI
+[EFISTUB] verified Ed25519 bootstrap sf-init.sfmod
+[EFISTUB] ExitBootServices OK
+
+SpiritFoxOS Core 0 / ABI 1
+[arch] SMEP unavailable
+[arch] SMAP unavailable
+[IOMMU] absent; trusted DMA mode
+[CORE] entering isolated sf-init.sfmod, timer=100Hz
+[INIT] sf-init.sfmod in ring 3; services live outside Core 0
+[PASS] verified echo.sfmod staged in private address space
+[PASS] dependency fixture provider active
+[PASS] dependency fixture lease balanced
+[PASS] dependency fixture retires provider registration
+[PASS] dependency provider slot reused by new generation
+[PASS] stale dependency cannot bind replacement provider
+DEPENDENCY GENERATION TESTS PASSED
+[PASS] user-space echo IPC without filesystem or sfexec
+[PASS] drain gate refuses new opens and busy unload
+[PASS] cancel stop restores existing service
+[PASS] dependency cycle reports A>B>A
+[PASS] active dependent prevents provider unload
+[PASS] resource ledger prevents premature reclaim
+[PASS] resource ledger prevents premature reclaim
+[PASS] resource ledger prevents premature reclaim
+[PASS] resource ledger prevents premature reclaim
+[PASS] resource ledger prevents premature reclaim
+[PASS] old and new service generations coexist
+[PASS] unloaded endpoint cannot alias a new generation
+[PASS] namespace directory
+[PASS] namespace directory
+[PASS] namespace directory
+[PASS] namespace directory
+[PASS] namespace directory
+[PASS] namespace directory
+[PASS] namespace directory
+[PASS] namespace directory
+[PASS] namespace directory
+[PASS] namespace directory
+[PASS] namespace directory
+[PASS] namespace directory
+[PASS] independent open offsets
+[PASS] duplicate descriptions share offset
+[PASS] file handles bound to process
+[PASS] namespace root and traversal bounds
+[PASS] pipe seek and WOULD_BLOCK
+[PASS] pipe poll and partial read
+[PASS] pipe EOF after final writer
+[PASS] native runtime module active
+[PASS] runtime replies have an isolated endpoint
+[PASS] process service rejects actual RWX load plan
+[PASS] process service rejects write right without device
+[PASS] process service rejects unknown device rights
+[PASS] kernel rejects argument count overflow
+[PASS] kernel rejects argument offset into header
+[PASS] kernel rejects environment count overflow
+[PASS] kernel rejects invocation reserved flags
+ARGUMENT PLAN TESTS PASSED
+[PASS] process service rejects image base outside isolated arena
+[PASS] process service rejects image base outside isolated arena
+[PASS] process service rejects image base outside isolated arena
+[PASS] process service rejects image base outside isolated arena
+[PASS] process service rejects image base outside isolated arena
+NATIVE BASE TESTS PASSED
+[PASS] message cannot forge transferred capabilities
+[PASS] bounded IPC queue accepts capacity
+[PASS] bounded IPC queue accepts capacity
+[PASS] bounded IPC queue accepts capacity
+[PASS] bounded IPC queue accepts capacity
+[PASS] bounded IPC queue accepts capacity
+[PASS] bounded IPC queue accepts capacity
+[PASS] bounded IPC queue accepts capacity
+[PASS] bounded IPC queue accepts capacity
+[PASS] full IPC queue applies backpressure
+[PASS] blocked receive expires on monotonic deadline
+[PASS] sfexec validates and launches hello.sfk
+[PASS] application pins runtime lease
+Hello from hello.sfk!
+[PASS] hello.sfk writes through namespace RPC and exits
+PIE PASS base=0x44000000 counter=8
+PIE PASS base=0x46000000 counter=8
+[PASS] two relocated images retain private pointers and independent writable data
+NATIVE PRIVATE IMAGES PASSED
+CAPABILITY WIDTH APP PASSED
+[PASS] forged handles pointers RWX and privilege amplification rejected
+OPENAT APP PASSED
+[PASS] directory capability reads file and rejects escape and write amplification
+[PASS] exit code SF_BUSY is distinct from a live task
+[CORE] isolated user fault pid=0x000000000000000b vector=0x000000000000000e
+[PASS] user kernel-memory write isolated
+[CORE] isolated user fault pid=0x000000000000000c vector=0x0000000000000006
+[PASS] illegal instruction isolated
+[CORE] isolated user fault pid=0x000000000000000d vector=0x000000000000000e
+[PASS] non-executable user stack enforced
+[CORE] isolated user fault pid=0x000000000000000e vector=0x000000000000000e
+[PASS] IOMMU control MMIO inaccessible to ordinary user task
+[PASS] noncanonical user stack is isolated before kernel return
+[PASS] timer preempts noncooperating user task
+[PASS] runtime releases lease after application exit
+[PASS] missing runtime returns diagnostic error
+[PASS] runtime death is diagnosed without harming other services
+[PASS] runtime restarts after failure
+[PASS] runtime reply endpoint recreated after failure
+[VIRTIO] readonly block service in ring 3
+[PASS] block read rejects capacity boundary
+[PASS] block read rejects unaligned offset
+[PASS] block service rejects every write
+[PASS] mounted filesystem pins block driver
+[PASS] open disk file prevents unmount and restores admission
+[PASS] duplicated disk description retains mount lease
+[PASS] read-only mount rejects writes and creation
+[PASS] unmount drains file references
+[PASS] driver quiesces before process teardown
+[PASS] replacement endpoint allocated
+[PASS] live stopped driver cannot share DMA arena with replacement
+[PASS] device ownership releases after old address space teardown
+[VIRTIO] readonly block service in ring 3
+[PASS] block driver and filesystem restart cleanly
+[PASS] driver death invokes kernel device reset
+[PASS] dead driver invalidates cached file access
+[VIRTIO] readonly block service in ring 3
+[PASS] confirmed reset allows isolated driver recovery
+STORAGE READY
+[PASS] signed sfmod loaded from disk without bundle fallback
+Hello from diskhello.sfk!
+[PASS] signed disk application runs through native runtime
+[PASS] echo restart policy configured
+[PASS] native restart policy configured
+
+SpiritFoxOS ready. Type help.
+fox> help
+ [path] | cat <path> | write <path> <text> | truncate <path> <bytes> | stat <path> | rm <path> | mkdir <path> | rmdir <path> | modules | trust | revoke-key /disk/pkg | echo
+run <app or installed> [args] | runat <read-only-dir> <app> [args]
+runenv [NAME=VALUE ...] -- <app> [args] | runenvat <dir> [NAME=VALUE ...] -- <app> [args]
+install /disk/bin/app.sfk | persist | stop echo | start echo | echo-status | echo-crash | echo-hang | echo-bad-reply | echo-bad-op | mount /disk | unmount /disk | stop disk | start disk | selftest | shutdown
+ifconfig | ping <ip> | udp <ip> <port> <text> | tcp <ip> <port> <text> | stop native | start native | native-status | native-crash | native-hang | native-bad-reply | native-bad-op
+fox> modules
+; sf-native ACTIVE; echo ACTIVE
+fox> echo
+
+fox> run hello.sfk
+Hello from hello.sfk!
+
+fox> stop echo
+
+fox> start echo
+
+fox> write /tmp/check persistent-in-ram
+
+fox> cat /tmp/check
+fox> ls /tmp
+
+check
+fox> selftest
+[PASS] independent open offsets
+[PASS] duplicate descriptions share offset
+[PASS] file handles bound to process
+[PASS] namespace root and traversal bounds
+[PASS] pipe seek and WOULD_BLOCK
+[PASS] pipe poll and partial read
+[PASS] pipe EOF after final writer
+[PASS] shell echo health
+
+fox> cat /disk/etc/readme.txt
+ through user-space virtio-blk.
+fox> run /disk/bin/diskhello.sfk
+Hello from diskhello.sfk!
+
+fox> write /disk/etc/readme.txt forbidden
+
+fox> stop disk
+
+fox> unmount /disk
+
+fox> stop disk
+
+fox> start disk
+[VIRTIO] readonly block service in ring 3
+
+fox> mount /disk
+
+fox> run /disk/bin/diskhello.sfk
+Hello from diskhello.sfk!
+
+fox> shutdown
+QEMU PASS (128 MiB, normal)
+[2J[001;001H[=3h[2J[001;001H[2J[001;001H[8;042;160t[2J[001;001H[2J[001;001H[8;056;240t[2J[001;001HBdsDxe: failed to load Boot0002 "UEFI Misc Device" from PciRoot(0x0)/Pci(0x5,0x0): Not Found
+BdsDxe: loading Boot0003 "UEFI QEMU HARDDISK QM00001 " from PciRoot(0x0)/Pci(0x1F,0x2)/Sata(0x0,0xFFFF,0x0)
+BdsDxe: starting Boot0003 "UEFI QEMU HARDDISK QM00001 " from PciRoot(0x0)/Pci(0x1F,0x2)/Sata(0x0,0xFFFF,0x0)
+[EFISTUB] SpiritFoxOS UEFI
+[EFISTUB] verified Ed25519 bootstrap sf-init.sfmod
+[EFISTUB] ExitBootServices OK
+
+SpiritFoxOS Core 0 / ABI 1
+[arch] SMEP unavailable
+[arch] SMAP unavailable
+[IOMMU] absent; trusted DMA mode
+[CORE] entering isolated sf-init.sfmod, timer=100Hz
+[INIT] sf-init.sfmod in ring 3; services live outside Core 0
+[PASS] verified echo.sfmod staged in private address space
+[PASS] dependency fixture provider active
+[PASS] dependency fixture lease balanced
+[PASS] dependency fixture retires provider registration
+[PASS] dependency provider slot reused by new generation
+[PASS] stale dependency cannot bind replacement provider
+DEPENDENCY GENERATION TESTS PASSED
+[PASS] user-space echo IPC without filesystem or sfexec
+[PASS] drain gate refuses new opens and busy unload
+[PASS] cancel stop restores existing service
+[PASS] dependency cycle reports A>B>A
+[PASS] active dependent prevents provider unload
+[PASS] resource ledger prevents premature reclaim
+[PASS] resource ledger prevents premature reclaim
+[PASS] resource ledger prevents premature reclaim
+[PASS] resource ledger prevents premature reclaim
+[PASS] resource ledger prevents premature reclaim
+[PASS] old and new service generations coexist
+[PASS] unloaded endpoint cannot alias a new generation
+[PASS] namespace directory
+[PASS] namespace directory
+[PASS] namespace directory
+[PASS] namespace directory
+[PASS] namespace directory
+[PASS] namespace directory
+[PASS] namespace directory
+[PASS] namespace directory
+[PASS] namespace directory
+[PASS] namespace directory
+[PASS] namespace directory
+[PASS] namespace directory
+[PASS] independent open offsets
+[PASS] duplicate descriptions share offset
+[PASS] file handles bound to process
+[PASS] namespace root and traversal bounds
+[PASS] pipe seek and WOULD_BLOCK
+[PASS] pipe poll and partial read
+[PASS] pipe EOF after final writer
+[PASS] native runtime module active
+[PASS] runtime replies have an isolated endpoint
+[PASS] process service rejects actual RWX load plan
+[PASS] process service rejects write right without device
+[PASS] process service rejects unknown device rights
+[PASS] kernel rejects argument count overflow
+[PASS] kernel rejects argument offset into header
+[PASS] kernel rejects environment count overflow
+[PASS] kernel rejects invocation reserved flags
+ARGUMENT PLAN TESTS PASSED
+[PASS] process service rejects image base outside isolated arena
+[PASS] process service rejects image base outside isolated arena
+[PASS] process service rejects image base outside isolated arena
+[PASS] process service rejects image base outside isolated arena
+[PASS] process service rejects image base outside isolated arena
+NATIVE BASE TESTS PASSED
+[PASS] message cannot forge transferred capabilities
+[PASS] bounded IPC queue accepts capacity
+[PASS] bounded IPC queue accepts capacity
+[PASS] bounded IPC queue accepts capacity
+[PASS] bounded IPC queue accepts capacity
+[PASS] bounded IPC queue accepts capacity
+[PASS] bounded IPC queue accepts capacity
+[PASS] bounded IPC queue accepts capacity
+[PASS] bounded IPC queue accepts capacity
+[PASS] full IPC queue applies backpressure
+[PASS] blocked receive expires on monotonic deadline
+[PASS] sfexec validates and launches hello.sfk
+[PASS] application pins runtime lease
+Hello from hello.sfk!
+[PASS] hello.sfk writes through namespace RPC and exits
+PIE PASS base=0x44000000 counter=8
+PIE PASS base=0x46000000 counter=8
+[PASS] two relocated images retain private pointers and independent writable data
+NATIVE PRIVATE IMAGES PASSED
+CAPABILITY WIDTH APP PASSED
+[PASS] forged handles pointers RWX and privilege amplification rejected
+OPENAT APP PASSED
+[PASS] directory capability reads file and rejects escape and write amplification
+[PASS] exit code SF_BUSY is distinct from a live task
+[CORE] isolated user fault pid=0x000000000000000b vector=0x000000000000000e
+[PASS] user kernel-memory write isolated
+[CORE] isolated user fault pid=0x000000000000000c vector=0x0000000000000006
+[PASS] illegal instruction isolated
+[CORE] isolated user fault pid=0x000000000000000d vector=0x000000000000000e
+[PASS] non-executable user stack enforced
+[CORE] isolated user fault pid=0x000000000000000e vector=0x000000000000000e
+[PASS] IOMMU control MMIO inaccessible to ordinary user task
+[PASS] noncanonical user stack is isolated before kernel return
+[PASS] timer preempts noncooperating user task
+[PASS] runtime releases lease after application exit
+[PASS] missing runtime returns diagnostic error
+[PASS] runtime death is diagnosed without harming other services
+[PASS] runtime restarts after failure
+[PASS] runtime reply endpoint recreated after failure
+[VIRTIO] readonly block service in ring 3
+[PASS] block read rejects capacity boundary
+[PASS] block read rejects unaligned offset
+[PASS] block service rejects every write
+[PASS] mounted filesystem pins block driver
+[PASS] open disk file prevents unmount and restores admission
+[PASS] duplicated disk description retains mount lease
+[PASS] read-only mount rejects writes and creation
+[PASS] unmount drains file references
+[PASS] driver quiesces before process teardown
+[PASS] replacement endpoint allocated
+[PASS] live stopped driver cannot share DMA arena with replacement
+[PASS] device ownership releases after old address space teardown
+[VIRTIO] readonly block service in ring 3
+[PASS] block driver and filesystem restart cleanly
+[PASS] driver death invokes kernel device reset
+[PASS] dead driver invalidates cached file access
+[VIRTIO] readonly block service in ring 3
+[PASS] confirmed reset allows isolated driver recovery
+STORAGE READY
+[PASS] signed sfmod loaded from disk without bundle fallback
+Hello from diskhello.sfk!
+[PASS] signed disk application runs through native runtime
+[PASS] echo restart policy configured
+[PASS] native restart policy configured
+
+SpiritFoxOS ready. Type help.
+fox> help
+ [path] | cat <path> | write <path> <text> | truncate <path> <bytes> | stat <path> | rm <path> | mkdir <path> | rmdir <path> | modules | trust | revoke-key /disk/pkg | echo
+run <app or installed> [args] | runat <read-only-dir> <app> [args]
+runenv [NAME=VALUE ...] -- <app> [args] | runenvat <dir> [NAME=VALUE ...] -- <app> [args]
+install /disk/bin/app.sfk | persist | stop echo | start echo | echo-status | echo-crash | echo-hang | echo-bad-reply | echo-bad-op | mount /disk | unmount /disk | stop disk | start disk | selftest | shutdown
+ifconfig | ping <ip> | udp <ip> <port> <text> | tcp <ip> <port> <text> | stop native | start native | native-status | native-crash | native-hang | native-bad-reply | native-bad-op
+fox> modules
+; sf-native ACTIVE; echo ACTIVE
+fox> echo
+
+fox> run hello.sfk
+Hello from hello.sfk!
+
+fox> stop echo
+
+fox> start echo
+
+fox> write /tmp/check persistent-in-ram
+
+fox> cat /tmp/check
+fox> ls /tmp
+
+check
+fox> selftest
+[PASS] independent open offsets
+[PASS] duplicate descriptions share offset
+[PASS] file handles bound to process
+[PASS] namespace root and traversal bounds
+[PASS] pipe seek and WOULD_BLOCK
+[PASS] pipe poll and partial read
+[PASS] pipe EOF after final writer
+[PASS] shell echo health
+
+fox> cat /disk/etc/readme.txt
+ through user-space virtio-blk.
+fox> run /disk/bin/diskhello.sfk
+Hello from diskhello.sfk!
+
+fox> write /disk/etc/readme.txt forbidden
+
+fox> stop disk
+
+fox> unmount /disk
+
+fox> stop disk
+
+fox> start disk
+[VIRTIO] readonly block service in ring 3
+
+fox> mount /disk
+
+fox> run /disk/bin/diskhello.sfk
+Hello from diskhello.sfk!
+
+fox> shutdown
+QEMU PASS (256 MiB, normal)
+[2J[001;001H[=3h[2J[001;001H[2J[001;001H[8;042;160t[2J[001;001H[2J[001;001H[8;056;240t[2J[001;001HBdsDxe: failed to load Boot0002 "UEFI Misc Device" from PciRoot(0x0)/Pci(0x5,0x0): Not Found
+BdsDxe: loading Boot0003 "UEFI QEMU HARDDISK QM00001 " from PciRoot(0x0)/Pci(0x1F,0x2)/Sata(0x0,0xFFFF,0x0)
+BdsDxe: starting Boot0003 "UEFI QEMU HARDDISK QM00001 " from PciRoot(0x0)/Pci(0x1F,0x2)/Sata(0x0,0xFFFF,0x0)
+[EFISTUB] SpiritFoxOS UEFI
+[EFISTUB] verified Ed25519 bootstrap sf-init.sfmod
+[EFISTUB] ExitBootServices OK
+
+SpiritFoxOS Core 0 / ABI 1
+[arch] SMEP unavailable
+[arch] SMAP unavailable
+[IOMMU] absent; trusted DMA mode
+[CORE] entering isolated sf-init.sfmod, timer=100Hz
+[INIT] sf-init.sfmod in ring 3; services live outside Core 0
+[PASS] verified echo.sfmod staged in private address space
+[PASS] dependency fixture provider active
+[PASS] dependency fixture lease balanced
+[PASS] dependency fixture retires provider registration
+[PASS] dependency provider slot reused by new generation
+[PASS] stale dependency cannot bind replacement provider
+DEPENDENCY GENERATION TESTS PASSED
+[PASS] user-space echo IPC without filesystem or sfexec
+[PASS] drain gate refuses new opens and busy unload
+[PASS] cancel stop restores existing service
+[PASS] dependency cycle reports A>B>A
+[PASS] active dependent prevents provider unload
+[PASS] resource ledger prevents premature reclaim
+[PASS] resource ledger prevents premature reclaim
+[PASS] resource ledger prevents premature reclaim
+[PASS] resource ledger prevents premature reclaim
+[PASS] resource ledger prevents premature reclaim
+[PASS] old and new service generations coexist
+[PASS] unloaded endpoint cannot alias a new generation
+[PASS] namespace directory
+[PASS] namespace directory
+[PASS] namespace directory
+[PASS] namespace directory
+[PASS] namespace directory
+[PASS] namespace directory
+[PASS] namespace directory
+[PASS] namespace directory
+[PASS] namespace directory
+[PASS] namespace directory
+[PASS] namespace directory
+[PASS] namespace directory
+[PASS] independent open offsets
+[PASS] duplicate descriptions share offset
+[PASS] file handles bound to process
+[PASS] namespace root and traversal bounds
+[PASS] pipe seek and WOULD_BLOCK
+[PASS] pipe poll and partial read
+[PASS] pipe EOF after final writer
+[PASS] native runtime module active
+[PASS] runtime replies have an isolated endpoint
+[PASS] process service rejects actual RWX load plan
+[PASS] process service rejects write right without device
+[PASS] process service rejects unknown device rights
+[PASS] kernel rejects argument count overflow
+[PASS] kernel rejects argument offset into header
+[PASS] kernel rejects environment count overflow
+[PASS] kernel rejects invocation reserved flags
+ARGUMENT PLAN TESTS PASSED
+[PASS] process service rejects image base outside isolated arena
+[PASS] process service rejects image base outside isolated arena
+[PASS] process service rejects image base outside isolated arena
+[PASS] process service rejects image base outside isolated arena
+[PASS] process service rejects image base outside isolated arena
+NATIVE BASE TESTS PASSED
+[PASS] message cannot forge transferred capabilities
+[PASS] bounded IPC queue accepts capacity
+[PASS] bounded IPC queue accepts capacity
+[PASS] bounded IPC queue accepts capacity
+[PASS] bounded IPC queue accepts capacity
+[PASS] bounded IPC queue accepts capacity
+[PASS] bounded IPC queue accepts capacity
+[PASS] bounded IPC queue accepts capacity
+[PASS] bounded IPC queue accepts capacity
+[PASS] full IPC queue applies backpressure
+[PASS] blocked receive expires on monotonic deadline
+[PASS] sfexec validates and launches hello.sfk
+[PASS] application pins runtime lease
+Hello from hello.sfk!
+[PASS] hello.sfk writes through namespace RPC and exits
+PIE PASS base=0x44000000 counter=8
+PIE PASS base=0x46000000 counter=8
+[PASS] two relocated images retain private pointers and independent writable data
+NATIVE PRIVATE IMAGES PASSED
+CAPABILITY WIDTH APP PASSED
+[PASS] forged handles pointers RWX and privilege amplification rejected
+OPENAT APP PASSED
+[PASS] directory capability reads file and rejects escape and write amplification
+[PASS] exit code SF_BUSY is distinct from a live task
+[CORE] isolated user fault pid=0x000000000000000b vector=0x000000000000000e
+[PASS] user kernel-memory write isolated
+[CORE] isolated user fault pid=0x000000000000000c vector=0x0000000000000006
+[PASS] illegal instruction isolated
+[CORE] isolated user fault pid=0x000000000000000d vector=0x000000000000000e
+[PASS] non-executable user stack enforced
+[CORE] isolated user fault pid=0x000000000000000e vector=0x000000000000000e
+[PASS] IOMMU control MMIO inaccessible to ordinary user task
+[PASS] noncanonical user stack is isolated before kernel return
+[PASS] timer preempts noncooperating user task
+[PASS] runtime releases lease after application exit
+[PASS] missing runtime returns diagnostic error
+[PASS] runtime death is diagnosed without harming other services
+[PASS] runtime restarts after failure
+[PASS] runtime reply endpoint recreated after failure
+[VIRTIO] readonly block service in ring 3
+[PASS] block read rejects capacity boundary
+[PASS] block read rejects unaligned offset
+[PASS] block service rejects every write
+[PASS] mounted filesystem pins block driver
+[PASS] open disk file prevents unmount and restores admission
+[PASS] duplicated disk description retains mount lease
+[PASS] read-only mount rejects writes and creation
+[PASS] unmount drains file references
+[PASS] driver quiesces before process teardown
+[PASS] replacement endpoint allocated
+[PASS] live stopped driver cannot share DMA arena with replacement
+[PASS] device ownership releases after old address space teardown
+[VIRTIO] readonly block service in ring 3
+[PASS] block driver and filesystem restart cleanly
+[PASS] driver death invokes kernel device reset
+[PASS] dead driver invalidates cached file access
+[VIRTIO] readonly block service in ring 3
+[PASS] confirmed reset allows isolated driver recovery
+STORAGE READY
+[PASS] signed sfmod loaded from disk without bundle fallback
+Hello from diskhello.sfk!
+[PASS] signed disk application runs through native runtime
+[PASS] echo restart policy configured
+[PASS] native restart policy configured
+
+SpiritFoxOS ready. Type help.
+fox> help
+ [path] | cat <path> | write <path> <text> | truncate <path> <bytes> | stat <path> | rm <path> | mkdir <path> | rmdir <path> | modules | trust | revoke-key /disk/pkg | echo
+run <app or installed> [args] | runat <read-only-dir> <app> [args]
+runenv [NAME=VALUE ...] -- <app> [args] | runenvat <dir> [NAME=VALUE ...] -- <app> [args]
+install /disk/bin/app.sfk | persist | stop echo | start echo | echo-status | echo-crash | echo-hang | echo-bad-reply | echo-bad-op | mount /disk | unmount /disk | stop disk | start disk | selftest | shutdown
+ifconfig | ping <ip> | udp <ip> <port> <text> | tcp <ip> <port> <text> | stop native | start native | native-status | native-crash | native-hang | native-bad-reply | native-bad-op
+fox> modules
+; sf-native ACTIVE; echo ACTIVE
+fox> echo
+
+fox> run hello.sfk
+Hello from hello.sfk!
+
+fox> stop echo
+
+fox> start echo
+
+fox> write /tmp/check persistent-in-ram
+
+fox> cat /tmp/check
+fox> ls /tmp
+
+check
+fox> selftest
+[PASS] independent open offsets
+[PASS] duplicate descriptions share offset
+[PASS] file handles bound to process
+[PASS] namespace root and traversal bounds
+[PASS] pipe seek and WOULD_BLOCK
+[PASS] pipe poll and partial read
+[PASS] pipe EOF after final writer
+[PASS] shell echo health
+
+fox> cat /disk/etc/readme.txt
+ through user-space virtio-blk.
+fox> run /disk/bin/diskhello.sfk
+Hello from diskhello.sfk!
+
+fox> write /disk/etc/readme.txt forbidden
+
+fox> stop disk
+
+fox> unmount /disk
+
+fox> stop disk
+
+fox> start disk
+[VIRTIO] readonly block service in ring 3
+
+fox> mount /disk
+
+fox> run /disk/bin/diskhello.sfk
+Hello from diskhello.sfk!
+
+fox> shutdown
+QEMU PASS (512 MiB, normal)
+[2J[001;001H[=3h[2J[001;001H[2J[001;001H[8;042;160t[2J[001;001H[2J[001;001H[8;056;240t[2J[001;001HBdsDxe: loading Boot0002 "UEFI QEMU HARDDISK QM00001 " from PciRoot(0x0)/Pci(0x1F,0x2)/Sata(0x0,0xFFFF,0x0)
+BdsDxe: starting Boot0002 "UEFI QEMU HARDDISK QM00001 " from PciRoot(0x0)/Pci(0x1F,0x2)/Sata(0x0,0xFFFF,0x0)
+[EFISTUB] SpiritFoxOS UEFI
+[EFISTUB] verified Ed25519 bootstrap sf-init.sfmod
+[EFISTUB] ExitBootServices OK
+
+SpiritFoxOS Core 0 / ABI 1
+[arch] SMEP unavailable
+[arch] SMAP unavailable
+[IOMMU] absent; trusted DMA mode
+[CORE] entering isolated sf-init.sfmod, timer=100Hz
+[INIT] sf-init.sfmod in ring 3; services live outside Core 0
+[PASS] verified echo.sfmod staged in private address space
+[PASS] dependency fixture provider active
+[PASS] dependency fixture lease balanced
+[PASS] dependency fixture retires provider registration
+[PASS] dependency provider slot reused by new generation
+[PASS] stale dependency cannot bind replacement provider
+DEPENDENCY GENERATION TESTS PASSED
+[PASS] user-space echo IPC without filesystem or sfexec
+[PASS] drain gate refuses new opens and busy unload
+[PASS] cancel stop restores existing service
+[PASS] dependency cycle reports A>B>A
+[PASS] active dependent prevents provider unload
+[PASS] resource ledger prevents premature reclaim
+[PASS] resource ledger prevents premature reclaim
+[PASS] resource ledger prevents premature reclaim
+[PASS] resource ledger prevents premature reclaim
+[PASS] resource ledger prevents premature reclaim
+[PASS] old and new service generations coexist
+[PASS] unloaded endpoint cannot alias a new generation
+[PASS] namespace directory
+[PASS] namespace directory
+[PASS] namespace directory
+[PASS] namespace directory
+[PASS] namespace directory
+[PASS] namespace directory
+[PASS] namespace directory
+[PASS] namespace directory
+[PASS] namespace directory
+[PASS] namespace directory
+[PASS] namespace directory
+[PASS] namespace directory
+[PASS] independent open offsets
+[PASS] duplicate descriptions share offset
+[PASS] file handles bound to process
+[PASS] namespace root and traversal bounds
+[PASS] pipe seek and WOULD_BLOCK
+[PASS] pipe poll and partial read
+[PASS] pipe EOF after final writer
+[PASS] native runtime module active
+[PASS] runtime replies have an isolated endpoint
+[PASS] process service rejects actual RWX load plan
+[PASS] process service rejects write right without device
+[PASS] process service rejects unknown device rights
+[PASS] kernel rejects argument count overflow
+[PASS] kernel rejects argument offset into header
+[PASS] kernel rejects environment count overflow
+[PASS] kernel rejects invocation reserved flags
+ARGUMENT PLAN TESTS PASSED
+[PASS] process service rejects image base outside isolated arena
+[PASS] process service rejects image base outside isolated arena
+[PASS] process service rejects image base outside isolated arena
+[PASS] process service rejects image base outside isolated arena
+[PASS] process service rejects image base outside isolated arena
+NATIVE BASE TESTS PASSED
+[PASS] message cannot forge transferred capabilities
+[PASS] bounded IPC queue accepts capacity
+[PASS] bounded IPC queue accepts capacity
+[PASS] bounded IPC queue accepts capacity
+[PASS] bounded IPC queue accepts capacity
+[PASS] bounded IPC queue accepts capacity
+[PASS] bounded IPC queue accepts capacity
+[PASS] bounded IPC queue accepts capacity
+[PASS] bounded IPC queue accepts capacity
+[PASS] full IPC queue applies backpressure
+[PASS] blocked receive expires on monotonic deadline
+[PASS] sfexec validates and launches hello.sfk
+[PASS] application pins runtime lease
+Hello from hello.sfk!
+[PASS] hello.sfk writes through namespace RPC and exits
+PIE PASS base=0x44000000 counter=8
+PIE PASS base=0x46000000 counter=8
+[PASS] two relocated images retain private pointers and independent writable data
+NATIVE PRIVATE IMAGES PASSED
+CAPABILITY WIDTH APP PASSED
+[PASS] forged handles pointers RWX and privilege amplification rejected
+OPENAT APP PASSED
+[PASS] directory capability reads file and rejects escape and write amplification
+[PASS] exit code SF_BUSY is distinct from a live task
+[CORE] isolated user fault pid=0x000000000000000b vector=0x000000000000000e
+[PASS] user kernel-memory write isolated
+[CORE] isolated user fault pid=0x000000000000000c vector=0x0000000000000006
+[PASS] illegal instruction isolated
+[CORE] isolated user fault pid=0x000000000000000d vector=0x000000000000000e
+[PASS] non-executable user stack enforced
+[CORE] isolated user fault pid=0x000000000000000e vector=0x000000000000000e
+[PASS] IOMMU control MMIO inaccessible to ordinary user task
+[PASS] noncanonical user stack is isolated before kernel return
+[PASS] timer preempts noncooperating user task
+[PASS] runtime releases lease after application exit
+[PASS] missing runtime returns diagnostic error
+[PASS] runtime death is diagnosed without harming other services
+[PASS] runtime restarts after failure
+[PASS] runtime reply endpoint recreated after failure
+STORAGE UNAVAILABLE code=16
+[PASS] echo restart policy configured
+[PASS] native restart policy configured
+
+SpiritFoxOS ready. Type help.
+fox> help
+ [path] | cat <path> | write <path> <text> | truncate <path> <bytes> | stat <path> | rm <path> | mkdir <path> | rmdir <path> | modules | trust | revoke-key /disk/pkg | echo
+run <app or installed> [args] | runat <read-only-dir> <app> [args]
+runenv [NAME=VALUE ...] -- <app> [args] | runenvat <dir> [NAME=VALUE ...] -- <app> [args]
+install /disk/bin/app.sfk | persist | stop echo | start echo | echo-status | echo-crash | echo-hang | echo-bad-reply | echo-bad-op | mount /disk | unmount /disk | stop disk | start disk | selftest | shutdown
+ifconfig | ping <ip> | udp <ip> <port> <text> | tcp <ip> <port> <text> | stop native | start native | native-status | native-crash | native-hang | native-bad-reply | native-bad-op
+fox> modules
+; sf-native ACTIVE; echo ACTIVE
+fox> echo
+
+fox> run hello.sfk
+Hello from hello.sfk!
+
+fox> stop echo
+
+fox> start echo
+
+fox> write /tmp/check persistent-in-ram
+
+fox> cat /tmp/check
+fox> ls /tmp
+
+check
+fox> selftest
+[PASS] independent open offsets
+[PASS] duplicate descriptions share offset
+[PASS] file handles bound to process
+[PASS] namespace root and traversal bounds
+[PASS] pipe seek and WOULD_BLOCK
+[PASS] pipe poll and partial read
+[PASS] pipe EOF after final writer
+[PASS] shell echo health
+
+fox> shutdown
+QEMU PASS (256 MiB, missing)
+[2J[001;001H[=3h[2J[001;001H[2J[001;001H[8;042;160t[2J[001;001H[2J[001;001H[8;056;240t[2J[001;001HBdsDxe: failed to load Boot0002 "UEFI Misc Device" from PciRoot(0x0)/Pci(0x5,0x0): Not Found
+BdsDxe: loading Boot0003 "UEFI QEMU HARDDISK QM00001 " from PciRoot(0x0)/Pci(0x1F,0x2)/Sata(0x0,0xFFFF,0x0)
+BdsDxe: starting Boot0003 "UEFI QEMU HARDDISK QM00001 " from PciRoot(0x0)/Pci(0x1F,0x2)/Sata(0x0,0xFFFF,0x0)
+[EFISTUB] SpiritFoxOS UEFI
+[EFISTUB] verified Ed25519 bootstrap sf-init.sfmod
+[EFISTUB] ExitBootServices OK
+
+SpiritFoxOS Core 0 / ABI 1
+[arch] SMEP unavailable
+[arch] SMAP unavailable
+[IOMMU] absent; trusted DMA mode
+[CORE] entering isolated sf-init.sfmod, timer=100Hz
+[INIT] sf-init.sfmod in ring 3; services live outside Core 0
+[PASS] verified echo.sfmod staged in private address space
+[PASS] dependency fixture provider active
+[PASS] dependency fixture lease balanced
+[PASS] dependency fixture retires provider registration
+[PASS] dependency provider slot reused by new generation
+[PASS] stale dependency cannot bind replacement provider
+DEPENDENCY GENERATION TESTS PASSED
+[PASS] user-space echo IPC without filesystem or sfexec
+[PASS] drain gate refuses new opens and busy unload
+[PASS] cancel stop restores existing service
+[PASS] dependency cycle reports A>B>A
+[PASS] active dependent prevents provider unload
+[PASS] resource ledger prevents premature reclaim
+[PASS] resource ledger prevents premature reclaim
+[PASS] resource ledger prevents premature reclaim
+[PASS] resource ledger prevents premature reclaim
+[PASS] resource ledger prevents premature reclaim
+[PASS] old and new service generations coexist
+[PASS] unloaded endpoint cannot alias a new generation
+[PASS] namespace directory
+[PASS] namespace directory
+[PASS] namespace directory
+[PASS] namespace directory
+[PASS] namespace directory
+[PASS] namespace directory
+[PASS] namespace directory
+[PASS] namespace directory
+[PASS] namespace directory
+[PASS] namespace directory
+[PASS] namespace directory
+[PASS] namespace directory
+[PASS] independent open offsets
+[PASS] duplicate descriptions share offset
+[PASS] file handles bound to process
+[PASS] namespace root and traversal bounds
+[PASS] pipe seek and WOULD_BLOCK
+[PASS] pipe poll and partial read
+[PASS] pipe EOF after final writer
+[PASS] native runtime module active
+[PASS] runtime replies have an isolated endpoint
+[PASS] process service rejects actual RWX load plan
+[PASS] process service rejects write right without device
+[PASS] process service rejects unknown device rights
+[PASS] kernel rejects argument count overflow
+[PASS] kernel rejects argument offset into header
+[PASS] kernel rejects environment count overflow
+[PASS] kernel rejects invocation reserved flags
+ARGUMENT PLAN TESTS PASSED
+[PASS] process service rejects image base outside isolated arena
+[PASS] process service rejects image base outside isolated arena
+[PASS] process service rejects image base outside isolated arena
+[PASS] process service rejects image base outside isolated arena
+[PASS] process service rejects image base outside isolated arena
+NATIVE BASE TESTS PASSED
+[PASS] message cannot forge transferred capabilities
+[PASS] bounded IPC queue accepts capacity
+[PASS] bounded IPC queue accepts capacity
+[PASS] bounded IPC queue accepts capacity
+[PASS] bounded IPC queue accepts capacity
+[PASS] bounded IPC queue accepts capacity
+[PASS] bounded IPC queue accepts capacity
+[PASS] bounded IPC queue accepts capacity
+[PASS] bounded IPC queue accepts capacity
+[PASS] full IPC queue applies backpressure
+[PASS] blocked receive expires on monotonic deadline
+[PASS] sfexec validates and launches hello.sfk
+[PASS] application pins runtime lease
+Hello from hello.sfk!
+[PASS] hello.sfk writes through namespace RPC and exits
+PIE PASS base=0x44000000 counter=8
+PIE PASS base=0x46000000 counter=8
+[PASS] two relocated images retain private pointers and independent writable data
+NATIVE PRIVATE IMAGES PASSED
+CAPABILITY WIDTH APP PASSED
+[PASS] forged handles pointers RWX and privilege amplification rejected
+OPENAT APP PASSED
+[PASS] directory capability reads file and rejects escape and write amplification
+[PASS] exit code SF_BUSY is distinct from a live task
+[CORE] isolated user fault pid=0x000000000000000b vector=0x000000000000000e
+[PASS] user kernel-memory write isolated
+[CORE] isolated user fault pid=0x000000000000000c vector=0x0000000000000006
+[PASS] illegal instruction isolated
+[CORE] isolated user fault pid=0x000000000000000d vector=0x000000000000000e
+[PASS] non-executable user stack enforced
+[CORE] isolated user fault pid=0x000000000000000e vector=0x000000000000000e
+[PASS] IOMMU control MMIO inaccessible to ordinary user task
+[PASS] noncanonical user stack is isolated before kernel return
+[PASS] timer preempts noncooperating user task
+[PASS] runtime releases lease after application exit
+[PASS] missing runtime returns diagnostic error
+[PASS] runtime death is diagnosed without harming other services
+[PASS] runtime restarts after failure
+[PASS] runtime reply endpoint recreated after failure
+[VIRTIO] readonly block service in ring 3
+STORAGE UNAVAILABLE code=3
+[PASS] echo restart policy configured
+[PASS] native restart policy configured
+
+SpiritFoxOS ready. Type help.
+fox> help
+ [path] | cat <path> | write <path> <text> | truncate <path> <bytes> | stat <path> | rm <path> | mkdir <path> | rmdir <path> | modules | trust | revoke-key /disk/pkg | echo
+run <app or installed> [args] | runat <read-only-dir> <app> [args]
+runenv [NAME=VALUE ...] -- <app> [args] | runenvat <dir> [NAME=VALUE ...] -- <app> [args]
+install /disk/bin/app.sfk | persist | stop echo | start echo | echo-status | echo-crash | echo-hang | echo-bad-reply | echo-bad-op | mount /disk | unmount /disk | stop disk | start disk | selftest | shutdown
+ifconfig | ping <ip> | udp <ip> <port> <text> | tcp <ip> <port> <text> | stop native | start native | native-status | native-crash | native-hang | native-bad-reply | native-bad-op
+fox> modules
+; sf-native ACTIVE; echo ACTIVE
+fox> echo
+
+fox> run hello.sfk
+Hello from hello.sfk!
+
+fox> stop echo
+
+fox> start echo
+
+fox> write /tmp/check persistent-in-ram
+
+fox> cat /tmp/check
+fox> ls /tmp
+
+check
+fox> selftest
+[PASS] independent open offsets
+[PASS] duplicate descriptions share offset
+[PASS] file handles bound to process
+[PASS] namespace root and traversal bounds
+[PASS] pipe seek and WOULD_BLOCK
+[PASS] pipe poll and partial read
+[PASS] pipe EOF after final writer
+[PASS] shell echo health
+
+fox> shutdown
+QEMU PASS (256 MiB, badheader)
+[2J[001;001H[=3h[2J[001;001H[2J[001;001H[8;042;160t[2J[001;001H[2J[001;001H[8;056;240t[2J[001;001HBdsDxe: failed to load Boot0002 "UEFI Misc Device" from PciRoot(0x0)/Pci(0x5,0x0): Not Found
+BdsDxe: loading Boot0003 "UEFI QEMU HARDDISK QM00001 " from PciRoot(0x0)/Pci(0x1F,0x2)/Sata(0x0,0xFFFF,0x0)
+BdsDxe: starting Boot0003 "UEFI QEMU HARDDISK QM00001 " from PciRoot(0x0)/Pci(0x1F,0x2)/Sata(0x0,0xFFFF,0x0)
+[EFISTUB] SpiritFoxOS UEFI
+[EFISTUB] verified Ed25519 bootstrap sf-init.sfmod
+[EFISTUB] ExitBootServices OK
+
+SpiritFoxOS Core 0 / ABI 1
+[arch] SMEP unavailable
+[arch] SMAP unavailable
+[IOMMU] absent; trusted DMA mode
+[CORE] entering isolated sf-init.sfmod, timer=100Hz
+[INIT] sf-init.sfmod in ring 3; services live outside Core 0
+[PASS] verified echo.sfmod staged in private address space
+[PASS] dependency fixture provider active
+[PASS] dependency fixture lease balanced
+[PASS] dependency fixture retires provider registration
+[PASS] dependency provider slot reused by new generation
+[PASS] stale dependency cannot bind replacement provider
+DEPENDENCY GENERATION TESTS PASSED
+[PASS] user-space echo IPC without filesystem or sfexec
+[PASS] drain gate refuses new opens and busy unload
+[PASS] cancel stop restores existing service
+[PASS] dependency cycle reports A>B>A
+[PASS] active dependent prevents provider unload
+[PASS] resource ledger prevents premature reclaim
+[PASS] resource ledger prevents premature reclaim
+[PASS] resource ledger prevents premature reclaim
+[PASS] resource ledger prevents premature reclaim
+[PASS] resource ledger prevents premature reclaim
+[PASS] old and new service generations coexist
+[PASS] unloaded endpoint cannot alias a new generation
+[PASS] namespace directory
+[PASS] namespace directory
+[PASS] namespace directory
+[PASS] namespace directory
+[PASS] namespace directory
+[PASS] namespace directory
+[PASS] namespace directory
+[PASS] namespace directory
+[PASS] namespace directory
+[PASS] namespace directory
+[PASS] namespace directory
+[PASS] namespace directory
+[PASS] independent open offsets
+[PASS] duplicate descriptions share offset
+[PASS] file handles bound to process
+[PASS] namespace root and traversal bounds
+[PASS] pipe seek and WOULD_BLOCK
+[PASS] pipe poll and partial read
+[PASS] pipe EOF after final writer
+[PASS] native runtime module active
+[PASS] runtime replies have an isolated endpoint
+[PASS] process service rejects actual RWX load plan
+[PASS] process service rejects write right without device
+[PASS] process service rejects unknown device rights
+[PASS] kernel rejects argument count overflow
+[PASS] kernel rejects argument offset into header
+[PASS] kernel rejects environment count overflow
+[PASS] kernel rejects invocation reserved flags
+ARGUMENT PLAN TESTS PASSED
+[PASS] process service rejects image base outside isolated arena
+[PASS] process service rejects image base outside isolated arena
+[PASS] process service rejects image base outside isolated arena
+[PASS] process service rejects image base outside isolated arena
+[PASS] process service rejects image base outside isolated arena
+NATIVE BASE TESTS PASSED
+[PASS] message cannot forge transferred capabilities
+[PASS] bounded IPC queue accepts capacity
+[PASS] bounded IPC queue accepts capacity
+[PASS] bounded IPC queue accepts capacity
+[PASS] bounded IPC queue accepts capacity
+[PASS] bounded IPC queue accepts capacity
+[PASS] bounded IPC queue accepts capacity
+[PASS] bounded IPC queue accepts capacity
+[PASS] bounded IPC queue accepts capacity
+[PASS] full IPC queue applies backpressure
+[PASS] blocked receive expires on monotonic deadline
+[PASS] sfexec validates and launches hello.sfk
+[PASS] application pins runtime lease
+Hello from hello.sfk!
+[PASS] hello.sfk writes through namespace RPC and exits
+PIE PASS base=0x44000000 counter=8
+PIE PASS base=0x46000000 counter=8
+[PASS] two relocated images retain private pointers and independent writable data
+NATIVE PRIVATE IMAGES PASSED
+CAPABILITY WIDTH APP PASSED
+[PASS] forged handles pointers RWX and privilege amplification rejected
+OPENAT APP PASSED
+[PASS] directory capability reads file and rejects escape and write amplification
+[PASS] exit code SF_BUSY is distinct from a live task
+[CORE] isolated user fault pid=0x000000000000000b vector=0x000000000000000e
+[PASS] user kernel-memory write isolated
+[CORE] isolated user fault pid=0x000000000000000c vector=0x0000000000000006
+[PASS] illegal instruction isolated
+[CORE] isolated user fault pid=0x000000000000000d vector=0x000000000000000e
+[PASS] non-executable user stack enforced
+[CORE] isolated user fault pid=0x000000000000000e vector=0x000000000000000e
+[PASS] IOMMU control MMIO inaccessible to ordinary user task
+[PASS] noncanonical user stack is isolated before kernel return
+[PASS] timer preempts noncooperating user task
+[PASS] runtime releases lease after application exit
+[PASS] missing runtime returns diagnostic error
+[PASS] runtime death is diagnosed without harming other services
+[PASS] runtime restarts after failure
+[PASS] runtime reply endpoint recreated after failure
+[VIRTIO] readonly block service in ring 3
+STORAGE UNAVAILABLE code=3
+[PASS] echo restart policy configured
+[PASS] native restart policy configured
+
+SpiritFoxOS ready. Type help.
+fox> help
+ [path] | cat <path> | write <path> <text> | truncate <path> <bytes> | stat <path> | rm <path> | mkdir <path> | rmdir <path> | modules | trust | revoke-key /disk/pkg | echo
+run <app or installed> [args] | runat <read-only-dir> <app> [args]
+runenv [NAME=VALUE ...] -- <app> [args] | runenvat <dir> [NAME=VALUE ...] -- <app> [args]
+install /disk/bin/app.sfk | persist | stop echo | start echo | echo-status | echo-crash | echo-hang | echo-bad-reply | echo-bad-op | mount /disk | unmount /disk | stop disk | start disk | selftest | shutdown
+ifconfig | ping <ip> | udp <ip> <port> <text> | tcp <ip> <port> <text> | stop native | start native | native-status | native-crash | native-hang | native-bad-reply | native-bad-op
+fox> modules
+; sf-native ACTIVE; echo ACTIVE
+fox> echo
+
+fox> run hello.sfk
+Hello from hello.sfk!
+
+fox> stop echo
+
+fox> start echo
+
+fox> write /tmp/check persistent-in-ram
+
+fox> cat /tmp/check
+fox> ls /tmp
+
+check
+fox> selftest
+[PASS] independent open offsets
+[PASS] duplicate descriptions share offset
+[PASS] file handles bound to process
+[PASS] namespace root and traversal bounds
+[PASS] pipe seek and WOULD_BLOCK
+[PASS] pipe poll and partial read
+[PASS] pipe EOF after final writer
+[PASS] shell echo health
+
+fox> shutdown
+QEMU PASS (256 MiB, badhash)
+[2J[001;001H[=3h[2J[001;001H[2J[001;001H[8;042;160t[2J[001;001H[2J[001;001H[8;056;240t[2J[001;001HBdsDxe: failed to load Boot0002 "UEFI Misc Device" from PciRoot(0x0)/Pci(0x5,0x0): Not Found
+BdsDxe: loading Boot0003 "UEFI QEMU HARDDISK QM00001 " from PciRoot(0x0)/Pci(0x1F,0x2)/Sata(0x0,0xFFFF,0x0)
+BdsDxe: starting Boot0003 "UEFI QEMU HARDDISK QM00001 " from PciRoot(0x0)/Pci(0x1F,0x2)/Sata(0x0,0xFFFF,0x0)
+[EFISTUB] SpiritFoxOS UEFI
+[EFISTUB] verified Ed25519 bootstrap sf-init.sfmod
+[EFISTUB] ExitBootServices OK
+
+SpiritFoxOS Core 0 / ABI 1
+[arch] SMEP unavailable
+[arch] SMAP unavailable
+[IOMMU] absent; trusted DMA mode
+[CORE] entering isolated sf-init.sfmod, timer=100Hz
+[INIT] sf-init.sfmod in ring 3; services live outside Core 0
+[PASS] verified echo.sfmod staged in private address space
+[PASS] dependency fixture provider active
+[PASS] dependency fixture lease balanced
+[PASS] dependency fixture retires provider registration
+[PASS] dependency provider slot reused by new generation
+[PASS] stale dependency cannot bind replacement provider
+DEPENDENCY GENERATION TESTS PASSED
+[PASS] user-space echo IPC without filesystem or sfexec
+[PASS] drain gate refuses new opens and busy unload
+[PASS] cancel stop restores existing service
+[PASS] dependency cycle reports A>B>A
+[PASS] active dependent prevents provider unload
+[PASS] resource ledger prevents premature reclaim
+[PASS] resource ledger prevents premature reclaim
+[PASS] resource ledger prevents premature reclaim
+[PASS] resource ledger prevents premature reclaim
+[PASS] resource ledger prevents premature reclaim
+[PASS] old and new service generations coexist
+[PASS] unloaded endpoint cannot alias a new generation
+[PASS] namespace directory
+[PASS] namespace directory
+[PASS] namespace directory
+[PASS] namespace directory
+[PASS] namespace directory
+[PASS] namespace directory
+[PASS] namespace directory
+[PASS] namespace directory
+[PASS] namespace directory
+[PASS] namespace directory
+[PASS] namespace directory
+[PASS] namespace directory
+[PASS] independent open offsets
+[PASS] duplicate descriptions share offset
+[PASS] file handles bound to process
+[PASS] namespace root and traversal bounds
+[PASS] pipe seek and WOULD_BLOCK
+[PASS] pipe poll and partial read
+[PASS] pipe EOF after final writer
+[PASS] native runtime module active
+[PASS] runtime replies have an isolated endpoint
+[PASS] process service rejects actual RWX load plan
+[PASS] process service rejects write right without device
+[PASS] process service rejects unknown device rights
+[PASS] kernel rejects argument count overflow
+[PASS] kernel rejects argument offset into header
+[PASS] kernel rejects environment count overflow
+[PASS] kernel rejects invocation reserved flags
+ARGUMENT PLAN TESTS PASSED
+[PASS] process service rejects image base outside isolated arena
+[PASS] process service rejects image base outside isolated arena
+[PASS] process service rejects image base outside isolated arena
+[PASS] process service rejects image base outside isolated arena
+[PASS] process service rejects image base outside isolated arena
+NATIVE BASE TESTS PASSED
+[PASS] message cannot forge transferred capabilities
+[PASS] bounded IPC queue accepts capacity
+[PASS] bounded IPC queue accepts capacity
+[PASS] bounded IPC queue accepts capacity
+[PASS] bounded IPC queue accepts capacity
+[PASS] bounded IPC queue accepts capacity
+[PASS] bounded IPC queue accepts capacity
+[PASS] bounded IPC queue accepts capacity
+[PASS] bounded IPC queue accepts capacity
+[PASS] full IPC queue applies backpressure
+[PASS] blocked receive expires on monotonic deadline
+[PASS] sfexec validates and launches hello.sfk
+[PASS] application pins runtime lease
+Hello from hello.sfk!
+[PASS] hello.sfk writes through namespace RPC and exits
+PIE PASS base=0x44000000 counter=8
+PIE PASS base=0x46000000 counter=8
+[PASS] two relocated images retain private pointers and independent writable data
+NATIVE PRIVATE IMAGES PASSED
+CAPABILITY WIDTH APP PASSED
+[PASS] forged handles pointers RWX and privilege amplification rejected
+OPENAT APP PASSED
+[PASS] directory capability reads file and rejects escape and write amplification
+[PASS] exit code SF_BUSY is distinct from a live task
+[CORE] isolated user fault pid=0x000000000000000b vector=0x000000000000000e
+[PASS] user kernel-memory write isolated
+[CORE] isolated user fault pid=0x000000000000000c vector=0x0000000000000006
+[PASS] illegal instruction isolated
+[CORE] isolated user fault pid=0x000000000000000d vector=0x000000000000000e
+[PASS] non-executable user stack enforced
+[CORE] isolated user fault pid=0x000000000000000e vector=0x000000000000000e
+[PASS] IOMMU control MMIO inaccessible to ordinary user task
+[PASS] noncanonical user stack is isolated before kernel return
+[PASS] timer preempts noncooperating user task
+[PASS] runtime releases lease after application exit
+[PASS] missing runtime returns diagnostic error
+[PASS] runtime death is diagnosed without harming other services
+[PASS] runtime restarts after failure
+[PASS] runtime reply endpoint recreated after failure
+[VIRTIO] readonly block service in ring 3
+[PASS] block read rejects capacity boundary
+[PASS] block read rejects unaligned offset
+[PASS] block service rejects every write
+[PASS] mounted filesystem pins block driver
+[PASS] open disk file prevents unmount and restores admission
+[PASS] duplicated disk description retains mount lease
+[PASS] read-only mount rejects writes and creation
+[PASS] unmount drains file references
+[PASS] driver quiesces before process teardown
+[PASS] replacement endpoint allocated
+[PASS] live stopped driver cannot share DMA arena with replacement
+[PASS] device ownership releases after old address space teardown
+[VIRTIO] readonly block service in ring 3
+[PASS] block driver and filesystem restart cleanly
+[PASS] driver death invokes kernel device reset
+[PASS] dead driver invalidates cached file access
+[VIRTIO] readonly block service in ring 3
+[PASS] confirmed reset allows isolated driver recovery
+STORAGE READY
+[PASS] signed sfmod loaded from disk without bundle fallback
+DISK PACKAGE REJECTED app code=4
+[PASS] echo restart policy configured
+[PASS] native restart policy configured
+
+SpiritFoxOS ready. Type help.
+fox> help
+ [path] | cat <path> | write <path> <text> | truncate <path> <bytes> | stat <path> | rm <path> | mkdir <path> | rmdir <path> | modules | trust | revoke-key /disk/pkg | echo
+run <app or installed> [args] | runat <read-only-dir> <app> [args]
+runenv [NAME=VALUE ...] -- <app> [args] | runenvat <dir> [NAME=VALUE ...] -- <app> [args]
+install /disk/bin/app.sfk | persist | stop echo | start echo | echo-status | echo-crash | echo-hang | echo-bad-reply | echo-bad-op | mount /disk | unmount /disk | stop disk | start disk | selftest | shutdown
+ifconfig | ping <ip> | udp <ip> <port> <text> | tcp <ip> <port> <text> | stop native | start native | native-status | native-crash | native-hang | native-bad-reply | native-bad-op
+fox> modules
+; sf-native ACTIVE; echo ACTIVE
+fox> echo
+
+fox> run hello.sfk
+Hello from hello.sfk!
+
+fox> stop echo
+
+fox> start echo
+
+fox> write /tmp/check persistent-in-ram
+
+fox> cat /tmp/check
+fox> ls /tmp
+
+check
+fox> selftest
+[PASS] independent open offsets
+[PASS] duplicate descriptions share offset
+[PASS] file handles bound to process
+[PASS] namespace root and traversal bounds
+[PASS] pipe seek and WOULD_BLOCK
+[PASS] pipe poll and partial read
+[PASS] pipe EOF after final writer
+[PASS] shell echo health
+
+fox> run /disk/bin/diskhello.sfk
+
+fox> run hello.sfk
+Hello from hello.sfk!
+
+fox> shutdown
+QEMU PASS (256 MiB, badsignature)
+[2J[001;001H[=3h[2J[001;001H[2J[001;001H[8;042;160t[2J[001;001H[2J[001;001H[8;056;240t[2J[001;001HBdsDxe: failed to load Boot0002 "UEFI Misc Device" from PciRoot(0x0)/Pci(0x5,0x0): Not Found
+BdsDxe: loading Boot0003 "UEFI QEMU HARDDISK QM00001 " from PciRoot(0x0)/Pci(0x1F,0x2)/Sata(0x0,0xFFFF,0x0)
+BdsDxe: starting Boot0003 "UEFI QEMU HARDDISK QM00001 " from PciRoot(0x0)/Pci(0x1F,0x2)/Sata(0x0,0xFFFF,0x0)
+[EFISTUB] SpiritFoxOS UEFI
+[EFISTUB] verified Ed25519 bootstrap sf-init.sfmod
+[EFISTUB] ExitBootServices OK
+
+SpiritFoxOS Core 0 / ABI 1
+[arch] SMEP unavailable
+[arch] SMAP unavailable
+[IOMMU] absent; trusted DMA mode
+[CORE] entering isolated sf-init.sfmod, timer=100Hz
+[INIT] sf-init.sfmod in ring 3; services live outside Core 0
+[PASS] verified echo.sfmod staged in private address space
+[PASS] dependency fixture provider active
+[PASS] dependency fixture lease balanced
+[PASS] dependency fixture retires provider registration
+[PASS] dependency provider slot reused by new generation
+[PASS] stale dependency cannot bind replacement provider
+DEPENDENCY GENERATION TESTS PASSED
+[PASS] user-space echo IPC without filesystem or sfexec
+[PASS] drain gate refuses new opens and busy unload
+[PASS] cancel stop restores existing service
+[PASS] dependency cycle reports A>B>A
+[PASS] active dependent prevents provider unload
+[PASS] resource ledger prevents premature reclaim
+[PASS] resource ledger prevents premature reclaim
+[PASS] resource ledger prevents premature reclaim
+[PASS] resource ledger prevents premature reclaim
+[PASS] resource ledger prevents premature reclaim
+[PASS] old and new service generations coexist
+[PASS] unloaded endpoint cannot alias a new generation
+[PASS] namespace directory
+[PASS] namespace directory
+[PASS] namespace directory
+[PASS] namespace directory
+[PASS] namespace directory
+[PASS] namespace directory
+[PASS] namespace directory
+[PASS] namespace directory
+[PASS] namespace directory
+[PASS] namespace directory
+[PASS] namespace directory
+[PASS] namespace directory
+[PASS] independent open offsets
+[PASS] duplicate descriptions share offset
+[PASS] file handles bound to process
+[PASS] namespace root and traversal bounds
+[PASS] pipe seek and WOULD_BLOCK
+[PASS] pipe poll and partial read
+[PASS] pipe EOF after final writer
+[PASS] native runtime module active
+[PASS] runtime replies have an isolated endpoint
+[PASS] process service rejects actual RWX load plan
+[PASS] process service rejects write right without device
+[PASS] process service rejects unknown device rights
+[PASS] kernel rejects argument count overflow
+[PASS] kernel rejects argument offset into header
+[PASS] kernel rejects environment count overflow
+[PASS] kernel rejects invocation reserved flags
+ARGUMENT PLAN TESTS PASSED
+[PASS] process service rejects image base outside isolated arena
+[PASS] process service rejects image base outside isolated arena
+[PASS] process service rejects image base outside isolated arena
+[PASS] process service rejects image base outside isolated arena
+[PASS] process service rejects image base outside isolated arena
+NATIVE BASE TESTS PASSED
+[PASS] message cannot forge transferred capabilities
+[PASS] bounded IPC queue accepts capacity
+[PASS] bounded IPC queue accepts capacity
+[PASS] bounded IPC queue accepts capacity
+[PASS] bounded IPC queue accepts capacity
+[PASS] bounded IPC queue accepts capacity
+[PASS] bounded IPC queue accepts capacity
+[PASS] bounded IPC queue accepts capacity
+[PASS] bounded IPC queue accepts capacity
+[PASS] full IPC queue applies backpressure
+[PASS] blocked receive expires on monotonic deadline
+[PASS] sfexec validates and launches hello.sfk
+[PASS] application pins runtime lease
+Hello from hello.sfk!
+[PASS] hello.sfk writes through namespace RPC and exits
+PIE PASS base=0x44000000 counter=8
+PIE PASS base=0x46000000 counter=8
+[PASS] two relocated images retain private pointers and independent writable data
+NATIVE PRIVATE IMAGES PASSED
+CAPABILITY WIDTH APP PASSED
+[PASS] forged handles pointers RWX and privilege amplification rejected
+OPENAT APP PASSED
+[PASS] directory capability reads file and rejects escape and write amplification
+[PASS] exit code SF_BUSY is distinct from a live task
+[CORE] isolated user fault pid=0x000000000000000b vector=0x000000000000000e
+[PASS] user kernel-memory write isolated
+[CORE] isolated user fault pid=0x000000000000000c vector=0x0000000000000006
+[PASS] illegal instruction isolated
+[CORE] isolated user fault pid=0x000000000000000d vector=0x000000000000000e
+[PASS] non-executable user stack enforced
+[CORE] isolated user fault pid=0x000000000000000e vector=0x000000000000000e
+[PASS] IOMMU control MMIO inaccessible to ordinary user task
+[PASS] noncanonical user stack is isolated before kernel return
+[PASS] timer preempts noncooperating user task
+[PASS] runtime releases lease after application exit
+[PASS] missing runtime returns diagnostic error
+[PASS] runtime death is diagnosed without harming other services
+[PASS] runtime restarts after failure
+[PASS] runtime reply endpoint recreated after failure
+[VIRTIO] device initialization refused
+[VIRTIO] flush-capable write service in ring 3
+STORAGE UNAVAILABLE code=1
+[PASS] echo restart policy configured
+[PASS] native restart policy configured
+
+SpiritFoxOS ready. Type help.
+fox> help
+ [path] | cat <path> | write <path> <text> | truncate <path> <bytes> | stat <path> | rm <path> | mkdir <path> | rmdir <path> | modules | trust | revoke-key /disk/pkg | echo
+run <app or installed> [args] | runat <read-only-dir> <app> [args]
+runenv [NAME=VALUE ...] -- <app> [args] | runenvat <dir> [NAME=VALUE ...] -- <app> [args]
+install /disk/bin/app.sfk | persist | stop echo | start echo | echo-status | echo-crash | echo-hang | echo-bad-reply | echo-bad-op | mount /disk | unmount /disk | stop disk | start disk | selftest | shutdown
+ifconfig | ping <ip> | udp <ip> <port> <text> | tcp <ip> <port> <text> | stop native | start native | native-status | native-crash | native-hang | native-bad-reply | native-bad-op
+fox> modules
+; sf-native ACTIVE; echo ACTIVE
+fox> echo
+
+fox> run hello.sfk
+Hello from hello.sfk!
+
+fox> stop echo
+
+fox> start echo
+
+fox> write /tmp/check persistent-in-ram
+
+fox> cat /tmp/check
+fox> ls /tmp
+
+check
+fox> selftest
+[PASS] independent open offsets
+[PASS] duplicate descriptions share offset
+[PASS] file handles bound to process
+[PASS] namespace root and traversal bounds
+[PASS] pipe seek and WOULD_BLOCK
+[PASS] pipe poll and partial read
+[PASS] pipe EOF after final writer
+[PASS] shell echo health
+
+fox> shutdown
+QEMU PASS (256 MiB, writable)
+[2J[001;001H[=3h[2J[001;001H[2J[001;001H[8;042;160t[2J[001;001H[2J[001;001H[8;056;240t[2J[001;001HBdsDxe: failed to load Boot0002 "UEFI Misc Device" from PciRoot(0x0)/Pci(0x5,0x0): Not Found
+BdsDxe: loading Boot0003 "UEFI QEMU HARDDISK QM00001 " from PciRoot(0x0)/Pci(0x1F,0x2)/Sata(0x0,0xFFFF,0x0)
+BdsDxe: starting Boot0003 "UEFI QEMU HARDDISK QM00001 " from PciRoot(0x0)/Pci(0x1F,0x2)/Sata(0x0,0xFFFF,0x0)
+[EFISTUB] SpiritFoxOS UEFI
+[EFISTUB] verified Ed25519 bootstrap sf-init.sfmod
+[EFISTUB] ExitBootServices OK
+
+SpiritFoxOS Core 0 / ABI 1
+[arch] SMEP unavailable
+[arch] SMAP unavailable
+[IOMMU] absent; trusted DMA mode
+[CORE] entering isolated sf-init.sfmod, timer=100Hz
+[INIT] sf-init.sfmod in ring 3; services live outside Core 0
+[PASS] verified echo.sfmod staged in private address space
+[PASS] dependency fixture provider active
+[PASS] dependency fixture lease balanced
+[PASS] dependency fixture retires provider registration
+[PASS] dependency provider slot reused by new generation
+[PASS] stale dependency cannot bind replacement provider
+DEPENDENCY GENERATION TESTS PASSED
+[PASS] user-space echo IPC without filesystem or sfexec
+[PASS] drain gate refuses new opens and busy unload
+[PASS] cancel stop restores existing service
+[PASS] dependency cycle reports A>B>A
+[PASS] active dependent prevents provider unload
+[PASS] resource ledger prevents premature reclaim
+[PASS] resource ledger prevents premature reclaim
+[PASS] resource ledger prevents premature reclaim
+[PASS] resource ledger prevents premature reclaim
+[PASS] resource ledger prevents premature reclaim
+[PASS] old and new service generations coexist
+[PASS] unloaded endpoint cannot alias a new generation
+[PASS] namespace directory
+[PASS] namespace directory
+[PASS] namespace directory
+[PASS] namespace directory
+[PASS] namespace directory
+[PASS] namespace directory
+[PASS] namespace directory
+[PASS] namespace directory
+[PASS] namespace directory
+[PASS] namespace directory
+[PASS] namespace directory
+[PASS] namespace directory
+[PASS] independent open offsets
+[PASS] duplicate descriptions share offset
+[PASS] file handles bound to process
+[PASS] namespace root and traversal bounds
+[PASS] pipe seek and WOULD_BLOCK
+[PASS] pipe poll and partial read
+[PASS] pipe EOF after final writer
+[PASS] native runtime module active
+[PASS] runtime replies have an isolated endpoint
+[PASS] process service rejects actual RWX load plan
+[PASS] process service rejects write right without device
+[PASS] process service rejects unknown device rights
+[PASS] kernel rejects argument count overflow
+[PASS] kernel rejects argument offset into header
+[PASS] kernel rejects environment count overflow
+[PASS] kernel rejects invocation reserved flags
+ARGUMENT PLAN TESTS PASSED
+[PASS] process service rejects image base outside isolated arena
+[PASS] process service rejects image base outside isolated arena
+[PASS] process service rejects image base outside isolated arena
+[PASS] process service rejects image base outside isolated arena
+[PASS] process service rejects image base outside isolated arena
+NATIVE BASE TESTS PASSED
+[PASS] message cannot forge transferred capabilities
+[PASS] bounded IPC queue accepts capacity
+[PASS] bounded IPC queue accepts capacity
+[PASS] bounded IPC queue accepts capacity
+[PASS] bounded IPC queue accepts capacity
+[PASS] bounded IPC queue accepts capacity
+[PASS] bounded IPC queue accepts capacity
+[PASS] bounded IPC queue accepts capacity
+[PASS] bounded IPC queue accepts capacity
+[PASS] full IPC queue applies backpressure
+[PASS] blocked receive expires on monotonic deadline
+[PASS] sfexec validates and launches hello.sfk
+[PASS] application pins runtime lease
+Hello from hello.sfk!
+[PASS] hello.sfk writes through namespace RPC and exits
+PIE PASS base=0x44000000 counter=8
+PIE PASS base=0x46000000 counter=8
+[PASS] two relocated images retain private pointers and independent writable data
+NATIVE PRIVATE IMAGES PASSED
+CAPABILITY WIDTH APP PASSED
+[PASS] forged handles pointers RWX and privilege amplification rejected
+OPENAT APP PASSED
+[PASS] directory capability reads file and rejects escape and write amplification
+[PASS] exit code SF_BUSY is distinct from a live task
+[CORE] isolated user fault pid=0x000000000000000b vector=0x000000000000000e
+[PASS] user kernel-memory write isolated
+[CORE] isolated user fault pid=0x000000000000000c vector=0x0000000000000006
+[PASS] illegal instruction isolated
+[CORE] isolated user fault pid=0x000000000000000d vector=0x000000000000000e
+[PASS] non-executable user stack enforced
+[CORE] isolated user fault pid=0x000000000000000e vector=0x000000000000000e
+[PASS] IOMMU control MMIO inaccessible to ordinary user task
+[PASS] noncanonical user stack is isolated before kernel return
+[PASS] timer preempts noncooperating user task
+[PASS] runtime releases lease after application exit
+[PASS] missing runtime returns diagnostic error
+[PASS] runtime death is diagnosed without harming other services
+[PASS] runtime restarts after failure
+[PASS] runtime reply endpoint recreated after failure
+[VIRTIO] readonly block service in ring 3
+STORAGE UNAVAILABLE code=10
+[PASS] echo restart policy configured
+[PASS] native restart policy configured
+
+SpiritFoxOS ready. Type help.
+fox> help
+ [path] | cat <path> | write <path> <text> | truncate <path> <bytes> | stat <path> | rm <path> | mkdir <path> | rmdir <path> | modules | trust | revoke-key /disk/pkg | echo
+run <app or installed> [args] | runat <read-only-dir> <app> [args]
+runenv [NAME=VALUE ...] -- <app> [args] | runenvat <dir> [NAME=VALUE ...] -- <app> [args]
+install /disk/bin/app.sfk | persist | stop echo | start echo | echo-status | echo-crash | echo-hang | echo-bad-reply | echo-bad-op | mount /disk | unmount /disk | stop disk | start disk | selftest | shutdown
+ifconfig | ping <ip> | udp <ip> <port> <text> | tcp <ip> <port> <text> | stop native | start native | native-status | native-crash | native-hang | native-bad-reply | native-bad-op
+fox> modules
+; sf-native ACTIVE; echo ACTIVE
+fox> echo
+
+fox> run hello.sfk
+Hello from hello.sfk!
+
+fox> stop echo
+
+fox> start echo
+
+fox> write /tmp/check persistent-in-ram
+
+fox> cat /tmp/check
+fox> ls /tmp
+
+check
+fox> selftest
+[PASS] independent open offsets
+[PASS] duplicate descriptions share offset
+[PASS] file handles bound to process
+[PASS] namespace root and traversal bounds
+[PASS] pipe seek and WOULD_BLOCK
+[PASS] pipe poll and partial read
+[PASS] pipe EOF after final writer
+[PASS] shell echo health
+
+fox> shutdown
+QEMU PASS (256 MiB, ioerror)
+Persistence VM: write
+Persistence VM: reboot
+Persistence VM: untrusted-slot
+Persistence VM: fallback
+Persistence VM: write-error
+Persistence VM: interrupted
+Persistence VM: interrupted-recovery
+Persistence VM: flush-error
+Persistence VM: error-recovery
+Persistence VM: update-first-failure
+Persistence VM: update-health-failures
+Persistence VM: update-pending-stage
+Persistence VM: update-begin-error
+Persistence VM: update-begin-recovery
+Persistence VM: update-interrupted-trial
+Persistence VM: update-recovery-error
+Persistence VM: update-trial-recovery
+Persistence VM: update-substituted-candidate
+Persistence VM: update-confirm-stage
