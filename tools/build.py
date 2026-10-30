@@ -100,7 +100,7 @@ def main(policy_path=None):
     Path('build/trust.h').write_text(trust_policy.header(policy))
     Path('build/trust-policy.json').write_text(json.dumps(policy, indent=2)+'\n')
     print('Building userspace packages', flush=True)
-    shared = objects('user-common', ['services/start.S', 'services/memory.c', 'services/libsf.c', 'services/arguments.c', 'services/sdk.c'])
+    shared = objects('user-common', ['services/start.S', 'services/memory.c', 'services/libsf.c', 'services/arguments.c'])
     init = shared + objects('init', ['services/init.c', 'services/file_rpc.c', 'services/native_image.c', 'services/argparse.c', 'services/storage.c', 'services/readfs.c', 'services/txn.c', 'services/update.c', 'services/version.c', 'services/persistence.c', 'services/manager.c', 'services/supervisor.c', 'services/namespace.c', 'services/net_proto.c', *CRYPTO])
     packages = []
     image = link_elf('sf-init', init, 'services/user.ld')
