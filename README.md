@@ -20,6 +20,7 @@
 | 更新与信任 | 应用 A/B 试运行、健康确认与回退、用途受限公钥、持久化密钥撤销、版本下限 |
 | DMA 隔离 | QEMU q35 Intel VT-d，按设备授予有界 IOVA，拒绝越界 DMA |
 | native 运行时 | static 与 `relative-v1` 位置无关装载、私有映像、有界 argv/env、有界 libc SDK |
+| 文件 SDK | 有界 C 客户端封装文件 RPC，支持规范句柄、元数据、固定截止时间与只读目录委派 |
 | 网络切片 | ring-3 legacy `virtio-net`、ARP/IPv4/ICMP、一次性 UDP/TCP，`ifconfig`/`ping`/`udp`/`tcp` |
 
 ## 架构
@@ -132,7 +133,7 @@ python3 tools/package/sfpack.py trust --policy build/trust-policy.json
 
 ## 验证
 
-- 宿主：内核 IPC/内存/任务边界、文件 RPC、openat、截断、命名空间、事务与更新故障、信任撤销、IOMMU、版本策略，以及以宿主 glibc 为独立参照的 SDK 检查。
+- 宿主：内核 IPC/内存/任务边界、文件 RPC、文件客户端 SDK、openat、截断、命名空间、事务与更新故障、信任撤销、IOMMU、版本策略，以及以宿主 glibc 为独立参照的 libc SDK 检查。
 - 集成：包格式、SFRFS1、变异测试与构建脚本。
 - QEMU：128/256/512 MiB 启动、签名验证、CPL3 服务、模块生命周期、持久化/更新/IOMMU/网络场景。
 - 最近一次 `python3 tools/test.py --host-only` 在本机通过（约 50 秒）。
@@ -145,7 +146,7 @@ python3 tools/package/sfpack.py trust --policy build/trust-policy.json
 | --- | --- | --- |
 | M0–M2 | 包格式、CPL3、能力 IPC、模块依赖与有界监督 | 完整生命周期 RPC、能力转移/派生撤销、动态配额 |
 | M3 | RAMFS、管道、poll、openat、只读目录委派、空目录回收 | proc/sys 适配、事件队列、符号链接策略、按进程挂载视图 |
-| M4–M6 | native 运行时、SFRFS1、双银行事务、A/B 更新、VT-d、密钥轮换/撤销 | 通用现代设备、独立文件系统 sfmod、生产级信任与防回滚 |
+| M4–M6 | native 运行时与文件客户端 SDK、SFRFS1、双银行事务与旧几何兼容、A/B 更新、VT-d、密钥轮换/撤销 | 通用现代设备、独立文件系统 sfmod、生产级信任与防回滚 |
 | M7 | 网络纵向切片 | DHCP、网络 IRQ、连接对象、`/net`、磁盘与网络同时授权；图形、用户会话、多核 |
 
 优先级：先补齐持久化服务与签名/更新策略，再扩展设备、网络和运行时能力。完整清单见[路线图](docs/project/ROADMAP.md)与[实施进度](docs/project/PROGRESS.md)。
@@ -167,6 +168,7 @@ python3 tools/package/sfpack.py trust --policy build/trust-policy.json
 | [命名空间](docs/architecture/NAMESPACE.md) / [存储](docs/architecture/STORAGE.md) | 文件对象、openat、SFRFS1 |
 | [持久化](docs/architecture/PERSISTENCE.md) / [更新](docs/architecture/UPDATES.md) | 双银行事务、A/B 与回退 |
 | [信任策略](docs/architecture/TRUST.md) / [native](docs/architecture/NATIVE.md) | 公钥用途、撤销、装载格式 |
+| [文件 SDK](docs/architecture/FILE_SDK.md) / [项目状态](docs/project/STATUS.md) | 文件 RPC 客户端封装与当前交付状态 |
 | [生命周期](docs/architecture/LIFECYCLE.md) / [CPU 上下文](docs/architecture/CPU_CONTEXT.md) | 依赖代次、租约、FPU 隔离 |
 | [测试记录](docs/quality/TESTING.md) / [安全审查](docs/quality/SECURITY.md) | 验证范围与已修复边界 |
 

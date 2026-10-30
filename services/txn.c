@@ -13,18 +13,18 @@ static int path_ok(const char*p){
 }
 static int sealed(const uint8_t*p){uint8_t h[32];sf_sha256(h,p,480);return !memcmp(h,p+480,32);}
 static void seal(uint8_t*p){sf_sha256(p+480,p,480);}
-static int decode(SfTxn*t,uint64_t generation){
- uint8_t*b=t->buffer;if(memcmp(b,"SFBANK1",8)||u64(b+8)!=generation||u32(b+16)>SF_TXN_FILES||!zero(b+20,492))return SF_BAD_FORMAT;
+static int decode(SfTxn*t,uint64_t generation,unsigned slots,unsigned data_start){
+ uint8_t*b=t->buffer;if(memcmp(b,"SFBANK1",8)||u64(b+8)!=generation||u32(b+16)>slots||!zero(b+20,492))return SF_BAD_FORMAT;
  unsigned count=u32(b+16);memset(t->next,0,sizeof(t->next));
- for(unsigned i=0;i<SF_TXN_FILES;i++){
-  uint8_t*e=b+512+i*128,*d=b+SF_TXN_DATA+i*SF_TXN_FILE_BYTES;
+ for(unsigned i=0;i<slots;i++){
+  uint8_t*e=b+512+i*128,*d=b+data_start+i*SF_TXN_FILE_BYTES;
   if(i>=count){if(!zero(e,128)||!zero(d,SF_TXN_FILE_BYTES))return SF_BAD_FORMAT;continue;}
   uint32_t n=u32(e+64);if(!path_ok((char*)e)||n>SF_TXN_FILE_BYTES||!zero(e+strlen((char*)e)+1,63-strlen((char*)e))||!zero(e+68,28)||!zero(d+n,SF_TXN_FILE_BYTES-n))return SF_BAD_FORMAT;
   uint8_t h[32];sf_sha256(h,d,n);if(memcmp(h,e+96,32))return SF_BAD_FORMAT;
   for(unsigned j=0;j<i;j++)if(!strcmp(t->next[j].path,(char*)e))return SF_BAD_FORMAT;
   memcpy(t->next[i].path,e,64);t->next[i].bytes=n;memcpy(t->next[i].data,d,n);
  }
- return zero(b+SF_TXN_DATA+SF_TXN_FILES*SF_TXN_FILE_BYTES,sizeof(t->buffer)-SF_TXN_DATA-SF_TXN_FILES*SF_TXN_FILE_BYTES)?0:SF_BAD_FORMAT;
+ return zero(b+data_start+slots*SF_TXN_FILE_BYTES,sizeof(t->buffer)-data_start-slots*SF_TXN_FILE_BYTES)?0:SF_BAD_FORMAT;
 }
 int sf_txn_mount(SfTxn*t,SfTxnRead read,SfTxnWrite write,SfTxnFlush flush,void*context){
  t->ready=0;t->generation=0;t->read=read;t->write=write;t->flush=flush;t->context=context;
@@ -36,7 +36,11 @@ int sf_txn_mount(SfTxn*t,SfTxnRead read,SfTxnWrite write,SfTxnFlush flush,void*c
   if(memcmp(s,"SFCMT1\0",8)||!sealed(s)||!u64(s+8)||u32(s+16)!=slot||u32(s+20)||memcmp(s+24,t->volume,16)||!zero(s+72,408))continue;
   uint64_t generation=u64(s+8);memcpy(hash,s+40,32);
   for(unsigned i=0;i<SF_TXN_BANK_SECTORS;i++){r=read(context,SF_TXN_BANK+slot*SF_TXN_BANK_SECTORS+i,t->buffer+i*512);if(r)return r;}
-  uint8_t h[32];sf_sha256(h,t->buffer,sizeof(t->buffer));if(memcmp(h,hash,32)||decode(t,generation))continue;
+  uint8_t h[32];sf_sha256(h,t->buffer,sizeof(t->buffer));if(memcmp(h,hash,32))continue;
+  /* Original v1 banks had four records and data at 1024. The fifth-key
+   * profile retains version 1; authenticate either exact geometry before
+   * selecting a generation. Mount never rewrites a legacy snapshot. */
+  if(decode(t,generation,SF_TXN_FILES,SF_TXN_DATA)&&decode(t,generation,4u,1024u))continue;
   if(generation==t->generation)return SF_BAD_FORMAT;
   if(generation>t->generation){t->generation=generation;t->bank=slot;memcpy(t->files,t->next,sizeof(t->files));}
  }
