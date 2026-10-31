@@ -14,6 +14,8 @@ python3 tools/package/sfpack.py app --strict-manifest --manifest build/hello-sou
 
 前两条命令只需要 Python、包工具和仓库 schema，不需要编译好的共享库、ELF 或签名密钥。`validate-manifest` 的结果明确标记为 `source-profile-only`：只确认源文件满足作者约定，不确认映像可运行、内存预算足够、签名受信任或能力获得授权。`module` 和 `app` 的 `--strict-manifest` 启用同一约定；默认仍允许现有的额外元数据。
 
+发布 ZIP 包含上述离线命令所需的 `sfpack.py`、`manifest_profile.py`、`trust_policy.py` 和 schema。解压后从解压目录执行前两条命令即可；源 JSON 和 `--out` 可指向已有的任意目录，例如用 `source.json` 和 `exported-schema.json`，不要求创建 `build`。ZIP 中的 ABI `check` / `diff` 同样只需要 Python。构建、ELF 打包、签名和包认证仍按源码工具链流程执行，发布副本不附带私钥、编译器或认证共享库。
+
 应用源文件示例：
 
 ```json
@@ -62,4 +64,4 @@ python3 tools/package/sfpack.py app --strict-manifest --manifest build/hello-sou
 
 `tests/integration/test_manifest_profile.py` 运行独立数值版本判据、全部边界与真实 CLI。它在缺少 build 和密钥目录的隔离副本中导出 schema、检查模块/APP；用公开固定测试种子打包真实 static、relative-v1 和模块 ELF，并经产品 C 验证及确定性字节对照。缺失映像/种子的负例验证源错误优先拒绝、输出保持；低于映像需要的预算则在真实打包阶段拒绝。
 
-统一测试入口记录 schema 摘要。发布门要求本轮源文件测试标记且 schema 与测试时摘要一致，再把独立 schema 纳入发布 ZIP；既有 VM 和镜像摘要门保持。完整托管检查必须按当前提交单独核对。
+统一测试入口记录 schema 摘要。发布门要求本轮源文件测试标记且 schema 与测试时摘要一致，再把独立 schema 和离线命令的三个 Python 源文件纳入发布 ZIP，其字节摘要记录在 ZIP 清单中；既有 VM 和镜像摘要门保持。完整托管检查必须按当前提交单独核对。

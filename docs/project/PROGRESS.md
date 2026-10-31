@@ -3,8 +3,8 @@
 更新日期：2026-10-31（北京时间）。
 
 - 工作区：`E:\SpiritFoxOS`；分支 `codex/requirements-followup-20261031`；origin `https://github.com/fwqfzqaz/SpiritFoxOS.git`。
-- 本轮目标：按用户恢复指示连续接续非 M7 工作；M0 两轮已推送并通过托管检查，当前补齐同所有者文件句柄复制与公共 SDK。
-- status: file_dup_local_verified_pending_publish
+- 本轮目标：按用户恢复指示连续接续非 M7 工作；M0 两轮已推送并通过托管检查，同所有者文件句柄复制已验证推送，当前补齐发布副本的离线清单命令依赖。
+- status: offline_release_tools_verified_pending_publish
 - round_complete: false
 - continuous_work: true
 - quota_paused: false
@@ -16,10 +16,10 @@
 - 已推送 M0 首轮：`ab085f9` / PR #13，独立 native-source-v1 schema、无密钥离线命令及可选严格源约定，兼容作者 APP 能力/内存约束；12 组专项、含构建 host-only 76.11 秒通过。该 head 四项 Windows/Linux 已成功，证明 `.cache/manifest-round-hosted-proof-20261031.json`。
 - 已推送 M0 后续：`789581f` / PR #13，真实编译共享头文件探针，采集首轮 549 项编号/大小/对齐/成员偏移/宽度/标量种类；9 组专项含三类真实临时头文件漂移。该 head 四项 Windows/Linux 已成功，证明 `.cache/abi-round-hosted-proof-20261031.json`。
 - M0 后续验证：含初始构建 host-only 75.08 秒通过，原 25 个 C 测试及 51 组 Python 用例保留；日志 `build/abi-inventory-host-full-20261031.log`、`build/abi-snapshot-final-20261031.log`，结果 `build/abi-inventory-host-20261031-results.json`。当前 DUP 轮次的完整验证见下节，不能沿用此旧结果。
-- 已交付 M0 摘要：七项产品摘要当时与作者基线相同，549 项 ABI 参考/采集为 `2036cab366d18b535cd005430eec23cd7c4acc3ee1a11b8663c0e1fda417bf24`。当前未提交 DUP 轮次增加 OP_DUP 后为 550 项，需要以本轮重新验证的产物为准。
+- 已交付 M0 摘要：七项产品摘要当时与作者基线相同，549 项 ABI 参考/采集为 `2036cab366d18b535cd005430eec23cd7c4acc3ee1a11b8663c0e1fda417bf24`。DUP 已提交 be5bda1，ABI 为 550 项，完整本地验证和发布门已通过。
 - 进程：本地完整测试 PID 32004 已以 0 退出，无本聊天存活 VM；`.cache/active-work.json` 保存结束状态。
 - 当前完整验证：`python tools/test.py` 包含初始构建，1107.92 秒、158 次 VM 全部通过。23068 项复制宿主检查、两种生产传输与原 416510 项 SDK 检查均保留；ABI 550 项只新增 `constant.OP_DUP=25`，原 549 项无删改。结果 `build/file-dup-final-test-results.json`，证明 `.cache/file-dup-full-proof-20261031.json`。
-- 下一步：发布门和 ZIP 精确摘要核对后正常提交推送当前分支、更新 PR #13 为最终范围并核对新 HEAD 的 Windows/Linux 检查；旧 789581f 的绿色状态不替代本轮。随后继续非 M7 有界事项；quota_paused=false，user_paused=false，自动任务 ACTIVE。
+- 下一步：额度已在 21:27 实际刷新（短期 99%、长期 46%），清除额度暂停并恢复五分钟接续。be5bda1 的两项 Linux 已成功，两项 Windows 完整套件仍运行；继续核对。当前将现有清单离线命令依赖纳入发布 ZIP，对实际解压副本验证，无重复本地 VM。
 
 ## 同所有者文件句柄复制（2026-10-31）
 
@@ -203,3 +203,17 @@ SDK 已推送 002ea46 并创建 PR #11；本地包含初始构建的 151 VM / 10
 完整含初始构建回归通过（1112.0 秒、157 VM），2046559 项兼容宿主检查与 783 个首次升级故障场景、六次迁移/重启 VM 通过；全部既有 SDK 与内核/服务/信任/更新回归保持，七项交付摘要一致。结果 build/txn-compat-test-results.json，日志 build/txn-compat-final-full.txt；当前所有本地 VM 已关闭。下一步正常提交推送工作分支并更新当前开放 PR 的最终范围，核对最新提交的 Windows/Linux CI，继续路线中的未完成工作。SDK 提交 002ea46 的已交付证明仍保留，不把旧检查状态算作本次提交通过。
 
 SDK 首轮提交 002ea46 的托管检查已实际核对：Windows run 40096585352 与 Linux run 40096584961 均成功；该结果只属于 SDK 首轮，后续兼容修复提交须重新检查。
+
+## 额度保存点（2026-10-31 21:17，北京时间）
+
+quota_paused=true，user_paused=false。短期剩余 10%、长期 46%，ordinaryUsageAllowed=true；短期实际 resetsAt=1793453188，下一次检查 21:27:28。DUP 完整本地验证和发布门已通过并正常推送 be5bda1 / PR #13；四项新托管检查最后均在运行。PID 32004 已退出 0，无本地测试/VM，需要恢复时先查 CI 而非重新测试旧成果。保存点 `.cache/progress-live.json` 与 `.cache/checkpoints/file-dup-quota-paused-20261031.zip`。
+
+可接续的下一有界事项：发布 ZIP 现已携带 schema 和 ABI 离线工具，但尚未携带 sfpack 清单校验所需的三个纯 Python 文件；恢复后可加入现有文件并对实际解压副本验证无编译器/build/密钥条件下的导出与源校验。当前仅做过依赖阅读，没有对此新事项修改实现或执行测试。
+
+## 额度刷新后恢复（2026-10-31 21:27，北京时间）
+
+实际接口确认短期 99%、长期 46%、ordinaryUsageAllowed=true，quota_paused=false。无本地存活测试或 VM，自动任务恢复每五分钟接续。先接续既有清单工具交付完整性：发布副本加入离线命令依赖并验证实际 ZIP，保留已完整验证的运行时代码和七项交付摘要；be5bda1 的 Windows 托管检查仍需核对。
+
+## 发布副本工具验证完成（2026-10-31）
+
+实际 ZIP 已补齐三个既有纯 Python 文件，CRC、39 项清单摘要和七项运行时产物核对通过。只取出 ZIP 中工具和公开输入，在 PATH 为空、没有 build/密钥/编译器/认证共享库的目录完成 12 项导出、校验、拒绝、公开策略描述和 ABI 比较检查，证明 .cache/offline-release-proof-20261031.json。此轮运行时代码和工具逻辑保持 be5bda1，不重复本地 158 VM；待正常提交推送与新 head 托管检查。quota_paused=false，user_paused=false，自动任务 ACTIVE。

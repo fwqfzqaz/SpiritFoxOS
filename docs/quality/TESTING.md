@@ -349,3 +349,9 @@ M6 尝试通过工作区桥调用 deepseek-flash 审查事务引擎。两次调�
 完整 `python tools/test.py` 包含初始构建，1107.92 秒、158 次真实 VM 全部通过；日志 `build/file-dup-final-full-20261031.log`，精确结果 `build/file-dup-final-test-results.json`。原 416510 项 SDK 检查及所有既有回归通过，七项产品摘要重新核对。ABI 550 项仅增加 `constant.OP_DUP=25`，原 549 项无删改；源工具 12 组与 ABI 9 组继续通过。发布门要求复制宿主/两次生产 VM 标记及最新 ABI 摘要。托管 Windows/Linux 需按新提交核对。
 
 前两轮 M0 已交付提交 ab085f9 与 789581f 各自四项 Windows/Linux 检查均成功；789581f 的 Windows PR 完整回归 916.98 秒、ZIP 420401 字节，证明 `.cache/abi-round-hosted-proof-20261031.json`。历史段落中的待核对说明只属于当时快照，不表示本轮托管检查通过。
+
+## 实际发布副本的离线工具（2026-10-31）
+
+发布 ZIP 补齐现有清单命令的三个纯 Python 依赖，所有文件均有清单摘要。对实际 ZIP 核对 CRC、39 项文件摘要和七项运行时产物，再只从 ZIP 取出工具/schema/ABI/公开策略，在工作区临时目录运行 12 项检查：schema 标准输出与文件导出、APP/模块源校验、重复键/浮点/布尔/源字节越界/缺失文件拒绝、公开策略描述及 ABI check/diff。子进程 PATH 为空，没有 build、密钥、编译器或认证共享库；结束后仍未生成 build 或密钥目录。
+
+证明 `.cache/offline-release-proof-20261031.json` 保存实际 ZIP 摘要和检查列表。此轮只改变打包清单和文档，原工具/运行时代码保持 be5bda1，七项产物与已完整通过的 1107.92 秒/158 VM 结果一致，因此本地没有重复 VM。新提交的托管 CI 仍独立核对，不用旧运行代替。

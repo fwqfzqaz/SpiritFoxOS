@@ -87,6 +87,8 @@ items.append((schema_path,'schemas/native-source-v1.schema.json'))
 items.append((abi_reference,'abi/x86_64-current.json'))
 items.append((abi_capture,'abi/x86_64-captured.json'))
 items.append((ROOT/'tools/abi.py','tools/abi.py'))
+for name in ['tools/package/sfpack.py','tools/package/manifest_profile.py','tools/trust_policy.py']:
+    items.append((ROOT/name,name))
 items += [(p,p.relative_to(ROOT).as_posix()) for p in sorted((ROOT/'docs').rglob('*.md'))]
 manifest = {'files_sha256': {name: hashlib.sha256(path.read_bytes()).hexdigest() for path,name in items}, 'validation': 'tools/test.py: host + legacy storage + VT-d/modern DMA isolation + persistence/update-health/version-policy/fault/restart + kernel-boundary/storage-failure security + directory-capability openat + truncate/zero-extension fault/recovery + trust-policy/rotation/immutable-and-durable-runtime-revocation + native-argv/explicit-environment/read-only/preflight + relative-native/private-image/reboot + file-RPC/local-bounds/IPC-rejection + block-reply/private-channel/restart + echo-reply/per-instance/capacity-recovery + authenticated-launch-kind/suffix-independent + dependency-generation/transactional-leases + echo-supervision/bounded-restart + echo-health/hang/protocol-failure + native-capacity/lease-drain/supervision VMs + actual-task-PID exhaustion host checks + installed-invocation/preflight/corrupt-rollback + RAM-unlink/directory/rights/slot-reuse + canonical-file-handle/stat VMs + canonical-kernel-capabilities + eager-FP-context/fresh/interleaved/timer/fault VMs + empty-RAM-directory/rmdir/rights/nonempty/reuse VMs + public-file-client/codec/private-transport/read-only/duplicate-shared-description VMs'}
 archive = BUILD/'SpiritFoxOS-M6-Updates.zip'
