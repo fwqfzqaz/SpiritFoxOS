@@ -15,9 +15,9 @@ UEFI 引导进入 Core 0 与隔离用户态，提供能力 IPC、抢占、进程
 
 2026-10-31 的后续交付：M0 独立清单 schema、有界源文件/离线命令、共享头文件 ABI 采集和比较；M3/M4 的同所有者句柄复制、共享游标与最后引用回收。be5bda1 的四项 Windows/Linux 托管检查均成功，Windows PR 完整回归 1306.09 秒；本地完整含构建回归 1107.92 秒、158 VM 通过。
 
-最新已推送 031e360 补齐发布 ZIP 的离线清单工具依赖；实际解压副本在空 PATH、无 build/密钥/认证共享库条件下完成 12 项检查，运行时代码及七项产物保持 be5bda1。该提交的四项 Windows/Linux 检查也已全部成功。随后定位读取 OP_PREAD 已通过 198935 项宿主、9 组 ABI、四次专项 VM，以及包含初始构建的完整 1134.6 秒/158 VM；正完成发布门与提交，新 HEAD 托管检查仍独立核对。
+最新已推送 031e360 补齐发布 ZIP 的离线清单工具依赖；实际解压副本在空 PATH、无 build/密钥/认证共享库条件下完成 12 项检查，运行时代码及七项产物保持 be5bda1。该提交的四项 Windows/Linux 检查也已全部成功。随后定位读取 OP_PREAD 已通过 198935 项宿主、9 组 ABI、四次专项 VM，以及包含初始构建的完整 1134.6 秒/158 VM；发布门和 12 项实际 ZIP 离线验证也已完成，定位读取已提交 5d7fc5a / PR #14，新 HEAD 托管检查仍独立核对。
 
-当前工作 PR：[PR #13](https://github.com/fwqfzqaz/SpiritFoxOS/pull/13)。如果后续产生新 PR，以 [实施进度](PROGRESS.md) 和仓库实际记录为准。
+作者已合并 [PR #13](https://github.com/fwqfzqaz/SpiritFoxOS/pull/13) 为 main 9acc42e。当前工作 PR：[PR #14](https://github.com/fwqfzqaz/SpiritFoxOS/pull/14)。如果后续产生新 PR，以 [实施进度](PROGRESS.md) 和仓库实际记录为准。
 
 ## 还差什么
 

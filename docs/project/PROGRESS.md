@@ -4,14 +4,14 @@
 
 - 工作区：`E:\SpiritFoxOS`；分支 `codex/requirements-followup-20261031`；origin `https://github.com/fwqfzqaz/SpiritFoxOS.git`。
 - 本轮目标：按用户恢复指示连续接续非 M7 工作；M0 两轮已推送并通过托管检查，同所有者文件句柄复制已验证推送，发布副本依赖也已推送；当前补齐不改变共享游标的定位读取。
-- status: file_pread_local_verified_pending_publish
+- status: file_pread_published_ci_pending
 - round_complete: false
 - continuous_work: true
 - quota_paused: false
 - user_paused: false
 - pause_reason: none
 - 自动任务：`spiritfoxos-2` ACTIVE，每五分钟接续；任一剩余 <=10% 保存暂停，暂停后两项均 >20% 才恢复；活跃阶段只要两项 >10% 继续。用户再次明确暂停时同时暂停自动任务。
-- 基线：main `9f3346b`。PR #12 已合并，原修复 head 四项 Windows/Linux CI 均成功；作者的 M7 保留，未重复实现。
+- 基线：作者已把 PR #13 合并为 main 9acc42e，其树与已通过四项 CI 的 031e360 相同；工作分支已正常合入该 merge，验证树与定位读取已测 5d7fc5a 完全一致。原始设计和 M7 保持。
 - 新需求核对：已检查远端各分支、库内文档、全部独立 Issue（无）、近期 PR/评论、发布和讨论入口，未定位独立的新需求说明；继续已有授权且不依赖该说明的非 M7 工作。以实际 Git/API 提交为准，避免使用旧网页缓存。证据 `.cache/github-requirements-evidence-20261031.json`。
 - 已推送 M0 首轮：`ab085f9` / PR #13，独立 native-source-v1 schema、无密钥离线命令及可选严格源约定，兼容作者 APP 能力/内存约束；12 组专项、含构建 host-only 76.11 秒通过。该 head 四项 Windows/Linux 已成功，证明 `.cache/manifest-round-hosted-proof-20261031.json`。
 - 已推送 M0 后续：`789581f` / PR #13，真实编译共享头文件探针，采集首轮 549 项编号/大小/对齐/成员偏移/宽度/标量种类；9 组专项含三类真实临时头文件漂移。该 head 四项 Windows/Linux 已成功，证明 `.cache/abi-round-hosted-proof-20261031.json`。
@@ -19,7 +19,7 @@
 - 已交付 M0 摘要：七项产品摘要当时与作者基线相同，549 项 ABI 参考/采集为 `2036cab366d18b535cd005430eec23cd7c4acc3ee1a11b8663c0e1fda417bf24`。DUP 已提交 be5bda1，ABI 为 550 项，完整本地验证和发布门已通过。
 - 进程：本地定位读取完整回归 PID 34008 已以 0 退出，无本地存活测试或 VM。
 - 当前完整验证：定位读取包含初始构建的 tools/test.py 全部通过，1134.6 秒、158 VM；198935 项新宿主检查、legacy/modern 各 61 次定位读取标记，原复制/SDK/CPU/服务/签名/更新/设备/旧事务兼容回归保留。结果 build/file-pread-final-test-results.json，证明 .cache/file-pread-full-proof-20261031.json。
-- 下一步：定位读取本地完整通过，核对本轮发布门和实际 ZIP 后正常提交推送、更新 PR #13 并核对新 HEAD 托管检查；031e360 四项 Windows/Linux 已全部成功，证明 .cache/offline-release-hosted-proof-20261031.json。之后继续非 M7 有界工作，quota_paused=false。
+- 下一步：定位读取已提交 5d7fc5a；作者期间合并 PR #13，因此新建 PR #14 并同步最新 main。核对 PR #14 当前 HEAD 的 Windows/Linux 托管检查；本地 1134.6 秒/158 VM、发布门及 12 项实际 ZIP 离线验证通过。随后继续非 M7 有界工作。
 
 ## 同所有者文件句柄复制（2026-10-31）
 
@@ -235,3 +235,7 @@ quota_paused=true，user_paused=false。短期剩余 10%、长期 46%，ordinary
 tools/test.py 包含初始构建，1134.6 秒、158 VM 全部通过；198935 项定位读取宿主检查、两种生产传输各 61 次应用标记、死驱动实际定位读取/EOF 拒绝及所有既有回归通过。定位读取复用两次客户端 VM，没有新增启动。当前 ABI 551 项只新增 constant.OP_PREAD=26，原 550 项无删改，参考/采集摘要均为 050286990143be32572991787f7e80e81d45743ffee07366544eecf3283a9edd。七项本轮产物与结果逐项核对。尚待本轮发布门/ZIP 和正常提交推送，新 HEAD 托管检查单独核对。
 
 上一发布副本轮次 031e360 的四项 Windows/Linux 托管检查已实际全部成功，证明 .cache/offline-release-hosted-proof-20261031.json；不能用它替代当前尚未提交的定位读取实现检查。
+
+## PR #13 合并及定位读取交付（2026-10-31）
+
+作者已将 PR #13 的 031e360 合并为 main 9acc42e；两者文件树完全相同。定位读取随后提交 5d7fc5a，已创建 PR #14；工作分支再正常合入最新 main，逐文件确认合入前后树相同，未重做已合并 M0/复制工作。当前 PR #14 只描述定位读取增量，托管检查按其最新 HEAD 独立核对。
