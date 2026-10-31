@@ -355,3 +355,11 @@ M6 尝试通过工作区桥调用 deepseek-flash 审查事务引擎。两次调�
 发布 ZIP 补齐现有清单命令的三个纯 Python 依赖，所有文件均有清单摘要。对实际 ZIP 核对 CRC、39 项文件摘要和七项运行时产物，再只从 ZIP 取出工具/schema/ABI/公开策略，在工作区临时目录运行 12 项检查：schema 标准输出与文件导出、APP/模块源校验、重复键/浮点/布尔/源字节越界/缺失文件拒绝、公开策略描述及 ABI check/diff。子进程 PATH 为空，没有 build、密钥、编译器或认证共享库；结束后仍未生成 build 或密钥目录。
 
 证明 `.cache/offline-release-proof-20261031.json` 保存实际 ZIP 摘要和检查列表。此轮只改变打包清单和文档，原工具/运行时代码保持 be5bda1，七项产物与已完整通过的 1107.92 秒/158 VM 结果一致，因此本地没有重复 VM。新提交的托管 CI 仍独立核对，不用旧运行代替。
+
+## 不改变共享游标的定位读取（2026-10-31）
+
+198935 项产品 namespace/file_rpc/SDK 宿主检查通过：1000 条独立字节向量与无关共享游标、输出保护、所有者/读权限、关闭与副本、完整 64 位 EOF、目录/管道/控制台、超长/高位/非法模式无副作用、后端短读/死亡/异常计数，以及六类畸形成功回复不交付输出并停止发送。非空磁盘 EOF 请求仍访问后端，死驱动拒绝保持；零字节不访问后端但验证权限和对象类型。
+
+完整 tools/test.py 包含初始构建，1134.6 秒、158 VM 全部通过，日志 build/file-pread-final-full-20261031.log，结果 build/file-pread-final-test-results.json。既有 legacy/modern 客户端两次 VM 各记录 61 次 FILE PREAD APP PASSED，保留只读授权、共享偏移和回收/盘字节检查；安全 VM 实际检查死驱动的定位读取与极大偏移 EOF 拒绝。没有为此功能增加 VM 启动。七项产物摘要一致，源工具 12 组、ABI 9 组继续通过；551 项 ABI 仅新增 OP_PREAD=26，前 550 项不变。托管 CI 按新 HEAD 独立核对。
+
+此前 be5bda1 和发布副本 031e360 的四项 Windows/Linux 各自均已核对成功，证明分别为 .cache/file-dup-hosted-proof-20261031.json 和 .cache/offline-release-hosted-proof-20261031.json。

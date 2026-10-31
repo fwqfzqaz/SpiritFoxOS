@@ -42,6 +42,7 @@
     "constant.OP_OPEN": 10,
     "constant.OP_OPENAT": 19,
     "constant.OP_POLL": 15,
+    "constant.OP_PREAD": 26,
     "constant.OP_READ": 11,
     "constant.OP_RMDIR": 24,
     "constant.OP_ROOT": 20,

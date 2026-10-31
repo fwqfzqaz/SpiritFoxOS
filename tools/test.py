@@ -36,6 +36,7 @@ host_test('test_services','tests/host/test_services.c','services/manager.c','ser
 host_test('test_openat','tests/host/test_openat.c','services/namespace.c')
 host_test('test_file_client','tests/host/test_file_client.c','services/namespace.c','services/file_rpc.c')
 host_test('test_file_dup','tests/host/test_file_dup.c','services/namespace.c','services/file_rpc.c')
+host_test('test_file_pread','tests/host/test_file_pread.c','services/namespace.c','services/file_rpc.c')
 host_test('test_stat','tests/host/test_stat.c','services/namespace.c','services/file_rpc.c')
 host_test('test_rmdir','tests/host/test_rmdir.c','services/namespace.c','services/file_rpc.c')
 host_test('test_unlink','tests/host/test_unlink.c','services/namespace.c','services/file_rpc.c')
@@ -111,7 +112,7 @@ result['manifest_source_profile'] = 'native-source-v1'
 result['manifest_profile_host_tests'] = 12
 result['manifest_schema_sha256'] = manifest_schema_sha256
 result['abi_snapshot_host_tests'] = 9
-result['abi_snapshot_entries'] = 550
+result['abi_snapshot_entries'] = 551
 result['abi_reference_sha256'] = abi_reference_sha256
 result['abi_capture_sha256'] = abi_capture_sha256
 result['net_qemu'] = not args.host_only
@@ -159,6 +160,9 @@ result['file_client_qemu_boots'] = 0 if args.host_only else 2
 result['file_dup_host_checks'] = 23068
 result['file_dup_qemu'] = not args.host_only
 result['file_dup_qemu_boots'] = 0 if args.host_only else 2
+result['file_pread_host_checks'] = 198935
+result['file_pread_qemu'] = not args.host_only
+result['file_pread_qemu_boots'] = 0 if args.host_only else 2
 result['rmdir_host_assertions'] = 11359
 result['rmdir_qemu'] = not args.host_only
 result['rmdir_qemu_boots'] = 0 if args.host_only else 2

@@ -3,8 +3,8 @@
 更新日期：2026-10-31（北京时间）。
 
 - 工作区：`E:\SpiritFoxOS`；分支 `codex/requirements-followup-20261031`；origin `https://github.com/fwqfzqaz/SpiritFoxOS.git`。
-- 本轮目标：按用户恢复指示连续接续非 M7 工作；M0 两轮已推送并通过托管检查，同所有者文件句柄复制已验证推送，当前补齐发布副本的离线清单命令依赖。
-- status: offline_release_tools_verified_pending_publish
+- 本轮目标：按用户恢复指示连续接续非 M7 工作；M0 两轮已推送并通过托管检查，同所有者文件句柄复制已验证推送，发布副本依赖也已推送；当前补齐不改变共享游标的定位读取。
+- status: file_pread_local_verified_pending_publish
 - round_complete: false
 - continuous_work: true
 - quota_paused: false
@@ -17,9 +17,9 @@
 - 已推送 M0 后续：`789581f` / PR #13，真实编译共享头文件探针，采集首轮 549 项编号/大小/对齐/成员偏移/宽度/标量种类；9 组专项含三类真实临时头文件漂移。该 head 四项 Windows/Linux 已成功，证明 `.cache/abi-round-hosted-proof-20261031.json`。
 - M0 后续验证：含初始构建 host-only 75.08 秒通过，原 25 个 C 测试及 51 组 Python 用例保留；日志 `build/abi-inventory-host-full-20261031.log`、`build/abi-snapshot-final-20261031.log`，结果 `build/abi-inventory-host-20261031-results.json`。当前 DUP 轮次的完整验证见下节，不能沿用此旧结果。
 - 已交付 M0 摘要：七项产品摘要当时与作者基线相同，549 项 ABI 参考/采集为 `2036cab366d18b535cd005430eec23cd7c4acc3ee1a11b8663c0e1fda417bf24`。DUP 已提交 be5bda1，ABI 为 550 项，完整本地验证和发布门已通过。
-- 进程：本地完整测试 PID 32004 已以 0 退出，无本聊天存活 VM；`.cache/active-work.json` 保存结束状态。
-- 当前完整验证：`python tools/test.py` 包含初始构建，1107.92 秒、158 次 VM 全部通过。23068 项复制宿主检查、两种生产传输与原 416510 项 SDK 检查均保留；ABI 550 项只新增 `constant.OP_DUP=25`，原 549 项无删改。结果 `build/file-dup-final-test-results.json`，证明 `.cache/file-dup-full-proof-20261031.json`。
-- 下一步：额度已在 21:27 实际刷新（短期 99%、长期 46%），清除额度暂停并恢复五分钟接续。be5bda1 的两项 Linux 已成功，两项 Windows 完整套件仍运行；继续核对。当前将现有清单离线命令依赖纳入发布 ZIP，对实际解压副本验证，无重复本地 VM。
+- 进程：本地定位读取完整回归 PID 34008 已以 0 退出，无本地存活测试或 VM。
+- 当前完整验证：定位读取包含初始构建的 tools/test.py 全部通过，1134.6 秒、158 VM；198935 项新宿主检查、legacy/modern 各 61 次定位读取标记，原复制/SDK/CPU/服务/签名/更新/设备/旧事务兼容回归保留。结果 build/file-pread-final-test-results.json，证明 .cache/file-pread-full-proof-20261031.json。
+- 下一步：定位读取本地完整通过，核对本轮发布门和实际 ZIP 后正常提交推送、更新 PR #13 并核对新 HEAD 托管检查；031e360 四项 Windows/Linux 已全部成功，证明 .cache/offline-release-hosted-proof-20261031.json。之后继续非 M7 有界工作，quota_paused=false。
 
 ## 同所有者文件句柄复制（2026-10-31）
 
@@ -217,3 +217,21 @@ quota_paused=true，user_paused=false。短期剩余 10%、长期 46%，ordinary
 ## 发布副本工具验证完成（2026-10-31）
 
 实际 ZIP 已补齐三个既有纯 Python 文件，CRC、39 项清单摘要和七项运行时产物核对通过。只取出 ZIP 中工具和公开输入，在 PATH 为空、没有 build/密钥/编译器/认证共享库的目录完成 12 项导出、校验、拒绝、公开策略描述和 ABI 比较检查，证明 .cache/offline-release-proof-20261031.json。此轮运行时代码和工具逻辑保持 be5bda1，不重复本地 158 VM；待正常提交推送与新 head 托管检查。quota_paused=false，user_paused=false，自动任务 ACTIVE。
+
+## 定位读取验证进行中（2026-10-31）
+
+发布副本轮次已正常推送 031e360 / PR #13；七项运行时产物保持 be5bda1，12 项实际 ZIP 离线检查已通过，托管检查另行核对。现接续 M3/M4 的 OP_PREAD=26 / sf_file_pread：显式 64 位偏移、原所有者/只读权限、同一描述及其副本游标不变；管道和控制台拒绝定位读取，非空磁盘 EOF 请求仍经后端设备健康检查。宿主 198935 项检查已通过，含 1000 条独立字节向量；ABI 只新增 OP_PREAD，原 550 项无删改，当前 551 项。
+
+正在接续构建与生产 legacy/modern 客户端及安全 VM 专项，唯一进程/日志见 .cache/active-work.json；尚未称为专项或完整回归通过，未提交/推送此轮实现。成功后运行单套含构建的完整回归，再核对产物、发布门和新 HEAD 托管检查。quota_paused=false，user_paused=false。
+
+## 定位读取完整回归运行中（2026-10-31）
+
+包含初始构建的专项已完成：198935 项宿主检查、551 项 ABI 的 9 组专项、legacy/modern 客户端两次生产 VM 以及两次设备/安全 VM 均通过。实际共享游标保持、完整 64 位 EOF、只读授权与死驱动非空定位读取/EOF 拒绝均覆盖。现在仅有一套完整 tools/test.py 运行，进程和日志见顶部及 .cache/active-work.json；完整回归尚未完成，不提交/推送草稿。
+
+上一轮 be5bda1 的四项 Windows/Linux 托管检查已全部实际核对成功，证明 .cache/file-dup-hosted-proof-20261031.json；Windows PR 完整套件 1306.09 秒，发布 ZIP 422809 字节。发布副本依赖轮次 031e360 的检查独立跟踪，不能沿用此绿色状态。quota_paused=false，user_paused=false，自动任务每五分钟 ACTIVE。
+
+## 定位读取本地完整验证完成（2026-10-31）
+
+tools/test.py 包含初始构建，1134.6 秒、158 VM 全部通过；198935 项定位读取宿主检查、两种生产传输各 61 次应用标记、死驱动实际定位读取/EOF 拒绝及所有既有回归通过。定位读取复用两次客户端 VM，没有新增启动。当前 ABI 551 项只新增 constant.OP_PREAD=26，原 550 项无删改，参考/采集摘要均为 050286990143be32572991787f7e80e81d45743ffee07366544eecf3283a9edd。七项本轮产物与结果逐项核对。尚待本轮发布门/ZIP 和正常提交推送，新 HEAD 托管检查单独核对。
+
+上一发布副本轮次 031e360 的四项 Windows/Linux 托管检查已实际全部成功，证明 .cache/offline-release-hosted-proof-20261031.json；不能用它替代当前尚未提交的定位读取实现检查。
