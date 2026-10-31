@@ -108,6 +108,8 @@
 
 69. 修复未声明的文档/代码缺口：应用清单现在强制声明并校验requested_caps（1..32项、非空UTF-8、每项不超过64字节）与resource_limits（含memory整数，必须覆盖映像映射总量且不超过32 MiB），缺失/空/低报/字符串或负值都在签名验证前按SF_BAD_FORMAT拒绝；模块清单保持原schema。CR4在CPUID宣告时启用SMEP与SMAP，内核RAM访问走恒等映射，不需要STAC窗口；QEMU默认CPU不宣告时打印诊断但不强制。Makefile纳入版本控制，PROGRESS工作区路径改为实际Linux工作区，SDK归档说明与第68条区分。host-only套件46.74秒通过（新增应用资源上限用例），256 MiB默认与max CPU各一次QEMU回归通过，max CPU日志无SMEP/SMAP不可用诊断。
 
+70. 修复Windows原型CI在`python tools/test.py`阶段的编译失败：tests/host/test_sdk.c原先用`sf_atol("2147483648")==2147483648L`断言64位long，但Windows（LLP64）的long是32位，`-Werror -Wtautological-constant-out-of-range-compare`直接拒绝编译，导致全部宿主检查中断。现按`LONG_MAX`宽度分支断言（64位宿主比较2147483648L，32位宿主比较LONG_MAX），`%p`改为断言SDK自身形式`0x1234`（UCRT/mingw不输出0x前缀，不再依赖宿主方言），检查数171739。另以`x86_64-windows-gnu`交叉编译全部25个宿主测试（含-Wno-unused-parameter分支）确认无其他Windows编译错误；Linux host-only套件通过。
+
 ## 交付与续做
 
 M3空目录删除完整验证通过（1166.82秒、145VM），当前全部VM关闭。正常提交推送当前origin分支、核对PR10后继续下一有界任务；不得因本轮交付停止。M4有界用户态SDK已并入并通过171738项宿主检查；下一有界事项按既有顺序从文件系统/存储子系统的有界能力开始，runtime ELF装载器按DESIGN-v0.2不迁入。保留当前只读授权与全部旧协议/探针。

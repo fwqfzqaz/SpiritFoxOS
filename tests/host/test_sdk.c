@@ -92,7 +92,13 @@ int main(void){
   const char*invalid="123";char*end=0;
   CHECK(sf_strtol(invalid,&end,1)==0&&end==invalid);
   CHECK(sf_strtol(invalid,&end,37)==0&&end==invalid);
-  CHECK(sf_atoi(" -42x")==-42&&sf_atol("2147483648")==2147483648L);
+  CHECK(sf_atoi(" -42x")==-42);
+  /* long is 32-bit on LLP64 hosts; the SDK clamps to that host's LONG_MAX. */
+ #if LONG_MAX > 2147483647L
+  CHECK(sf_atol("2147483648")==2147483648L);
+ #else
+  CHECK(sf_atol("2147483648")==LONG_MAX);
+ #endif
  }
  for(unsigned round=0;round<1000;round++){
   char text[24];unsigned n=pick(16);static const char alphabet[]="0123456789abcdefABCDEFxX+- \tgz";
@@ -111,7 +117,10 @@ int main(void){
   SAME("%ld",1234567890L);SAME("%lld",-123456789012345LL);SAME("%hd",-32768);SAME("%hhd",-128);SAME("%hhd",127);
   SAME("%u",42u);SAME("%5u",42u);SAME("%-5u",42u);SAME("%05u",42u);SAME("%x",0x2a);SAME("%X",0x2a);
   SAME("%08x",0x2a);SAME("%o",42u);SAME("%.5u",42u);SAME("%.0u",0u);SAME("%llx",0x123456789abcdefULL);
-  SAME("%hhx",0xf0u);SAME("%hx",0xffffu);SAME("%p",(void*)0x1234);SAME("%12p",(void*)0x1234);
+  SAME("%hhx",0xf0u);SAME("%hx",0xffffu);
+  /* UCRT renders %p without the 0x prefix, so assert the SDK's own form. */
+  CHECK(sf_snprintf(b,sizeof(b),"%p",(void*)0x1234)==6&&!strcmp(b,"0x1234"));
+  CHECK(sf_snprintf(b,sizeof(b),"%12p",(void*)0x1234)==12&&!strcmp(b,"      0x1234"));
   SAME("%s","hello");SAME("%10s","hello");SAME("%-10s","hello");SAME("%.3s","hello");SAME("%10.3s","hello");
   SAME("%.0s","hello");SAME("%3s","ab");SAME("%c",'A');SAME("%5c",'A');SAME("%-5c",'A');
   SAME("%s/%d/%08x","abc",-3,0x11u);SAME("[%.4s]","abcdefg");
