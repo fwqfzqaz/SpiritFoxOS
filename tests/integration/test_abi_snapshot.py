@@ -45,11 +45,13 @@ class AbiSnapshot(unittest.TestCase):
     def test_capture_and_independent_wire_sizes(self):
         self.assertEqual(self.current,self.reference)
         values=self.current['values']
-        self.assertEqual(len(values),558)
+        self.assertEqual(len(values),562)
         self.assertEqual(values['constant.OP_DUP'],25)
         self.assertEqual(values['constant.OP_PREAD'],26)
         self.assertEqual(values['constant.SYS_TASK_PRIORITY'],20)
         self.assertEqual(values['constant.SF_PRIORITY_AGING_TICKS'],4)
+        self.assertEqual(values['constant.SYS_TASK_CAP_LIMIT'],21)
+        self.assertEqual(values['constant.SF_CAP_LIMIT_MAX'],32)
         # These fixed little-endian formats are independent of C sizeof/offsetof.
         formats={'SfIpcHeader':'<IHHIIQIIQ','SfMessage':'<IHHIIQIIQqQQII256s',
                  'SfBootArgs':'<IHHQQ12IQQIHH','SfFileStat':'<IIIIQQ',

@@ -11,7 +11,7 @@ int user_range(Task*t,uint64_t a,uint64_t n,int write){(void)t;(void)a;(void)n;(
 void panic(const char*s){fprintf(stderr,"Unexpected panic: %s\n",s);abort();}
 static void setup(void){
  memset(tasks,0,sizeof(tasks));memset(endpoints,0,sizeof(endpoints));memset(frames,0,sizeof(frames));
- for(unsigned i=0;i<2;i++){tasks[i].pid=i+1;tasks[i].state=T_READY;tasks[i].frame=&frames[i];tasks[i].priority=i?0:3;tasks[i].ready_since=1;}
+ for(unsigned i=0;i<2;i++){tasks[i].pid=i+1;tasks[i].state=T_READY;tasks[i].cap_limit=SF_CAP_LIMIT_MAX;tasks[i].frame=&frames[i];tasks[i].priority=i?0:3;tasks[i].ready_since=1;}
  current=0;
 }
 int main(void){

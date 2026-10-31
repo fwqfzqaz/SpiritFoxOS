@@ -29,7 +29,7 @@ int task_new(const SfLoadPlan*p,int bootstrap){
  long pid=sf_pid_take(&next_pid);if(pid<0)return (int)pid;
  Task*t=&tasks[slot];/* Preserve capability generations across slot reuse. */
  for(unsigned i=0;i<32;i++)t->caps[i].endpoint=0;t->pid=(uint32_t)pid;t->state=T_EMPTY;t->device_io=0;t->device_bdf=0;t->device_fault=0;t->device_modern=0;
- t->priority=SF_PRIORITY_DEFAULT;t->ready_since=ticks;
+ t->priority=SF_PRIORITY_DEFAULT;t->cap_limit=SF_CAP_LIMIT_MAX;t->ready_since=ticks;
  /* FXSAVE64 layout: empty x87 tags, zero physical payloads/XMM/pointers,
   * default round-to-nearest controls. FNINIT alone leaves data registers. */
  memset(t->fxstate,0,sizeof(t->fxstate));t->fxstate[0]=0x7f;t->fxstate[1]=3;t->fxstate[24]=0x80;t->fxstate[25]=0x1f;
@@ -69,6 +69,17 @@ static long syscall(Frame*f){Task*t=&tasks[current];uint64_t a=f->rdi,b=f->rsi,c
  case SYS_YIELD:return 0;
  case SYS_LOG:{if(b>512||!user_range(t,a,b,0))return SF_DENIED;char buf[513];copy_in(t,buf,a,b);buf[b]=0;serial(buf);return b;}
  case SYS_TICKS:return ticks;
+ case SYS_TASK_CAP_LIMIT:{
+  if(t->pid!=1)return SF_DENIED;
+  if(!a||a>INT32_MAX||(c!=SF_LIMIT_QUERY&&c!=SF_LIMIT_SET)||b>SF_CAP_LIMIT_MAX||(c==SF_LIMIT_QUERY&&b))return SF_INVALID;
+  for(unsigned i=0;i<SF_MAX_TASKS;i++){
+   Task*x=&tasks[i];if(x->pid==a&&(x->state==T_READY||x->state==T_BLOCKED)){
+    if(c==SF_LIMIT_SET){if(task_caps_used(x)>b)return SF_BUSY;x->cap_limit=(uint32_t)b;}
+    return x->cap_limit;
+   }
+  }
+  return SF_NOT_FOUND;
+ }
  case SYS_TASK_PRIORITY:{
   if(t->pid!=1)return SF_DENIED;
   if(!a||a>INT32_MAX||(c!=SF_PRIORITY_QUERY&&c!=SF_PRIORITY_SET)||b>SF_PRIORITY_MAX||(c==SF_PRIORITY_QUERY&&b))return SF_INVALID;

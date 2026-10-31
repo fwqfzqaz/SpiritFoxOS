@@ -32,6 +32,8 @@ host_test('test_file_rpc','tests/host/test_file_rpc.c','services/file_rpc.c','se
 host_test('test_task_pid','tests/host/test_task_pid.c','kernel/pid.c','kernel/sched_policy.c','services/arguments.c',no_unused=True)
 host_test('test_scheduler','tests/host/test_scheduler.c','kernel/pid.c','kernel/sched_policy.c','services/arguments.c',no_unused=True)
 host_test('test_sched_ipc','tests/host/test_sched_ipc.c')
+host_test('test_cap_limit','tests/host/test_cap_limit.c','kernel/pid.c','kernel/sched_policy.c','services/arguments.c',no_unused=True)
+host_test('test_ipc_budget','tests/host/test_ipc_budget.c')
 host_test('test_supervisor','tests/host/test_supervisor.c','services/supervisor.c')
 host_test('test_manager','tests/host/test_manager.c','services/manager.c')
 host_test('test_services','tests/host/test_services.c','services/manager.c','services/namespace.c')
@@ -68,6 +70,7 @@ if not args.host_only:
     subprocess.run([sys.executable, 'tests/qemu/qemu_capability_test.py'], check=True)
     subprocess.run([sys.executable, 'tests/qemu/qemu_fpu_test.py'], check=True)
     subprocess.run([sys.executable, 'tests/qemu/qemu_priority_test.py'], check=True)
+    subprocess.run([sys.executable, 'tests/qemu/qemu_cap_limit_test.py'], check=True)
     subprocess.run([sys.executable, 'tests/qemu/qemu_file_client_test.py'], check=True)
     subprocess.run([sys.executable, 'tests/qemu/qemu_rmdir_test.py'], check=True)
     subprocess.run([sys.executable, 'tests/qemu/qemu_stat_test.py'], check=True)
@@ -115,7 +118,7 @@ result['manifest_source_profile'] = 'native-source-v1'
 result['manifest_profile_host_tests'] = 12
 result['manifest_schema_sha256'] = manifest_schema_sha256
 result['abi_snapshot_host_tests'] = 9
-result['abi_snapshot_entries'] = 558
+result['abi_snapshot_entries'] = 562
 result['abi_reference_sha256'] = abi_reference_sha256
 result['abi_capture_sha256'] = abi_capture_sha256
 result['net_qemu'] = not args.host_only
@@ -135,6 +138,10 @@ result['scheduler_host_checks'] = 1605642
 result['scheduler_ipc_host_checks'] = 10000
 result['scheduler_qemu'] = not args.host_only
 result['scheduler_qemu_boots'] = 0 if args.host_only else 2
+result['cap_limit_host_checks'] = 4014
+result['ipc_budget_host_checks'] = 55043
+result['cap_limit_qemu'] = not args.host_only
+result['cap_limit_qemu_boots'] = 0 if args.host_only else 2
 result['kernel_capability_width'] = True
 result['capability_width_qemu'] = not args.host_only
 result['capability_width_qemu_boots'] = 0 if args.host_only else 2

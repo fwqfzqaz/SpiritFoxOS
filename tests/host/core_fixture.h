@@ -26,6 +26,6 @@ long pci_read(uint64_t a,uint64_t b){(void)a;(void)b;return SF_DENIED;}long devi
 int device_grant(Task*t,uint32_t a,uint32_t b,SfBootArgs*c){(void)t;(void)a;(void)b;(void)c;return SF_DENIED;}int device_release(Task*t){(void)t;return 0;}void device_forget(Task*t){(void)t;}
 void device_init(SfBootInfo*b){(void)b;}void device_poll(void){}int device_status(SfDmaStatus*s){memset(s,0,sizeof(*s));return 0;}
 uint8_t kernel_end[1];
-static void reset(uint32_t next){memset(tasks,0,sizeof(tasks));tasks[0].pid=1;tasks[0].state=T_READY;current=0;next_pid=next;allocated=allocation_calls=space_calls=freed=0;freed_pid=0;fail_after=64;core_map_tick_step=0;core_allow_schedule=0;core_last_arch=0;}
+static void reset(uint32_t next){memset(tasks,0,sizeof(tasks));tasks[0].pid=1;tasks[0].state=T_READY;tasks[0].cap_limit=SF_CAP_LIMIT_MAX;current=0;next_pid=next;allocated=allocation_calls=space_calls=freed=0;freed_pid=0;fail_after=64;core_map_tick_step=0;core_allow_schedule=0;core_last_arch=0;}
 static SfLoadPlan plan(void){SfLoadPlan p={0};p.size=sizeof(p);p.count=1;p.image_base=SF_BASE;p.segments[0]=(SfLoadSegment){0,4096,(uint64_t)(uintptr_t)segment,5,0};return p;}
 #endif

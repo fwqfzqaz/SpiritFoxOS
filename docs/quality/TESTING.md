@@ -371,3 +371,11 @@ M6 尝试通过工作区桥调用 deepseek-flash 审查事务引擎。两次调�
 新增两次 legacy/modern VM，各四次让两个不合作高优先级任务运行，最低级别管理器继续运行后恢复配置、终止/回收。实际查询/设置、非法数字/参数拒绝及普通应用查询/自提权 DENIED 通过；普通/PI/文件 SDK、echo、挂载引用和持久字节保留。此处验证定时器抢占与继续运行，不测量 CPU 比例或宣称实时上界。
 
 最终 tools/test.py 含初始构建完整通过（1187.54 秒、160 VM），日志 build/priority-final-full-20261031.log，结果 build/priority-final-test-results.json。全部既有回归、七项产物和 ABI 9 组/558 项通过。发布门要求本轮策略、两项宿主计数和两次 VM 标记；新 HEAD 的 Windows/Linux 另行核对。上一定位读取 97ae85a 已四项托管全绿，Windows PR 完整套件 899.95 秒、ZIP 434940 字节，证明 .cache/file-pread-hosted-proof-20261031.json。
+
+## 运行期内核能力句柄上限（2026-10-31）
+
+4014 项控制检查使用实际 core，包含 1000 个独立非空槽位图、BUSY/无副作用、0 上限、权限/高位和任务复用。55043 项实际 IPC 检查包含 1000 组增长/占满/拒绝/关闭轨迹，验证创建/派生/授予、零权限引用、高编号既有句柄仍可用、代次退休、全局池及拒绝时完整状态保持。原 40908 项 IPC 和 8022 项创建检查保持。
+
+新增 legacy/modern 两次 VM，各四次分阶段应用由根配置为 3，保留两个继承句柄并创建一个额外端点；重复创建/派生拒绝不耗尽全局池，降为 2 返回 BUSY 且配置保持。关闭额外引用后成功降为 2，原两个 IPC 句柄仍完成只读文件 SDK，退出回收后普通应用和优先级检查通过，持久盘字节相同。
+
+最终 tools/test.py 含初始构建完整通过（1167.02 秒、162 VM），日志 build/cap-limit-final-full-20261031.log，结果 build/cap-limit-final-test-results.json。全部旧回归、七项产物和源工具/ABI 专项保持。发布门要求本轮宿主计数、两次 VM 标记及 562 项 ABI 摘要；新 HEAD 托管 Windows/Linux 独立核对。上一优先级提交 960b62c 已四项托管全绿，证明 .cache/priority-hosted-proof-20261031.json。

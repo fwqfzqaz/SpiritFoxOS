@@ -11,11 +11,13 @@ typedef struct {
  uint64_t cr3,recv_buffer,wait_deadline;Frame *frame;
  uint32_t device_io,device_bdf,device_fault;
  uint32_t device_modern;
- uint32_t priority;uint64_t ready_since;
+ uint32_t priority,cap_limit;uint64_t ready_since;
  Cap caps[32];uint8_t fxstate[512] __attribute__((aligned(16)));
  uint8_t kstack[16384] __attribute__((aligned(16)));
 } Task;
 _Static_assert(offsetof(Task,fxstate)%16==0&&sizeof(Task)%16==0,"FXSAVE task alignment");
+_Static_assert(SF_CAP_LIMIT_MAX==sizeof(((Task*)0)->caps)/sizeof(Cap),"capability limit/table size");
+static inline unsigned task_caps_used(const Task*t){unsigned count=0;for(unsigned i=0;i<SF_CAP_LIMIT_MAX;i++)if(t->caps[i].endpoint)count++;return count;}
 extern Task tasks[SF_MAX_TASKS];extern int current;extern uint64_t ticks;
 void serial(const char*);void hex(uint64_t);void panic(const char*);
 void console_irq(void);long console_read(void);

@@ -407,14 +407,14 @@ static void namespace_stat_line(char*line){
  sf_log("stat: type=");sf_number(info.type);sf_log(" size=");sf_number(info.size);
  sf_log(" offset=");sf_number(info.offset);sf_log(" mode=");sf_number(info.mode);sf_log(" flags=");sf_number(info.flags);sf_log("\n");
 }
-static int priority_number(const char*s,uint32_t*out){
+static int decimal_u32(const char*s,uint32_t*out){
  if(!*s)return 0;uint32_t value=0;
  for(;*s;s++){if(*s<'0'||*s>'9')return 0;unsigned digit=(unsigned)(*s-'0');if(value>(UINT32_MAX-digit)/10)return 0;value=value*10+digit;}
  *out=value;return 1;
 }
 static void priority_line(char*line){
  char*words[2];int count=sf_arguments_split(line,words,2);uint32_t pid=0,level=0;long r=SF_INVALID;
- if((count==1||count==2)&&priority_number(words[0],&pid)&&(count==1||priority_number(words[1],&level)))
+ if((count==1||count==2)&&decimal_u32(words[0],&pid)&&(count==1||decimal_u32(words[1],&level)))
   r=sf_sys(SYS_TASK_PRIORITY,pid,level,count==1?SF_PRIORITY_QUERY:SF_PRIORITY_SET);
  if(r<0){sf_log("priority: failed code=");sf_number(-r);sf_log("\n");return;}
  sf_log("priority: pid=");sf_number(pid);sf_log(" level=");sf_number(r);sf_log("\n");
@@ -431,6 +431,29 @@ static void priority_test(void){
  sf_assert(sf_sys(SYS_TASK_PRIORITY,a,0,SF_PRIORITY_QUERY)==SF_NOT_FOUND&&sf_sys(SYS_TASK_PRIORITY,b,0,SF_PRIORITY_QUERY)==SF_NOT_FOUND,"priority queries reject retired tasks");
  sf_log("PRIORITY SCHEDULER TEST PASSED\n");
 }
+static void cap_limit_line(char*line){
+ char*words[2];int count=sf_arguments_split(line,words,2);uint32_t pid=0,budget=0;long r=SF_INVALID;
+ if((count==1||count==2)&&decimal_u32(words[0],&pid)&&(count==1||decimal_u32(words[1],&budget)))
+  r=sf_sys(SYS_TASK_CAP_LIMIT,pid,budget,count==1?SF_LIMIT_QUERY:SF_LIMIT_SET);
+ if(r<0){sf_log("cap-limit: failed code=");sf_number(-r);sf_log("\n");return;}
+ sf_log("cap-limit: pid=");sf_number(pid);sf_log(" limit=");sf_number(r);sf_log("\n");
+}
+static void cap_limit_signal(uint32_t pid,uint64_t stage){Child*c=child(pid);SfMessage m;sf_message(&m,OP_ECHO,stage);sf_assert(c&&!sf_send(c->reply,&m),"cap limit test signals owned child");}
+static void cap_limit_wait(uint32_t pid,uint64_t stage){
+ SfMessage m;long from=sf_recv(manager_ep,&m,sf_deadline(3000));sf_assert(from==(long)pid&&m.h.flags==pid&&m.h.opcode==OP_HELLO&&m.h.request_id==stage&&!m.status,"cap limit test authenticates child stage");
+}
+static void cap_limit_test(void){
+ int pid=launch_app_root("caplimit.sfk","/tmp");sf_assert(pid>0,"cap limit test owns waiting application");
+ sf_assert(sf_sys(SYS_TASK_CAP_LIMIT,pid,0,SF_LIMIT_QUERY)==32&&sf_sys(SYS_TASK_CAP_LIMIT,pid,3,SF_LIMIT_SET)==3,"root configures cap budget before release");
+ cap_limit_signal(pid,1);cap_limit_wait(pid,1);
+ sf_assert(sf_sys(SYS_TASK_CAP_LIMIT,pid,2,SF_LIMIT_SET)==SF_BUSY&&sf_sys(SYS_TASK_CAP_LIMIT,pid,0,SF_LIMIT_QUERY)==3,"lower budget refuses live handles without mutation");
+ int ep=sf_sys(SYS_EP_CREATE,0,0,0);sf_assert(ep>0&&!sf_sys(SYS_CAP_CLOSE,ep,0,0),"refused child allocations leave endpoint pool available");
+ cap_limit_signal(pid,2);cap_limit_wait(pid,2);
+ sf_assert(sf_sys(SYS_TASK_CAP_LIMIT,pid,2,SF_LIMIT_SET)==2,"budget lowers after child closes reference");
+ cap_limit_signal(pid,3);sf_assert(!wait_app(pid),"inherited two-cap file transport stays usable at budget");
+ sf_assert(sf_sys(SYS_TASK_CAP_LIMIT,pid,0,SF_LIMIT_QUERY)==SF_NOT_FOUND,"retired child limit is not configurable");
+ sf_log("CAP LIMIT TEST PASSED\n");
+}
 static void trust_show(void){
  if(sf_trust_validate(&sf_trust_store)){sf_log("trust: INVALID\n");return;}
  sf_log("trust: build-time keys=");sf_number(sf_trust_store.count);sf_log("\n");
@@ -441,7 +464,7 @@ static void trust_show(void){
 }
 static void command(char*line){
  if(!strcmp(line,"help")){
-  sf_log("help | ls [path] | cat <path> | write <path> <text> | truncate <path> <bytes> | stat <path> | rm <path> | mkdir <path> | rmdir <path> | priority <pid> [0..3] | modules | trust | revoke-key /disk/pkg | echo\n");
+  sf_log("help | ls [path] | cat <path> | write <path> <text> | truncate <path> <bytes> | stat <path> | rm <path> | mkdir <path> | rmdir <path> | priority <pid> [0..3] | cap-limit <pid> [0..32] | modules | trust | revoke-key /disk/pkg | echo\n");
   sf_log("run <app or installed> [args] | runat <read-only-dir> <app> [args]\nrunenv [NAME=VALUE ...] -- <app> [args] | runenvat <dir> [NAME=VALUE ...] -- <app> [args]\n");
   sf_log("install /disk/bin/app.sfk | persist | stop echo | start echo | echo-status | echo-crash | echo-hang | echo-bad-reply | echo-bad-op | mount /disk | unmount /disk | stop disk | start disk | selftest | shutdown\n");
   sf_log("ifconfig | ping <ip> | udp <ip> <port> <text> | tcp <ip> <port> <text> | stop native | start native | native-status | native-crash | native-hang | native-bad-reply | native-bad-op\n");}
@@ -457,6 +480,8 @@ static void command(char*line){
  else if(!strcmp(line,"trust")){trust_show();sf_persist_trust_status();}
  else if(!strcmp(line,"priority-test"))priority_test();
  else if(!strcmp(line,"priority")||!memcmp(line,"priority ",9))priority_line(line+8);
+ else if(!strcmp(line,"cap-limit-test"))cap_limit_test();
+ else if(!strcmp(line,"cap-limit")||!memcmp(line,"cap-limit ",10))cap_limit_line(line+9);
  else if(!memcmp(line,"revoke-key ",11)){int r=sf_persist_revoke(line+11);if(!r)sf_log("revoke: OK\n");else if(r==1)sf_log("revoke: UNCHANGED\n");else{sf_log("revoke: failed code=");sf_number(-r);sf_log("\n");}}
  else if(!strcmp(line,"modules")){sf_log("sf-init ACTIVE pinned; sf-native ");sf_log(manager.modules[runtime_slot].state==MOD_ACTIVE?"ACTIVE":"STOPPED");sf_log("; echo ");sf_log(manager.modules[echo_slot].state==MOD_ACTIVE?"ACTIVE\n":"STOPPED\n");}
  else if(!strcmp(line,"echo")){sf_log(echo_call(echo_ep,echo_pid)==0?"echo: ping\n":"echo: service unavailable\n");}

@@ -49,3 +49,5 @@ python3 tools/abi.py diff abi/x86_64-current.json build/abi-current.json
 统一测试入口记录参考和本次采集的摘要；发布门核对测试标记与两份摘要后才把报告和离线脚本纳入 ZIP。Windows/Linux 的固定宽度布局分别由相应 CI 核对，完整托管结果以当前提交为准。
 
 基础优先级后续新增 SYS_TASK_PRIORITY=20 及六项策略常量，当前 558 项；前 551 项均无删改。系统调用参数为固定宽度寄存器值，没有新 wire 结构。
+
+内核句柄上限新增 SYS_TASK_CAP_LIMIT=21 和三个常量，当前 562 项；前 558 项无删改，没有新增 wire 结构。

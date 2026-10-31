@@ -138,6 +138,9 @@ def main(policy_path=None):
     fp_manifest = {'app_id':'org.spiritfox.fpprobe','version':'0.1.0','runtime_id':'org.spiritfox.native','app_abi':1,'requested_caps':['stdio'],'resource_limits':{'memory':131072}}
     packages.append(('fpprobe.sfk',pack(fp_manifest,fp_image,2,application_seed)))
     client_image = link_elf('fileclient',shared+objects('file-client',['services/file_client.c'])+objects('fileclient',['services/fileclient_probe.c']),'services/user.ld')
+    caplimit_image = link_elf('caplimit',shared+objects('caplimit-file-client',['services/file_client.c'])+objects('caplimit',['services/caplimit_probe.c']),'services/user.ld')
+    caplimit_manifest = {'app_id':'org.spiritfox.caplimit','version':'0.1.0','runtime_id':'org.spiritfox.native','app_abi':1,'requested_caps':['stdio','namespace.read'],'resource_limits':{'memory':131072}}
+    packages.append(('caplimit.sfk',pack(caplimit_manifest,caplimit_image,2,application_seed)))
     client_manifest = {'app_id':'org.spiritfox.fileclient','version':'0.1.0','runtime_id':'org.spiritfox.native','app_abi':1,'requested_caps':['stdio','namespace.read'],'resource_limits':{'memory':131072}}
     packages.append(('fileclient.sfk',pack(client_manifest,client_image,2,application_seed)))
     pie_shared = objects('pie-common', ['services/start.S','services/memory.c','services/libsf.c','services/arguments.c'], defines=['-fpie'])
