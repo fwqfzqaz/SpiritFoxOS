@@ -341,3 +341,11 @@ M6 尝试通过工作区桥调用 deepseek-flash 审查事务引擎。两次调�
 离线副本无工具链和 build 目录也可 check/diff；新增/删除/改值均要求审阅，重复键、非法名称/格式、非整数、整数/源字节/项目数越界拒绝。最终专项还确认发布副本误用 capture 时清晰提示需要源码，不产生构建目录或 traceback。日志 `build/abi-snapshot-final-20261031.log`。
 
 包含初始构建的 host-only 全套通过（75.08 秒，原 25 个 C 测试与 51 组 Python 用例，含实际 ABI 探针）；日志 `build/abi-inventory-host-full-20261031.log`，结果 `build/abi-inventory-host-20261031-results.json`。参考和采集摘要均为 `2036cab366d18b535cd005430eec23cd7c4acc3ee1a11b8663c0e1fda417bf24`；七项产品摘要与基线一致。发布门绑定两份报告，随 ZIP 提供离线脚本；本地未重跑 VM，完整托管回归及发布结果按后续当前提交核对。
+
+## 同所有者文件句柄复制（2026-10-31）
+
+`test_file_dup` 直接包含产品客户端并链接真实 namespace/file_rpc，23068 项检查覆盖共享游标/权限、跨所有者拒绝、根副本、非法操作数无副作用、高位本地拒绝、挂载最后引用、管道 EOF、控制台、退役/耗尽槽、1000 次复用及十类畸形成功回复与回收。现有 legacy/modern 客户端 VM 的每次显式目录运行必须出现 `FILE DUP APP PASSED`，保留 60 次应用复用、只读授权、盘字节和卸载检查；未新增 VM 启动。
+
+完整 `python tools/test.py` 包含初始构建，1107.92 秒、158 次真实 VM 全部通过；日志 `build/file-dup-final-full-20261031.log`，精确结果 `build/file-dup-final-test-results.json`。原 416510 项 SDK 检查及所有既有回归通过，七项产品摘要重新核对。ABI 550 项仅增加 `constant.OP_DUP=25`，原 549 项无删改；源工具 12 组与 ABI 9 组继续通过。发布门要求复制宿主/两次生产 VM 标记及最新 ABI 摘要。托管 Windows/Linux 需按新提交核对。
+
+前两轮 M0 已交付提交 ab085f9 与 789581f 各自四项 Windows/Linux 检查均成功；789581f 的 Windows PR 完整回归 916.98 秒、ZIP 420401 字节，证明 `.cache/abi-round-hosted-proof-20261031.json`。历史段落中的待核对说明只属于当时快照，不表示本轮托管检查通过。

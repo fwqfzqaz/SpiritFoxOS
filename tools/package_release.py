@@ -58,6 +58,8 @@ if result.get('rmdir_host_assertions') != 11359 or result.get('rmdir_qemu') is n
     raise SystemExit('Run empty directory rights, busy/nonempty, reuse and VM regressions before packaging')
 if result.get('file_client_host_assertions') != 416510 or result.get('file_client_qemu') is not True or result.get('file_client_qemu_boots') != 2:
     raise SystemExit('Run file client codec/peer/deadline/counter host and production transport VM regressions before packaging')
+if result.get('file_dup_host_checks') != 23068 or result.get('file_dup_qemu') is not True or result.get('file_dup_qemu_boots') != 2:
+    raise SystemExit('Run duplicate handle rights/cursor/lifetime host and production transport VM regressions before packaging')
 if result.get('txn_compat_host_assertions') != 2046559 or result.get('txn_compat_fault_scenarios') != 783 or result.get('txn_compat_qemu') is not True or result.get('txn_compat_qemu_boots') != 6:
     raise SystemExit('Run legacy transaction geometry, first-upgrade faults and migration/restart VM regressions before packaging')
 if result.get('trust_host_assertions') != 29 or result.get('trust_qemu') is not True:
@@ -69,7 +71,7 @@ if result.get('manifest_schema_sha256') != hashlib.sha256(schema_path.read_bytes
     raise SystemExit('Manifest schema changed since source validation')
 abi_reference = ROOT/'abi/x86_64-current.json'
 abi_capture = BUILD/'abi-current.json'
-if result.get('abi_snapshot_host_tests') != 9 or result.get('abi_snapshot_entries') != 549:
+if result.get('abi_snapshot_host_tests') != 9 or result.get('abi_snapshot_entries') != 550:
     raise SystemExit('Run compiled ABI capture, offline comparison and header-drift regressions before packaging')
 if result.get('abi_reference_sha256') != hashlib.sha256(abi_reference.read_bytes()).hexdigest() or result.get('abi_capture_sha256') != hashlib.sha256(abi_capture.read_bytes()).hexdigest():
     raise SystemExit('ABI reference or capture changed since validation')
@@ -86,7 +88,7 @@ items.append((abi_reference,'abi/x86_64-current.json'))
 items.append((abi_capture,'abi/x86_64-captured.json'))
 items.append((ROOT/'tools/abi.py','tools/abi.py'))
 items += [(p,p.relative_to(ROOT).as_posix()) for p in sorted((ROOT/'docs').rglob('*.md'))]
-manifest = {'files_sha256': {name: hashlib.sha256(path.read_bytes()).hexdigest() for path,name in items}, 'validation': 'tools/test.py: host + legacy storage + VT-d/modern DMA isolation + persistence/update-health/version-policy/fault/restart + kernel-boundary/storage-failure security + directory-capability openat + truncate/zero-extension fault/recovery + trust-policy/rotation/immutable-and-durable-runtime-revocation + native-argv/explicit-environment/read-only/preflight + relative-native/private-image/reboot + file-RPC/local-bounds/IPC-rejection + block-reply/private-channel/restart + echo-reply/per-instance/capacity-recovery + authenticated-launch-kind/suffix-independent + dependency-generation/transactional-leases + echo-supervision/bounded-restart + echo-health/hang/protocol-failure + native-capacity/lease-drain/supervision VMs + actual-task-PID exhaustion host checks + installed-invocation/preflight/corrupt-rollback + RAM-unlink/directory/rights/slot-reuse + canonical-file-handle/stat VMs + canonical-kernel-capabilities + eager-FP-context/fresh/interleaved/timer/fault VMs + empty-RAM-directory/rmdir/rights/nonempty/reuse VMs + public-file-client/codec/private-transport/read-only VMs'}
+manifest = {'files_sha256': {name: hashlib.sha256(path.read_bytes()).hexdigest() for path,name in items}, 'validation': 'tools/test.py: host + legacy storage + VT-d/modern DMA isolation + persistence/update-health/version-policy/fault/restart + kernel-boundary/storage-failure security + directory-capability openat + truncate/zero-extension fault/recovery + trust-policy/rotation/immutable-and-durable-runtime-revocation + native-argv/explicit-environment/read-only/preflight + relative-native/private-image/reboot + file-RPC/local-bounds/IPC-rejection + block-reply/private-channel/restart + echo-reply/per-instance/capacity-recovery + authenticated-launch-kind/suffix-independent + dependency-generation/transactional-leases + echo-supervision/bounded-restart + echo-health/hang/protocol-failure + native-capacity/lease-drain/supervision VMs + actual-task-PID exhaustion host checks + installed-invocation/preflight/corrupt-rollback + RAM-unlink/directory/rights/slot-reuse + canonical-file-handle/stat VMs + canonical-kernel-capabilities + eager-FP-context/fresh/interleaved/timer/fault VMs + empty-RAM-directory/rmdir/rights/nonempty/reuse VMs + public-file-client/codec/private-transport/read-only/duplicate-shared-description VMs'}
 archive = BUILD/'SpiritFoxOS-M6-Updates.zip'
 with zipfile.ZipFile(archive,'w',zipfile.ZIP_DEFLATED) as z:
     for path,name in items:

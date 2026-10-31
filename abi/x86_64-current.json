@@ -26,6 +26,7 @@
     "constant.OP_CLOSE": 13,
     "constant.OP_CREATE": 16,
     "constant.OP_DESCRIBE": 17,
+    "constant.OP_DUP": 25,
     "constant.OP_ECHO": 1,
     "constant.OP_ECHO_DIAGNOSTIC": 2,
     "constant.OP_ENUMERATE": 18,

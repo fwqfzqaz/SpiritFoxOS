@@ -3,8 +3,8 @@
 更新日期：2026-10-31（北京时间）。
 
 - 工作区：`E:\SpiritFoxOS`；分支 `codex/requirements-followup-20261031`；origin `https://github.com/fwqfzqaz/SpiritFoxOS.git`。
-- 本轮目标：按用户恢复指示连续接续非 M7 工作；交付 M0 独立清单作者工具、共享头文件 ABI 目录与离线布局比较。
-- status: abi_inventory_host_verified
+- 本轮目标：按用户恢复指示连续接续非 M7 工作；M0 两轮已推送并通过托管检查，当前补齐同所有者文件句柄复制与公共 SDK。
+- status: file_dup_local_verified_pending_publish
 - round_complete: false
 - continuous_work: true
 - quota_paused: false
@@ -12,13 +12,21 @@
 - pause_reason: none
 - 自动任务：`spiritfoxos-2` ACTIVE，每五分钟接续；任一剩余 <=10% 保存暂停，暂停后两项均 >20% 才恢复；活跃阶段只要两项 >10% 继续。用户再次明确暂停时同时暂停自动任务。
 - 基线：main `9f3346b`。PR #12 已合并，原修复 head 四项 Windows/Linux CI 均成功；作者的 M7 保留，未重复实现。
-- 新需求核对：已检查远端各分支、库内文档、全部独立 Issue（无）、近期 PR/评论、发布和讨论入口，未定位独立的新需求说明；继续已有授权且不依赖该说明的 M0 工作。以实际 Git/API 提交为准，避免使用旧网页缓存。证据 `.cache/github-requirements-evidence-20261031.json`。
-- 已推送 M0 首轮：`ab085f9` / PR #13，独立 native-source-v1 schema、无密钥离线命令及可选严格源约定，兼容作者 APP 能力/内存约束；12 组专项、含构建 host-only 76.11 秒通过。该 head 两项 Linux 已成功，Windows 完整套件/发布门按实际运行单独核对。
-- 当前后续：真实编译共享头文件探针，采集 549 项编号/大小/对齐/成员偏移/宽度/标量种类，维护 `abi/x86_64-current.json`；离线 capture/check/diff 不自动刷新参考。9 组专项含三类真实临时头文件漂移，以及无编译器的离线副本。
-- 验证：含初始构建 host-only 75.08 秒通过，保留原 25 个 C 测试及 51 组 Python 用例；ABI 独立大小/捕获和真实负例通过，离线发布副本缺少源码时的清晰拒绝又以最终 9 组专项核对。日志 `build/abi-inventory-host-full-20261031.log`、`build/abi-snapshot-final-20261031.log`，结果 `build/abi-inventory-host-20261031-results.json`。
-- 交付摘要：七项 EFI/磁盘/公开密钥/策略与作者基线逐项相同；ABI 参考和采集均为 `2036cab366d18b535cd005430eec23cd7c4acc3ee1a11b8663c0e1fda417bf24`。未重复本地 VM，布局匹配不代表 ABI 语义冻结。
-- 进程：本地宿主/专项测试均结束，无 VM 运行；原草稿 stash `c77ee53558a569589d4667873464f47631b1b359` 只作备份，不要再次应用。
-- 下一步：正常推送 ABI 工具，更新现有 PR 最终范围，核对当前 HEAD 的 Windows 完整套件/发布门与 Linux 检查，保留已交付首轮的独立证明；继续路线中的下一项非 M7 有界工作，不能因一轮完成而停工。
+- 新需求核对：已检查远端各分支、库内文档、全部独立 Issue（无）、近期 PR/评论、发布和讨论入口，未定位独立的新需求说明；继续已有授权且不依赖该说明的非 M7 工作。以实际 Git/API 提交为准，避免使用旧网页缓存。证据 `.cache/github-requirements-evidence-20261031.json`。
+- 已推送 M0 首轮：`ab085f9` / PR #13，独立 native-source-v1 schema、无密钥离线命令及可选严格源约定，兼容作者 APP 能力/内存约束；12 组专项、含构建 host-only 76.11 秒通过。该 head 四项 Windows/Linux 已成功，证明 `.cache/manifest-round-hosted-proof-20261031.json`。
+- 已推送 M0 后续：`789581f` / PR #13，真实编译共享头文件探针，采集首轮 549 项编号/大小/对齐/成员偏移/宽度/标量种类；9 组专项含三类真实临时头文件漂移。该 head 四项 Windows/Linux 已成功，证明 `.cache/abi-round-hosted-proof-20261031.json`。
+- M0 后续验证：含初始构建 host-only 75.08 秒通过，原 25 个 C 测试及 51 组 Python 用例保留；日志 `build/abi-inventory-host-full-20261031.log`、`build/abi-snapshot-final-20261031.log`，结果 `build/abi-inventory-host-20261031-results.json`。当前 DUP 轮次的完整验证见下节，不能沿用此旧结果。
+- 已交付 M0 摘要：七项产品摘要当时与作者基线相同，549 项 ABI 参考/采集为 `2036cab366d18b535cd005430eec23cd7c4acc3ee1a11b8663c0e1fda417bf24`。当前未提交 DUP 轮次增加 OP_DUP 后为 550 项，需要以本轮重新验证的产物为准。
+- 进程：本地完整测试 PID 32004 已以 0 退出，无本聊天存活 VM；`.cache/active-work.json` 保存结束状态。
+- 当前完整验证：`python tools/test.py` 包含初始构建，1107.92 秒、158 次 VM 全部通过。23068 项复制宿主检查、两种生产传输与原 416510 项 SDK 检查均保留；ABI 550 项只新增 `constant.OP_DUP=25`，原 549 项无删改。结果 `build/file-dup-final-test-results.json`，证明 `.cache/file-dup-full-proof-20261031.json`。
+- 下一步：发布门和 ZIP 精确摘要核对后正常提交推送当前分支、更新 PR #13 为最终范围并核对新 HEAD 的 Windows/Linux 检查；旧 789581f 的绿色状态不替代本轮。随后继续非 M7 有界事项；quota_paused=false，user_paused=false，自动任务 ACTIVE。
+
+## 同所有者文件句柄复制（2026-10-31）
+
+OP_DUP=25 / sf_file_dup 通过现有描述引用实现同所有者复制，保留权限、共享游标和最后引用回收；关闭默认根后显式目录副本仍可使用，但 OP_ROOT 不会重新授予根。挂载、管道 EOF、控制台、回收与槽位耗尽语义由真实 namespace/file_rpc 宿主组合验证。畸形成功回复会停止客户端；不确定超时可能保留引用至进程回收，不提供跨进程转移或取消。
+
+完整含初始构建回归 1107.92 秒、158 VM 通过；复制复用现有 legacy/modern 两次客户端 VM，没有为复制额外增加启动。全部既有 CPU/能力/服务/签名/设备/更新/旧事务兼容测试通过，七项交付摘要与本轮验证产物逐项相同。ABI 参考及采集均为 408e6cbdcf7ccf50eb900b7e06401280812c8bf823eca2ce7510dc0d575fd7ab。当前本地通过，托管 CI 按新提交另行核对。
+
 
 ## 已完成
 
