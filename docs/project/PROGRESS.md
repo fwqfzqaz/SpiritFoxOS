@@ -1,20 +1,21 @@
 # SpiritFoxOS 实施进度
 
-更新日期：2026-10-30（北京时间）。
+更新日期：2026-10-31（北京时间）。
 
-- 工作区：`/home/fwqfzqaz/work/SpiritFoxOS`。
-- 本轮目标：合并 `origin/main` 的 PR #11（文件客户端 SDK、旧事务几何兼容）与本地 M7 网络纵向切片、有界 SDK、应用清单校验和 SMEP/SMAP，保留两边实现与目录结构。
-- status: merged_pending_full_regression
-- round_complete: true
-- continuous_work: true
+- 工作区：`E:\SpiritFoxOS`。
+- 本轮目标：只修复用户截图中的 Windows CI 失败，保留作者在 main 上的新实现和修复；此前暂停的其他开发继续暂停。
+- status: windows_ci_fix_host_verified
+- round_complete: false
+- continuous_work: false
 - quota_paused: false
 - user_paused: false
 - pause_reason: none
-- 分支：`main`；origin 为 `https://github.com/fwqfzqaz/SpiritFoxOS.git`。
-- 合并基线：`origin/main` 的 `b5c82c3`（PR #11，含 `002ea46` 文件客户端 SDK、`5dd9b54` 旧事务几何兼容），本地为 `20d65db`（README、冻结快照、M7 网络与有界 SDK）。
-- 当前验证：两分支各自完整测试已通过（本地 M7：host-only 47.55 秒、`net_host_checks=14084`、网络 QEMU 通过；远端 PR #11：1086.09 秒 / 151 VM、SDK 416510 项；事务兼容：1112.0 秒 / 157 VM、2046559 项兼容断言）。合并树尚未重跑完整套件，发布前必须以合并后结果为准。
-- 合并前旧 SDK 存档仍在 stash `bbbbf630329e88e41f656c1ce3da59b2a575ea82`，与已合并的有界 SDK 无关。
-- 交付步骤：在合并树上执行 `python3 tools/test.py`，然后推送 `main`；不得用任一分支的旧结果冒充合并结果。
+- 分支：`codex/windows-sdk-ci-20261031`；origin 为 `https://github.com/fwqfzqaz/SpiritFoxOS.git`。
+- 基线：作者 main `e74cf26`，包括 `f085ef1` 的 LLP64 long 与指针格式断言修复。Windows #54 编译失败已由作者修复；#55 继续因字符串比较测试错误要求返回值绝对数值一致而失败，本机已复现。
+- 修复范围：比较结果按符号核对；分词只在首调用传入字符串，不依赖 opaque 保存指针；不完整十六进制前缀使用明确期望值和结束偏移；二分查找允许返回任一匹配重复项。新增全字节对、NUL/长度、空分隔符、重复键与空数组检查。SDK 产品源码未修改。
+- 当前验证：Windows SDK `-O2`、`-O0 -fno-builtin` 与 `-O2 -fno-builtin -fsanitize=undefined -fno-sanitize-recover=all` 均为 368490 项通过；包含初始构建的 `python tools/test.py --host-only` 已通过（175.29 秒、25 个 C 宿主程序、30 组 Python 用例）。日志 `build/windows-ci-host-20261031.log`，单独保留结果 `build/windows-ci-host-20261031-results.json`。本机未运行 QEMU，本地结果不能替代托管 Windows 完整套件；托管结果以本修复 PR 的当前 HEAD 检查为准。
+- 原 M0 草稿完整保存在 stash `c77ee53558a569589d4667873464f47631b1b359`，未混入本次修复。自动任务 `spiritfoxos-2` 保持 PAUSED，不恢复后续开发。
+- 交付步骤：正常提交推送修复分支并创建 PR，实际核对 Windows 完整套件与 Linux 宿主检查；结果存 `.cache/windows-ci-repair-20261031.json`，核对完成后其余开发继续暂停。历史失败记录保留，不把旧提交重跑称为已修复。
 
 ## 已完成
 

@@ -26,7 +26,7 @@ Linux 下 OVMF 文件名因发行版而异，QEMU 测试同时识别 `OVMF_CODE.
 - 229 条 IOMMU C 检查：ACPI 校验和、RSDT/XSDT、DMAR 长度/范围/重复、DRHD segment、端点覆盖；独立页表遍历验证获授 IOVA 的每个半扇区、前后边界、其他请求者和 CPU 物理地址均不能意外获得映射。
 - 更新状态机与真实事务引擎组合测试：规范编码、截断与逐位变异、身份及槽约束、首装失败；stage/begin/confirm/rollback 四个提交点各 261 个边界 × 三种故障，共 3132 个失败场景。恢复时包摘要、状态和回退槽保持一致，未确认试运行不会升级为已确认。
 - 4069 条版本策略检查：规范数字版本、最大 32 位分量、溢出/前导零/后缀拒绝、整数次序而非字符串次序、降级/同版本换包拒绝和精确重装识别，以及 1000 次固定种子版本字符串往返。与用户态安装器共用 `services/version.c`。
-- 171739 条 SDK 宿主检查：以宿主 C 库为独立参照，覆盖内存/字符串/ctype 固定与随机输入、1000 组 strtol/strtoul、700 组格式化、0 到 40 字节截断的返回值/终止/字节一致性和 100 组 bsearch；SDK 自身不调用宿主库，也不含 syscall、分配、全局状态或流。`long` 宽度与 `%p` 形式按宿主 ABI 分别断言，Windows（LLP64/UCRT）与 Linux 均可编译运行。
+- 368490 条 SDK 宿主检查：以宿主 C 库和明确的接口期望值为独立参照，覆盖内存/字符串/ctype 固定与随机输入、1000 组 strtol/strtoul、700 组格式化、0 到 40 字节截断的返回值/终止/字节一致性、100 组随机 bsearch，以及全部 256×256 字节对的有界比较。比较函数核对符号，分词首调用与续调用分开，不完整十六进制前缀按明确值及偏移核对，二分查找验证匹配成员而非重复键下的相同下标。`long` 宽度与 `%p` 形式分别按宿主 ABI 和 SDK 约定断言；SDK 自身不调用宿主库，也不含 syscall、分配、全局状态或流。
 
 ## QEMU 端到端
 
@@ -315,3 +315,13 @@ M6 尝试通过工作区桥调用 deepseek-flash 审查事务引擎。两次调�
 六次新增 QEMU（每种传输三次）先准备已确认 0.2.0 应用和双槽/笔记，离线转为精确四记录旧几何；稳定挂载和运行 installed 不改任何字节。普通笔记写出迁移后的新几何，双槽/选择器保持原字节，再追加备用应用签名者的撤销键作为第五个文件。重启后笔记、版本、撤销保持，正常应用签名者仍可运行，原构建盘/只读底区不变。
 
 完整 python tools/test.py 包含初始构建通过（1112.0 秒、157 VM），日志 build/txn-compat-final-full.txt，结果 build/txn-compat-test-results.json。全部 SDK、内核、CPU、服务、签名/用途/撤销、DMA、目录及旧事务/更新/截断回归与七项交付摘要一致。发布门要求本轮宿主计数、783 故障场景及六次 VM 标记；托管检查仍按最新提交单独核对。
+
+## Windows SDK 宿主测试修复（2026-10-31）
+
+读取 main 的 Actions 原始日志：Windows #54（run 41173097613）因 LLP64 的 32 位 long 断言无法编译，作者已在 f085ef1 修复；最新 #55（run 41189419413，e74cf26）构建完成后停在 `test_sdk.c` 的 strncmp 断言。本机使用同样的 `x86_64-windows-gnu -O2 -Wall -Wextra -Werror` 复现。逐项修正后又实际复现了分词重启和 `0xg` 结束偏移差异，没有把编译通过当成运行通过。
+
+比较函数只比较结果的符号；不完整 `0x`/`0X`、正负号及前置空白使用独立的值/结束偏移向量；bsearch 对重复键核对返回值确实属于输入数组并等于 key，不要求两套实现选择相同副本。依据为 [WG14 N1570 草案](https://www.open-std.org/jtc1/sc22/wg14/www/docs/n1570.pdf) 的 7.24.4、7.22.1.4 和 7.22.5.1。strtok_r 只在首次调用传入文本，其后始终传 NULL，保存指针不用于决定重新开始；调用约定见 [GNU libc 分词说明](https://www.gnu.org/software/libc/manual/2.23/html_node/Finding-Tokens-in-a-String.html)。SDK 产品实现保持原有语义。
+
+新增 196608 条字节对/长度检查、4 条终止/前缀检查、7 条确定性分词检查、28 条不完整十六进制解析检查、104 条二分查找边界检查，保留全部原固定种子用例，总数 368490。Windows 的 `-O2`、`-O0 -fno-builtin`、`-O2 -fno-builtin -fsanitize=undefined -fno-sanitize-recover=all` 均实际运行通过，日志分别为 `build/sdk-ci-final.log`、`build/sdk-ci-unoptimized.log`、`build/sdk-ci-sanitized.log`。
+
+本机 `python tools/test.py --host-only` 包含初始构建，175.29 秒通过（25 个 C 宿主程序、30 组 Python 用例）；日志 `build/windows-ci-host-20261031.log`，结果 `build/windows-ci-host-20261031-results.json` 记录七项交付摘要。此运行没有执行 QEMU 或发布打包，托管 Windows 完整套件及 Linux 宿主检查按本次修复提交单独核对，旧红色运行属于其历史提交。
