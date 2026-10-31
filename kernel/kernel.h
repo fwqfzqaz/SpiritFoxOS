@@ -1,6 +1,7 @@
 #ifndef KERNEL_H
 #define KERNEL_H
 #include "sf.h"
+#include "sched_policy.h"
 #define NX (1ull<<63)
 typedef struct {uint64_t r15,r14,r13,r12,r11,r10,r9,r8,rdi,rsi,rbp,rbx,rdx,rcx,rax,vector,error,rip,cs,rflags,rsp,ss;} Frame;
 enum {T_EMPTY,T_READY,T_BLOCKED,T_DEAD};
@@ -10,6 +11,7 @@ typedef struct {
  uint64_t cr3,recv_buffer,wait_deadline;Frame *frame;
  uint32_t device_io,device_bdf,device_fault;
  uint32_t device_modern;
+ uint32_t priority;uint64_t ready_since;
  Cap caps[32];uint8_t fxstate[512] __attribute__((aligned(16)));
  uint8_t kstack[16384] __attribute__((aligned(16)));
 } Task;

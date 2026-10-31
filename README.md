@@ -14,6 +14,7 @@
 | 能力 | 当前状态 |
 | --- | --- |
 | 启动与隔离 | UEFI 验证签名启动包，ExitBootServices 后进入独立页表的 CPL3 `sf-init` |
+| 调度 | 单核抢占、0–3 基础优先级、等待老化与同级轮转，PID 1 控制配置 |
 | 包格式 | 96 字节头 + 64 字节段描述符 + 确定性 CBOR + Ed25519 尾部，W^X 与段布局校验 |
 | 微内核边界 | 内核不解析路径、ELF、CBOR 或包格式；驱动与服务均为用户态模块 |
 | 存储 | legacy/modern `virtio-blk`、SFRFS1 只读盘、双银行事务持久化、掉电故障恢复 |
@@ -171,6 +172,7 @@ python3 tools/package/sfpack.py trust --policy build/trust-policy.json
 | [持久化](docs/architecture/PERSISTENCE.md) / [更新](docs/architecture/UPDATES.md) | 双银行事务、A/B 与回退 |
 | [信任策略](docs/architecture/TRUST.md) / [native](docs/architecture/NATIVE.md) | 公钥用途、撤销、装载格式 |
 | [文件 SDK](docs/architecture/FILE_SDK.md) / [项目状态](docs/project/STATUS.md) | 文件 RPC 客户端封装与当前交付状态 |
+| [基础优先级](docs/architecture/SCHEDULING.md) | PID 1 配置、等待老化与同级轮转 |
 | [生命周期](docs/architecture/LIFECYCLE.md) / [CPU 上下文](docs/architecture/CPU_CONTEXT.md) | 依赖代次、租约、FPU 隔离 |
 | [测试记录](docs/quality/TESTING.md) / [安全审查](docs/quality/SECURITY.md) | 验证范围与已修复边界 |
 

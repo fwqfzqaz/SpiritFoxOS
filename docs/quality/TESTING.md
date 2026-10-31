@@ -363,3 +363,11 @@ M6 尝试通过工作区桥调用 deepseek-flash 审查事务引擎。两次调�
 完整 tools/test.py 包含初始构建，1134.6 秒、158 VM 全部通过，日志 build/file-pread-final-full-20261031.log，结果 build/file-pread-final-test-results.json。既有 legacy/modern 客户端两次 VM 各记录 61 次 FILE PREAD APP PASSED，保留只读授权、共享偏移和回收/盘字节检查；安全 VM 实际检查死驱动的定位读取与极大偏移 EOF 拒绝。没有为此功能增加 VM 启动。七项产物摘要一致，源工具 12 组、ABI 9 组继续通过；551 项 ABI 仅新增 OP_PREAD=26，前 550 项不变。托管 CI 按新 HEAD 独立核对。
 
 此前 be5bda1 和发布副本 031e360 的四项 Windows/Linux 各自均已核对成功，证明分别为 .cache/file-dup-hosted-proof-20261031.json 和 .cache/offline-release-hosted-proof-20261031.json。
+
+## 基础优先级、等待老化与唤醒（2026-10-31）
+
+1605642 项宿主检查使用实际 core 的 schedule、task_new 和系统调用控制，替换硬件机制。包含 0–3 选择边界、同级轮转、坏返回帧、权限/高位/无副作用、槽复用与创建过程中时钟前进，以及 1000 组持续 READY 集合轨迹。模型所测最大运行间隔为 20 tick，不把它作为真实硬件的最坏延迟。10000 项产品 IPC 检查包含 1000 组直接交付、接收期限和撤销唤醒，独立确认新 READY 时间与基础优先级保持；原 task_new 的 8022 项检查不变。
+
+新增两次 legacy/modern VM，各四次让两个不合作高优先级任务运行，最低级别管理器继续运行后恢复配置、终止/回收。实际查询/设置、非法数字/参数拒绝及普通应用查询/自提权 DENIED 通过；普通/PI/文件 SDK、echo、挂载引用和持久字节保留。此处验证定时器抢占与继续运行，不测量 CPU 比例或宣称实时上界。
+
+最终 tools/test.py 含初始构建完整通过（1187.54 秒、160 VM），日志 build/priority-final-full-20261031.log，结果 build/priority-final-test-results.json。全部既有回归、七项产物和 ABI 9 组/558 项通过。发布门要求本轮策略、两项宿主计数和两次 VM 标记；新 HEAD 的 Windows/Linux 另行核对。上一定位读取 97ae85a 已四项托管全绿，Windows PR 完整套件 899.95 秒、ZIP 434940 字节，证明 .cache/file-pread-hosted-proof-20261031.json。

@@ -3,8 +3,8 @@
 更新日期：2026-10-31（北京时间）。
 
 - 工作区：`E:\SpiritFoxOS`；分支 `codex/requirements-followup-20261031`；origin `https://github.com/fwqfzqaz/SpiritFoxOS.git`。
-- 本轮目标：按用户恢复指示连续接续非 M7 工作；M0 两轮已推送并通过托管检查，同所有者文件句柄复制已验证推送，发布副本依赖也已推送；当前补齐不改变共享游标的定位读取。
-- status: file_pread_published_ci_pending
+- 本轮目标：连续接续非 M7 工作；清单/ABI/复制已随 PR #13 合入 main，定位读取已推送 PR #14，当前补齐 M1 基础优先级与等待老化。
+- status: priority_local_verified_pending_publish
 - round_complete: false
 - continuous_work: true
 - quota_paused: false
@@ -17,9 +17,9 @@
 - 已推送 M0 后续：`789581f` / PR #13，真实编译共享头文件探针，采集首轮 549 项编号/大小/对齐/成员偏移/宽度/标量种类；9 组专项含三类真实临时头文件漂移。该 head 四项 Windows/Linux 已成功，证明 `.cache/abi-round-hosted-proof-20261031.json`。
 - M0 后续验证：含初始构建 host-only 75.08 秒通过，原 25 个 C 测试及 51 组 Python 用例保留；日志 `build/abi-inventory-host-full-20261031.log`、`build/abi-snapshot-final-20261031.log`，结果 `build/abi-inventory-host-20261031-results.json`。当前 DUP 轮次的完整验证见下节，不能沿用此旧结果。
 - 已交付 M0 摘要：七项产品摘要当时与作者基线相同，549 项 ABI 参考/采集为 `2036cab366d18b535cd005430eec23cd7c4acc3ee1a11b8663c0e1fda417bf24`。DUP 已提交 be5bda1，ABI 为 550 项，完整本地验证和发布门已通过。
-- 进程：本地定位读取完整回归 PID 34008 已以 0 退出，无本地存活测试或 VM。
-- 当前完整验证：定位读取包含初始构建的 tools/test.py 全部通过，1134.6 秒、158 VM；198935 项新宿主检查、legacy/modern 各 61 次定位读取标记，原复制/SDK/CPU/服务/签名/更新/设备/旧事务兼容回归保留。结果 build/file-pread-final-test-results.json，证明 .cache/file-pread-full-proof-20261031.json。
-- 下一步：定位读取已提交 5d7fc5a；作者期间合并 PR #13，因此新建 PR #14 并同步最新 main。核对 PR #14 当前 HEAD 的 Windows/Linux 托管检查；本地 1134.6 秒/158 VM、发布门及 12 项实际 ZIP 离线验证通过。随后继续非 M7 有界工作。
+- 进程：M1 完整回归 PID 29556 已以 0 退出，无本地存活测试或 VM。
+- 当前完整验证：M1 包含初始构建的 tools/test.py 全部通过，1187.54 秒、160 VM；1605642 项选择/控制与 10000 项 IPC 唤醒检查，9 组 ABI/558 项及全部既有回归保留。结果 build/priority-final-test-results.json，证明 .cache/priority-full-proof-20261031.json。
+- 下一步：核对当前 M1 发布门/ZIP 与离线工具，拉取并保留作者最新合并，正常提交推送并按实际开放 PR 更新范围；新 HEAD Windows/Linux 独立核对。定位读取 97ae85a 的四项托管检查已全部成功，证明 .cache/file-pread-hosted-proof-20261031.json。之后继续非 M7 有界工作。
 
 ## 同所有者文件句柄复制（2026-10-31）
 
@@ -239,3 +239,17 @@ tools/test.py 包含初始构建，1134.6 秒、158 VM 全部通过；198935 项
 ## PR #13 合并及定位读取交付（2026-10-31）
 
 作者已将 PR #13 的 031e360 合并为 main 9acc42e；两者文件树完全相同。定位读取随后提交 5d7fc5a，已创建 PR #14；工作分支再正常合入最新 main，逐文件确认合入前后树相同，未重做已合并 M0/复制工作。当前 PR #14 只描述定位读取增量，托管检查按其最新 HEAD 独立核对。
+
+## M1 基础优先级完整验证进行中（2026-10-31）
+
+新增 0–3 基础优先级、每四 tick READY 老化及同有效级别轮转；PID 1 可通过 SYS_TASK_PRIORITY=20 和 priority 命令查询/设置，普通应用拒绝。新任务/槽复用默认 1，IPC 交付/期限/撤销唤醒重新计等待，既有 FPU 和坏返回帧隔离保持。没有实现 CPU 预算或优先级继承，也不宣称硬实时上界。
+
+初版含构建专项通过：1605641 项选择/控制宿主、10000 项实际 IPC 唤醒检查、9 组 ABI，以及 legacy/modern 两次优先级 VM 和两次 CPU 状态 VM。随后独立注入创建过程中时钟前进，复现创建耗时被计为等待的错误；已在实际 READY 发布点重置时间，最终宿主 1605642 项及原 8022 项创建检查通过。修正后正在重新构建并运行完整 tools/test.py，目标 160 VM；当前只此一套，不把旧专项或旧 158 VM 结果当成本轮完整通过。
+
+ABI 只新增 SYS_TASK_PRIORITY 和六项策略常量，前 551 项无删改，当前 558 项；差异 .cache/priority-abi-addition-20261031.json。进程、验证和恢复点见 .cache/progress-live.json、.cache/active-work.json 及 .cache/checkpoints/priority-running-20261031.zip。源码和文档均保存，尚未提交或推送本轮 M1；原设计和作者 M7 未改动。
+
+## M1 基础优先级本地完整验证完成（2026-10-31）
+
+tools/test.py 包含初始构建，1187.54 秒、160 VM 全部通过。1605642 项实际 core 选择/控制、10000 项实际 IPC 唤醒、原 8022 项创建/浮点初始化检查均保留；两次新增 legacy/modern 优先级 VM 各四次运行两个不合作高优先级任务，最低级别管理器仍继续运行，恢复配置、终止回收和盘字节检查通过。全部既有 CPU/FPU、文件/复制/定位读取、监督、签名/更新、设备/DMA、旧事务兼容回归通过。
+
+当前 ABI 558 项仅新增 SYS_TASK_PRIORITY=20 和六项策略常量，前 551 项无删改；参考与采集均为 5b7f4343d07169496ddb14bbc054cc0fd17ec31e945ad68f520f6bca0a23e56c。七项本轮产物摘要逐项核对。当前无本地测试/VM，待发布门/ZIP 和正常推送，新托管检查不能沿用定位读取 97ae85a 的四项绿色状态。

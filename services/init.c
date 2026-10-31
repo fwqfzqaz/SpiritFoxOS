@@ -407,6 +407,30 @@ static void namespace_stat_line(char*line){
  sf_log("stat: type=");sf_number(info.type);sf_log(" size=");sf_number(info.size);
  sf_log(" offset=");sf_number(info.offset);sf_log(" mode=");sf_number(info.mode);sf_log(" flags=");sf_number(info.flags);sf_log("\n");
 }
+static int priority_number(const char*s,uint32_t*out){
+ if(!*s)return 0;uint32_t value=0;
+ for(;*s;s++){if(*s<'0'||*s>'9')return 0;unsigned digit=(unsigned)(*s-'0');if(value>(UINT32_MAX-digit)/10)return 0;value=value*10+digit;}
+ *out=value;return 1;
+}
+static void priority_line(char*line){
+ char*words[2];int count=sf_arguments_split(line,words,2);uint32_t pid=0,level=0;long r=SF_INVALID;
+ if((count==1||count==2)&&priority_number(words[0],&pid)&&(count==1||priority_number(words[1],&level)))
+  r=sf_sys(SYS_TASK_PRIORITY,pid,level,count==1?SF_PRIORITY_QUERY:SF_PRIORITY_SET);
+ if(r<0){sf_log("priority: failed code=");sf_number(-r);sf_log("\n");return;}
+ sf_log("priority: pid=");sf_number(pid);sf_log(" level=");sf_number(r);sf_log("\n");
+}
+static void priority_test(void){
+ int a=launch_app("spinner.sfk"),b=launch_app("spinner.sfk");sf_assert(a>0&&b>0,"priority test owns two noncooperating tasks");
+ sf_assert(sf_sys(SYS_TASK_PRIORITY,a,0,SF_PRIORITY_QUERY)==SF_PRIORITY_DEFAULT&&sf_sys(SYS_TASK_PRIORITY,b,0,SF_PRIORITY_QUERY)==SF_PRIORITY_DEFAULT,"new tasks start at default priority");
+ sf_assert(sf_sys(SYS_TASK_PRIORITY,a,SF_PRIORITY_MAX,SF_PRIORITY_SET)==SF_PRIORITY_MAX&&sf_sys(SYS_TASK_PRIORITY,b,SF_PRIORITY_MAX,SF_PRIORITY_SET)==SF_PRIORITY_MAX,"root raises both timer-preempted spinners");
+ sf_assert(sf_sys(SYS_TASK_PRIORITY,1,SF_PRIORITY_MIN,SF_PRIORITY_SET)==SF_PRIORITY_MIN,"root lowers itself for aging test");
+ uint64_t before=sf_ticks();while(sf_ticks()-before<40)sf_yield();
+ sf_assert(sf_sys(SYS_TASK_STATUS,a,0,0)==SF_TASK_RUNNING&&sf_sys(SYS_TASK_STATUS,b,0,0)==SF_TASK_RUNNING,"lowest-priority manager progresses while both high tasks remain alive");
+ sf_assert(sf_sys(SYS_TASK_PRIORITY,1,SF_PRIORITY_DEFAULT,SF_PRIORITY_SET)==SF_PRIORITY_DEFAULT,"root restores normal priority");
+ sf_assert(!sf_sys(SYS_KILL,a,0,0)&&!sf_sys(SYS_KILL,b,0,0),"priority test stops owned tasks");app_reap(a);app_reap(b);
+ sf_assert(sf_sys(SYS_TASK_PRIORITY,a,0,SF_PRIORITY_QUERY)==SF_NOT_FOUND&&sf_sys(SYS_TASK_PRIORITY,b,0,SF_PRIORITY_QUERY)==SF_NOT_FOUND,"priority queries reject retired tasks");
+ sf_log("PRIORITY SCHEDULER TEST PASSED\n");
+}
 static void trust_show(void){
  if(sf_trust_validate(&sf_trust_store)){sf_log("trust: INVALID\n");return;}
  sf_log("trust: build-time keys=");sf_number(sf_trust_store.count);sf_log("\n");
@@ -417,7 +441,7 @@ static void trust_show(void){
 }
 static void command(char*line){
  if(!strcmp(line,"help")){
-  sf_log("help | ls [path] | cat <path> | write <path> <text> | truncate <path> <bytes> | stat <path> | rm <path> | mkdir <path> | rmdir <path> | modules | trust | revoke-key /disk/pkg | echo\n");
+  sf_log("help | ls [path] | cat <path> | write <path> <text> | truncate <path> <bytes> | stat <path> | rm <path> | mkdir <path> | rmdir <path> | priority <pid> [0..3] | modules | trust | revoke-key /disk/pkg | echo\n");
   sf_log("run <app or installed> [args] | runat <read-only-dir> <app> [args]\nrunenv [NAME=VALUE ...] -- <app> [args] | runenvat <dir> [NAME=VALUE ...] -- <app> [args]\n");
   sf_log("install /disk/bin/app.sfk | persist | stop echo | start echo | echo-status | echo-crash | echo-hang | echo-bad-reply | echo-bad-op | mount /disk | unmount /disk | stop disk | start disk | selftest | shutdown\n");
   sf_log("ifconfig | ping <ip> | udp <ip> <port> <text> | tcp <ip> <port> <text> | stop native | start native | native-status | native-crash | native-hang | native-bad-reply | native-bad-op\n");}
@@ -431,6 +455,8 @@ static void command(char*line){
  else if(!strcmp(line,"disk-crash")){if(sf_storage_crash_test())sf_log("disk: crash test refused\n");}
  else if(!memcmp(line,"install ",8)){int r=sf_persist_install(line+8);if(!r)sf_log("install: COMMITTED\n");else if(r==1)sf_log("install: UNCHANGED\n");else{sf_log("install: failed code=");sf_number(-r);sf_log("\n");}}
  else if(!strcmp(line,"trust")){trust_show();sf_persist_trust_status();}
+ else if(!strcmp(line,"priority-test"))priority_test();
+ else if(!strcmp(line,"priority")||!memcmp(line,"priority ",9))priority_line(line+8);
  else if(!memcmp(line,"revoke-key ",11)){int r=sf_persist_revoke(line+11);if(!r)sf_log("revoke: OK\n");else if(r==1)sf_log("revoke: UNCHANGED\n");else{sf_log("revoke: failed code=");sf_number(-r);sf_log("\n");}}
  else if(!strcmp(line,"modules")){sf_log("sf-init ACTIVE pinned; sf-native ");sf_log(manager.modules[runtime_slot].state==MOD_ACTIVE?"ACTIVE":"STOPPED");sf_log("; echo ");sf_log(manager.modules[echo_slot].state==MOD_ACTIVE?"ACTIVE\n":"STOPPED\n");}
  else if(!strcmp(line,"echo")){sf_log(echo_call(echo_ep,echo_pid)==0?"echo: ping\n":"echo: service unavailable\n");}
