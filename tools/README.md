@@ -10,8 +10,11 @@
 | `build.py` | 构建内核、UEFI 镜像、sfmod、应用与测试盘。 |
 | `test.py` | 构建并运行宿主与 QEMU 测试，写出 `build/test-results.json`。 |
 | `package_release.py` | 校验测试结果与镜像摘要后生成发布包。 |
+| `abi.py` | 实际编译共享头文件目录，采集固定宽度 ABI 数值，并离线检查或比较报告。 |
 
 根目录 `Makefile` 把上述入口映射为 `make bootstrap`、`make build`、`make test`、`make release` 等目标，并透传相同参数。
+
+`python3 tools/abi.py capture` 生成当前头文件快照，`python3 tools/abi.py check build/abi-current.json` 对照审阅参考；`diff <before> <after>` 离线报告增删改。离线比较不依赖编译器，范围见 [ABI 快照说明](../docs/architecture/ABI_SNAPSHOT.md)。
 
 ## 包工具
 

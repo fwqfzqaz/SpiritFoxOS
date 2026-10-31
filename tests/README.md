@@ -20,6 +20,8 @@ python3 tools/test.py --skip-build # 复用已有构建镜像
 
 `python3 tests/integration/test_manifest_profile.py` 专项检查 JSON 源预算、重复键和独立作者 schema，并以真实 ELF / C 验证器测试 CLI 打包。schema/清单离线命令还在无共享库、无密钥的隔离副本中验证；完整专项的真实打包部分需要先构建。
 
+`python3 tests/integration/test_abi_snapshot.py` 实际编译共享头文件探针，对照审阅参考和独立 wire 大小；另在临时头文件副本中验证操作码漂移、同大小字段交换和有符号性改变都能检测。正式头文件保持不变。
+
 单独运行某个 QEMU 场景：
 
 ```bash

@@ -3,20 +3,22 @@
 更新日期：2026-10-31（北京时间）。
 
 - 工作区：`E:\SpiritFoxOS`；分支 `codex/requirements-followup-20261031`；origin `https://github.com/fwqfzqaz/SpiritFoxOS.git`。
-- 本轮目标：恢复原计划，保留作者已完成的 M7 分工；接续 M0 独立清单源 schema 和离线校验。
-- status: manifest_profile_host_verified
+- 本轮目标：按用户恢复指示连续接续非 M7 工作；交付 M0 独立清单作者工具、共享头文件 ABI 目录与离线布局比较。
+- status: abi_inventory_host_verified
 - round_complete: false
 - continuous_work: true
 - quota_paused: false
 - user_paused: false
 - pause_reason: none
-- 自动任务：`spiritfoxos-2` 已恢复 ACTIVE，额度允许时每五分钟接续；任一余额 <=10% 保存暂停，暂停后两项均 >20% 才恢复，活跃阶段 10%–20% 继续。用户人工暂停仍优先。
-- 基线：main `9f3346b`；PR #12 的 Windows SDK CI 修复已合并。该修复 head `4e91fff` 的 Windows push/PR 完整套件和发布打包、Linux 两项宿主检查均已实际核对成功。
-- 新需求核对：已检查远端所有分支、仓库文档、全部 Issue（无独立 Issue）、近期 PR 与评论、发布及讨论入口，尚未定位单独的新需求说明。GitHub 网页缓存展示过旧结构，当前实现以实际 Git/API 提交为准。可恢复证据 `.cache/github-requirements-evidence-20261031.json`。
-- 当前实现：独立 `schemas/native-source-v1.schema.json`；无密钥/共享库的 `manifest-schema`、`validate-manifest`；module/app 可选 `--strict-manifest`；所有 JSON 打包源先拒绝重复键、非法数字/Unicode、源/深度/节点/CBOR 超界。APP 约定要求作者新增的能力列表和内存声明，实际映像预算仍由 C 验证器检查。
-- 验证：12 组新专项通过，包含真实 static/relative-v1/模块 CLI 打包及 C 验证、独立数值和边界检查；完整包含初始构建的 host-only 通过（76.11 秒，25 C、42 Python）。七项交付摘要与作者基线逐项相同；未重复本地 VM。结果 `build/manifest-profile-host-20261031-results.json`，日志 `build/manifest-profile-host-final-lf-20261031.log`。
-- 进程：本轮本地测试已结束，无 VM 在运行。原 M0 草稿仍保留 stash `c77ee53558a569589d4667873464f47631b1b359`，只恢复了两个源工具文件，没有覆盖作者文档。
-- 下一步：正常提交/推送本轮工具和文档，创建工作 PR 并实际核对 Windows 完整回归/发布门与 Linux 检查；随后继续非 M7 的有界任务。独立源约定不等于 ABI 冻结、权限授予或完整 JSON Schema 引擎。
+- 自动任务：`spiritfoxos-2` ACTIVE，每五分钟接续；任一剩余 <=10% 保存暂停，暂停后两项均 >20% 才恢复；活跃阶段只要两项 >10% 继续。用户再次明确暂停时同时暂停自动任务。
+- 基线：main `9f3346b`。PR #12 已合并，原修复 head 四项 Windows/Linux CI 均成功；作者的 M7 保留，未重复实现。
+- 新需求核对：已检查远端各分支、库内文档、全部独立 Issue（无）、近期 PR/评论、发布和讨论入口，未定位独立的新需求说明；继续已有授权且不依赖该说明的 M0 工作。以实际 Git/API 提交为准，避免使用旧网页缓存。证据 `.cache/github-requirements-evidence-20261031.json`。
+- 已推送 M0 首轮：`ab085f9` / PR #13，独立 native-source-v1 schema、无密钥离线命令及可选严格源约定，兼容作者 APP 能力/内存约束；12 组专项、含构建 host-only 76.11 秒通过。该 head 两项 Linux 已成功，Windows 完整套件/发布门按实际运行单独核对。
+- 当前后续：真实编译共享头文件探针，采集 549 项编号/大小/对齐/成员偏移/宽度/标量种类，维护 `abi/x86_64-current.json`；离线 capture/check/diff 不自动刷新参考。9 组专项含三类真实临时头文件漂移，以及无编译器的离线副本。
+- 验证：含初始构建 host-only 75.08 秒通过，保留原 25 个 C 测试及 51 组 Python 用例；ABI 独立大小/捕获和真实负例通过，离线发布副本缺少源码时的清晰拒绝又以最终 9 组专项核对。日志 `build/abi-inventory-host-full-20261031.log`、`build/abi-snapshot-final-20261031.log`，结果 `build/abi-inventory-host-20261031-results.json`。
+- 交付摘要：七项 EFI/磁盘/公开密钥/策略与作者基线逐项相同；ABI 参考和采集均为 `2036cab366d18b535cd005430eec23cd7c4acc3ee1a11b8663c0e1fda417bf24`。未重复本地 VM，布局匹配不代表 ABI 语义冻结。
+- 进程：本地宿主/专项测试均结束，无 VM 运行；原草稿 stash `c77ee53558a569589d4667873464f47631b1b359` 只作备份，不要再次应用。
+- 下一步：正常推送 ABI 工具，更新现有 PR 最终范围，核对当前 HEAD 的 Windows 完整套件/发布门与 Linux 检查，保留已交付首轮的独立证明；继续路线中的下一项非 M7 有界工作，不能因一轮完成而停工。
 
 ## 已完成
 

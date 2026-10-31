@@ -333,3 +333,11 @@ M6 尝试通过工作区桥调用 deepseek-flash 审查事务引擎。两次调�
 真实 CLI 用公开固定测试种子打包 static APP、relative-v1 APP 与模块，全部通过产品 C 验证，输出与原程序接口逐字节相同。默认 CLI 保留额外元数据；严格源模式关闭未知字段。畸形 JSON/源约定/编码越界在缺失 ELF 和种子之前报错，输出保持；声明内存低于实际映像时在真实打包阶段拒绝。专项日志 `build/manifest-profile-focused-20261031.log`。
 
 包含初始构建的 `python tools/test.py --host-only` 完整通过；schema 按仓库 LF 行尾规范化后的最终运行耗时 76.11 秒（25 个 C 程序、42 组 Python 用例），日志 `build/manifest-profile-host-final-lf-20261031.log`。七项 EFI/磁盘/公钥/策略摘要与已验证的作者基线一致；本次本地未重复 VM。测试结果记录 schema 摘要，发布门核对此摘要及新宿主测试标记并把独立 schema 放入 ZIP；Windows 完整套件与 Linux CI 仍须按新提交核对。
+
+## M0 共享头文件 ABI 目录与比较（2026-10-31）
+
+真实 C11 宿主探针采集 549 项数值，含编号、大小、对齐、偏移、宽度和标量种类；原头文件保持不变。`tests/integration/test_abi_snapshot.py` 的 9 组专项通过，独立 little-endian wire 格式核对 IPC/BootArgs/文件/网络/信任记录，另实际编译三类临时修改头文件：插入系统调用造成编号漂移、总大小相同的字段交换、大小和偏移相同的有符号性改变。三者均通过真实采集和离线比较定位。
+
+离线副本无工具链和 build 目录也可 check/diff；新增/删除/改值均要求审阅，重复键、非法名称/格式、非整数、整数/源字节/项目数越界拒绝。最终专项还确认发布副本误用 capture 时清晰提示需要源码，不产生构建目录或 traceback。日志 `build/abi-snapshot-final-20261031.log`。
+
+包含初始构建的 host-only 全套通过（75.08 秒，原 25 个 C 测试与 51 组 Python 用例，含实际 ABI 探针）；日志 `build/abi-inventory-host-full-20261031.log`，结果 `build/abi-inventory-host-20261031-results.json`。参考和采集摘要均为 `2036cab366d18b535cd005430eec23cd7c4acc3ee1a11b8663c0e1fda417bf24`；七项产品摘要与基线一致。发布门绑定两份报告，随 ZIP 提供离线脚本；本地未重跑 VM，完整托管回归及发布结果按后续当前提交核对。
