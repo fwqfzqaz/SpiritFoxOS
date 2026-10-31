@@ -51,3 +51,5 @@ python3 tools/abi.py diff abi/x86_64-current.json build/abi-current.json
 基础优先级后续新增 SYS_TASK_PRIORITY=20 及六项策略常量，当前 558 项；前 551 项均无删改。系统调用参数为固定宽度寄存器值，没有新 wire 结构。
 
 内核句柄上限新增 SYS_TASK_CAP_LIMIT=21 和三个常量，当前 562 项；前 558 项无删改，没有新增 wire 结构。
+
+未投递 IPC 撤回仅追加 SYS_SEND_CANCEL=22，当前 563 项；前 562 项无删改，没有新增 wire 结构。

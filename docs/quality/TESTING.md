@@ -379,3 +379,11 @@ M6 尝试通过工作区桥调用 deepseek-flash 审查事务引擎。两次调�
 新增 legacy/modern 两次 VM，各四次分阶段应用由根配置为 3，保留两个继承句柄并创建一个额外端点；重复创建/派生拒绝不耗尽全局池，降为 2 返回 BUSY 且配置保持。关闭额外引用后成功降为 2，原两个 IPC 句柄仍完成只读文件 SDK，退出回收后普通应用和优先级检查通过，持久盘字节相同。
 
 最终 tools/test.py 含初始构建完整通过（1167.02 秒、162 VM），日志 build/cap-limit-final-full-20261031.log，结果 build/cap-limit-final-test-results.json。全部旧回归、七项产物和源工具/ABI 专项保持。发布门要求本轮宿主计数、两次 VM 标记及 562 项 ABI 摘要；新 HEAD 托管 Windows/Linux 独立核对。上一优先级提交 960b62c 已四项托管全绿，证明 .cache/priority-hosted-proof-20261031.json。
+
+## 按实际发送者撤回排队请求（2026-11-01）
+
+25776 项产品 IPC 检查覆盖黄金向量和 1000 组独立逻辑 FIFO，包含所有环形 head、满队列、首中尾、同编号不同发送者、0/完整 64 位编号、重复撤回、载荷/顺序、无匹配完整状态、非法权限/高位/保留参数、失效/撤销、独立端点与直接交付后无副作用。满 32 个能力句柄时撤回仍可用，不额外分配资源。
+
+新增 legacy/modern 两次 VM，各八次分阶段应用通过自有端点和继承 SEND-only 管理器端点验证；管理器在应用退出前不接收，并保留自己的同编号消息。原能力宽度、配额、优先级、文件 SDK/回收与持久字节不变。完整 tools/test.py 含初始构建全部通过（1210.79 秒、164 VM），日志 build/ipc-cancel-final-full-20261031.log，结果 build/ipc-cancel-final-test-results.json。发布门要求本轮计数/两个 VM 标记，ABI 9 组/563 项及七项精确产物摘要；新 HEAD 托管 CI 另核对。此前 2b728ef 四项 Windows/Linux 全绿，证明 .cache/cap-limit-hosted-proof-20261031.json。
+
+本轮撤回发布门与实际 ZIP 验证通过：465689 字节、42 项 CRC/全部摘要，七项产物与完整 1210.79 秒/164 VM 结果一致；12 项实际解压离线检查通过。验证证明 .cache/ipc-cancel-release-proof-20261031.json。

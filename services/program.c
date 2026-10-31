@@ -84,6 +84,7 @@ long sf_main(const SfBootArgs*a,size_t bytes){
   if(sf_sys(SYS_CAP_CLOSE,invalid,0,0)!=SF_STALE_HANDLE)return 33;
   if(sf_sys(SYS_CAP_DERIVE,invalid,RIGHT_SEND|RIGHT_RECV,0)!=SF_DENIED)return 34;
   if(sf_sys(SYS_CAP_REVOKE,invalid,0,0)!=SF_DENIED)return 35;
+  if(sf_send_cancel(invalid,0xcab123)!=SF_STALE_HANDLE)return 39;
  }
  if(sf_send(owned,&probe_message)||sf_recv(owned,&probe_message,sf_deadline(100))!=a->pid||probe_message.h.request_id!=0xcab123||probe_message.h.flags!=a->pid)return 36;
  long held=sf_sys(SYS_CAP_DERIVE,owned,RIGHT_SEND|RIGHT_RECV,0);if(held<=0||sf_sys(SYS_CAP_CLOSE,owned,0,0))return 37;

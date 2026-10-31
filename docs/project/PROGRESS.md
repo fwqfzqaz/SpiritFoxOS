@@ -1,10 +1,10 @@
 # SpiritFoxOS 实施进度
 
-更新日期：2026-10-31（北京时间）。
+更新日期：2026-11-01（北京时间；本轮自 10 月 31 日跨日接续）。
 
 - 工作区：`E:\SpiritFoxOS`；分支 `codex/requirements-followup-20261031`；origin `https://github.com/fwqfzqaz/SpiritFoxOS.git`。
-- 本轮目标：连续接续非 M7 工作；定位读取和基础优先级已推送，当前补齐可在运行期配置的内核能力句柄数量上限。
-- status: cap_limit_local_verified_pending_publish
+- 本轮目标：连续接续非 M7 工作；定位读取、基础优先级和内核句柄上限已验证推送，当前补齐只撤回尚未投递的认证发送者队列请求。
+- status: ipc_cancel_local_verified_pending_publish
 - round_complete: false
 - continuous_work: true
 - quota_paused: false
@@ -17,9 +17,9 @@
 - 已推送 M0 后续：`789581f` / PR #13，真实编译共享头文件探针，采集首轮 549 项编号/大小/对齐/成员偏移/宽度/标量种类；9 组专项含三类真实临时头文件漂移。该 head 四项 Windows/Linux 已成功，证明 `.cache/abi-round-hosted-proof-20261031.json`。
 - M0 后续验证：含初始构建 host-only 75.08 秒通过，原 25 个 C 测试及 51 组 Python 用例保留；日志 `build/abi-inventory-host-full-20261031.log`、`build/abi-snapshot-final-20261031.log`，结果 `build/abi-inventory-host-20261031-results.json`。当前 DUP 轮次的完整验证见下节，不能沿用此旧结果。
 - 已交付 M0 摘要：七项产品摘要当时与作者基线相同，549 项 ABI 参考/采集为 `2036cab366d18b535cd005430eec23cd7c4acc3ee1a11b8663c0e1fda417bf24`。DUP 已提交 be5bda1，ABI 为 550 项，完整本地验证和发布门已通过。
-- 进程：内核句柄上限完整回归 PID 36332 已以 0 退出，无本地存活测试或 VM。
-- 当前完整验证：内核句柄上限 tools/test.py 含初始构建全部通过，1167.02 秒、162 VM；4014 项控制、55043 项准入与全部既有回归保留，ABI 9 组/562 项通过。结果 build/cap-limit-final-test-results.json，证明 .cache/cap-limit-full-proof-20261031.json。
-- 下一步：核对本轮发布门/ZIP 和实际解压离线工具，再正常提交推送并按实际开放 PR 更新范围，新 HEAD Windows/Linux 独立核对；优先级 960b62c 的四项托管检查已成功，证明 .cache/priority-hosted-proof-20261031.json。之后继续非 M7 有界工作。
+- 进程：排队发送撤回完整回归 PID 30688 以 0 退出，无本轮存活测试/VM。
+- 当前完整验证：tools/test.py 含初始构建全部通过，1210.79 秒、164 VM；25776 项撤回检查、原配额/优先级/文件和所有既有回归保留，ABI 9 组/563 项通过。结果 build/ipc-cancel-final-test-results.json。
+- 下一步：发布门与实际 ZIP 离线工具验证后正常提交推送，核对实际开放 PR 和新 HEAD Windows/Linux；旧 2b728ef 四项托管检查均成功，不能代替本轮 CI。继续非 M7 有界任务。
 
 ## 同所有者文件句柄复制（2026-10-31）
 
@@ -267,3 +267,21 @@ SYS_TASK_CAP_LIMIT=21 仅允许 PID 1 为活任务查询/设置 0–32 个内核
 tools/test.py 含初始构建完整通过（1167.02 秒、162 VM）：4014 项实际 core 控制、55043 项产品 IPC 配额、原 40908 项 IPC 与全部既有回归通过。两次新增 legacy/modern VM 各四次完成配置 3、占满/创建派生拒绝、BUSY 降低保持、关闭后降为 2、两个继承句柄继续文件 IPC 和回收；优先级、CPU、服务、签名/更新、设备与旧事务兼容保持。
 
 当前 ABI 562 项仅新增 SYS_TASK_CAP_LIMIT=21 和三个常量，前 558 项无删改；参考/采集摘要均为 247b43b76ab319d7231da8cd94823007ecbb3bfcd97d482fea5023a0d5fb4e1f。七项本轮产物逐项核对，尚待发布门/ZIP 与正常推送。本轮托管 CI 不沿用旧结果；此前 960b62c 已四项全绿，Windows PR 完整套件 1348.63 秒、ZIP 440696 字节，证明 .cache/priority-hosted-proof-20261031.json。
+
+## 排队发送撤回完整验证进行中（2026-11-01）
+
+SYS_SEND_CANCEL=22 / sf_send_cancel 仅移除当前端点队列中实际发送者等于调用者、完整 64 位编号相同的条目，0 编号合法，保留其他消息 FIFO/载荷。无匹配、重复或已交付返回 0，不修改既有输出、服务副作用或在途操作。有效 SEND 权限即可，非法句柄/保留字段无副作用；现有文件 SDK 不自动撤回或清除超时状态。
+
+含构建专项已通过：25776 项产品 IPC 检查、原配额/IPC 宿主、9 组 ABI，以及两次 legacy/modern 撤回 VM 与两次能力宽度 VM。每种传输八次分阶段应用验证全编号/0/重复/环绕，通过继承 SEND-only 管理器能力撤回自己消息；管理器同编号自身消息保留。配额/优先级/文件 IPC 和回收、磁盘字节保持。
+
+当前只运行一套含初始构建的完整 tools/test.py，目标 164 VM，尚未完成，未提交或推送本轮。ABI 仅新增 SYS_SEND_CANCEL=22，前 562 项无删改，当前 563 项；差异 .cache/ipc-cancel-abi-addition-20261031.json。恢复点见 .cache/progress-live.json、.cache/active-work.json 与 .cache/checkpoints/ipc-cancel-running-20261031.zip。quota_paused=false，user_paused=false，自动任务 ACTIVE。
+
+用户授权的 DeepSeek 桥已用于独立纯文本用例整理（无工具/文件读取），其中一行跨发送者预期错误已独立纠正并保留为阴性回归，不把生成结果称为测试通过。来源/复核记录在 .cache/deepseek/cancel-matrix-reviewed-20261031.md；另一次只读副本审查超时，没有将其视为审查通过。
+
+## 排队发送撤回本地验证完成（2026-11-01）
+
+含初始构建的完整 tools/test.py 全部通过（1210.79 秒、164 VM）。25776 项产品 IPC 宿主检查和 legacy/modern 各八次分阶段应用验证认证发送者隔离、完整编号/0/重复、环绕 FIFO、继承 SEND-only 能力、交付后无副作用和配额占满仍可撤回。原内核/CPU/能力/文件/服务/设备/签名/更新/旧事务回归保留，七项产物逐项相符。
+
+仅新增 SYS_SEND_CANCEL=22，旧 562 项 ABI 无删改，当前 563 项；参考/采集 SHA-256 为 f6d0963368d0c9448a8488edfb9df9b6d88c5392aeb884bb381a77e2e758a674。边界见 IPC_CANCEL.md：撤回仅针对未投递队列，不代表取消在途操作、确认/排空或回滚副作用。此轮本地通过；正常推送后单独核对新 HEAD 托管检查。此前 2b728ef 四项 Windows/Linux 已全部成功，Windows PR 完整 1248.55 秒、ZIP 446035 字节，证据 .cache/cap-limit-hosted-proof-20261031.json。
+
+本轮撤回发布门与实际 ZIP 验证通过：465689 字节、42 项 CRC/全部摘要，七项产物与完整 1210.79 秒/164 VM 结果一致；12 项实际解压离线检查通过。验证证明 .cache/ipc-cancel-release-proof-20261031.json。

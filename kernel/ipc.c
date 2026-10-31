@@ -28,6 +28,20 @@ long ipc_syscall(uint64_t call,uint64_t a,uint64_t b,uint64_t c){
  if(call==SYS_CAP_CLOSE){Cap*x=cap(t,a,0);if(!x)return SF_STALE_HANDLE;close_cap(x);return 0;}
  if(call==SYS_CAP_DERIVE){Cap*x=cap(t,a,RIGHT_DELEGATE);if(!x||(b&~7)||(b&x->rights)!=b)return SF_DENIED;return install(t,x->endpoint-1,b);}
  if(call==SYS_CAP_REVOKE){Cap*x=cap(t,a,RIGHT_DELEGATE);if(!x||endpoints[x->endpoint-1].owner!=t->pid)return SF_DENIED;invalidate(x->endpoint-1);return 0;}
+ if(call==SYS_SEND_CANCEL){
+  Cap*x=cap(t,a,RIGHT_SEND);if(!x)return SF_STALE_HANDLE;if(c)return SF_INVALID;
+  Endpoint*e=&endpoints[x->endpoint-1];if(e->head>=8||e->count>8)return SF_BAD_FORMAT;
+  unsigned count=e->count,kept=0;
+  /* Logical indices cover at most one ring lap. Each destination precedes
+   * its source, so compaction cannot overwrite a later unread message. */
+  for(unsigned i=0;i<count;i++){
+   SfMessage*m=&e->queue[(e->head+i)%8];if(m->h.flags==t->pid&&m->h.request_id==b)continue;
+   if(kept!=i)e->queue[(e->head+kept)%8]=*m;kept++;
+  }
+  if(kept==count)return 0;
+  for(unsigned i=kept;i<count;i++)memset(&e->queue[(e->head+i)%8],0,sizeof(SfMessage));
+  e->count=kept;if(!kept)e->head=0;return count-kept;
+ }
  if(call==SYS_SEND){
   Cap*x=cap(t,a,RIGHT_SEND);if(!x)return SF_STALE_HANDLE;SfMessage m;if(copy_in(t,&m,b,sizeof(m)))return SF_DENIED;
   if(m.h.size!=40||m.h.protocol_major!=1||m.h.protocol_minor||m.h.payload_bytes>sizeof(m)-40||m.h.cap_count||m.length>SF_MSG_BYTES)return SF_INVALID;

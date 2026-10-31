@@ -131,6 +131,7 @@
     "constant.SYS_PORT_IO": 17,
     "constant.SYS_RECV": 6,
     "constant.SYS_SEND": 5,
+    "constant.SYS_SEND_CANCEL": 22,
     "constant.SYS_SHUTDOWN": 11,
     "constant.SYS_SPAWN": 7,
     "constant.SYS_TASK_CAP_LIMIT": 21,
