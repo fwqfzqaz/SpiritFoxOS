@@ -10,7 +10,6 @@
 | `build.py` | 构建内核、UEFI 镜像、sfmod、应用与测试盘。 |
 | `test.py` | 构建并运行宿主与 QEMU 测试，写出 `build/test-results.json`。 |
 | `package_release.py` | 校验测试结果与镜像摘要后生成发布包。 |
-| `push.py` | 提交当前改动并通过本地 spv SOCKS 代理推送；拒绝凭据类路径。 |
 
 根目录 `Makefile` 把上述入口映射为 `make bootstrap`、`make build`、`make test`、`make release` 等目标，并透传相同参数。
 
@@ -19,6 +18,7 @@
 `package/` 保存磁盘与包格式实现，被构建、测试与发布共用：
 
 - `sfpack.py`：SFMOD1/SFK1 打包、签名与检查。
+- `manifest_profile.py`：有界无重复键 JSON 源读取与 `native-source-v1` 固定作者约定。
 - `mkreadfs.py`：生成只读 SFRFS1 镜像。
 - `mkpersist.py`：生成 2 MiB 双银行事务镜像。
 - `crypto_host.c`：供 Python 通过 ctypes 调用的 C 加密/校验桥。
@@ -27,7 +27,11 @@
 
 ```bash
 python3 tools/package/sfpack.py inspect build/hello.sfk --public-key build/application.pub
+python3 tools/package/sfpack.py manifest-schema
+python3 tools/package/sfpack.py validate-manifest build/hello-source.json --kind app
 ```
+
+离线 schema/源校验无需 C 共享库或签名密钥；`module` / `app` 可加 `--strict-manifest`，默认保留自由元数据。所有 JSON 打包输入都拒绝重复键、非法数字和超预算源文件。约定及独立 schema 见 [清单源文件说明](../docs/architecture/MANIFESTS.md)。
 
 ## 开发辅助
 

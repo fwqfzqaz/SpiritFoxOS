@@ -8,6 +8,7 @@ import struct
 import sys
 sys.path.insert(0,str(Path(__file__).resolve().parents[2]/'tools'))
 import trust_policy
+import manifest_profile
 
 ROOT = Path(__file__).resolve().parents[2]
 BASE = 0x40000000
@@ -210,6 +211,16 @@ def bundle(packages):
     return result
 
 
+def source_manifest(path, kind, strict=False):
+    """Reject ambiguous/unbounded JSON before reading ELF or signing material."""
+    manifest = manifest_profile.load(path)
+    if strict:
+        manifest_profile.validate(manifest, kind)
+    if len(cbor(manifest)) > manifest_profile.MAX_ENCODED_BYTES:
+        raise ValueError('Manifest exceeds 64 KiB encoded limit')
+    return manifest
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     sub = p.add_subparsers(dest='command', required=True)
@@ -217,6 +228,13 @@ def main():
         s = sub.add_parser(name)
         for flag in ['manifest', 'image', 'out', 'seed']:
             s.add_argument('--'+flag, type=Path, required=True)
+        s.add_argument('--strict-manifest', action='store_true',
+                       help='require the native-source-v1 authoring profile')
+    s = sub.add_parser('validate-manifest', help='validate source without ELF, keys or a C library')
+    s.add_argument('file', type=Path)
+    s.add_argument('--kind', choices=['module', 'app'], required=True)
+    s = sub.add_parser('manifest-schema', help='export the native-source-v1 JSON Schema')
+    s.add_argument('--out', type=Path)
     s = sub.add_parser('inspect')
     s.add_argument('file', type=Path)
     group = s.add_mutually_exclusive_group(required=True)
@@ -229,7 +247,19 @@ def main():
     s.add_argument('--seed', type=Path, required=True)
     a = p.parse_args()
     if a.command in ('module', 'app'):
-        a.out.write_bytes(pack(json.loads(a.manifest.read_text(encoding='utf-8')), a.image.read_bytes(), 1 if a.command == 'module' else 2, a.seed.read_bytes()))
+        manifest = source_manifest(a.manifest, a.command, a.strict_manifest)
+        a.out.write_bytes(pack(manifest, a.image.read_bytes(), 1 if a.command == 'module' else 2, a.seed.read_bytes()))
+    elif a.command == 'validate-manifest':
+        manifest = source_manifest(a.file, a.kind, True)
+        print(json.dumps({'profile':'native-source-v1', 'kind':a.kind,
+                          'manifest_bytes':len(cbor(manifest)), 'status':'valid',
+                          'validation':'source-profile-only'}))
+    elif a.command == 'manifest-schema':
+        text = json.dumps(manifest_profile.schema(), indent=2)+'\n'
+        if a.out:
+            a.out.write_text(text, encoding='utf-8')
+        else:
+            print(text, end='')
     elif a.command == 'sign':
         a.file.write_bytes(seal(a.file.read_bytes(), a.seed.read_bytes()))
     elif a.command == 'trust':
@@ -244,4 +274,7 @@ def main():
 
 
 if __name__ == '__main__':
-    main()
+    try:
+        main()
+    except (OSError, ValueError) as error:
+        raise SystemExit('sfpack: '+str(error)) from None

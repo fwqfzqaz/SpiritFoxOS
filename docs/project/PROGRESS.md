@@ -2,20 +2,21 @@
 
 更新日期：2026-10-31（北京时间）。
 
-- 工作区：`E:\SpiritFoxOS`。
-- 本轮目标：只修复用户截图中的 Windows CI 失败，保留作者在 main 上的新实现和修复；此前暂停的其他开发继续暂停。
-- status: windows_ci_fix_host_verified
+- 工作区：`E:\SpiritFoxOS`；分支 `codex/requirements-followup-20261031`；origin `https://github.com/fwqfzqaz/SpiritFoxOS.git`。
+- 本轮目标：恢复原计划，保留作者已完成的 M7 分工；接续 M0 独立清单源 schema 和离线校验。
+- status: manifest_profile_host_verified
 - round_complete: false
-- continuous_work: false
+- continuous_work: true
 - quota_paused: false
 - user_paused: false
 - pause_reason: none
-- 分支：`codex/windows-sdk-ci-20261031`；origin 为 `https://github.com/fwqfzqaz/SpiritFoxOS.git`。
-- 基线：作者 main `e74cf26`，包括 `f085ef1` 的 LLP64 long 与指针格式断言修复。Windows #54 编译失败已由作者修复；#55 继续因字符串比较测试错误要求返回值绝对数值一致而失败，本机已复现。
-- 修复范围：比较结果按符号核对；分词只在首调用传入字符串，不依赖 opaque 保存指针；不完整十六进制前缀使用明确期望值和结束偏移；二分查找允许返回任一匹配重复项。新增全字节对、NUL/长度、空分隔符、重复键与空数组检查。SDK 产品源码未修改。
-- 当前验证：Windows SDK `-O2`、`-O0 -fno-builtin` 与 `-O2 -fno-builtin -fsanitize=undefined -fno-sanitize-recover=all` 均为 368490 项通过；包含初始构建的 `python tools/test.py --host-only` 已通过（175.29 秒、25 个 C 宿主程序、30 组 Python 用例）。日志 `build/windows-ci-host-20261031.log`，单独保留结果 `build/windows-ci-host-20261031-results.json`。本机未运行 QEMU，本地结果不能替代托管 Windows 完整套件；托管结果以本修复 PR 的当前 HEAD 检查为准。
-- 原 M0 草稿完整保存在 stash `c77ee53558a569589d4667873464f47631b1b359`，未混入本次修复。自动任务 `spiritfoxos-2` 保持 PAUSED，不恢复后续开发。
-- 交付步骤：正常提交推送修复分支并创建 PR，实际核对 Windows 完整套件与 Linux 宿主检查；结果存 `.cache/windows-ci-repair-20261031.json`，核对完成后其余开发继续暂停。历史失败记录保留，不把旧提交重跑称为已修复。
+- 自动任务：`spiritfoxos-2` 已恢复 ACTIVE，额度允许时每五分钟接续；任一余额 <=10% 保存暂停，暂停后两项均 >20% 才恢复，活跃阶段 10%–20% 继续。用户人工暂停仍优先。
+- 基线：main `9f3346b`；PR #12 的 Windows SDK CI 修复已合并。该修复 head `4e91fff` 的 Windows push/PR 完整套件和发布打包、Linux 两项宿主检查均已实际核对成功。
+- 新需求核对：已检查远端所有分支、仓库文档、全部 Issue（无独立 Issue）、近期 PR 与评论、发布及讨论入口，尚未定位单独的新需求说明。GitHub 网页缓存展示过旧结构，当前实现以实际 Git/API 提交为准。可恢复证据 `.cache/github-requirements-evidence-20261031.json`。
+- 当前实现：独立 `schemas/native-source-v1.schema.json`；无密钥/共享库的 `manifest-schema`、`validate-manifest`；module/app 可选 `--strict-manifest`；所有 JSON 打包源先拒绝重复键、非法数字/Unicode、源/深度/节点/CBOR 超界。APP 约定要求作者新增的能力列表和内存声明，实际映像预算仍由 C 验证器检查。
+- 验证：12 组新专项通过，包含真实 static/relative-v1/模块 CLI 打包及 C 验证、独立数值和边界检查；完整包含初始构建的 host-only 通过（76.11 秒，25 C、42 Python）。七项交付摘要与作者基线逐项相同；未重复本地 VM。结果 `build/manifest-profile-host-20261031-results.json`，日志 `build/manifest-profile-host-final-lf-20261031.log`。
+- 进程：本轮本地测试已结束，无 VM 在运行。原 M0 草稿仍保留 stash `c77ee53558a569589d4667873464f47631b1b359`，只恢复了两个源工具文件，没有覆盖作者文档。
+- 下一步：正常提交/推送本轮工具和文档，创建工作 PR 并实际核对 Windows 完整回归/发布门与 Linux 检查；随后继续非 M7 的有界任务。独立源约定不等于 ABI 冻结、权限授予或完整 JSON Schema 引擎。
 
 ## 已完成
 

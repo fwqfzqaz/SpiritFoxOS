@@ -62,6 +62,11 @@ if result.get('txn_compat_host_assertions') != 2046559 or result.get('txn_compat
     raise SystemExit('Run legacy transaction geometry, first-upgrade faults and migration/restart VM regressions before packaging')
 if result.get('trust_host_assertions') != 29 or result.get('trust_qemu') is not True:
     raise SystemExit('Run persistent revocation host and VM regressions before packaging')
+schema_path = ROOT/'schemas/native-source-v1.schema.json'
+if result.get('manifest_source_profile') != 'native-source-v1' or result.get('manifest_profile_host_tests') != 12:
+    raise SystemExit('Run source manifest/profile and real authoring CLI regressions before packaging')
+if result.get('manifest_schema_sha256') != hashlib.sha256(schema_path.read_bytes()).hexdigest():
+    raise SystemExit('Manifest schema changed since source validation')
 for name in ['esp/EFI/BOOT/BOOTX64.EFI','storage.img','persistent.img','development.pub','application.pub','backup.pub','trust-policy.json']:
     actual = hashlib.sha256((BUILD/name).read_bytes()).hexdigest()
     if result.get('artifacts_sha256',{}).get(name) != actual:
@@ -70,6 +75,7 @@ items = [(BUILD/'esp/EFI/BOOT/BOOTX64.EFI','EFI/BOOT/BOOTX64.EFI'),(BUILD/'stora
 items.append((BUILD/'trust-policy.json','trust-policy.json'))
 items.append((BUILD/'application.pub','application.pub'))
 items.append((BUILD/'backup.pub','backup.pub'))
+items.append((schema_path,'schemas/native-source-v1.schema.json'))
 items += [(p,p.relative_to(ROOT).as_posix()) for p in sorted((ROOT/'docs').rglob('*.md'))]
 manifest = {'files_sha256': {name: hashlib.sha256(path.read_bytes()).hexdigest() for path,name in items}, 'validation': 'tools/test.py: host + legacy storage + VT-d/modern DMA isolation + persistence/update-health/version-policy/fault/restart + kernel-boundary/storage-failure security + directory-capability openat + truncate/zero-extension fault/recovery + trust-policy/rotation/immutable-and-durable-runtime-revocation + native-argv/explicit-environment/read-only/preflight + relative-native/private-image/reboot + file-RPC/local-bounds/IPC-rejection + block-reply/private-channel/restart + echo-reply/per-instance/capacity-recovery + authenticated-launch-kind/suffix-independent + dependency-generation/transactional-leases + echo-supervision/bounded-restart + echo-health/hang/protocol-failure + native-capacity/lease-drain/supervision VMs + actual-task-PID exhaustion host checks + installed-invocation/preflight/corrupt-rollback + RAM-unlink/directory/rights/slot-reuse + canonical-file-handle/stat VMs + canonical-kernel-capabilities + eager-FP-context/fresh/interleaved/timer/fault VMs + empty-RAM-directory/rmdir/rights/nonempty/reuse VMs + public-file-client/codec/private-transport/read-only VMs'}
 archive = BUILD/'SpiritFoxOS-M6-Updates.zip'

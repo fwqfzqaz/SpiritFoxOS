@@ -325,3 +325,11 @@ M6 尝试通过工作区桥调用 deepseek-flash 审查事务引擎。两次调�
 新增 196608 条字节对/长度检查、4 条终止/前缀检查、7 条确定性分词检查、28 条不完整十六进制解析检查、104 条二分查找边界检查，保留全部原固定种子用例，总数 368490。Windows 的 `-O2`、`-O0 -fno-builtin`、`-O2 -fno-builtin -fsanitize=undefined -fno-sanitize-recover=all` 均实际运行通过，日志分别为 `build/sdk-ci-final.log`、`build/sdk-ci-unoptimized.log`、`build/sdk-ci-sanitized.log`。
 
 本机 `python tools/test.py --host-only` 包含初始构建，175.29 秒通过（25 个 C 宿主程序、30 组 Python 用例）；日志 `build/windows-ci-host-20261031.log`，结果 `build/windows-ci-host-20261031-results.json` 记录七项交付摘要。此运行没有执行 QEMU 或发布打包，托管 Windows 完整套件及 Linux 宿主检查按本次修复提交单独核对，旧红色运行属于其历史提交。
+
+## M0 清单源文件与独立 schema（2026-10-31）
+
+`tests/integration/test_manifest_profile.py` 的 12 组专项通过，含 2000 组固定种子版本输入与独立 uint32 数值判据、schema 搜索语义下的终点、标识符/种类/ABI/能力与内存声明边界、JSON 重复键和非法 Unicode/数字、精确 256 KiB / 4096 节点 / 16 层 / 64 KiB 编码边界。隔离副本内没有 build、密钥或 C 共享库时仍可导出 schema 并验证两类源清单。
+
+真实 CLI 用公开固定测试种子打包 static APP、relative-v1 APP 与模块，全部通过产品 C 验证，输出与原程序接口逐字节相同。默认 CLI 保留额外元数据；严格源模式关闭未知字段。畸形 JSON/源约定/编码越界在缺失 ELF 和种子之前报错，输出保持；声明内存低于实际映像时在真实打包阶段拒绝。专项日志 `build/manifest-profile-focused-20261031.log`。
+
+包含初始构建的 `python tools/test.py --host-only` 完整通过；schema 按仓库 LF 行尾规范化后的最终运行耗时 76.11 秒（25 个 C 程序、42 组 Python 用例），日志 `build/manifest-profile-host-final-lf-20261031.log`。七项 EFI/磁盘/公钥/策略摘要与已验证的作者基线一致；本次本地未重复 VM。测试结果记录 schema 摘要，发布门核对此摘要及新宿主测试标记并把独立 schema 放入 ZIP；Windows 完整套件与 Linux CI 仍须按新提交核对。

@@ -18,6 +18,8 @@ python3 tools/test.py --skip-build # 复用已有构建镜像
 
 对应的 Make 目标为 `make test`、`make test-host`、`make test-reuse`。
 
+`python3 tests/integration/test_manifest_profile.py` 专项检查 JSON 源预算、重复键和独立作者 schema，并以真实 ELF / C 验证器测试 CLI 打包。schema/清单离线命令还在无共享库、无密钥的隔离副本中验证；完整专项的真实打包部分需要先构建。
+
 单独运行某个 QEMU 场景：
 
 ```bash
