@@ -138,6 +138,12 @@ def main(policy_path=None):
     fp_manifest = {'app_id':'org.spiritfox.fpprobe','version':'0.1.0','runtime_id':'org.spiritfox.native','app_abi':1,'requested_caps':['stdio'],'resource_limits':{'memory':131072}}
     packages.append(('fpprobe.sfk',pack(fp_manifest,fp_image,2,application_seed)))
     client_image = link_elf('fileclient',shared+objects('file-client',['services/file_client.c'])+objects('fileclient',['services/fileclient_probe.c']),'services/user.ld')
+    caplimit_image = link_elf('caplimit',shared+objects('caplimit-file-client',['services/file_client.c'])+objects('caplimit',['services/caplimit_probe.c']),'services/user.ld')
+    caplimit_manifest = {'app_id':'org.spiritfox.caplimit','version':'0.1.0','runtime_id':'org.spiritfox.native','app_abi':1,'requested_caps':['stdio','namespace.read'],'resource_limits':{'memory':131072}}
+    packages.append(('caplimit.sfk',pack(caplimit_manifest,caplimit_image,2,application_seed)))
+    cancel_image = link_elf('cancelprobe',shared+objects('cancelprobe',['services/cancel_probe.c']),'services/user.ld')
+    cancel_manifest = {'app_id':'org.spiritfox.cancelprobe','version':'0.1.0','runtime_id':'org.spiritfox.native','app_abi':1,'requested_caps':['stdio'],'resource_limits':{'memory':131072}}
+    packages.append(('cancelprobe.sfk',pack(cancel_manifest,cancel_image,2,application_seed)))
     client_manifest = {'app_id':'org.spiritfox.fileclient','version':'0.1.0','runtime_id':'org.spiritfox.native','app_abi':1,'requested_caps':['stdio','namespace.read'],'resource_limits':{'memory':131072}}
     packages.append(('fileclient.sfk',pack(client_manifest,client_image,2,application_seed)))
     pie_shared = objects('pie-common', ['services/start.S','services/memory.c','services/libsf.c','services/arguments.c'], defines=['-fpie'])
@@ -166,7 +172,7 @@ def main(policy_path=None):
     asm += ['.section .rodata', '.global isr_table', 'isr_table:'] + [f'.quad isr_{i}' for i in range(256)]
     Path('build/interrupts.S').write_text('\n'.join(asm)+'\n')
     print('Building Core 0', flush=True)
-    kernel = objects('kernel', ['kernel/entry.S', 'kernel/arch.c', 'kernel/core.c', 'kernel/pid.c', 'kernel/memory.c', 'kernel/ipc.c', 'kernel/device.c', 'kernel/acpi.c', 'kernel/vtd_tables.c', 'kernel/iommu.c', 'services/memory.c', 'services/arguments.c', 'build/interrupts.S'])
+    kernel = objects('kernel', ['kernel/entry.S', 'kernel/arch.c', 'kernel/core.c', 'kernel/sched_policy.c', 'kernel/pid.c', 'kernel/memory.c', 'kernel/ipc.c', 'kernel/device.c', 'kernel/acpi.c', 'kernel/vtd_tables.c', 'kernel/iommu.c', 'services/memory.c', 'services/arguments.c', 'build/interrupts.S'])
     link_elf('kernel', kernel, 'kernel/linker.ld')
     # Content-addressed incbin inputs prevent assembler caches reusing old bytes.
     embedded = {}

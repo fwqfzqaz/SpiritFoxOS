@@ -13,7 +13,7 @@ Core 0 校验 BootInfo 大小、版本、内存映射边界、引导对象的 Lo
 ## Core 0
 
 - GDT、TSS、IDT、双重故障 IST、用户异常回收。
-- 单核 100 Hz PIT 抢占与轮转调度。每个任务一个线程；不是优先级调度器。每任务私有 FXSAVE64/FXRSTOR64 的 x87/MMX/SSE 上下文，创建/复用时完整清零、默认舍入控制；明确禁用 AVX/OSXSAVE，具体边界见 CPU_CONTEXT.md。
+- 单核 100 Hz PIT 抢占、0–3 基础优先级及每四 tick 等待老化，同有效级别轮转，PID 1 控制配置；没有 CPU 预算或调用优先级继承，见 SCHEDULING.md。每个任务一个线程；每任务私有 FXSAVE64/FXRSTOR64 的 x87/MMX/SSE 上下文，创建/复用时完整清零、默认舍入控制；明确禁用 AVX/OSXSAVE，具体边界见 CPU_CONTEXT.md。
 - 固定 4096 页（16 MiB）内核页池，页按 pid 归属，失败与退出时回收。没有物理内存通用分配服务或按需分页。
 - 4 KiB 用户页、只读代码和常量、RW/NX 数据与栈、未映射栈保护页、只读 BootArgs。映射计划拒绝 W+X、重叠、越界和不可执行入口。
 - 进程内端点能力、32 个能力槽、权利衰减、句柄 generation、端点整体撤销、8 条有界队列、复制消息和接收截止时间。

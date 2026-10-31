@@ -1,25 +1,25 @@
 # SpiritFoxOS 实施进度
 
-更新日期：2026-10-31（北京时间）。
+更新日期：2026-11-01（北京时间；本轮自 10 月 31 日跨日接续）。
 
 - 工作区：`E:\SpiritFoxOS`；分支 `codex/requirements-followup-20261031`；origin `https://github.com/fwqfzqaz/SpiritFoxOS.git`。
-- 本轮目标：按用户恢复指示连续接续非 M7 工作；M0 两轮已推送并通过托管检查，同所有者文件句柄复制已验证推送，当前补齐发布副本的离线清单命令依赖。
-- status: offline_release_tools_verified_pending_publish
+- 本轮目标：撤回已测推送 6c6450a / PR #14，接续 M0 明确常量新增审阅工具；不改变运行时代码或 M7。
+- status: abi_reviewed_additions_verified_pending_publish
 - round_complete: false
 - continuous_work: true
 - quota_paused: false
 - user_paused: false
 - pause_reason: none
 - 自动任务：`spiritfoxos-2` ACTIVE，每五分钟接续；任一剩余 <=10% 保存暂停，暂停后两项均 >20% 才恢复；活跃阶段只要两项 >10% 继续。用户再次明确暂停时同时暂停自动任务。
-- 基线：main `9f3346b`。PR #12 已合并，原修复 head 四项 Windows/Linux CI 均成功；作者的 M7 保留，未重复实现。
+- 基线：作者已把 PR #13 合并为 main 9acc42e，其树与已通过四项 CI 的 031e360 相同；工作分支已正常合入该 merge，验证树与定位读取已测 5d7fc5a 完全一致。原始设计和 M7 保持。
 - 新需求核对：已检查远端各分支、库内文档、全部独立 Issue（无）、近期 PR/评论、发布和讨论入口，未定位独立的新需求说明；继续已有授权且不依赖该说明的非 M7 工作。以实际 Git/API 提交为准，避免使用旧网页缓存。证据 `.cache/github-requirements-evidence-20261031.json`。
 - 已推送 M0 首轮：`ab085f9` / PR #13，独立 native-source-v1 schema、无密钥离线命令及可选严格源约定，兼容作者 APP 能力/内存约束；12 组专项、含构建 host-only 76.11 秒通过。该 head 四项 Windows/Linux 已成功，证明 `.cache/manifest-round-hosted-proof-20261031.json`。
 - 已推送 M0 后续：`789581f` / PR #13，真实编译共享头文件探针，采集首轮 549 项编号/大小/对齐/成员偏移/宽度/标量种类；9 组专项含三类真实临时头文件漂移。该 head 四项 Windows/Linux 已成功，证明 `.cache/abi-round-hosted-proof-20261031.json`。
 - M0 后续验证：含初始构建 host-only 75.08 秒通过，原 25 个 C 测试及 51 组 Python 用例保留；日志 `build/abi-inventory-host-full-20261031.log`、`build/abi-snapshot-final-20261031.log`，结果 `build/abi-inventory-host-20261031-results.json`。当前 DUP 轮次的完整验证见下节，不能沿用此旧结果。
 - 已交付 M0 摘要：七项产品摘要当时与作者基线相同，549 项 ABI 参考/采集为 `2036cab366d18b535cd005430eec23cd7c4acc3ee1a11b8663c0e1fda417bf24`。DUP 已提交 be5bda1，ABI 为 550 项，完整本地验证和发布门已通过。
-- 进程：本地完整测试 PID 32004 已以 0 退出，无本聊天存活 VM；`.cache/active-work.json` 保存结束状态。
-- 当前完整验证：`python tools/test.py` 包含初始构建，1107.92 秒、158 次 VM 全部通过。23068 项复制宿主检查、两种生产传输与原 416510 项 SDK 检查均保留；ABI 550 项只新增 `constant.OP_DUP=25`，原 549 项无删改。结果 `build/file-dup-final-test-results.json`，证明 `.cache/file-dup-full-proof-20261031.json`。
-- 下一步：额度已在 21:27 实际刷新（短期 99%、长期 46%），清除额度暂停并恢复五分钟接续。be5bda1 的两项 Linux 已成功，两项 Windows 完整套件仍运行；继续核对。当前将现有清单离线命令依赖纳入发布 ZIP，对实际解压副本验证，无重复本地 VM。
+- 进程：排队发送撤回完整回归 PID 30688 以 0 退出，无本轮存活测试/VM。
+- 当前完整验证：tools/test.py 含初始构建全部通过，1210.79 秒、164 VM；25776 项撤回检查、原配额/优先级/文件和所有既有回归保留，ABI 9 组/563 项通过。结果 build/ipc-cancel-final-test-results.json。
+- 下一步：ABI 常量新增审阅九组专项及 14 项实际 ZIP 离线检查已通过，正常推送后核对新 HEAD Windows/Linux，再继续非 M7 有界任务。6c6450a 托管 Windows 尚在运行，不提前称绿。
 
 ## 同所有者文件句柄复制（2026-10-31）
 
@@ -217,3 +217,77 @@ quota_paused=true，user_paused=false。短期剩余 10%、长期 46%，ordinary
 ## 发布副本工具验证完成（2026-10-31）
 
 实际 ZIP 已补齐三个既有纯 Python 文件，CRC、39 项清单摘要和七项运行时产物核对通过。只取出 ZIP 中工具和公开输入，在 PATH 为空、没有 build/密钥/编译器/认证共享库的目录完成 12 项导出、校验、拒绝、公开策略描述和 ABI 比较检查，证明 .cache/offline-release-proof-20261031.json。此轮运行时代码和工具逻辑保持 be5bda1，不重复本地 158 VM；待正常提交推送与新 head 托管检查。quota_paused=false，user_paused=false，自动任务 ACTIVE。
+
+## 定位读取验证进行中（2026-10-31）
+
+发布副本轮次已正常推送 031e360 / PR #13；七项运行时产物保持 be5bda1，12 项实际 ZIP 离线检查已通过，托管检查另行核对。现接续 M3/M4 的 OP_PREAD=26 / sf_file_pread：显式 64 位偏移、原所有者/只读权限、同一描述及其副本游标不变；管道和控制台拒绝定位读取，非空磁盘 EOF 请求仍经后端设备健康检查。宿主 198935 项检查已通过，含 1000 条独立字节向量；ABI 只新增 OP_PREAD，原 550 项无删改，当前 551 项。
+
+正在接续构建与生产 legacy/modern 客户端及安全 VM 专项，唯一进程/日志见 .cache/active-work.json；尚未称为专项或完整回归通过，未提交/推送此轮实现。成功后运行单套含构建的完整回归，再核对产物、发布门和新 HEAD 托管检查。quota_paused=false，user_paused=false。
+
+## 定位读取完整回归运行中（2026-10-31）
+
+包含初始构建的专项已完成：198935 项宿主检查、551 项 ABI 的 9 组专项、legacy/modern 客户端两次生产 VM 以及两次设备/安全 VM 均通过。实际共享游标保持、完整 64 位 EOF、只读授权与死驱动非空定位读取/EOF 拒绝均覆盖。现在仅有一套完整 tools/test.py 运行，进程和日志见顶部及 .cache/active-work.json；完整回归尚未完成，不提交/推送草稿。
+
+上一轮 be5bda1 的四项 Windows/Linux 托管检查已全部实际核对成功，证明 .cache/file-dup-hosted-proof-20261031.json；Windows PR 完整套件 1306.09 秒，发布 ZIP 422809 字节。发布副本依赖轮次 031e360 的检查独立跟踪，不能沿用此绿色状态。quota_paused=false，user_paused=false，自动任务每五分钟 ACTIVE。
+
+## 定位读取本地完整验证完成（2026-10-31）
+
+tools/test.py 包含初始构建，1134.6 秒、158 VM 全部通过；198935 项定位读取宿主检查、两种生产传输各 61 次应用标记、死驱动实际定位读取/EOF 拒绝及所有既有回归通过。定位读取复用两次客户端 VM，没有新增启动。当前 ABI 551 项只新增 constant.OP_PREAD=26，原 550 项无删改，参考/采集摘要均为 050286990143be32572991787f7e80e81d45743ffee07366544eecf3283a9edd。七项本轮产物与结果逐项核对。尚待本轮发布门/ZIP 和正常提交推送，新 HEAD 托管检查单独核对。
+
+上一发布副本轮次 031e360 的四项 Windows/Linux 托管检查已实际全部成功，证明 .cache/offline-release-hosted-proof-20261031.json；不能用它替代当前尚未提交的定位读取实现检查。
+
+## PR #13 合并及定位读取交付（2026-10-31）
+
+作者已将 PR #13 的 031e360 合并为 main 9acc42e；两者文件树完全相同。定位读取随后提交 5d7fc5a，已创建 PR #14；工作分支再正常合入最新 main，逐文件确认合入前后树相同，未重做已合并 M0/复制工作。当前 PR #14 只描述定位读取增量，托管检查按其最新 HEAD 独立核对。
+
+## M1 基础优先级完整验证进行中（2026-10-31）
+
+新增 0–3 基础优先级、每四 tick READY 老化及同有效级别轮转；PID 1 可通过 SYS_TASK_PRIORITY=20 和 priority 命令查询/设置，普通应用拒绝。新任务/槽复用默认 1，IPC 交付/期限/撤销唤醒重新计等待，既有 FPU 和坏返回帧隔离保持。没有实现 CPU 预算或优先级继承，也不宣称硬实时上界。
+
+初版含构建专项通过：1605641 项选择/控制宿主、10000 项实际 IPC 唤醒检查、9 组 ABI，以及 legacy/modern 两次优先级 VM 和两次 CPU 状态 VM。随后独立注入创建过程中时钟前进，复现创建耗时被计为等待的错误；已在实际 READY 发布点重置时间，最终宿主 1605642 项及原 8022 项创建检查通过。修正后正在重新构建并运行完整 tools/test.py，目标 160 VM；当前只此一套，不把旧专项或旧 158 VM 结果当成本轮完整通过。
+
+ABI 只新增 SYS_TASK_PRIORITY 和六项策略常量，前 551 项无删改，当前 558 项；差异 .cache/priority-abi-addition-20261031.json。进程、验证和恢复点见 .cache/progress-live.json、.cache/active-work.json 及 .cache/checkpoints/priority-running-20261031.zip。源码和文档均保存，尚未提交或推送本轮 M1；原设计和作者 M7 未改动。
+
+## M1 基础优先级本地完整验证完成（2026-10-31）
+
+tools/test.py 包含初始构建，1187.54 秒、160 VM 全部通过。1605642 项实际 core 选择/控制、10000 项实际 IPC 唤醒、原 8022 项创建/浮点初始化检查均保留；两次新增 legacy/modern 优先级 VM 各四次运行两个不合作高优先级任务，最低级别管理器仍继续运行，恢复配置、终止回收和盘字节检查通过。全部既有 CPU/FPU、文件/复制/定位读取、监督、签名/更新、设备/DMA、旧事务兼容回归通过。
+
+当前 ABI 558 项仅新增 SYS_TASK_PRIORITY=20 和六项策略常量，前 551 项无删改；参考与采集均为 5b7f4343d07169496ddb14bbc054cc0fd17ec31e945ad68f520f6bca0a23e56c。七项本轮产物摘要逐项核对。当前无本地测试/VM，待发布门/ZIP 和正常推送，新托管检查不能沿用定位读取 97ae85a 的四项绿色状态。
+
+## M1 内核句柄上限完整验证进行中（2026-10-31）
+
+SYS_TASK_CAP_LIMIT=21 仅允许 PID 1 为活任务查询/设置 0–32 个内核能力句柄，默认 32，按非空槽数量而非索引前缀计费。降低到占用数量以下返回 BUSY 且不改状态；保留既有引用及释放能力。创建端点在修改全局 epoch/拥有者前预检本地容量，创建/派生/授予均执行准入；不把命名空间文件描述或 APP 映像预算混作此配额。
+
+含构建专项已通过：4014 项实际 core 控制、55043 项产品 IPC 配额、原 40908 项 IPC 与优先级/创建宿主检查、9 组 ABI，以及两次 legacy/modern 分阶段配额 VM 和两次能力宽度 VM。每种传输四次验证配置 3、占满/拒绝和 BUSY 降低、关闭后降为 2、继承的两个 IPC 句柄继续只读文件 SDK、普通应用拒绝和回收/磁盘保持。
+
+现在仅有一套含初始构建的完整 tools/test.py，目标 162 VM，尚未完成，未提交/推送此轮实现。ABI 仅新增系统调用和三个常量，前 558 项无删改，当前 562 项，差异 .cache/cap-limit-abi-addition-20261031.json。状态与恢复见 .cache/progress-live.json、.cache/active-work.json 和 .cache/checkpoints/cap-limit-running-20261031.zip。quota_paused=false，user_paused=false，自动任务 ACTIVE。
+
+## 内核句柄上限本地完整验证完成（2026-10-31）
+
+tools/test.py 含初始构建完整通过（1167.02 秒、162 VM）：4014 项实际 core 控制、55043 项产品 IPC 配额、原 40908 项 IPC 与全部既有回归通过。两次新增 legacy/modern VM 各四次完成配置 3、占满/创建派生拒绝、BUSY 降低保持、关闭后降为 2、两个继承句柄继续文件 IPC 和回收；优先级、CPU、服务、签名/更新、设备与旧事务兼容保持。
+
+当前 ABI 562 项仅新增 SYS_TASK_CAP_LIMIT=21 和三个常量，前 558 项无删改；参考/采集摘要均为 247b43b76ab319d7231da8cd94823007ecbb3bfcd97d482fea5023a0d5fb4e1f。七项本轮产物逐项核对，尚待发布门/ZIP 与正常推送。本轮托管 CI 不沿用旧结果；此前 960b62c 已四项全绿，Windows PR 完整套件 1348.63 秒、ZIP 440696 字节，证明 .cache/priority-hosted-proof-20261031.json。
+
+## 排队发送撤回完整验证进行中（2026-11-01）
+
+SYS_SEND_CANCEL=22 / sf_send_cancel 仅移除当前端点队列中实际发送者等于调用者、完整 64 位编号相同的条目，0 编号合法，保留其他消息 FIFO/载荷。无匹配、重复或已交付返回 0，不修改既有输出、服务副作用或在途操作。有效 SEND 权限即可，非法句柄/保留字段无副作用；现有文件 SDK 不自动撤回或清除超时状态。
+
+含构建专项已通过：25776 项产品 IPC 检查、原配额/IPC 宿主、9 组 ABI，以及两次 legacy/modern 撤回 VM 与两次能力宽度 VM。每种传输八次分阶段应用验证全编号/0/重复/环绕，通过继承 SEND-only 管理器能力撤回自己消息；管理器同编号自身消息保留。配额/优先级/文件 IPC 和回收、磁盘字节保持。
+
+当前只运行一套含初始构建的完整 tools/test.py，目标 164 VM，尚未完成，未提交或推送本轮。ABI 仅新增 SYS_SEND_CANCEL=22，前 562 项无删改，当前 563 项；差异 .cache/ipc-cancel-abi-addition-20261031.json。恢复点见 .cache/progress-live.json、.cache/active-work.json 与 .cache/checkpoints/ipc-cancel-running-20261031.zip。quota_paused=false，user_paused=false，自动任务 ACTIVE。
+
+用户授权的 DeepSeek 桥已用于独立纯文本用例整理（无工具/文件读取），其中一行跨发送者预期错误已独立纠正并保留为阴性回归，不把生成结果称为测试通过。来源/复核记录在 .cache/deepseek/cancel-matrix-reviewed-20261031.md；另一次只读副本审查超时，没有将其视为审查通过。
+
+## 排队发送撤回本地验证完成（2026-11-01）
+
+含初始构建的完整 tools/test.py 全部通过（1210.79 秒、164 VM）。25776 项产品 IPC 宿主检查和 legacy/modern 各八次分阶段应用验证认证发送者隔离、完整编号/0/重复、环绕 FIFO、继承 SEND-only 能力、交付后无副作用和配额占满仍可撤回。原内核/CPU/能力/文件/服务/设备/签名/更新/旧事务回归保留，七项产物逐项相符。
+
+仅新增 SYS_SEND_CANCEL=22，旧 562 项 ABI 无删改，当前 563 项；参考/采集 SHA-256 为 f6d0963368d0c9448a8488edfb9df9b6d88c5392aeb884bb381a77e2e758a674。边界见 IPC_CANCEL.md：撤回仅针对未投递队列，不代表取消在途操作、确认/排空或回滚副作用。此轮本地通过；正常推送后单独核对新 HEAD 托管检查。此前 2b728ef 四项 Windows/Linux 已全部成功，Windows PR 完整 1248.55 秒、ZIP 446035 字节，证据 .cache/cap-limit-hosted-proof-20261031.json。
+
+本轮撤回发布门与实际 ZIP 验证通过：465689 字节、42 项 CRC/全部摘要，七项产物与完整 1210.79 秒/164 VM 结果一致；12 项实际解压离线检查通过。验证证明 .cache/ipc-cancel-release-proof-20261031.json。
+
+## 显式 ABI 常量新增审阅（2026-11-01）
+
+tools/abi.py check-additions 要求旧目录每个项目保留原值，新增常量与显式 --allow-add constant.NAME=DECIMAL 精确相同；少审、多审、重复、值不符、修改/删除旧项均失败。它不批准布局变化，不自动推断语义兼容，原 check/diff 仍拒绝任何差异。
+
+现有九组 ABI 专项扩展后全部通过（6.415 秒），包含 256 组独立向量逐项改变/删除旧常量、大小、偏移、种类、平台项，名称/整数/数量边界、CLI 不改输入、无工具链独立副本，以及三个真实编译头文件漂移。运行时代码、563 项 ABI 参考和七项产物与已完整通过的撤回轮次一致，没有为纯工具改动重复 VM；完整运行时结果仍为 1210.79 秒/164 VM。发布门与实际 ZIP（466773 字节、42 项）CRC/所有摘要通过；空 PATH/无 build/密钥/编译器/认证库的解压副本通过 14 项检查，包括新增允许和漏审拒绝。证明 .cache/abi-reviewed-additions-proof-20261101.json。新提交托管 CI 单独核对。

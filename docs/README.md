@@ -20,6 +20,9 @@
 - [native 配置](architecture/NATIVE.md)：静态/relative-v1 装载与限制。
 - [清单源文件](architecture/MANIFESTS.md)：独立 schema、有界 JSON、可选严格作者约定与离线检查。
 - [ABI 快照](architecture/ABI_SNAPSHOT.md)：真实头文件编号/布局采集、离线差异与参考审阅。
+- [基础优先级调度](architecture/SCHEDULING.md)：根任务配置、等待老化、同级轮转与计时/继承边界。
+- [内核句柄上限](architecture/IPC_LIMITS.md)：运行期配额、创建/派生/授予准入和既有引用保持。
+- [排队发送撤回](architecture/IPC_CANCEL.md)：按认证发送者/请求编号撤回、FIFO 保持与交付边界。
 - [命令行参数与显式环境](architecture/ARGUMENTS.md)：私有只读调用数据。
 - [生命周期](architecture/LIFECYCLE.md)：依赖代次、租约与有界监督。
 - [CPU 上下文](architecture/CPU_CONTEXT.md)：x87/MMX/SSE 隔离与验证边界。

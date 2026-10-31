@@ -4,6 +4,8 @@
 
 句柄复制新增 `OP_DUP=25` 后当前目录为 550 项。该次已审阅差异只有这一项新增，原 549 项无删改；记录见对应代码提交和 TESTING。它展示了增加操作码时显式维护目录及参考的流程。
 
+后续定位读取新增 `OP_PREAD=26`，当前为 551 项；该轮差异仅新增此常量，前 550 项保持。共享消息/BootArgs 大小和原有编号不变。
+
 ## 采集与离线比较
 
 在源码仓库根目录执行：
@@ -19,6 +21,16 @@ python3 tools/abi.py diff abi/x86_64-current.json build/abi-current.json
 `check` 默认与仓库参考比较；`--reference` 可选择另一份参考。`diff` 比较任意两份合法报告，输出按名称排序的 `added`、`removed`、`changed`；`changed` 含 before/after。相同布局返回 0，任何差异（包括新增项目）返回非零，留待审阅；它不自动判定新增项目向后兼容。
 
 离线 `check` / `diff` 只需要 Python 和两份报告，不需要编译器、构建目录或签名密钥。发布 ZIP 同时提供脚本、审阅参考 `abi/x86_64-current.json` 与本次真实采集 `abi/x86_64-captured.json`。发布包中的离线脚本用于比较；重新采集需要源码和工具链。
+
+已经审阅的常量新增可以单独核对。例如从新增撤回前的 562 项报告到当前报告：
+
+```bash
+python3 tools/abi.py check-additions before.json after.json --allow-add constant.SYS_SEND_CANCEL=22
+```
+
+`check-additions` 要求所有基线项目原值保留，实际新增项目与每个显式 `--allow-add constant.NAME=DECIMAL` 名称和值恰好一致。漏审、多审、旧项目修改/删除、重复审阅和数值不符均失败；不能用此选项批准布局修改或删除。无新增时不提供该选项即可核对相同报告。名称和整数使用有界规范十进制，不接受十六进制、前导零或 `-0`。
+
+输出 `baseline_preserved` 和 `reviewed_additions_match`；两者均真才返回 0。它核对已明确审阅的数值增量，不自动判断操作码冲突、行为兼容、调用约定或安全性，也不修改文件。原 `check` / `diff` 继续拒绝所有差异，包括新增。
 
 发布 ZIP 解压后可直接执行 `python3 tools/abi.py check abi/x86_64-captured.json`。
 
@@ -45,3 +57,9 @@ python3 tools/abi.py diff abi/x86_64-current.json build/abi-current.json
 三项负例在工作区临时目录内编译经过修改的真实共享头文件：系统调用中间插入新编号、BootArgs 在保持总大小下交换 pid/manager、pid 在保持大小和偏移下改为有符号类型。三者都产生真实探针输出，并被离线检查定位；正式头文件保持原状。
 
 统一测试入口记录参考和本次采集的摘要；发布门核对测试标记与两份摘要后才把报告和离线脚本纳入 ZIP。Windows/Linux 的固定宽度布局分别由相应 CI 核对，完整托管结果以当前提交为准。
+
+基础优先级后续新增 SYS_TASK_PRIORITY=20 及六项策略常量，当前 558 项；前 551 项均无删改。系统调用参数为固定宽度寄存器值，没有新 wire 结构。
+
+内核句柄上限新增 SYS_TASK_CAP_LIMIT=21 和三个常量，当前 562 项；前 558 项无删改，没有新增 wire 结构。
+
+未投递 IPC 撤回仅追加 SYS_SEND_CANCEL=22，当前 563 项；前 562 项无删改，没有新增 wire 结构。

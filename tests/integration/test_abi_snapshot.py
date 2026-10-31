@@ -45,8 +45,14 @@ class AbiSnapshot(unittest.TestCase):
     def test_capture_and_independent_wire_sizes(self):
         self.assertEqual(self.current,self.reference)
         values=self.current['values']
-        self.assertEqual(len(values),550)
+        self.assertEqual(len(values),563)
         self.assertEqual(values['constant.OP_DUP'],25)
+        self.assertEqual(values['constant.OP_PREAD'],26)
+        self.assertEqual(values['constant.SYS_TASK_PRIORITY'],20)
+        self.assertEqual(values['constant.SF_PRIORITY_AGING_TICKS'],4)
+        self.assertEqual(values['constant.SYS_TASK_CAP_LIMIT'],21)
+        self.assertEqual(values['constant.SF_CAP_LIMIT_MAX'],32)
+        self.assertEqual(values['constant.SYS_SEND_CANCEL'],22)
         # These fixed little-endian formats are independent of C sizeof/offsetof.
         formats={'SfIpcHeader':'<IHHIIQIIQ','SfMessage':'<IHHIIQIIQqQQII256s',
                  'SfBootArgs':'<IHHQQ12IQQIHH','SfFileStat':'<IIIIQQ',
@@ -78,6 +84,9 @@ class AbiSnapshot(unittest.TestCase):
         self.assertTrue(json.loads(p.stdout)['layout_matches'])
         p=self.cli('diff',capture,capture,script=isolated/'tools/abi.py',cwd=isolated)
         self.assertEqual(p.returncode,0,p.stderr)
+        p=self.cli('check-additions',capture,capture,script=isolated/'tools/abi.py',cwd=isolated)
+        self.assertEqual(p.returncode,0,p.stderr)
+        self.assertTrue(json.loads(p.stdout)['reviewed_additions_match'])
         p=self.cli('capture',script=isolated/'tools/abi.py',cwd=isolated)
         self.assertNotEqual(p.returncode,0)
         self.assertIn('source checkout',p.stderr)
@@ -92,6 +101,26 @@ class AbiSnapshot(unittest.TestCase):
         old=copy.deepcopy(before);new=copy.deepcopy(after)
         abi.difference(before,after)
         self.assertEqual(before,old);self.assertEqual(after,new)
+        # Independent baseline/mutation oracle; reviewing a new constant must
+        # never waive an old size, offset, kind, model or constant change.
+        for index in range(256):
+            base={'format':abi.FORMAT,'values':{'constant.OLD':index,'size.Record':16,'offset.Record.field':8,'kind.Record.field':7,'model.pointer_bits':64}}
+            values=dict(base['values'],**{'constant.NEW':index+1024})
+            candidate={'format':abi.FORMAT,'values':values}
+            allowed=['constant.NEW='+str(index+1024)]
+            base_copy=copy.deepcopy(base);candidate_copy=copy.deepcopy(candidate)
+            self.assertTrue(abi.check_additions(base,candidate,allowed)['reviewed_additions_match'])
+            self.assertFalse(abi.check_additions(base,candidate,[])['reviewed_additions_match'])
+            self.assertFalse(abi.check_additions(base,candidate,['constant.NEW='+str(index)])['reviewed_additions_match'])
+            for key in base['values']:
+                for remove in [False,True]:
+                    modified=copy.deepcopy(candidate)
+                    if remove:del modified['values'][key]
+                    else:modified['values'][key]+=1
+                    result=abi.check_additions(base,modified,allowed)
+                    self.assertFalse(result['baseline_preserved'])
+                    self.assertFalse(result['reviewed_additions_match'])
+            self.assertEqual(base,base_copy);self.assertEqual(candidate,candidate_copy)
 
     def test_cli_requires_review_for_additions_as_well(self):
         before={'format':abi.FORMAT,'values':{'a':1,'b':2}}
@@ -103,6 +132,22 @@ class AbiSnapshot(unittest.TestCase):
         reordered={'format':abi.FORMAT,'values':{'b':2,'a':1}}
         p=self.cli('diff',self.write('before.json',before),self.write('after.json',reordered))
         self.assertEqual(p.returncode,0,p.stderr)
+        baseline={'format':abi.FORMAT,'values':{'constant.OLD':1,'size.Record':16}}
+        candidate={'format':abi.FORMAT,'values':dict(baseline['values'],**{'constant.NEW':22})}
+        a=self.write('base.json',baseline);b=self.write('candidate.json',candidate)
+        original=(a.read_bytes(),b.read_bytes())
+        p=self.cli('check-additions',a,b,'--allow-add','constant.NEW=22')
+        self.assertEqual(p.returncode,0,p.stderr)
+        report=json.loads(p.stdout)
+        self.assertTrue(report['baseline_preserved'] and report['reviewed_additions_match'])
+        for options,field in [([], 'unreviewed_added'),(['--allow-add','constant.NEW=23'],'review_value_mismatches'),
+                              (['--allow-add','constant.NEW=22','--allow-add','constant.OLD=1'],'unused_reviews')]:
+            p=self.cli('check-additions',a,b,*options)
+            self.assertEqual(p.returncode,1,p.stderr)
+            self.assertTrue(json.loads(p.stdout)[field])
+        self.assertEqual(self.cli('check',b,'--reference',a).returncode,1)
+        self.assertEqual(self.cli('diff',a,b).returncode,1)
+        self.assertEqual((a.read_bytes(),b.read_bytes()),original)
 
     def test_invalid_ambiguous_or_nested_reports(self):
         bad=[b'{"format":"x","format":"y","values":{"a":1}}',
@@ -126,8 +171,25 @@ class AbiSnapshot(unittest.TestCase):
         self.assertNotEqual(p.returncode,0)
         self.assertIn('abi:',p.stderr)
         self.assertNotIn('Traceback',p.stderr)
+        for entries in [['constant.X=1','constant.X=1'],['size.Record=16'],['constant.X=+1'],
+                        ['constant.X=01'],['constant.X=-0'],['constant.X=1.0'],['constant.X=0x10'],
+                        ['constant.X= 1'],['constant.X=true'],['constant.X=1=2'],['constant.X'],
+                        ['constant.X='+str(2**64)],['constant.X='+str(-2**63-1)],
+                        ['constant.X.'+'a'*120+'=1'],['constant.X='+'1'*5000],['constant.X=1\n']]:
+            with self.subTest(review=entries[0][:80]):
+                with self.assertRaises(ValueError):abi.reviewed_additions(entries)
+        p=self.cli('check-additions',abi.REFERENCE,abi.REFERENCE,'--allow-add','size.Record=16')
+        self.assertEqual(p.returncode,1)
+        self.assertIn('Only named constant',p.stderr)
+        self.assertNotIn('Traceback',p.stderr)
 
     def test_exact_limits_and_integer_range(self):
+        name='constant.'+'x'*119
+        for value in [-2**63,0,2**64-1]:
+            self.assertEqual(abi.reviewed_additions([name+'='+str(value)]),{name:value})
+        entries=['constant.X'+str(i)+'='+str(i) for i in range(2048)]
+        self.assertEqual(len(abi.reviewed_additions(entries)),2048)
+        with self.assertRaises(ValueError):abi.reviewed_additions(entries+['constant.LAST=1'])
         sample={'format':abi.FORMAT,'values':{'a':1}}
         raw=json.dumps(sample).encode()
         path=self.folder/'limit.json'

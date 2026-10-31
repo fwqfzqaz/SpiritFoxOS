@@ -20,6 +20,9 @@ long sf_main(const SfBootArgs*a,size_t bytes){
  uint8_t data[256],second[256];int64_t n=sf_file_read(&c,file,data,sizeof(data));if(n<=0||n>256)return 13;
  if(sf_file_stat(&c,file,&info)||info.offset!=(uint64_t)n||sf_file_poll(&c,file)!=1)return 14;
  if(sf_file_stat(&c,file_copy,&info)||info.offset!=(uint64_t)n||sf_file_write(&c,file_copy,data,1)!=SF_DENIED||sf_file_truncate(&c,file_copy,0)!=SF_DENIED)return 26;
+ if(sf_file_pread(&c,file_copy,second,sizeof(second),0)!=n||memcmp(data,second,n)||sf_file_stat(&c,file,&info)||info.offset!=(uint64_t)n)return 29;
+ if(sf_file_pread(&c,file_copy,second,1,UINT64_MAX)||sf_file_stat(&c,file_copy,&info)||info.offset!=(uint64_t)n||sf_file_pread(&c,root,second,1,0)!=SF_INVALID)return 30;
+ if(sf_file_pread(&c,file_copy,second,1,1)!=(n>1?1:0)||(n>1&&second[0]!=data[1])||sf_file_stat(&c,file,&info)||info.offset!=(uint64_t)n)return 31;
  if(sf_file_read(&c,file,0,0)||sf_file_write(&c,file,0,0)!=SF_DENIED)return 15;
  if(sf_file_seek(&c,file_copy,0)||sf_file_stat(&c,file,&info)||info.offset||sf_file_read(&c,file_copy,second,sizeof(second))!=n||memcmp(data,second,n))return 16;
  if(sf_file_enumerate(&c,root,(char*)second,sizeof(second))<=0)return 17;
@@ -31,5 +34,5 @@ long sf_main(const SfBootArgs*a,size_t bytes){
  if(sf_file_stat(&c,file,&info)!=SF_STALE_HANDLE||memcmp(&info,&prior,sizeof(info)))return 22;
  uint8_t one;if(sf_file_stat(&c,file_copy,&info)||sf_file_seek(&c,file_copy,0)||sf_file_read(&c,file_copy,&one,1)!=1||one!=data[0]||sf_file_close(&c,file_copy))return 28;
  if(sf_file_close(&c,console)||c.error)return 23;
- sf_log("FILE DUP APP PASSED\n");sf_log("FILE SDK APP PASSED\n");return 0;
+ sf_log("FILE PREAD APP PASSED\n");sf_log("FILE DUP APP PASSED\n");sf_log("FILE SDK APP PASSED\n");return 0;
 }

@@ -30,7 +30,7 @@ static long receive(long handle,uint64_t deadline){return call(SYS_RECV,handle,(
 static void reset(void){
  for(unsigned i=0;i<SF_MAX_TASKS;i++)ipc_cleanup(&tasks[i]);
  memset(tasks,0,sizeof(tasks));memset(frames,0,sizeof(frames));memset(messages,0,sizeof(messages));
- for(unsigned i=0;i<SF_MAX_TASKS;i++){tasks[i].pid=i+1;tasks[i].state=T_READY;tasks[i].frame=&frames[i];}
+ for(unsigned i=0;i<SF_MAX_TASKS;i++){tasks[i].pid=i+1;tasks[i].state=T_READY;tasks[i].cap_limit=SF_CAP_LIMIT_MAX;tasks[i].frame=&frames[i];}
  ticks=0;current=0;copies=0;
 }
 

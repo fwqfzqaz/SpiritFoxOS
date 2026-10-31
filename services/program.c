@@ -84,12 +84,13 @@ long sf_main(const SfBootArgs*a,size_t bytes){
   if(sf_sys(SYS_CAP_CLOSE,invalid,0,0)!=SF_STALE_HANDLE)return 33;
   if(sf_sys(SYS_CAP_DERIVE,invalid,RIGHT_SEND|RIGHT_RECV,0)!=SF_DENIED)return 34;
   if(sf_sys(SYS_CAP_REVOKE,invalid,0,0)!=SF_DENIED)return 35;
+  if(sf_send_cancel(invalid,0xcab123)!=SF_STALE_HANDLE)return 39;
  }
  if(sf_send(owned,&probe_message)||sf_recv(owned,&probe_message,sf_deadline(100))!=a->pid||probe_message.h.request_id!=0xcab123||probe_message.h.flags!=a->pid)return 36;
  long held=sf_sys(SYS_CAP_DERIVE,owned,RIGHT_SEND|RIGHT_RECV,0);if(held<=0||sf_sys(SYS_CAP_CLOSE,owned,0,0))return 37;
  if(sf_send(held,&probe_message)||sf_recv(held,&probe_message,sf_deadline(100))!=a->pid||sf_sys(SYS_CAP_CLOSE,held,0,0))return 38;
  int ok=sf_sys(SYS_SPAWN,0,0,0)==SF_DENIED&&sf_sys(SYS_LOG,0x100000,16,0)==SF_DENIED&&sf_sys(SYS_MAP_TEST,SF_BASE,7,0)==SF_DENIED&&sf_sys(SYS_SEND,0x1234,0,0)==SF_STALE_HANDLE&&sf_sys(SYS_CAP_DERIVE,a->manager,7,0)==SF_DENIED&&sf_sys(SYS_PCI_READ,0,0,0)==SF_DENIED&&sf_sys(SYS_PORT_IO,0xcf8,4,0)==SF_DENIED;
- ok=ok&&sf_sys(SYS_DMA_STATUS,0,0,0)==SF_DENIED;SfMessage m;sf_message(&m,OP_HELLO,1);m.status=ok?0:SF_DENIED;if(ok)sf_log("CAPABILITY WIDTH APP PASSED\n");sf_send(a->manager,&m);return ok?0:1;
+ ok=ok&&sf_sys(SYS_DMA_STATUS,0,0,0)==SF_DENIED&&sf_sys(SYS_TASK_PRIORITY,a->pid,0,SF_PRIORITY_QUERY)==SF_DENIED&&sf_sys(SYS_TASK_PRIORITY,a->pid,SF_PRIORITY_MAX,SF_PRIORITY_SET)==SF_DENIED&&sf_sys(SYS_TASK_CAP_LIMIT,a->pid,0,SF_LIMIT_QUERY)==SF_DENIED&&sf_sys(SYS_TASK_CAP_LIMIT,a->pid,SF_CAP_LIMIT_MAX,SF_LIMIT_SET)==SF_DENIED;SfMessage m;sf_message(&m,OP_HELLO,1);m.status=ok?0:SF_DENIED;if(ok)sf_log("CAPABILITY WIDTH APP PASSED\n");sf_send(a->manager,&m);return ok?0:1;
 #elif ROLE == 10
  return *(volatile uint32_t*)0xfed90000ull;
 #elif ROLE == 11
