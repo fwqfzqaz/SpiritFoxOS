@@ -35,6 +35,7 @@ host_test('test_manager','tests/host/test_manager.c','services/manager.c')
 host_test('test_services','tests/host/test_services.c','services/manager.c','services/namespace.c')
 host_test('test_openat','tests/host/test_openat.c','services/namespace.c')
 host_test('test_file_client','tests/host/test_file_client.c','services/namespace.c','services/file_rpc.c')
+host_test('test_file_dup','tests/host/test_file_dup.c','services/namespace.c','services/file_rpc.c')
 host_test('test_stat','tests/host/test_stat.c','services/namespace.c','services/file_rpc.c')
 host_test('test_rmdir','tests/host/test_rmdir.c','services/namespace.c','services/file_rpc.c')
 host_test('test_unlink','tests/host/test_unlink.c','services/namespace.c','services/file_rpc.c')
@@ -55,6 +56,11 @@ subprocess.run([sys.executable,'tests/integration/test_packages.py'],check=True)
 subprocess.run([sys.executable,'tests/integration/test_trust.py'],check=True)
 subprocess.run([sys.executable,'tests/integration/test_readfs.py'],check=True)
 subprocess.run([sys.executable,'tests/integration/test_native.py'],check=True)
+subprocess.run([sys.executable,'tests/integration/test_manifest_profile.py'],check=True)
+manifest_schema_sha256 = hashlib.sha256((ROOT/'schemas/native-source-v1.schema.json').read_bytes()).hexdigest()
+subprocess.run([sys.executable,'tests/integration/test_abi_snapshot.py'],check=True)
+abi_reference_sha256 = hashlib.sha256((ROOT/'abi/x86_64-current.json').read_bytes()).hexdigest()
+abi_capture_sha256 = hashlib.sha256((ROOT/'build/abi-current.json').read_bytes()).hexdigest()
 if not args.host_only:
     subprocess.run([sys.executable, 'tests/qemu/qemu_capability_test.py'], check=True)
     subprocess.run([sys.executable, 'tests/qemu/qemu_fpu_test.py'], check=True)
@@ -101,6 +107,13 @@ result['security_qemu'] = not args.host_only
 result['ipc_host_assertions'] = 40908
 result['net_host_checks'] = 14084
 result['sdk_host_checks'] = 368490
+result['manifest_source_profile'] = 'native-source-v1'
+result['manifest_profile_host_tests'] = 12
+result['manifest_schema_sha256'] = manifest_schema_sha256
+result['abi_snapshot_host_tests'] = 9
+result['abi_snapshot_entries'] = 550
+result['abi_reference_sha256'] = abi_reference_sha256
+result['abi_capture_sha256'] = abi_capture_sha256
 result['net_qemu'] = not args.host_only
 result['net_qemu_boots'] = 0 if args.host_only else 1
 result['memory_host_assertions'] = 42
@@ -143,6 +156,9 @@ result['native_relative_qemu_boots'] = 0 if args.host_only else 4
 result['file_client_host_assertions'] = 416510
 result['file_client_qemu'] = not args.host_only
 result['file_client_qemu_boots'] = 0 if args.host_only else 2
+result['file_dup_host_checks'] = 23068
+result['file_dup_qemu'] = not args.host_only
+result['file_dup_qemu_boots'] = 0 if args.host_only else 2
 result['rmdir_host_assertions'] = 11359
 result['rmdir_qemu'] = not args.host_only
 result['rmdir_qemu_boots'] = 0 if args.host_only else 2

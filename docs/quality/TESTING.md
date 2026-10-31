@@ -325,3 +325,33 @@ M6 尝试通过工作区桥调用 deepseek-flash 审查事务引擎。两次调�
 新增 196608 条字节对/长度检查、4 条终止/前缀检查、7 条确定性分词检查、28 条不完整十六进制解析检查、104 条二分查找边界检查，保留全部原固定种子用例，总数 368490。Windows 的 `-O2`、`-O0 -fno-builtin`、`-O2 -fno-builtin -fsanitize=undefined -fno-sanitize-recover=all` 均实际运行通过，日志分别为 `build/sdk-ci-final.log`、`build/sdk-ci-unoptimized.log`、`build/sdk-ci-sanitized.log`。
 
 本机 `python tools/test.py --host-only` 包含初始构建，175.29 秒通过（25 个 C 宿主程序、30 组 Python 用例）；日志 `build/windows-ci-host-20261031.log`，结果 `build/windows-ci-host-20261031-results.json` 记录七项交付摘要。此运行没有执行 QEMU 或发布打包，托管 Windows 完整套件及 Linux 宿主检查按本次修复提交单独核对，旧红色运行属于其历史提交。
+
+## M0 清单源文件与独立 schema（2026-10-31）
+
+`tests/integration/test_manifest_profile.py` 的 12 组专项通过，含 2000 组固定种子版本输入与独立 uint32 数值判据、schema 搜索语义下的终点、标识符/种类/ABI/能力与内存声明边界、JSON 重复键和非法 Unicode/数字、精确 256 KiB / 4096 节点 / 16 层 / 64 KiB 编码边界。隔离副本内没有 build、密钥或 C 共享库时仍可导出 schema 并验证两类源清单。
+
+真实 CLI 用公开固定测试种子打包 static APP、relative-v1 APP 与模块，全部通过产品 C 验证，输出与原程序接口逐字节相同。默认 CLI 保留额外元数据；严格源模式关闭未知字段。畸形 JSON/源约定/编码越界在缺失 ELF 和种子之前报错，输出保持；声明内存低于实际映像时在真实打包阶段拒绝。专项日志 `build/manifest-profile-focused-20261031.log`。
+
+包含初始构建的 `python tools/test.py --host-only` 完整通过；schema 按仓库 LF 行尾规范化后的最终运行耗时 76.11 秒（25 个 C 程序、42 组 Python 用例），日志 `build/manifest-profile-host-final-lf-20261031.log`。七项 EFI/磁盘/公钥/策略摘要与已验证的作者基线一致；本次本地未重复 VM。测试结果记录 schema 摘要，发布门核对此摘要及新宿主测试标记并把独立 schema 放入 ZIP；Windows 完整套件与 Linux CI 仍须按新提交核对。
+
+## M0 共享头文件 ABI 目录与比较（2026-10-31）
+
+真实 C11 宿主探针采集 549 项数值，含编号、大小、对齐、偏移、宽度和标量种类；原头文件保持不变。`tests/integration/test_abi_snapshot.py` 的 9 组专项通过，独立 little-endian wire 格式核对 IPC/BootArgs/文件/网络/信任记录，另实际编译三类临时修改头文件：插入系统调用造成编号漂移、总大小相同的字段交换、大小和偏移相同的有符号性改变。三者均通过真实采集和离线比较定位。
+
+离线副本无工具链和 build 目录也可 check/diff；新增/删除/改值均要求审阅，重复键、非法名称/格式、非整数、整数/源字节/项目数越界拒绝。最终专项还确认发布副本误用 capture 时清晰提示需要源码，不产生构建目录或 traceback。日志 `build/abi-snapshot-final-20261031.log`。
+
+包含初始构建的 host-only 全套通过（75.08 秒，原 25 个 C 测试与 51 组 Python 用例，含实际 ABI 探针）；日志 `build/abi-inventory-host-full-20261031.log`，结果 `build/abi-inventory-host-20261031-results.json`。参考和采集摘要均为 `2036cab366d18b535cd005430eec23cd7c4acc3ee1a11b8663c0e1fda417bf24`；七项产品摘要与基线一致。发布门绑定两份报告，随 ZIP 提供离线脚本；本地未重跑 VM，完整托管回归及发布结果按后续当前提交核对。
+
+## 同所有者文件句柄复制（2026-10-31）
+
+`test_file_dup` 直接包含产品客户端并链接真实 namespace/file_rpc，23068 项检查覆盖共享游标/权限、跨所有者拒绝、根副本、非法操作数无副作用、高位本地拒绝、挂载最后引用、管道 EOF、控制台、退役/耗尽槽、1000 次复用及十类畸形成功回复与回收。现有 legacy/modern 客户端 VM 的每次显式目录运行必须出现 `FILE DUP APP PASSED`，保留 60 次应用复用、只读授权、盘字节和卸载检查；未新增 VM 启动。
+
+完整 `python tools/test.py` 包含初始构建，1107.92 秒、158 次真实 VM 全部通过；日志 `build/file-dup-final-full-20261031.log`，精确结果 `build/file-dup-final-test-results.json`。原 416510 项 SDK 检查及所有既有回归通过，七项产品摘要重新核对。ABI 550 项仅增加 `constant.OP_DUP=25`，原 549 项无删改；源工具 12 组与 ABI 9 组继续通过。发布门要求复制宿主/两次生产 VM 标记及最新 ABI 摘要。托管 Windows/Linux 需按新提交核对。
+
+前两轮 M0 已交付提交 ab085f9 与 789581f 各自四项 Windows/Linux 检查均成功；789581f 的 Windows PR 完整回归 916.98 秒、ZIP 420401 字节，证明 `.cache/abi-round-hosted-proof-20261031.json`。历史段落中的待核对说明只属于当时快照，不表示本轮托管检查通过。
+
+## 实际发布副本的离线工具（2026-10-31）
+
+发布 ZIP 补齐现有清单命令的三个纯 Python 依赖，所有文件均有清单摘要。对实际 ZIP 核对 CRC、39 项文件摘要和七项运行时产物，再只从 ZIP 取出工具/schema/ABI/公开策略，在工作区临时目录运行 12 项检查：schema 标准输出与文件导出、APP/模块源校验、重复键/浮点/布尔/源字节越界/缺失文件拒绝、公开策略描述及 ABI check/diff。子进程 PATH 为空，没有 build、密钥、编译器或认证共享库；结束后仍未生成 build 或密钥目录。
+
+证明 `.cache/offline-release-proof-20261031.json` 保存实际 ZIP 摘要和检查列表。此轮只改变打包清单和文档，原工具/运行时代码保持 be5bda1，七项产物与已完整通过的 1107.92 秒/158 VM 结果一致，因此本地没有重复 VM。新提交的托管 CI 仍独立核对，不用旧运行代替。

@@ -6,13 +6,16 @@ long sf_file_dispatch(SfNamespace*ns,uint32_t owner,uint32_t*root,SfMessage*m){
   * Reject aliases before conversion, mutation or root-handle bookkeeping. */
  if(m->handle>UINT32_MAX)switch(op){
   case OP_READ:case OP_WRITE:case OP_CLOSE:case OP_SEEK:case OP_POLL:
-  case OP_ENUMERATE:case OP_OPENAT:case OP_TRUNCATE:case OP_UNLINK:case OP_RMDIR:case OP_STAT:
+  case OP_ENUMERATE:case OP_OPENAT:case OP_TRUNCATE:case OP_UNLINK:case OP_RMDIR:case OP_STAT:case OP_DUP:
    m->length=0;m->status=SF_STALE_HANDLE;return SF_STALE_HANDLE;
  }
  if((op==OP_READ||op==OP_WRITE||op==OP_ENUMERATE)&&m->length>sizeof(m->data)){
   m->length=0;m->status=SF_INVALID;return SF_INVALID;
  }
  switch(op){
+ case OP_DUP:
+  if(m->length||m->mode||m->offset)break;
+  status=sf_ns_dup(ns,owner,m->handle);if(status>=0){m->handle=status;status=0;}break;
  case OP_STAT:{
   unsigned length=m->length;m->length=0;if(length)break;SfFileStat info;
   status=sf_ns_stat(ns,owner,m->handle,&info);

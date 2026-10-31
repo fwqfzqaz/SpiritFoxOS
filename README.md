@@ -42,6 +42,8 @@ flowchart LR
 
 环境：Linux x64（使用系统 QEMU 与 OVMF），或 Windows x64 + Python 3.11+。工具链、缓存和密钥都在仓库内，无需全局安装或修改 `PATH`。
 
+包作者可使用独立 `native-source-v1` schema 和无需密钥的离线清单检查；源文件界限与 `--strict-manifest` 用法见[清单说明](docs/architecture/MANIFESTS.md)。
+
 ```bash
 python3 tools/bootstrap.py     # 下载并校验 Zig 0.13.0 与 Monocypher
 python3 tools/test.py          # 构建 + 宿主/集成/QEMU 全量测试
