@@ -22,6 +22,16 @@ python3 tools/abi.py diff abi/x86_64-current.json build/abi-current.json
 
 离线 `check` / `diff` 只需要 Python 和两份报告，不需要编译器、构建目录或签名密钥。发布 ZIP 同时提供脚本、审阅参考 `abi/x86_64-current.json` 与本次真实采集 `abi/x86_64-captured.json`。发布包中的离线脚本用于比较；重新采集需要源码和工具链。
 
+已经审阅的常量新增可以单独核对。例如从新增撤回前的 562 项报告到当前报告：
+
+```bash
+python3 tools/abi.py check-additions before.json after.json --allow-add constant.SYS_SEND_CANCEL=22
+```
+
+`check-additions` 要求所有基线项目原值保留，实际新增项目与每个显式 `--allow-add constant.NAME=DECIMAL` 名称和值恰好一致。漏审、多审、旧项目修改/删除、重复审阅和数值不符均失败；不能用此选项批准布局修改或删除。无新增时不提供该选项即可核对相同报告。名称和整数使用有界规范十进制，不接受十六进制、前导零或 `-0`。
+
+输出 `baseline_preserved` 和 `reviewed_additions_match`；两者均真才返回 0。它核对已明确审阅的数值增量，不自动判断操作码冲突、行为兼容、调用约定或安全性，也不修改文件。原 `check` / `diff` 继续拒绝所有差异，包括新增。
+
 发布 ZIP 解压后可直接执行 `python3 tools/abi.py check abi/x86_64-captured.json`。
 
 ## 采集内容

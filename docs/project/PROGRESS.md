@@ -3,8 +3,8 @@
 更新日期：2026-11-01（北京时间；本轮自 10 月 31 日跨日接续）。
 
 - 工作区：`E:\SpiritFoxOS`；分支 `codex/requirements-followup-20261031`；origin `https://github.com/fwqfzqaz/SpiritFoxOS.git`。
-- 本轮目标：连续接续非 M7 工作；定位读取、基础优先级和内核句柄上限已验证推送，当前补齐只撤回尚未投递的认证发送者队列请求。
-- status: ipc_cancel_local_verified_pending_publish
+- 本轮目标：撤回已测推送 6c6450a / PR #14，接续 M0 明确常量新增审阅工具；不改变运行时代码或 M7。
+- status: abi_reviewed_additions_verified_pending_publish
 - round_complete: false
 - continuous_work: true
 - quota_paused: false
@@ -19,7 +19,7 @@
 - 已交付 M0 摘要：七项产品摘要当时与作者基线相同，549 项 ABI 参考/采集为 `2036cab366d18b535cd005430eec23cd7c4acc3ee1a11b8663c0e1fda417bf24`。DUP 已提交 be5bda1，ABI 为 550 项，完整本地验证和发布门已通过。
 - 进程：排队发送撤回完整回归 PID 30688 以 0 退出，无本轮存活测试/VM。
 - 当前完整验证：tools/test.py 含初始构建全部通过，1210.79 秒、164 VM；25776 项撤回检查、原配额/优先级/文件和所有既有回归保留，ABI 9 组/563 项通过。结果 build/ipc-cancel-final-test-results.json。
-- 下一步：发布门与实际 ZIP 离线工具验证后正常提交推送，核对实际开放 PR 和新 HEAD Windows/Linux；旧 2b728ef 四项托管检查均成功，不能代替本轮 CI。继续非 M7 有界任务。
+- 下一步：ABI 常量新增审阅九组专项及 14 项实际 ZIP 离线检查已通过，正常推送后核对新 HEAD Windows/Linux，再继续非 M7 有界任务。6c6450a 托管 Windows 尚在运行，不提前称绿。
 
 ## 同所有者文件句柄复制（2026-10-31）
 
@@ -285,3 +285,9 @@ SYS_SEND_CANCEL=22 / sf_send_cancel 仅移除当前端点队列中实际发送�
 仅新增 SYS_SEND_CANCEL=22，旧 562 项 ABI 无删改，当前 563 项；参考/采集 SHA-256 为 f6d0963368d0c9448a8488edfb9df9b6d88c5392aeb884bb381a77e2e758a674。边界见 IPC_CANCEL.md：撤回仅针对未投递队列，不代表取消在途操作、确认/排空或回滚副作用。此轮本地通过；正常推送后单独核对新 HEAD 托管检查。此前 2b728ef 四项 Windows/Linux 已全部成功，Windows PR 完整 1248.55 秒、ZIP 446035 字节，证据 .cache/cap-limit-hosted-proof-20261031.json。
 
 本轮撤回发布门与实际 ZIP 验证通过：465689 字节、42 项 CRC/全部摘要，七项产物与完整 1210.79 秒/164 VM 结果一致；12 项实际解压离线检查通过。验证证明 .cache/ipc-cancel-release-proof-20261031.json。
+
+## 显式 ABI 常量新增审阅（2026-11-01）
+
+tools/abi.py check-additions 要求旧目录每个项目保留原值，新增常量与显式 --allow-add constant.NAME=DECIMAL 精确相同；少审、多审、重复、值不符、修改/删除旧项均失败。它不批准布局变化，不自动推断语义兼容，原 check/diff 仍拒绝任何差异。
+
+现有九组 ABI 专项扩展后全部通过（6.415 秒），包含 256 组独立向量逐项改变/删除旧常量、大小、偏移、种类、平台项，名称/整数/数量边界、CLI 不改输入、无工具链独立副本，以及三个真实编译头文件漂移。运行时代码、563 项 ABI 参考和七项产物与已完整通过的撤回轮次一致，没有为纯工具改动重复 VM；完整运行时结果仍为 1210.79 秒/164 VM。发布门与实际 ZIP（466773 字节、42 项）CRC/所有摘要通过；空 PATH/无 build/密钥/编译器/认证库的解压副本通过 14 项检查，包括新增允许和漏审拒绝。证明 .cache/abi-reviewed-additions-proof-20261101.json。新提交托管 CI 单独核对。

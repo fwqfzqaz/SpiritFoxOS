@@ -387,3 +387,9 @@ M6 尝试通过工作区桥调用 deepseek-flash 审查事务引擎。两次调�
 新增 legacy/modern 两次 VM，各八次分阶段应用通过自有端点和继承 SEND-only 管理器端点验证；管理器在应用退出前不接收，并保留自己的同编号消息。原能力宽度、配额、优先级、文件 SDK/回收与持久字节不变。完整 tools/test.py 含初始构建全部通过（1210.79 秒、164 VM），日志 build/ipc-cancel-final-full-20261031.log，结果 build/ipc-cancel-final-test-results.json。发布门要求本轮计数/两个 VM 标记，ABI 9 组/563 项及七项精确产物摘要；新 HEAD 托管 CI 另核对。此前 2b728ef 四项 Windows/Linux 全绿，证明 .cache/cap-limit-hosted-proof-20261031.json。
 
 本轮撤回发布门与实际 ZIP 验证通过：465689 字节、42 项 CRC/全部摘要，七项产物与完整 1210.79 秒/164 VM 结果一致；12 项实际解压离线检查通过。验证证明 .cache/ipc-cancel-release-proof-20261031.json。
+
+## 显式 ABI 常量新增审阅（2026-11-01）
+
+tools/abi.py check-additions 要求旧目录每个项目保留原值，新增常量与显式 --allow-add constant.NAME=DECIMAL 精确相同；少审、多审、重复、值不符、修改/删除旧项均失败。它不批准布局变化，不自动推断语义兼容，原 check/diff 仍拒绝任何差异。
+
+现有九组 ABI 专项扩展后全部通过（6.415 秒），包含 256 组独立向量逐项改变/删除旧常量、大小、偏移、种类、平台项，名称/整数/数量边界、CLI 不改输入、无工具链独立副本，以及三个真实编译头文件漂移。运行时代码、563 项 ABI 参考和七项产物与已完整通过的撤回轮次一致，没有为纯工具改动重复 VM；完整运行时结果仍为 1210.79 秒/164 VM。发布门与实际 ZIP（466773 字节、42 项）CRC/所有摘要通过；空 PATH/无 build/密钥/编译器/认证库的解压副本通过 14 项检查，包括新增允许和漏审拒绝。证明 .cache/abi-reviewed-additions-proof-20261101.json。新提交托管 CI 单独核对。
