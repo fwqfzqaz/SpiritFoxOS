@@ -12,6 +12,12 @@ if result.get('passed') is not True or result.get('version_policy_host') is not 
     raise SystemExit('Run the full test suite before packaging')
 if result.get('security_host') is not True or result.get('security_qemu') is not True:
     raise SystemExit('Run the kernel boundary and storage failure security regressions before packaging')
+if result.get('scheduler_profile') != 'priority-0..3-aging-4ticks-v1' or result.get('scheduler_host_checks') != 1605642 or result.get('scheduler_ipc_host_checks') != 10000 or result.get('scheduler_qemu') is not True or result.get('scheduler_qemu_boots') != 2:
+    raise SystemExit('Run priority selection/configuration, fresh IPC wakeups and timer/aging VM regressions before packaging')
+if result.get('cap_limit_host_checks') != 6015 or result.get('ipc_budget_host_checks') != 55043 or result.get('cap_limit_qemu') is not True or result.get('cap_limit_qemu_boots') != 2:
+    raise SystemExit('Run live capability limits, atomic quota admission and staged authority/recovery VM regressions before packaging')
+if result.get('ipc_cancel_host_checks') != 25776 or result.get('ipc_cancel_qemu') is not True or result.get('ipc_cancel_qemu_boots') != 2:
+    raise SystemExit('Run authenticated pending send withdrawal, FIFO/width/delivery bounds and production queue VM regressions before packaging')
 if result.get('openat_host_assertions') != 108 or result.get('openat_qemu') is not True:
     raise SystemExit('Run the directory capability host and VM regressions before packaging')
 if result.get('truncate_host_assertions') != 83 or result.get('resize_fault_scenarios') != 3132 or result.get('truncate_qemu') is not True:
@@ -40,7 +46,7 @@ if result.get('echo_health_qemu') is not True or result.get('echo_health_qemu_bo
     raise SystemExit('Run authenticated echo health timeout and protocol failure regressions before packaging')
 if result.get('native_supervision_qemu') is not True or result.get('native_supervision_qemu_boots') != 2:
     raise SystemExit('Run native capacity, lease drain and bounded death/health recovery before packaging')
-if result.get('task_pid_host_checks') != 8022:
+if result.get('task_pid_host_checks') != 10022:
     raise SystemExit('Run actual task_new PID exhaustion and publication regressions before packaging')
 if result.get('invocation_preflight_qemu') is not True or result.get('invocation_preflight_qemu_boots') != 4:
     raise SystemExit('Run installed invocation preflight and corrupt candidate rollback regressions before packaging')
@@ -60,6 +66,8 @@ if result.get('file_client_host_assertions') != 416510 or result.get('file_clien
     raise SystemExit('Run file client codec/peer/deadline/counter host and production transport VM regressions before packaging')
 if result.get('file_dup_host_checks') != 23068 or result.get('file_dup_qemu') is not True or result.get('file_dup_qemu_boots') != 2:
     raise SystemExit('Run duplicate handle rights/cursor/lifetime host and production transport VM regressions before packaging')
+if result.get('file_pread_host_checks') != 198935 or result.get('file_pread_qemu') is not True or result.get('file_pread_qemu_boots') != 2:
+    raise SystemExit('Run positional read rights/cursor/backend host and production transport VM regressions before packaging')
 if result.get('txn_compat_host_assertions') != 2046559 or result.get('txn_compat_fault_scenarios') != 783 or result.get('txn_compat_qemu') is not True or result.get('txn_compat_qemu_boots') != 6:
     raise SystemExit('Run legacy transaction geometry, first-upgrade faults and migration/restart VM regressions before packaging')
 if result.get('trust_host_assertions') != 29 or result.get('trust_qemu') is not True:
@@ -71,8 +79,12 @@ if result.get('manifest_schema_sha256') != hashlib.sha256(schema_path.read_bytes
     raise SystemExit('Manifest schema changed since source validation')
 abi_reference = ROOT/'abi/x86_64-current.json'
 abi_capture = BUILD/'abi-current.json'
-if result.get('abi_snapshot_host_tests') != 9 or result.get('abi_snapshot_entries') != 550:
+if result.get('abi_snapshot_host_tests') != 9 or result.get('abi_snapshot_entries') != 583:
     raise SystemExit('Run compiled ABI capture, offline comparison and header-drift regressions before packaging')
+if result.get('ipc_copy_host_checks') != 10041 or result.get('ipc_stats_control_host_checks') != 6001 or result.get('ipc_copy_profile') != 'successful-user-copy-bytes-v1' or not result.get('ipc_stats_qemu') or result.get('ipc_stats_qemu_boots') != 2:
+    raise SystemExit('Run actual IPC copy event/control oracles and both production stats VM transports before packaging')
+if result.get('memory_quota_host_checks') != 298045 or result.get('page_limit_host_checks') != 3033 or result.get('memory_quota_profile') != 'private-pool-pages-v1' or not result.get('page_quota_qemu') or result.get('page_quota_qemu_boots') != 2:
+    raise SystemExit('Run actual pool-page accounting, limited-spawn/control and both production quota VM transports before packaging')
 if result.get('abi_reference_sha256') != hashlib.sha256(abi_reference.read_bytes()).hexdigest() or result.get('abi_capture_sha256') != hashlib.sha256(abi_capture.read_bytes()).hexdigest():
     raise SystemExit('ABI reference or capture changed since validation')
 for name in ['esp/EFI/BOOT/BOOTX64.EFI','storage.img','persistent.img','development.pub','application.pub','backup.pub','trust-policy.json']:

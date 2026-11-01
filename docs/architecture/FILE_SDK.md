@@ -29,7 +29,7 @@ return count < 0 ? count : 0;
 | 接口 | 成功返回 |
 | --- | --- |
 | sf_file_root / sf_file_console / sf_file_openat / sf_file_dup | 非零规范32位命名空间句柄，扩展为int64_t |
-| sf_file_read / sf_file_write / sf_file_enumerate | 实际字节数，一次最多256；调用者按需循环 |
+| sf_file_read / sf_file_pread / sf_file_write / sf_file_enumerate | 实际字节数，一次最多256；调用者按需循环 |
 | sf_file_stat | 0，写入32字节SfFileStat |
 | sf_file_seek | 绝对偏移；不提供SEEK_CUR/END |
 | sf_file_poll | 当前协议的0..7事件掩码 |
@@ -58,6 +58,12 @@ SDK包含write/truncate/unlink/rmdir编解码，但当前普通应用仍只能�
 单次请求只计算一个经过溢出检查的绝对截止时间。SEND失败不入队，可以返回错误；RECV错误或异常回复保存到client.error，后续调用直接返回该错误。正常服务错误，例如DENIED、STALE，不毒化客户端。显式重新初始化时编号继续递增，最多跳过八条已认证旧回复，仍使用当前请求原截止时间；超过上限、未来/零编号或格式错误都会拒绝。
 
 超时不取消已入队操作，不能承诺没有副作用，也不能据此盲目重试写入。丢失的OPEN或DUP回复可能保留描述/引用直至进程回收；遇到不确定超时时应结束进程并由已有回收路径释放引用。通用取消、异步/多线程和独立命名空间服务仍为后续工作。
+
+## 不改变共享偏移的读取
+
+`sf_file_pread(client, handle, output, bytes, offset)` 以完整 uint64_t 绝对字节偏移读取 RAM 文件、只读磁盘文件或持久笔记，一次最多 256 字节。`OP_PREAD=26` 沿用现有消息，handle 为规范句柄，offset 为绝对位置，length 为容量，mode 必须为 0；成功回复保留 handle/offset/mode，并以 status 和 length 返回实际字节数。SDK 独立检查这些字段，异常成功回复停止客户端，错误不交付输出。
+
+成功、EOF 或失败均不改变原描述及其所有副本的共享游标。完整 64 位偏移不窄化；超过末尾返回 0。非空磁盘请求即使在 EOF 也会进入原后端检查设备/卷健康，没有缓存元数据捷径。零字节调用仍验证句柄、读权限和对象类型，但不访问后端；管道/控制台返回 NOT_SEEKABLE，目录返回 INVALID。该接口不增加权限，不提供定位写入或并发/取消保证。
 
 ## 验证
 

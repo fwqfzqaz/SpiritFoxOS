@@ -1,6 +1,7 @@
 #ifndef KERNEL_H
 #define KERNEL_H
 #include "sf.h"
+#include "sched_policy.h"
 #define NX (1ull<<63)
 typedef struct {uint64_t r15,r14,r13,r12,r11,r10,r9,r8,rdi,rsi,rbp,rbx,rdx,rcx,rax,vector,error,rip,cs,rflags,rsp,ss;} Frame;
 enum {T_EMPTY,T_READY,T_BLOCKED,T_DEAD};
@@ -10,10 +11,13 @@ typedef struct {
  uint64_t cr3,recv_buffer,wait_deadline;Frame *frame;
  uint32_t device_io,device_bdf,device_fault;
  uint32_t device_modern;
+ uint32_t priority,cap_limit,page_limit,page_count;uint64_t ready_since;
  Cap caps[32];uint8_t fxstate[512] __attribute__((aligned(16)));
  uint8_t kstack[16384] __attribute__((aligned(16)));
 } Task;
 _Static_assert(offsetof(Task,fxstate)%16==0&&sizeof(Task)%16==0,"FXSAVE task alignment");
+_Static_assert(SF_CAP_LIMIT_MAX==sizeof(((Task*)0)->caps)/sizeof(Cap),"capability limit/table size");
+static inline unsigned task_caps_used(const Task*t){unsigned count=0;for(unsigned i=0;i<SF_CAP_LIMIT_MAX;i++)if(t->caps[i].endpoint)count++;return count;}
 extern Task tasks[SF_MAX_TASKS];extern int current;extern uint64_t ticks;
 void serial(const char*);void hex(uint64_t);void panic(const char*);
 void console_irq(void);long console_read(void);
@@ -21,8 +25,9 @@ void arch_init(void);void arch_task(Task*);void arch_save(Task*);void arch_enter
 void *page_alloc(uint32_t);void pages_free(uint32_t);uint64_t space_new(uint32_t);
 int space_map(Task*,uint64_t,uint64_t,uint32_t);int user_range(Task*,uint64_t,uint64_t,int);
 void *user_phys(Task*,uint64_t);int copy_in(Task*,void*,uint64_t,size_t);int copy_out(Task*,uint64_t,const void*,size_t);
-int task_new(const SfLoadPlan*,int);void task_dead(Task*,int);Frame *schedule(void);
+int task_new(const SfLoadPlan*,int);int task_new_limited(const SfLoadPlan*,int,uint32_t);void task_dead(Task*,int);Frame *schedule(void);
 long ipc_syscall(uint64_t,uint64_t,uint64_t,uint64_t);void ipc_cleanup(Task*);
+void ipc_stats_snapshot(SfIpcStats*);
 int ipc_grant(Task*,Task*,uint32_t,uint32_t);void ipc_deadlines(void);
 long pci_read(uint64_t,uint64_t);long device_io(Task*,uint64_t,uint64_t,uint64_t);
 int device_grant(Task*,uint32_t,uint32_t,SfBootArgs*);int device_release(Task*);

@@ -22,15 +22,20 @@ static int valid_plan(const SfLoadPlan*p,Task*parent){
   if(s->flags==5&&p->entry>=s->rva&&p->entry-s->rva<s->bytes)entry=1;
  }return entry;
 }
-int task_new(const SfLoadPlan*p,int bootstrap){
+int task_new_limited(const SfLoadPlan*p,int bootstrap,uint32_t pages){
+ if(pages>SF_PAGE_LIMIT_MAX)return SF_INVALID;
  Task*parent=bootstrap?0:&tasks[current];if(!valid_plan(p,parent)||(!parent&&p->image_base&&p->image_base!=SF_BASE))return SF_INVALID;uint64_t image_base=p->image_base?p->image_base:SF_BASE;
  int result=SF_NO_SPACE;
  int slot=-1;for(unsigned i=0;i<SF_MAX_TASKS;i++)if(tasks[i].state==T_EMPTY||tasks[i].state==T_DEAD){slot=i;break;}if(slot<0)return SF_NO_SPACE;
  long pid=sf_pid_take(&next_pid);if(pid<0)return (int)pid;
  Task*t=&tasks[slot];/* Preserve capability generations across slot reuse. */
  for(unsigned i=0;i<32;i++)t->caps[i].endpoint=0;t->pid=(uint32_t)pid;t->state=T_EMPTY;t->device_io=0;t->device_bdf=0;t->device_fault=0;t->device_modern=0;
+ t->priority=SF_PRIORITY_DEFAULT;t->cap_limit=SF_CAP_LIMIT_MAX;t->page_limit=pages;t->page_count=0;t->ready_since=ticks;
  /* FXSAVE64 layout: empty x87 tags, zero physical payloads/XMM/pointers,
   * default round-to-nearest controls. FNINIT alone leaves data registers. */
+ /* The admitted/reused slot is not the live parent kernel stack.
+  * Clear retained bytes here; never erase an exiting task on its active stack. */
+ memset(t->kstack,0,sizeof(t->kstack));
  memset(t->fxstate,0,sizeof(t->fxstate));t->fxstate[0]=0x7f;t->fxstate[1]=3;t->fxstate[24]=0x80;t->fxstate[25]=0x1f;
  t->cr3=space_new(t->pid);if(!t->cr3)goto fail;
  for(unsigned i=0;i<p->count;i++){const SfLoadSegment*s=&p->segments[i];for(uint64_t off=0;off<s->bytes;off+=4096){void*page=page_alloc(t->pid);if(!page||space_map(t,image_base+s->rva+off,(uint64_t)page,s->flags))goto fail;size_t n=s->bytes-off;if(n>4096)n=4096;if(parent){if(copy_in(parent,page,s->data+off,n))goto fail;}else memcpy(page,(void*)(s->data+off),n);}}
@@ -43,17 +48,23 @@ int task_new(const SfLoadPlan*p,int bootstrap){
  if(bootstrap||p->grant_bundle){for(uint64_t off=0;off<bundle_bytes;off+=4096)if(space_map(t,SF_BUNDLE+off,bundle_phys+off,1))goto fail;args->bundle=SF_BUNDLE;args->bundle_bytes=bundle_bytes;}
  if(parent){int h;if(p->grant_manager){h=ipc_grant(parent,t,p->grant_manager,RIGHT_SEND);if(h<0)goto fail;args->manager=h;}if(p->grant_service){if(p->service_rights&~7)goto fail;h=ipc_grant(parent,t,p->grant_service,p->service_rights);if(h<0)goto fail;args->service=h;}}
  if(p->grant_device){int r=device_grant(t,p->grant_device,p->device_rights,args);if(r){result=r;goto fail;}}
- t->frame=(Frame*)(t->kstack+sizeof(t->kstack)-sizeof(Frame));memset(t->frame,0,sizeof(Frame));t->frame->rip=image_base+p->entry;t->frame->cs=0x1b;t->frame->ss=0x23;t->frame->rflags=0x202;t->frame->rsp=SF_STACK-8;t->frame->rdi=SF_ARGS;t->frame->rsi=args->size;t->state=T_READY;t->exit_status=0;return t->pid;
+ t->frame=(Frame*)(t->kstack+sizeof(t->kstack)-sizeof(Frame));memset(t->frame,0,sizeof(Frame));t->frame->rip=image_base+p->entry;t->frame->cs=0x1b;t->frame->ss=0x23;t->frame->rflags=0x202;t->frame->rsp=SF_STACK-8;t->frame->rdi=SF_ARGS;t->frame->rsi=args->size;t->ready_since=ticks;t->state=T_READY;t->exit_status=0;return t->pid;
 fail: device_release(t);ipc_cleanup(t);pages_free(t->pid);device_forget(t);t->state=T_DEAD;t->exit_status=result;return result;
 }
+int task_new(const SfLoadPlan*p,int bootstrap){return task_new_limited(p,bootstrap,SF_PAGE_LIMIT_MAX);}
 void task_dead(Task*t,int status){device_release(t);ipc_cleanup(t);t->state=T_DEAD;t->exit_status=status;if(current>=0&&t==&tasks[current])__asm__ volatile("mov %0,%%cr3"::"r"(boot_cr3):"memory");pages_free(t->pid);device_forget(t);}
 Frame *schedule(void){
- for(;;){for(int n=1;n<=SF_MAX_TASKS;n++){int i=(current+n)%SF_MAX_TASKS;if(tasks[i].state==T_READY){
+ /* Time spent running is not ready-queue waiting credit. Wakeups separately
+  * start a fresh interval; elapsed blocked time never manufactures a boost. */
+ if(current>=0&&tasks[current].state==T_READY)tasks[current].ready_since=ticks;
+ for(;;){SfSchedEntry entries[SF_MAX_TASKS];
+  for(unsigned j=0;j<SF_MAX_TASKS;j++)entries[j]=(SfSchedEntry){tasks[j].ready_since,tasks[j].priority,tasks[j].state==T_READY};
+  int i=sf_sched_pick(entries,SF_MAX_TASKS,current,ticks);if(i>=0){
    Task*t=&tasks[i];uint64_t rsp=t->frame->rsp;
    /* An arbitrary ring-3 RSP can make IRET fault in ring 0. Validate before
     * returning, independently of the emulator's IRET canonicality checks. */
    if(rsp>=0x0000800000000000ull&&rsp<0xffff800000000000ull){if(t->pid==1)panic("initial task return frame");task_dead(t,-113);continue;}
-   current=i;arch_task(t);return t->frame;}}
+   current=i;t->ready_since=ticks;arch_task(t);return t->frame;}
   __asm__ volatile("sti; hlt; cli");
  }
 }
@@ -63,6 +74,45 @@ static long syscall(Frame*f){Task*t=&tasks[current];uint64_t a=f->rdi,b=f->rsi,c
  case SYS_YIELD:return 0;
  case SYS_LOG:{if(b>512||!user_range(t,a,b,0))return SF_DENIED;char buf[513];copy_in(t,buf,a,b);buf[b]=0;serial(buf);return b;}
  case SYS_TICKS:return ticks;
+ case SYS_IPC_STATS:{if(t->pid!=1)return SF_DENIED;if(b!=sizeof(SfIpcStats)||c)return SF_INVALID;SfIpcStats info;ipc_stats_snapshot(&info);return copy_out(t,a,&info,sizeof(info));}
+ case SYS_TASK_PAGE_LIMIT:{
+  if(t->pid!=1)return SF_DENIED;
+  if(!a||a>INT32_MAX||(c!=SF_LIMIT_QUERY&&c!=SF_LIMIT_SET&&c!=SF_LIMIT_USED)||b>SF_PAGE_LIMIT_MAX||(c!=SF_LIMIT_SET&&b))return SF_INVALID;
+  for(unsigned i=0;i<SF_MAX_TASKS;i++){
+   Task*x=&tasks[i];if(x->pid==a&&(x->state==T_READY||x->state==T_BLOCKED)){
+    if(c==SF_LIMIT_USED)return x->page_count;
+    if(c==SF_LIMIT_SET){if(x->page_count>b)return SF_BUSY;x->page_limit=(uint32_t)b;}
+    return x->page_limit;
+   }
+  }
+  return SF_NOT_FOUND;
+ }
+ case SYS_TASK_CAP_LIMIT:{
+  if(t->pid!=1)return SF_DENIED;
+  if(!a||a>INT32_MAX||(c!=SF_LIMIT_QUERY&&c!=SF_LIMIT_SET&&c!=SF_LIMIT_USED)||b>SF_CAP_LIMIT_MAX||(c!=SF_LIMIT_SET&&b))return SF_INVALID;
+  for(unsigned i=0;i<SF_MAX_TASKS;i++){
+   Task*x=&tasks[i];if(x->pid==a&&(x->state==T_READY||x->state==T_BLOCKED)){
+    if(c==SF_LIMIT_USED)return task_caps_used(x);
+    if(c==SF_LIMIT_SET){if(task_caps_used(x)>b)return SF_BUSY;x->cap_limit=(uint32_t)b;}
+    return x->cap_limit;
+   }
+  }
+  return SF_NOT_FOUND;
+ }
+ case SYS_TASK_PRIORITY:{
+  if(t->pid!=1)return SF_DENIED;
+  if(!a||a>INT32_MAX||(c!=SF_PRIORITY_QUERY&&c!=SF_PRIORITY_SET)||b>SF_PRIORITY_MAX||(c==SF_PRIORITY_QUERY&&b))return SF_INVALID;
+  for(unsigned i=0;i<SF_MAX_TASKS;i++){
+   if(tasks[i].pid==a&&(tasks[i].state==T_READY||tasks[i].state==T_BLOCKED)){
+    if(c==SF_PRIORITY_SET)tasks[i].priority=(uint32_t)b;return tasks[i].priority;
+   }
+  }
+  return SF_NOT_FOUND;
+ }
+ case SYS_SPAWN_LIMITED:{
+  if(t->pid!=1)return SF_DENIED;if(b>SF_PAGE_LIMIT_MAX||c)return SF_INVALID;
+  SfLoadPlan plan;if(copy_in(t,&plan,a,sizeof(plan)))return SF_DENIED;return task_new_limited(&plan,0,(uint32_t)b);
+ }
  case SYS_SPAWN:{if(t->pid!=1)return SF_DENIED;SfLoadPlan plan;if(copy_in(t,&plan,a,sizeof(plan)))return SF_DENIED;return task_new(&plan,0);}
  case SYS_KILL:if(t->pid!=1||a==1)return SF_DENIED;for(unsigned i=0;i<SF_MAX_TASKS;i++)if(tasks[i].pid==a&&tasks[i].state!=T_DEAD){task_dead(&tasks[i],(int)b);return 0;}return SF_NOT_FOUND;
  case SYS_TASK_STATUS:if(t->pid!=1)return SF_DENIED;for(unsigned i=0;i<SF_MAX_TASKS;i++)if(tasks[i].pid==a&&tasks[i].state!=T_EMPTY)return tasks[i].state==T_DEAD?(long)tasks[i].exit_status:SF_TASK_RUNNING;return SF_NOT_FOUND;

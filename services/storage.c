@@ -119,7 +119,7 @@ int sf_storage_crash_test(void){
  char data[32];long r=sf_ns_read(ns,1,h,data,sizeof(data));if(r<0){sf_ns_close(ns,1,h);return r;}
  sf_assert(!sf_storage_transaction(1),"driver failure test owns dirty lease");
  sf_assert(!sf_sys(SYS_KILL,driver_pid,SF_BUSY,0),"driver failure uses exit code SF_BUSY");
- sf_assert(!sf_storage_writable()&&sf_ns_read(ns,1,h,data,1)==SF_DEVICE_GONE&&sf_ns_write(ns,1,h,"x",1)==SF_DEVICE_GONE,"dead driver rejects held persistent read and write");
+ sf_assert(!sf_storage_writable()&&sf_ns_read(ns,1,h,data,1)==SF_DEVICE_GONE&&sf_ns_write(ns,1,h,"x",1)==SF_DEVICE_GONE&&sf_ns_pread(ns,1,h,data,1,0)==SF_DEVICE_GONE&&sf_ns_pread(ns,1,h,data,1,UINT64_MAX)==SF_DEVICE_GONE,"dead driver rejects held persistent read/write and positional EOF");
  sf_ns_close(ns,1,h);sf_assert(!sf_storage_transaction(0),"driver failure still releases dirty lease");
  sf_log("STORAGE CRASH TEST PASSED\n");return 0;
 }

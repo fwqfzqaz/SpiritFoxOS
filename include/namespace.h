@@ -17,6 +17,7 @@ int sf_ns_stat(SfNamespace*,uint32_t,uint32_t,SfFileStat*);
 int sf_ns_dup(SfNamespace*,uint32_t,uint32_t);
 int sf_ns_close(SfNamespace*,uint32_t,uint32_t);
 long sf_ns_read(SfNamespace*,uint32_t,uint32_t,void*,size_t);
+long sf_ns_pread(SfNamespace*,uint32_t,uint32_t,void*,size_t,uint64_t);
 long sf_ns_write(SfNamespace*,uint32_t,uint32_t,const void*,size_t);
 int sf_ns_truncate(SfNamespace*,uint32_t,uint32_t,uint64_t);
 long sf_ns_seek(SfNamespace*,uint32_t,uint32_t,uint64_t);

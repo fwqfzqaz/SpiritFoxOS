@@ -11,6 +11,7 @@ int64_t sf_file_console(SfFileClient*);
 int64_t sf_file_openat(SfFileClient*,uint64_t,const char*,uint32_t);
 int64_t sf_file_dup(SfFileClient*,uint64_t);
 int64_t sf_file_read(SfFileClient*,uint64_t,void*,size_t);
+int64_t sf_file_pread(SfFileClient*,uint64_t,void*,size_t,uint64_t);
 int64_t sf_file_write(SfFileClient*,uint64_t,const void*,size_t);
 int64_t sf_file_enumerate(SfFileClient*,uint64_t,char*,size_t);
 int64_t sf_file_stat(SfFileClient*,uint64_t,SfFileStat*);

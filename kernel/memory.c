@@ -1,5 +1,5 @@
 #include "kernel.h"
-#define POOL_PAGES 4096
+#define POOL_PAGES SF_PAGE_LIMIT_MAX
 #define PTE_MMIO (1ull<<9)
 static uint8_t pool[POOL_PAGES][4096] __attribute__((aligned(4096)));
 static uint32_t owner[POOL_PAGES];
@@ -20,8 +20,21 @@ int space_device_mmio(uint64_t physical){
  device_pt[0]=physical|0x1b|NX;mmio_pd[511]=(uint64_t)device_pt|3;boot_mmio_pd[511]=(uint64_t)device_pt|3;
  uint64_t cr3;__asm__ volatile("mov %%cr3,%0":"=r"(cr3));__asm__ volatile("mov %0,%%cr3"::"r"(cr3):"memory");return 0;
 }
-void *page_alloc(uint32_t pid){for(unsigned i=0;i<POOL_PAGES;i++)if(!owner[i]){owner[i]=pid;memset(pool[i],0,4096);return pool[i];}return 0;}
-void pages_free(uint32_t pid){for(unsigned i=0;i<POOL_PAGES;i++)if(owner[i]==pid){memset(pool[i],0,4096);owner[i]=0;}}
+static Task *page_owner(uint32_t pid){
+ if(!pid||pid>INT32_MAX)return 0;
+ for(unsigned i=0;i<SF_MAX_TASKS;i++){Task*t=&tasks[i];if(t->pid==pid&&(t->state==T_EMPTY||t->state==T_READY||t->state==T_BLOCKED))return t;}
+ return 0;
+}
+void *page_alloc(uint32_t pid){
+ Task*t=page_owner(pid);if(!t||t->page_count>=t->page_limit)return 0;
+ for(unsigned i=0;i<POOL_PAGES;i++)if(!owner[i]){owner[i]=pid;t->page_count++;memset(pool[i],0,4096);return pool[i];}return 0;
+}
+void pages_free(uint32_t pid){
+ if(!pid||pid>INT32_MAX)return;
+ for(unsigned i=0;i<POOL_PAGES;i++)if(owner[i]==pid){memset(pool[i],0,4096);owner[i]=0;}
+ /* task_dead marks DEAD before freeing; construction rollback is EMPTY. */
+ for(unsigned i=0;i<SF_MAX_TASKS;i++)if(tasks[i].pid==pid)tasks[i].page_count=0;
+}
 uint64_t space_new(uint32_t pid){
  if(!kernel_pd[0])for(unsigned i=0;i<512;i++)kernel_pd[i]=i*0x200000ull|0x83;
  uint64_t*p4=page_alloc(pid),*p3=page_alloc(pid);if(!p4||!p3)return 0;

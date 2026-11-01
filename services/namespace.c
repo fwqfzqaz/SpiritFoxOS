@@ -67,6 +67,17 @@ long sf_ns_read(SfNamespace*n,uint32_t owner,uint32_t h,void*out,size_t bytes){S
  if(x->type==NODE_PIPE){if(!x->size)return x->writers?SF_WOULD_BLOCK:0;if(bytes>x->size)bytes=x->size;for(size_t i=0;i<bytes;i++)((uint8_t*)out)[i]=x->data[(x->head+i)%sizeof(x->data)];x->head=(x->head+bytes)%sizeof(x->data);x->size-=bytes;return bytes;}
  if(d->offset>=x->size)return 0;if(bytes>x->size-d->offset)bytes=x->size-d->offset;memcpy(out,x->data+d->offset,bytes);d->offset+=bytes;return bytes;
 }
+long sf_ns_pread(SfNamespace*n,uint32_t owner,uint32_t h,void*out,size_t bytes,uint64_t offset){
+ SfDescription*d=description(n,owner,h);if(!d)return SF_STALE_HANDLE;if(!(d->mode&OPEN_READ))return SF_DENIED;SfNode*x=&n->nodes[d->node];
+ if(x->type==NODE_DIR)return SF_INVALID;if(x->type==NODE_PIPE||x->type==NODE_CONSOLE)return SF_NOT_SEEKABLE;
+ if(bytes&&!out)return SF_INVALID;if(!bytes)return 0;
+ /* Positional reads never borrow or modify the shared description cursor.
+  * The backend still checks device health, including nonempty EOF requests. */
+ if(x->type==NODE_DISK){if(!n->external_read)return SF_DEVICE_GONE;long r=n->external_read(x->external,offset,out,bytes);
+  return r>=0&&((uint64_t)r>bytes||(uint64_t)r>UINT64_MAX-offset)?SF_BAD_FORMAT:r;
+ }
+ if(offset>=x->size)return 0;if(bytes>x->size-offset)bytes=x->size-offset;memcpy(out,x->data+offset,bytes);return bytes;
+}
 long sf_ns_write(SfNamespace*n,uint32_t owner,uint32_t h,const void*data,size_t bytes){SfDescription*d=description(n,owner,h);if(!d)return SF_STALE_HANDLE;if(!(d->mode&OPEN_WRITE))return SF_DENIED;SfNode*x=&n->nodes[d->node];if(x->readonly)return SF_READ_ONLY;if(x->type==NODE_DIR)return SF_INVALID;if(!bytes)return 0;if(x->type==NODE_CONSOLE)return n->console?n->console(data,bytes):SF_DEVICE_GONE;
  if(x->type==NODE_DISK){if(!n->external_write)return SF_READ_ONLY;long r=n->external_write(x->external,d->offset,data,bytes);if(r>=0){if((uint64_t)r>bytes||(uint64_t)r>UINT32_MAX-d->offset)return SF_BAD_FORMAT;d->offset+=r;if(d->offset>x->size)x->size=d->offset;}return r;}
  if(d->offset>sizeof(x->data)||x->size>sizeof(x->data))return SF_INVALID;
