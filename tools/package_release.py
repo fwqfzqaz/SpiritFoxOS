@@ -46,7 +46,7 @@ if result.get('echo_health_qemu') is not True or result.get('echo_health_qemu_bo
     raise SystemExit('Run authenticated echo health timeout and protocol failure regressions before packaging')
 if result.get('native_supervision_qemu') is not True or result.get('native_supervision_qemu_boots') != 2:
     raise SystemExit('Run native capacity, lease drain and bounded death/health recovery before packaging')
-if result.get('task_pid_host_checks') != 8022:
+if result.get('task_pid_host_checks') != 10022:
     raise SystemExit('Run actual task_new PID exhaustion and publication regressions before packaging')
 if result.get('invocation_preflight_qemu') is not True or result.get('invocation_preflight_qemu_boots') != 4:
     raise SystemExit('Run installed invocation preflight and corrupt candidate rollback regressions before packaging')

@@ -33,6 +33,9 @@ int task_new_limited(const SfLoadPlan*p,int bootstrap,uint32_t pages){
  t->priority=SF_PRIORITY_DEFAULT;t->cap_limit=SF_CAP_LIMIT_MAX;t->page_limit=pages;t->page_count=0;t->ready_since=ticks;
  /* FXSAVE64 layout: empty x87 tags, zero physical payloads/XMM/pointers,
   * default round-to-nearest controls. FNINIT alone leaves data registers. */
+ /* The admitted/reused slot is not the live parent kernel stack.
+  * Clear retained bytes here; never erase an exiting task on its active stack. */
+ memset(t->kstack,0,sizeof(t->kstack));
  memset(t->fxstate,0,sizeof(t->fxstate));t->fxstate[0]=0x7f;t->fxstate[1]=3;t->fxstate[24]=0x80;t->fxstate[25]=0x1f;
  t->cr3=space_new(t->pid);if(!t->cr3)goto fail;
  for(unsigned i=0;i<p->count;i++){const SfLoadSegment*s=&p->segments[i];for(uint64_t off=0;off<s->bytes;off+=4096){void*page=page_alloc(t->pid);if(!page||space_map(t,image_base+s->rva+off,(uint64_t)page,s->flags))goto fail;size_t n=s->bytes-off;if(n>4096)n=4096;if(parent){if(copy_in(parent,page,s->data+off,n))goto fail;}else memcpy(page,(void*)(s->data+off),n);}}

@@ -3,23 +3,23 @@
 更新日期：2026-11-01（北京时间；本轮自 10 月 31 日跨日接续）。
 
 - 工作区：`E:\SpiritFoxOS`；分支 `codex/requirements-followup-20261031`；origin `https://github.com/fwqfzqaz/SpiritFoxOS.git`。
-- 本轮目标：私有池页面预算已完整验证推送 d3001aa / PR #14；按原设计13.3补齐实际IPC用户复制字节计量。
-- status: ipc_stats_local_verified_pending_publish
+- 本轮目标：IPC复制计量已完整验证推送1a7dc5c / PR #14；接续M1任务槽复用时的内核栈字节清理。
+- status: user_paused_after_kstack_validation
 - round_complete: false
-- continuous_work: true
+- continuous_work: false
 - quota_paused: false
-- user_paused: false
-- pause_reason: none
-- 自动任务：spiritfoxos-2 ACTIVE，额度恢复后已重新启用五分钟接续；任一余额 <=10% 保存暂停，暂停后两项均 >20% 才恢复。
+- user_paused: true
+- pause_reason: user requested finish current round then stop
+- 自动任务：spiritfoxos-2已PAUSED；用户要求只收尾当前内核栈清理轮次后停止，未经再次明确继续不自动恢复。
 - 基线：作者已把 PR #13 合并为 main 9acc42e，其树与已通过四项 CI 的 031e360 相同；工作分支已正常合入该 merge，验证树与定位读取已测 5d7fc5a 完全一致。原始设计和 M7 保持。
 - 新需求核对：已检查远端各分支、库内文档、全部独立 Issue（无）、近期 PR/评论、发布和讨论入口，未定位独立的新需求说明；继续已有授权且不依赖该说明的非 M7 工作。以实际 Git/API 提交为准，避免使用旧网页缓存。证据 `.cache/github-requirements-evidence-20261031.json`。
 - 已推送 M0 首轮：`ab085f9` / PR #13，独立 native-source-v1 schema、无密钥离线命令及可选严格源约定，兼容作者 APP 能力/内存约束；12 组专项、含构建 host-only 76.11 秒通过。该 head 四项 Windows/Linux 已成功，证明 `.cache/manifest-round-hosted-proof-20261031.json`。
 - 已推送 M0 后续：`789581f` / PR #13，真实编译共享头文件探针，采集首轮 549 项编号/大小/对齐/成员偏移/宽度/标量种类；9 组专项含三类真实临时头文件漂移。该 head 四项 Windows/Linux 已成功，证明 `.cache/abi-round-hosted-proof-20261031.json`。
 - M0 后续验证：含初始构建 host-only 75.08 秒通过，原 25 个 C 测试及 51 组 Python 用例保留；日志 `build/abi-inventory-host-full-20261031.log`、`build/abi-snapshot-final-20261031.log`，结果 `build/abi-inventory-host-20261031-results.json`。当前 DUP 轮次的完整验证见下节，不能沿用此旧结果。
 - 已交付 M0 摘要：七项产品摘要当时与作者基线相同，549 项 ABI 参考/采集为 `2036cab366d18b535cd005430eec23cd7c4acc3ee1a11b8663c0e1fda417bf24`。DUP 已提交 be5bda1，ABI 为 550 项，完整本地验证和发布门已通过。
-- 进程：本轮完整回归以0退出，无存活本地测试/VM。
-- 当前完整验证：IPC复制计量含初始构建完整1246.1秒/168VM，10041/6001项新增宿主、583项ABI和七项产物及全部旧回归通过。
-- 下一步：发布门与实际ZIP14项离线检查后正常提交推送，核对新HEAD CI；继续下一项有界任务。
+- 进程：本轮完整回归以0退出，无存活本地测试/VM；只核对本轮发布与托管检查。
+- 当前完整验证：内核栈复用清理含初始构建完整1268.57秒/168VM、10022项创建/上下文检查通过；583项ABI保持，七项产物相符。
+- 下一步：本轮发布门/ZIP14项离线验证、正常推送并核对新HEAD Windows/Linux；随后等待用户指示，不开始新开发，自动任务PAUSED。
 
 ## 同所有者文件句柄复制（2026-10-31）
 
@@ -343,3 +343,19 @@ ABI只追加两个常量和SfIpcStats布局的16个项目，旧567项无删改�
 前一页面预算d3001aa的四项Windows/Linux托管检查已独立核对成功，证明.cache/memory-quota-hosted-proof-20261101.json；本轮计量新HEAD仍另行检查。
 
 IPC计量发布门与实际ZIP验证通过：CRC/全部摘要、七项产物相符，14项实际解压离线工具检查通过。证明.cache/ipc-stats-release-proof-20261101.json；记录验证状态后重新打包并核对最终副本，新HEAD托管检查独立核对。
+
+任务槽复用清理草稿：在原Frame和FP初始化基础上，已准入的新拥有者获得清零内核栈前缀，原活父任务的内核栈保持。清除放在创建路径，退出路径仍使用该栈时不擦除。1000组脏栈/FP复用宿主场景和实际FPU复用VM验证；API/583项ABI不变。当前专项/完整状态见恢复文件，不把未完成工作当成通过推送。quota_paused=false，user_paused=false。
+
+任务槽复用清理草稿：在原Frame和FP初始化基础上，已准入的新拥有者获得清零内核栈前缀，原活父任务的内核栈保持。清除放在创建路径，退出路径仍使用该栈时不擦除。1000组脏栈/FP复用宿主场景和实际FPU复用VM验证；API/583项ABI不变。当前专项/完整状态见恢复文件，不把未完成工作当成通过推送。quota_paused=false，user_paused=false。
+
+用户最新边界：只完成当前内核栈清理的验证、正常推送与CI核对，然后停手；自动任务已提前暂停以防新轮次启动。finish_current_then_stop=true，不开始新开发。
+
+## 任务槽复用的内核栈清理（2026-11-01）
+
+有效计划取得单调PID、准入目标槽后，为新拥有者清零内嵌内核栈，再初始化FP与返回Frame。清除不放在退出路径，避免擦除仍在使用的活动栈；无效计划/PID耗尽不修改未准入槽，活父任务的栈保持。API、583项共享ABI和物理池计费边界不变。
+
+10022项真实task_new宿主检查通过：保留原PID边界/构造失败与1000组PID轨迹，在1000组脏FP/内核栈槽复用中检查清零前缀、对齐FP初值和完整父栈保持。含构建78.84秒/两FPU VM专项已通过。完整tools/test.py含初始构建全部通过（1268.57秒、168VM），日志build/kstack-final-full-20261101.log，结果build/kstack-final-test-results.json；全部旧CPU/FPU、调度、预算、IPC计量/撤回、文件、服务、设备、签名/更新和旧事务回归保留，七项产物逐项相符。新HEAD托管CI单独核对。
+
+按用户最新指示，本轮是最后收尾：停止其余实现/测试，spiritfoxos-2保持PAUSED。只完成本轮正常发布和新HEAD CI核对；未经再次明确继续，不因额度刷新开始新开发。
+
+本轮发布门、实际ZIP的CRC/全部摘要和14项解压离线工具检查通过；记录收尾与暂停状态后重新打包核对最终副本，新HEAD托管CI单独核对。自动任务保持PAUSED，不开始下一轮。
