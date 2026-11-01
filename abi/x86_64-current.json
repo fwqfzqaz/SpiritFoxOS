@@ -85,6 +85,7 @@
     "constant.SF_INVALID": -1,
     "constant.SF_LIMIT_QUERY": 0,
     "constant.SF_LIMIT_SET": 1,
+    "constant.SF_LIMIT_USED": 2,
     "constant.SF_MAX_TASKS": 12,
     "constant.SF_MSG_BYTES": 256,
     "constant.SF_NATIVE_RELATIVE": 1,

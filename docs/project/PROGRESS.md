@@ -3,23 +3,23 @@
 更新日期：2026-11-01（北京时间；本轮自 10 月 31 日跨日接续）。
 
 - 工作区：`E:\SpiritFoxOS`；分支 `codex/requirements-followup-20261031`；origin `https://github.com/fwqfzqaz/SpiritFoxOS.git`。
-- 本轮目标：撤回已测推送 6c6450a / PR #14，接续 M0 明确常量新增审阅工具；不改变运行时代码或 M7。
-- status: abi_reviewed_additions_verified_pending_publish
+- 本轮目标：M0 常量新增精确审阅已验证推送 cc1db73 / PR #14；当前补充根任务只读占用查询 SF_LIMIT_USED=2 与 cap-limit used 显示。
+- status: cap_usage_local_verified_pending_publish
 - round_complete: false
 - continuous_work: true
 - quota_paused: false
 - user_paused: false
 - pause_reason: none
-- 自动任务：`spiritfoxos-2` ACTIVE，每五分钟接续；任一剩余 <=10% 保存暂停，暂停后两项均 >20% 才恢复；活跃阶段只要两项 >10% 继续。用户再次明确暂停时同时暂停自动任务。
+- 自动任务：spiritfoxos-2 ACTIVE，额度恢复后已重新启用五分钟接续；任一余额 <=10% 保存暂停，暂停后两项均 >20% 才恢复。
 - 基线：作者已把 PR #13 合并为 main 9acc42e，其树与已通过四项 CI 的 031e360 相同；工作分支已正常合入该 merge，验证树与定位读取已测 5d7fc5a 完全一致。原始设计和 M7 保持。
 - 新需求核对：已检查远端各分支、库内文档、全部独立 Issue（无）、近期 PR/评论、发布和讨论入口，未定位独立的新需求说明；继续已有授权且不依赖该说明的非 M7 工作。以实际 Git/API 提交为准，避免使用旧网页缓存。证据 `.cache/github-requirements-evidence-20261031.json`。
 - 已推送 M0 首轮：`ab085f9` / PR #13，独立 native-source-v1 schema、无密钥离线命令及可选严格源约定，兼容作者 APP 能力/内存约束；12 组专项、含构建 host-only 76.11 秒通过。该 head 四项 Windows/Linux 已成功，证明 `.cache/manifest-round-hosted-proof-20261031.json`。
 - 已推送 M0 后续：`789581f` / PR #13，真实编译共享头文件探针，采集首轮 549 项编号/大小/对齐/成员偏移/宽度/标量种类；9 组专项含三类真实临时头文件漂移。该 head 四项 Windows/Linux 已成功，证明 `.cache/abi-round-hosted-proof-20261031.json`。
 - M0 后续验证：含初始构建 host-only 75.08 秒通过，原 25 个 C 测试及 51 组 Python 用例保留；日志 `build/abi-inventory-host-full-20261031.log`、`build/abi-snapshot-final-20261031.log`，结果 `build/abi-inventory-host-20261031-results.json`。当前 DUP 轮次的完整验证见下节，不能沿用此旧结果。
 - 已交付 M0 摘要：七项产品摘要当时与作者基线相同，549 项 ABI 参考/采集为 `2036cab366d18b535cd005430eec23cd7c4acc3ee1a11b8663c0e1fda417bf24`。DUP 已提交 be5bda1，ABI 为 550 项，完整本地验证和发布门已通过。
-- 进程：排队发送撤回完整回归 PID 30688 以 0 退出，无本轮存活测试/VM。
-- 当前完整验证：tools/test.py 含初始构建全部通过，1210.79 秒、164 VM；25776 项撤回检查、原配额/优先级/文件和所有既有回归保留，ABI 9 组/563 项通过。结果 build/ipc-cancel-final-test-results.json。
-- 下一步：ABI 常量新增审阅九组专项及 14 项实际 ZIP 离线检查已通过，正常推送后核对新 HEAD Windows/Linux，再继续非 M7 有界任务。6c6450a 托管 Windows 尚在运行，不提前称绿。
+- 进程：本轮完整回归已以 0 退出，无存活本地测试/VM。
+- 当前完整验证：占用查询含初始构建完整 1230.53 秒、164 VM；6015 项 core、55043 项 IPC 配额和所有旧回归通过，ABI 9 组/564 项及七项产物一致。
+- 下一步：发布门与实际 ZIP14 项离线检查后正常提交推送，核对新 HEAD CI；接续 M1 物理池页面配额等非 M7 有界事项。
 
 ## 同所有者文件句柄复制（2026-10-31）
 
@@ -291,3 +291,21 @@ SYS_SEND_CANCEL=22 / sf_send_cancel 仅移除当前端点队列中实际发送�
 tools/abi.py check-additions 要求旧目录每个项目保留原值，新增常量与显式 --allow-add constant.NAME=DECIMAL 精确相同；少审、多审、重复、值不符、修改/删除旧项均失败。它不批准布局变化，不自动推断语义兼容，原 check/diff 仍拒绝任何差异。
 
 现有九组 ABI 专项扩展后全部通过（6.415 秒），包含 256 组独立向量逐项改变/删除旧常量、大小、偏移、种类、平台项，名称/整数/数量边界、CLI 不改输入、无工具链独立副本，以及三个真实编译头文件漂移。运行时代码、563 项 ABI 参考和七项产物与已完整通过的撤回轮次一致，没有为纯工具改动重复 VM；完整运行时结果仍为 1210.79 秒/164 VM。发布门与实际 ZIP（466773 字节、42 项）CRC/所有摘要通过；空 PATH/无 build/密钥/编译器/认证库的解压副本通过 14 项检查，包括新增允许和漏审拒绝。证明 .cache/abi-reviewed-additions-proof-20261101.json。新提交托管 CI 单独核对。
+
+## 占用查询验证进行中（2026-11-01）
+
+SF_LIMIT_USED=2 / sf_task_cap_usage 仅根任务查询活任务非空能力槽数，保留规范 PID、零 limit 参数和权限检查；不改变既有能力、上限或状态。根诊断观察继承 2、占满 3、关闭后 2 与退出 NOT_FOUND，普通应用查询仍 DENIED。新增常量已通过 check-additions 精确审阅，旧 563 项无删改。产品 core 6015 项检查已过，专项/完整状态见恢复文件；本轮尚未完整验证和推送。
+
+占用查询恢复点：专项含构建 59.49 秒、6015 项 core、55043 项 IPC、ABI 九组/564 项与四次 VM 已通过。首个专项因串口测试等候旧提示符而失败，已改为等当前 used 字段后的完整行，修正后整套专项通过。完整回归尚未通过，草稿未提交推送。quota_paused=true；短期 10%、长期 32%，下次额度检查 2026-11-01T02:28:05+08:00；实际恢复后先核对 cc1db73 的真实 Windows/Linux。
+
+额度实际刷新后恢复：短期98%、长期31%，ordinaryUsageAllowed=true。旧完整回归因额度保护中止，未当作通过；未重复已通过专项，当前只运行一套新的含初始构建完整回归。cc1db73 四项托管检查均独立核对成功；日志连接未返回正文，不据此补造运行时长或摘要。
+
+## 根任务查询能力句柄占用（2026-11-01）
+
+SF_LIMIT_USED=2 / sf_task_cap_usage(pid) 复用 SYS_TASK_CAP_LIMIT=21，只允许根任务查询活任务当前非空能力槽数；查询 limit 参数必须为 0，保持规范 PID、权限和死亡拒绝。按引用槽计数，零权限与高编号槽均计入，查询不修改能力表、上限、状态或调度时间。cap-limit 同时显示 limit 与 used，分别读取的快照不构成预留，降低仍以 SET 的 BUSY/成功为准。
+
+6015 项实际 core 控制检查通过：1000 组独立位图在设置前后查询占用并核对完整状态不变，保留 BUSY、权限/高位/保留参数和槽复用。原 55043 项 IPC 准入与 40908 项 IPC 不变。legacy/modern 各四次分阶段应用实际观察继承 2、占满 3、关闭后 2，再降额/继续文件 IPC，退出后使用量和配置都 NOT_FOUND；普通应用查询占用仍 DENIED。
+
+完整 tools/test.py 含初始构建全部通过（1230.53 秒、164 VM）；日志 build/cap-usage-resumed-full-20261101.log，结果 build/cap-usage-final-test-results.json。保留所有 CPU/FPU、调度、撤回、服务、文件、设备、签名/更新/旧事务回归，七项产物逐项相符。ABI 仅新增 SF_LIMIT_USED=2，前 563 项无删改，当前 564 项，参考/采集摘要 1a9ee8bf9e0b54d2043417d48ca47fad83d32479d14987fe8bf8173d0c2b6028。先前 cc1db73 四项 Windows/Linux 已成功；本轮新 HEAD 托管检查独立核对。
+
+占用查询发布门与实际 ZIP 已通过：470100 字节、42 项 CRC/全部摘要，七项产物与本轮完整结果相同，14 项实际解压离线工具检查通过。新 HEAD 托管检查独立核对。

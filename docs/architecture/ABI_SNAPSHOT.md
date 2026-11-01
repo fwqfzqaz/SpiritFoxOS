@@ -63,3 +63,5 @@ python3 tools/abi.py check-additions before.json after.json --allow-add constant
 内核句柄上限新增 SYS_TASK_CAP_LIMIT=21 和三个常量，当前 562 项；前 558 项无删改，没有新增 wire 结构。
 
 未投递 IPC 撤回仅追加 SYS_SEND_CANCEL=22，当前 563 项；前 562 项无删改，没有新增 wire 结构。
+
+能力占用查询只新增 SF_LIMIT_USED=2，当前 564 项，前 563 项无删改；新增审阅命令已用于核对该差异，不更改 wire 布局。

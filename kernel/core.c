@@ -71,9 +71,10 @@ static long syscall(Frame*f){Task*t=&tasks[current];uint64_t a=f->rdi,b=f->rsi,c
  case SYS_TICKS:return ticks;
  case SYS_TASK_CAP_LIMIT:{
   if(t->pid!=1)return SF_DENIED;
-  if(!a||a>INT32_MAX||(c!=SF_LIMIT_QUERY&&c!=SF_LIMIT_SET)||b>SF_CAP_LIMIT_MAX||(c==SF_LIMIT_QUERY&&b))return SF_INVALID;
+  if(!a||a>INT32_MAX||(c!=SF_LIMIT_QUERY&&c!=SF_LIMIT_SET&&c!=SF_LIMIT_USED)||b>SF_CAP_LIMIT_MAX||(c!=SF_LIMIT_SET&&b))return SF_INVALID;
   for(unsigned i=0;i<SF_MAX_TASKS;i++){
    Task*x=&tasks[i];if(x->pid==a&&(x->state==T_READY||x->state==T_BLOCKED)){
+    if(c==SF_LIMIT_USED)return task_caps_used(x);
     if(c==SF_LIMIT_SET){if(task_caps_used(x)>b)return SF_BUSY;x->cap_limit=(uint32_t)b;}
     return x->cap_limit;
    }

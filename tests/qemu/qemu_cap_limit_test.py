@@ -1,5 +1,6 @@
 """Live kernel handle quotas without revoking existing IPC authority."""
 from qemu_persist_test import VM,ROOT
+import re
 
 
 def run():
@@ -10,7 +11,11 @@ def run():
         vm=VM(disk,'cap-limit-'+label,iommu=iommu)
         try:
             vm.boot();vm.command('write /persist/notes CAP-LIMIT-PRESERVED','write: OK');before=disk.read_bytes()
-            vm.command('cap-limit 1','cap-limit: pid=1 limit=32')
+            start=vm.send('cap-limit 1');marker='cap-limit: pid=1 limit=32 used='
+            vm.expect(marker,start);field=vm.output.index(marker.encode(),start)+len(marker)
+            vm.expect('\n',field)
+            usage=re.search(rb'cap-limit: pid=1 limit=32 used=(\d+)\r?\n',vm.output[start:])
+            assert usage and 0<int(usage.group(1))<=32,'Missing or invalid actual root capability usage'
             vm.command('cap-limit 1 0','cap-limit: failed code=7')
             vm.command('cap-limit 1','cap-limit: pid=1 limit=32')
             for command in ['cap-limit','cap-limit 0','cap-limit 1 33','cap-limit 4294967297 3',

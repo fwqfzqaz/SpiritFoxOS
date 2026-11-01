@@ -436,7 +436,8 @@ static void cap_limit_line(char*line){
  if((count==1||count==2)&&decimal_u32(words[0],&pid)&&(count==1||decimal_u32(words[1],&budget)))
   r=sf_sys(SYS_TASK_CAP_LIMIT,pid,budget,count==1?SF_LIMIT_QUERY:SF_LIMIT_SET);
  if(r<0){sf_log("cap-limit: failed code=");sf_number(-r);sf_log("\n");return;}
- sf_log("cap-limit: pid=");sf_number(pid);sf_log(" limit=");sf_number(r);sf_log("\n");
+ long used=sf_task_cap_usage(pid);if(used<0){sf_log("cap-limit: failed code=");sf_number(-used);sf_log("\n");return;}
+ sf_log("cap-limit: pid=");sf_number(pid);sf_log(" limit=");sf_number(r);sf_log(" used=");sf_number(used);sf_log("\n");
 }
 static void child_test_signal(uint32_t pid,uint64_t stage){Child*c=child(pid);SfMessage m;sf_message(&m,OP_ECHO,stage);sf_assert(c&&!sf_send(c->reply,&m),"diagnostic signals owned child");}
 static void cap_limit_wait(uint32_t pid,uint64_t stage){
@@ -444,14 +445,14 @@ static void cap_limit_wait(uint32_t pid,uint64_t stage){
 }
 static void cap_limit_test(void){
  int pid=launch_app_root("caplimit.sfk","/tmp");sf_assert(pid>0,"cap limit test owns waiting application");
- sf_assert(sf_sys(SYS_TASK_CAP_LIMIT,pid,0,SF_LIMIT_QUERY)==32&&sf_sys(SYS_TASK_CAP_LIMIT,pid,3,SF_LIMIT_SET)==3,"root configures cap budget before release");
+ sf_assert(sf_task_cap_usage(pid)==2&&sf_sys(SYS_TASK_CAP_LIMIT,pid,0,SF_LIMIT_QUERY)==32&&sf_sys(SYS_TASK_CAP_LIMIT,pid,3,SF_LIMIT_SET)==3,"root observes inherited handles and configures budget before release");
  child_test_signal(pid,1);cap_limit_wait(pid,1);
- sf_assert(sf_sys(SYS_TASK_CAP_LIMIT,pid,2,SF_LIMIT_SET)==SF_BUSY&&sf_sys(SYS_TASK_CAP_LIMIT,pid,0,SF_LIMIT_QUERY)==3,"lower budget refuses live handles without mutation");
+ sf_assert(sf_task_cap_usage(pid)==3&&sf_sys(SYS_TASK_CAP_LIMIT,pid,2,SF_LIMIT_SET)==SF_BUSY&&sf_sys(SYS_TASK_CAP_LIMIT,pid,0,SF_LIMIT_QUERY)==3,"root observes full usage and busy lowering preserves budget");
  int ep=sf_sys(SYS_EP_CREATE,0,0,0);sf_assert(ep>0&&!sf_sys(SYS_CAP_CLOSE,ep,0,0),"refused child allocations leave endpoint pool available");
  child_test_signal(pid,2);cap_limit_wait(pid,2);
- sf_assert(sf_sys(SYS_TASK_CAP_LIMIT,pid,2,SF_LIMIT_SET)==2,"budget lowers after child closes reference");
+ sf_assert(sf_task_cap_usage(pid)==2&&sf_sys(SYS_TASK_CAP_LIMIT,pid,2,SF_LIMIT_SET)==2,"root observes released reference before lowering budget");
  child_test_signal(pid,3);sf_assert(!wait_app(pid),"inherited two-cap file transport stays usable at budget");
- sf_assert(sf_sys(SYS_TASK_CAP_LIMIT,pid,0,SF_LIMIT_QUERY)==SF_NOT_FOUND,"retired child limit is not configurable");
+ sf_assert(sf_task_cap_usage(pid)==SF_NOT_FOUND&&sf_sys(SYS_TASK_CAP_LIMIT,pid,0,SF_LIMIT_QUERY)==SF_NOT_FOUND,"retired child usage/limit is not configurable");
  sf_log("CAP LIMIT TEST PASSED\n");
 }
 static void ipc_cancel_test(void){
