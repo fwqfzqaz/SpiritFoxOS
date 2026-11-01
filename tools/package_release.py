@@ -79,8 +79,10 @@ if result.get('manifest_schema_sha256') != hashlib.sha256(schema_path.read_bytes
     raise SystemExit('Manifest schema changed since source validation')
 abi_reference = ROOT/'abi/x86_64-current.json'
 abi_capture = BUILD/'abi-current.json'
-if result.get('abi_snapshot_host_tests') != 9 or result.get('abi_snapshot_entries') != 564:
+if result.get('abi_snapshot_host_tests') != 9 or result.get('abi_snapshot_entries') != 567:
     raise SystemExit('Run compiled ABI capture, offline comparison and header-drift regressions before packaging')
+if result.get('memory_quota_host_checks') != 298045 or result.get('page_limit_host_checks') != 3033 or result.get('memory_quota_profile') != 'private-pool-pages-v1' or not result.get('page_quota_qemu') or result.get('page_quota_qemu_boots') != 2:
+    raise SystemExit('Run actual pool-page accounting, limited-spawn/control and both production quota VM transports before packaging')
 if result.get('abi_reference_sha256') != hashlib.sha256(abi_reference.read_bytes()).hexdigest() or result.get('abi_capture_sha256') != hashlib.sha256(abi_capture.read_bytes()).hexdigest():
     raise SystemExit('ABI reference or capture changed since validation')
 for name in ['esp/EFI/BOOT/BOOTX64.EFI','storage.img','persistent.img','development.pub','application.pub','backup.pub','trust-policy.json']:

@@ -403,3 +403,15 @@ SF_LIMIT_USED=2 / sf_task_cap_usage(pid) 复用 SYS_TASK_CAP_LIMIT=21，只允�
 完整 tools/test.py 含初始构建全部通过（1230.53 秒、164 VM）；日志 build/cap-usage-resumed-full-20261101.log，结果 build/cap-usage-final-test-results.json。保留所有 CPU/FPU、调度、撤回、服务、文件、设备、签名/更新/旧事务回归，七项产物逐项相符。ABI 仅新增 SF_LIMIT_USED=2，前 563 项无删改，当前 564 项，参考/采集摘要 1a9ee8bf9e0b54d2043417d48ca47fad83d32479d14987fe8bf8173d0c2b6028。先前 cc1db73 四项 Windows/Linux 已成功；本轮新 HEAD 托管检查独立核对。
 
 占用查询发布门与实际 ZIP 已通过：470100 字节、42 项 CRC/全部摘要，七项产物与本轮完整结果相同，14 项实际解压离线工具检查通过。新 HEAD 托管检查独立核对。
+
+## 私有物理池页面预算与计数（2026-11-01）
+
+SYS_SPAWN_LIMITED=23 在分配前配置子任务0–4096页预算，原 SfLoadPlan/默认创建保持；SYS_TASK_PAGE_LIMIT=24 仅根任务查询/设置活任务的上限与占用，低于 used 返回 BUSY，不驱逐映射。计费包含私有页和新页表，借用映射不重复计费物理页；全池耗尽仍可能失败，没有预留、CPU预算或清单内存声明自动转换。单调PID、错误回滚、死亡清零与默认复用保持。
+
+298045项实际分配器检查覆盖1000组独立预算/交错轨迹、4096页全池耗尽、跨拥有者隔离、唯一地址/清零、页表计费、借用映射和死亡。3033项实际core控制/创建检查覆盖1000组已用/预算组合、权限/宽度/保留参数、BUSY、构造准入/回滚和默认复用。原42项内存、8022项创建及所有旧宿主保持。
+
+含初始构建专项101.31秒/四VM已通过；完整 tools/test.py 全部通过（1192.6秒、166VM），日志build/memory-quota-final-full-20261101.log，结果build/memory-quota-final-test-results.json。新增legacy/modern各四次实际诊断，反复失败预算仍可成功创建，真实计数、精确used降低、非合作任务抢占、死亡回收/默认复用、普通拒绝、文件IPC和磁盘字节保持；FPU/调度/能力/撤回/服务/设备/签名/更新/旧事务全部保留，七项产物逐项核对。
+
+ABI只新增SYS_SPAWN_LIMITED、SYS_TASK_PAGE_LIMIT、SF_PAGE_LIMIT_MAX，前564项无删改，当前567项，参考/采集摘要af54b2bf8424c9aed4c4faf59b8bcda98cee32ea76bcdd106aa9fe927f0e1480。协议与边界见PAGE_LIMITS.md。本地通过不能替代本轮新HEAD托管Windows/Linux，按真实提交独立核对。
+
+页面配额发布门及实际ZIP验证通过：476111字节、43项CRC/所有摘要，七项产物与完整结果相同，14项解压离线工具检查通过。证明.cache/memory-quota-release-proof-20261101.json；新HEAD托管结果独立核对。

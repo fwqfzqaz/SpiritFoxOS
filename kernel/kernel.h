@@ -11,7 +11,7 @@ typedef struct {
  uint64_t cr3,recv_buffer,wait_deadline;Frame *frame;
  uint32_t device_io,device_bdf,device_fault;
  uint32_t device_modern;
- uint32_t priority,cap_limit;uint64_t ready_since;
+ uint32_t priority,cap_limit,page_limit,page_count;uint64_t ready_since;
  Cap caps[32];uint8_t fxstate[512] __attribute__((aligned(16)));
  uint8_t kstack[16384] __attribute__((aligned(16)));
 } Task;
@@ -25,7 +25,7 @@ void arch_init(void);void arch_task(Task*);void arch_save(Task*);void arch_enter
 void *page_alloc(uint32_t);void pages_free(uint32_t);uint64_t space_new(uint32_t);
 int space_map(Task*,uint64_t,uint64_t,uint32_t);int user_range(Task*,uint64_t,uint64_t,int);
 void *user_phys(Task*,uint64_t);int copy_in(Task*,void*,uint64_t,size_t);int copy_out(Task*,uint64_t,const void*,size_t);
-int task_new(const SfLoadPlan*,int);void task_dead(Task*,int);Frame *schedule(void);
+int task_new(const SfLoadPlan*,int);int task_new_limited(const SfLoadPlan*,int,uint32_t);void task_dead(Task*,int);Frame *schedule(void);
 long ipc_syscall(uint64_t,uint64_t,uint64_t,uint64_t);void ipc_cleanup(Task*);
 int ipc_grant(Task*,Task*,uint32_t,uint32_t);void ipc_deadlines(void);
 long pci_read(uint64_t,uint64_t);long device_io(Task*,uint64_t,uint64_t,uint64_t);

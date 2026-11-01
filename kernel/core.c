@@ -22,14 +22,15 @@ static int valid_plan(const SfLoadPlan*p,Task*parent){
   if(s->flags==5&&p->entry>=s->rva&&p->entry-s->rva<s->bytes)entry=1;
  }return entry;
 }
-int task_new(const SfLoadPlan*p,int bootstrap){
+int task_new_limited(const SfLoadPlan*p,int bootstrap,uint32_t pages){
+ if(pages>SF_PAGE_LIMIT_MAX)return SF_INVALID;
  Task*parent=bootstrap?0:&tasks[current];if(!valid_plan(p,parent)||(!parent&&p->image_base&&p->image_base!=SF_BASE))return SF_INVALID;uint64_t image_base=p->image_base?p->image_base:SF_BASE;
  int result=SF_NO_SPACE;
  int slot=-1;for(unsigned i=0;i<SF_MAX_TASKS;i++)if(tasks[i].state==T_EMPTY||tasks[i].state==T_DEAD){slot=i;break;}if(slot<0)return SF_NO_SPACE;
  long pid=sf_pid_take(&next_pid);if(pid<0)return (int)pid;
  Task*t=&tasks[slot];/* Preserve capability generations across slot reuse. */
  for(unsigned i=0;i<32;i++)t->caps[i].endpoint=0;t->pid=(uint32_t)pid;t->state=T_EMPTY;t->device_io=0;t->device_bdf=0;t->device_fault=0;t->device_modern=0;
- t->priority=SF_PRIORITY_DEFAULT;t->cap_limit=SF_CAP_LIMIT_MAX;t->ready_since=ticks;
+ t->priority=SF_PRIORITY_DEFAULT;t->cap_limit=SF_CAP_LIMIT_MAX;t->page_limit=pages;t->page_count=0;t->ready_since=ticks;
  /* FXSAVE64 layout: empty x87 tags, zero physical payloads/XMM/pointers,
   * default round-to-nearest controls. FNINIT alone leaves data registers. */
  memset(t->fxstate,0,sizeof(t->fxstate));t->fxstate[0]=0x7f;t->fxstate[1]=3;t->fxstate[24]=0x80;t->fxstate[25]=0x1f;
@@ -47,6 +48,7 @@ int task_new(const SfLoadPlan*p,int bootstrap){
  t->frame=(Frame*)(t->kstack+sizeof(t->kstack)-sizeof(Frame));memset(t->frame,0,sizeof(Frame));t->frame->rip=image_base+p->entry;t->frame->cs=0x1b;t->frame->ss=0x23;t->frame->rflags=0x202;t->frame->rsp=SF_STACK-8;t->frame->rdi=SF_ARGS;t->frame->rsi=args->size;t->ready_since=ticks;t->state=T_READY;t->exit_status=0;return t->pid;
 fail: device_release(t);ipc_cleanup(t);pages_free(t->pid);device_forget(t);t->state=T_DEAD;t->exit_status=result;return result;
 }
+int task_new(const SfLoadPlan*p,int bootstrap){return task_new_limited(p,bootstrap,SF_PAGE_LIMIT_MAX);}
 void task_dead(Task*t,int status){device_release(t);ipc_cleanup(t);t->state=T_DEAD;t->exit_status=status;if(current>=0&&t==&tasks[current])__asm__ volatile("mov %0,%%cr3"::"r"(boot_cr3):"memory");pages_free(t->pid);device_forget(t);}
 Frame *schedule(void){
  /* Time spent running is not ready-queue waiting credit. Wakeups separately
@@ -69,6 +71,18 @@ static long syscall(Frame*f){Task*t=&tasks[current];uint64_t a=f->rdi,b=f->rsi,c
  case SYS_YIELD:return 0;
  case SYS_LOG:{if(b>512||!user_range(t,a,b,0))return SF_DENIED;char buf[513];copy_in(t,buf,a,b);buf[b]=0;serial(buf);return b;}
  case SYS_TICKS:return ticks;
+ case SYS_TASK_PAGE_LIMIT:{
+  if(t->pid!=1)return SF_DENIED;
+  if(!a||a>INT32_MAX||(c!=SF_LIMIT_QUERY&&c!=SF_LIMIT_SET&&c!=SF_LIMIT_USED)||b>SF_PAGE_LIMIT_MAX||(c!=SF_LIMIT_SET&&b))return SF_INVALID;
+  for(unsigned i=0;i<SF_MAX_TASKS;i++){
+   Task*x=&tasks[i];if(x->pid==a&&(x->state==T_READY||x->state==T_BLOCKED)){
+    if(c==SF_LIMIT_USED)return x->page_count;
+    if(c==SF_LIMIT_SET){if(x->page_count>b)return SF_BUSY;x->page_limit=(uint32_t)b;}
+    return x->page_limit;
+   }
+  }
+  return SF_NOT_FOUND;
+ }
  case SYS_TASK_CAP_LIMIT:{
   if(t->pid!=1)return SF_DENIED;
   if(!a||a>INT32_MAX||(c!=SF_LIMIT_QUERY&&c!=SF_LIMIT_SET&&c!=SF_LIMIT_USED)||b>SF_CAP_LIMIT_MAX||(c!=SF_LIMIT_SET&&b))return SF_INVALID;
@@ -90,6 +104,10 @@ static long syscall(Frame*f){Task*t=&tasks[current];uint64_t a=f->rdi,b=f->rsi,c
    }
   }
   return SF_NOT_FOUND;
+ }
+ case SYS_SPAWN_LIMITED:{
+  if(t->pid!=1)return SF_DENIED;if(b>SF_PAGE_LIMIT_MAX||c)return SF_INVALID;
+  SfLoadPlan plan;if(copy_in(t,&plan,a,sizeof(plan)))return SF_DENIED;return task_new_limited(&plan,0,(uint32_t)b);
  }
  case SYS_SPAWN:{if(t->pid!=1)return SF_DENIED;SfLoadPlan plan;if(copy_in(t,&plan,a,sizeof(plan)))return SF_DENIED;return task_new(&plan,0);}
  case SYS_KILL:if(t->pid!=1||a==1)return SF_DENIED;for(unsigned i=0;i<SF_MAX_TASKS;i++)if(tasks[i].pid==a&&tasks[i].state!=T_DEAD){task_dead(&tasks[i],(int)b);return 0;}return SF_NOT_FOUND;

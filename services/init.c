@@ -431,6 +431,32 @@ static void priority_test(void){
  sf_assert(sf_sys(SYS_TASK_PRIORITY,a,0,SF_PRIORITY_QUERY)==SF_NOT_FOUND&&sf_sys(SYS_TASK_PRIORITY,b,0,SF_PRIORITY_QUERY)==SF_NOT_FOUND,"priority queries reject retired tasks");
  sf_log("PRIORITY SCHEDULER TEST PASSED\n");
 }
+static void page_limit_line(char*line){
+ char*words[2];int count=sf_arguments_split(line,words,2);uint32_t pid=0,pages=0;long r=SF_INVALID;
+ if((count==1||count==2)&&decimal_u32(words[0],&pid)&&(count==1||decimal_u32(words[1],&pages)))
+  r=sf_task_page_limit(pid,pages,count==1?SF_LIMIT_QUERY:SF_LIMIT_SET);
+ if(r<0){sf_log("page-limit: failed code=");sf_number(-r);sf_log("\n");return;}
+ long used=sf_task_page_usage(pid);if(used<0){sf_log("page-limit: failed code=");sf_number(-used);sf_log("\n");return;}
+ sf_log("page-limit: pid=");sf_number(pid);sf_log(" limit=");sf_number(r);sf_log(" used=");sf_number(used);sf_log("\n");
+}
+static void page_quota_test(void){
+ long root_used=sf_task_page_usage(1);sf_assert(root_used>0,"root pool-page ownership is counted");
+ memset(staging,0,4096);staging[0]=0xeb;staging[1]=0xfe;
+ SfLoadPlan p={0};p.size=sizeof(p);p.count=1;p.image_base=SF_BASE;p.segments[0]=(SfLoadSegment){0,4096,(uint64_t)staging,5,0};
+ for(unsigned i=0;i<32;i++)sf_assert(sf_spawn_limited(&p,1)==SF_NO_SPACE&&sf_task_page_usage(1)==root_used,"tiny construction budgets roll back without charging parent");
+ int pid=sf_spawn_limited(&p,64);sf_assert(pid>1,"explicit page budget admits isolated loop");
+ long used=sf_task_page_usage(pid);sf_assert(used>0&&used<=64&&sf_task_page_limit(pid,0,SF_LIMIT_QUERY)==64,"page tables and private image fit configured budget");
+ sf_assert(sf_task_page_limit(pid,used-1,SF_LIMIT_SET)==SF_BUSY&&sf_task_page_limit(pid,0,SF_LIMIT_QUERY)==64,"below-used page lowering is busy with no mutation");
+ sf_assert(sf_task_page_limit(pid,used,SF_LIMIT_SET)==used&&sf_task_page_usage(pid)==used,"exact-used lowering preserves private mappings");
+ uint64_t before=sf_ticks();while(sf_ticks()-before<3)sf_yield();
+ sf_assert(sf_sys(SYS_TASK_STATUS,pid,0,0)==SF_TASK_RUNNING,"budgeted noncooperating task remains isolated and preemptible");
+ sf_assert(!sf_sys(SYS_KILL,pid,0,0),"page quota diagnostic kills owned loop");
+ sf_assert(sf_task_page_usage(pid)==SF_NOT_FOUND&&sf_task_page_limit(pid,0,SF_LIMIT_QUERY)==SF_NOT_FOUND&&sf_task_page_usage(1)==root_used,"dead owner reclaimed without changing parent usage");
+ pid=sf_sys(SYS_SPAWN,(uint64_t)&p,0,0);sf_assert(pid>1&&sf_task_page_limit(pid,0,SF_LIMIT_QUERY)==SF_PAGE_LIMIT_MAX,"ordinary spawn on reused slot defaults independently");
+ sf_assert(!sf_sys(SYS_KILL,pid,0,0)&&sf_task_page_usage(1)==root_used,"default child cleanup preserves parent accounting");
+ sf_log("PAGE QUOTA TEST PASSED\n");
+}
+
 static void cap_limit_line(char*line){
  char*words[2];int count=sf_arguments_split(line,words,2);uint32_t pid=0,budget=0;long r=SF_INVALID;
  if((count==1||count==2)&&decimal_u32(words[0],&pid)&&(count==1||decimal_u32(words[1],&budget)))
@@ -479,7 +505,7 @@ static void trust_show(void){
 }
 static void command(char*line){
  if(!strcmp(line,"help")){
-  sf_log("help | ls [path] | cat <path> | write <path> <text> | truncate <path> <bytes> | stat <path> | rm <path> | mkdir <path> | rmdir <path> | priority <pid> [0..3] | cap-limit <pid> [0..32] | modules | trust | revoke-key /disk/pkg | echo\n");
+  sf_log("help | ls [path] | cat <path> | write <path> <text> | truncate <path> <bytes> | stat <path> | rm <path> | mkdir <path> | rmdir <path> | priority <pid> [0..3] | cap-limit <pid> [0..32] | page-limit <pid> [0..4096] | modules | trust | revoke-key /disk/pkg | echo\n");
   sf_log("run <app or installed> [args] | runat <read-only-dir> <app> [args]\nrunenv [NAME=VALUE ...] -- <app> [args] | runenvat <dir> [NAME=VALUE ...] -- <app> [args]\n");
   sf_log("install /disk/bin/app.sfk | persist | stop echo | start echo | echo-status | echo-crash | echo-hang | echo-bad-reply | echo-bad-op | mount /disk | unmount /disk | stop disk | start disk | selftest | shutdown\n");
   sf_log("ifconfig | ping <ip> | udp <ip> <port> <text> | tcp <ip> <port> <text> | stop native | start native | native-status | native-crash | native-hang | native-bad-reply | native-bad-op\n");}
@@ -495,8 +521,10 @@ static void command(char*line){
  else if(!strcmp(line,"trust")){trust_show();sf_persist_trust_status();}
  else if(!strcmp(line,"priority-test"))priority_test();
  else if(!strcmp(line,"priority")||!memcmp(line,"priority ",9))priority_line(line+8);
+ else if(!strcmp(line,"page-quota-test"))page_quota_test();
  else if(!strcmp(line,"cap-limit-test"))cap_limit_test();
  else if(!strcmp(line,"ipc-cancel-test"))ipc_cancel_test();
+ else if(!strcmp(line,"page-limit")||!memcmp(line,"page-limit ",11))page_limit_line(line+10);
  else if(!strcmp(line,"cap-limit")||!memcmp(line,"cap-limit ",10))cap_limit_line(line+9);
  else if(!memcmp(line,"revoke-key ",11)){int r=sf_persist_revoke(line+11);if(!r)sf_log("revoke: OK\n");else if(r==1)sf_log("revoke: UNCHANGED\n");else{sf_log("revoke: failed code=");sf_number(-r);sf_log("\n");}}
  else if(!strcmp(line,"modules")){sf_log("sf-init ACTIVE pinned; sf-native ");sf_log(manager.modules[runtime_slot].state==MOD_ACTIVE?"ACTIVE":"STOPPED");sf_log("; echo ");sf_log(manager.modules[echo_slot].state==MOD_ACTIVE?"ACTIVE\n":"STOPPED\n");}
