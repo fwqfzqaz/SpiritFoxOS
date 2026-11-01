@@ -431,6 +431,24 @@ static void priority_test(void){
  sf_assert(sf_sys(SYS_TASK_PRIORITY,a,0,SF_PRIORITY_QUERY)==SF_NOT_FOUND&&sf_sys(SYS_TASK_PRIORITY,b,0,SF_PRIORITY_QUERY)==SF_NOT_FOUND,"priority queries reject retired tasks");
  sf_log("PRIORITY SCHEDULER TEST PASSED\n");
 }
+static int ipc_stats_read(SfIpcStats*s){long r=sf_ipc_stats(s);return r?r:(s->size!=sizeof(*s)||s->version!=SF_IPC_STATS_VERSION?SF_BAD_FORMAT:0);}
+static void ipc_stats_line(void){
+ SfIpcStats s;int r=ipc_stats_read(&s);if(r){sf_log("ipc-stats: failed code=");sf_number(-r);sf_log("\n");return;}
+ sf_log("ipc-stats: send-bytes=");sf_number(s.send_bytes);sf_log(" receive-bytes=");sf_number(s.receive_bytes);sf_log("\n");
+}
+static int ipc_copy_increased(uint64_t before,uint64_t after){return before>UINT64_MAX-sizeof(SfMessage)?after==UINT64_MAX:after>=before+sizeof(SfMessage);}
+static void ipc_stats_test(void){
+ SfIpcStats before,after;memset(&before,0xa5,sizeof(before));
+ sf_assert(sf_sys(SYS_IPC_STATS,(uint64_t)&before,sizeof(before)-1,0)==SF_INVALID&&before.size==0xa5a5a5a5u,"IPC counters reject size without touching output");
+ sf_assert(sf_sys(SYS_IPC_STATS,(uint64_t)&before,sizeof(before),1)==SF_INVALID,"IPC counters reject reserved field");
+ sf_assert(sf_ipc_stats((void*)SF_BUNDLE)==SF_DENIED,"IPC counters refuse read-only output buffer");
+ int ep=sf_sys(SYS_EP_CREATE,0,0,0);sf_assert(ep>0&&!ipc_stats_read(&before),"root reads IPC counters without extra endpoint allocation");
+ SfMessage m;sf_message(&m,OP_ECHO,0xc0b1);sf_assert(!sf_send(ep,&m)&&sf_recv(ep,&m,sf_deadline(100))==1,"private IPC round trip for copy observation");
+ sf_assert(!ipc_stats_read(&after)&&ipc_copy_increased(before.send_bytes,after.send_bytes)&&ipc_copy_increased(before.receive_bytes,after.receive_bytes),"actual IPC user copies increase counters");
+ sf_assert(!sf_sys(SYS_CAP_CLOSE,ep,0,0),"IPC counter diagnostic releases private endpoint");
+ sf_log("IPC COPY TEST PASSED\n");
+}
+
 static void page_limit_line(char*line){
  char*words[2];int count=sf_arguments_split(line,words,2);uint32_t pid=0,pages=0;long r=SF_INVALID;
  if((count==1||count==2)&&decimal_u32(words[0],&pid)&&(count==1||decimal_u32(words[1],&pages)))
@@ -505,7 +523,7 @@ static void trust_show(void){
 }
 static void command(char*line){
  if(!strcmp(line,"help")){
-  sf_log("help | ls [path] | cat <path> | write <path> <text> | truncate <path> <bytes> | stat <path> | rm <path> | mkdir <path> | rmdir <path> | priority <pid> [0..3] | cap-limit <pid> [0..32] | page-limit <pid> [0..4096] | modules | trust | revoke-key /disk/pkg | echo\n");
+  sf_log("help | ls [path] | cat <path> | write <path> <text> | truncate <path> <bytes> | stat <path> | rm <path> | mkdir <path> | rmdir <path> | priority <pid> [0..3] | cap-limit <pid> [0..32] | page-limit <pid> [0..4096] | ipc-stats | modules | trust | revoke-key /disk/pkg | echo\n");
   sf_log("run <app or installed> [args] | runat <read-only-dir> <app> [args]\nrunenv [NAME=VALUE ...] -- <app> [args] | runenvat <dir> [NAME=VALUE ...] -- <app> [args]\n");
   sf_log("install /disk/bin/app.sfk | persist | stop echo | start echo | echo-status | echo-crash | echo-hang | echo-bad-reply | echo-bad-op | mount /disk | unmount /disk | stop disk | start disk | selftest | shutdown\n");
   sf_log("ifconfig | ping <ip> | udp <ip> <port> <text> | tcp <ip> <port> <text> | stop native | start native | native-status | native-crash | native-hang | native-bad-reply | native-bad-op\n");}
@@ -521,6 +539,8 @@ static void command(char*line){
  else if(!strcmp(line,"trust")){trust_show();sf_persist_trust_status();}
  else if(!strcmp(line,"priority-test"))priority_test();
  else if(!strcmp(line,"priority")||!memcmp(line,"priority ",9))priority_line(line+8);
+ else if(!strcmp(line,"ipc-stats"))ipc_stats_line();
+ else if(!strcmp(line,"ipc-stats-test"))ipc_stats_test();
  else if(!strcmp(line,"page-quota-test"))page_quota_test();
  else if(!strcmp(line,"cap-limit-test"))cap_limit_test();
  else if(!strcmp(line,"ipc-cancel-test"))ipc_cancel_test();

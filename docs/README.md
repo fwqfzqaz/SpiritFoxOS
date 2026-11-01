@@ -24,6 +24,7 @@
 - [内核句柄上限](architecture/IPC_LIMITS.md)：运行期配额、创建/派生/授予准入和既有引用保持。
 - [私有池页面配额](architecture/PAGE_LIMITS.md)：显式预算创建、页面/页表计数、根任务管理与回收边界。
 - [排队发送撤回](architecture/IPC_CANCEL.md)：按认证发送者/请求编号撤回、FIFO 保持与交付边界。
+- [IPC 复制计数](architecture/IPC_STATS.md)：实际用户复制字节、饱和快照、查询权限及计量边界。
 - [命令行参数与显式环境](architecture/ARGUMENTS.md)：私有只读调用数据。
 - [生命周期](architecture/LIFECYCLE.md)：依赖代次、租约与有界监督。
 - [CPU 上下文](architecture/CPU_CONTEXT.md)：x87/MMX/SSE 隔离与验证边界。

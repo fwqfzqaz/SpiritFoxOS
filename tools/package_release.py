@@ -79,8 +79,10 @@ if result.get('manifest_schema_sha256') != hashlib.sha256(schema_path.read_bytes
     raise SystemExit('Manifest schema changed since source validation')
 abi_reference = ROOT/'abi/x86_64-current.json'
 abi_capture = BUILD/'abi-current.json'
-if result.get('abi_snapshot_host_tests') != 9 or result.get('abi_snapshot_entries') != 567:
+if result.get('abi_snapshot_host_tests') != 9 or result.get('abi_snapshot_entries') != 583:
     raise SystemExit('Run compiled ABI capture, offline comparison and header-drift regressions before packaging')
+if result.get('ipc_copy_host_checks') != 10041 or result.get('ipc_stats_control_host_checks') != 6001 or result.get('ipc_copy_profile') != 'successful-user-copy-bytes-v1' or not result.get('ipc_stats_qemu') or result.get('ipc_stats_qemu_boots') != 2:
+    raise SystemExit('Run actual IPC copy event/control oracles and both production stats VM transports before packaging')
 if result.get('memory_quota_host_checks') != 298045 or result.get('page_limit_host_checks') != 3033 or result.get('memory_quota_profile') != 'private-pool-pages-v1' or not result.get('page_quota_qemu') or result.get('page_quota_qemu_boots') != 2:
     raise SystemExit('Run actual pool-page accounting, limited-spawn/control and both production quota VM transports before packaging')
 if result.get('abi_reference_sha256') != hashlib.sha256(abi_reference.read_bytes()).hexdigest() or result.get('abi_capture_sha256') != hashlib.sha256(abi_capture.read_bytes()).hexdigest():

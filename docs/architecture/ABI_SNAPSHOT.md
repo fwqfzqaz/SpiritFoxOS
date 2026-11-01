@@ -67,3 +67,5 @@ python3 tools/abi.py check-additions before.json after.json --allow-add constant
 能力占用查询只新增 SF_LIMIT_USED=2，当前 564 项，前 563 项无删改；新增审阅命令已用于核对该差异，不更改 wire 布局。
 
 私有池页面预算追加SYS_SPAWN_LIMITED=23、SYS_TASK_PAGE_LIMIT=24、SF_PAGE_LIMIT_MAX=4096，当前567项，旧564项无删改，SfLoadPlan等wire布局保持；三项新增已由显式审阅命令核对。
+
+IPC复制计数追加SYS_IPC_STATS=25、SF_IPC_STATS_VERSION=1与SfIpcStats的size/align及四成员布局，共16项；当前583项，旧567项无删改。新结构固定24字节，<IIQQ，偏移0/4/8/16，不改变原消息结构。

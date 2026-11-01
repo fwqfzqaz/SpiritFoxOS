@@ -45,7 +45,7 @@ class AbiSnapshot(unittest.TestCase):
     def test_capture_and_independent_wire_sizes(self):
         self.assertEqual(self.current,self.reference)
         values=self.current['values']
-        self.assertEqual(len(values),567)
+        self.assertEqual(len(values),583)
         self.assertEqual(values['constant.OP_DUP'],25)
         self.assertEqual(values['constant.OP_PREAD'],26)
         self.assertEqual(values['constant.SYS_TASK_PRIORITY'],20)
@@ -58,7 +58,7 @@ class AbiSnapshot(unittest.TestCase):
         self.assertEqual(values['constant.SF_PAGE_LIMIT_MAX'],4096)
         self.assertEqual(values['constant.SYS_SEND_CANCEL'],22)
         # These fixed little-endian formats are independent of C sizeof/offsetof.
-        formats={'SfIpcHeader':'<IHHIIQIIQ','SfMessage':'<IHHIIQIIQqQQII256s',
+        formats={'SfIpcStats':'<IIQQ','SfIpcHeader':'<IHHIIQIIQ','SfMessage':'<IHHIIQIIQqQQII256s',
                  'SfBootArgs':'<IHHQQ12IQQIHH','SfFileStat':'<IIIIQQ',
                  'SfNetInfo':'<6sH6I','SfNetPacket':'<IHH248s','SfTrustKey':'<32sII'}
         for name,fmt in formats.items():

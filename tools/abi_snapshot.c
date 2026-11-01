@@ -85,5 +85,6 @@ int main(void){
  F(SfNetInfo,netmask);F(SfNetInfo,rx_frames);F(SfNetInfo,tx_frames);F(SfNetInfo,link);
  L(SfNetPacket);F(SfNetPacket,ip);F(SfNetPacket,port);F(SfNetPacket,bytes);F(SfNetPacket,data);
  L(SfTrustKey);F(SfTrustKey,public_key);F(SfTrustKey,usage);F(SfTrustKey,revoked);
+ U(SYS_IPC_STATS);U(SF_IPC_STATS_VERSION);L(SfIpcStats);F(SfIpcStats,size);F(SfIpcStats,version);F(SfIpcStats,send_bytes);F(SfIpcStats,receive_bytes);
  puts("}}");return 0;
 }

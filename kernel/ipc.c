@@ -2,6 +2,9 @@
 #define ENDPOINTS 64
 typedef struct {uint32_t owner,epoch,head,count;SfMessage queue[8];} Endpoint;
 static Endpoint endpoints[ENDPOINTS];
+static uint64_t send_bytes,receive_bytes;
+static void copied(uint64_t*count,size_t bytes){*count=bytes>UINT64_MAX-*count?UINT64_MAX:*count+bytes;}
+void ipc_stats_snapshot(SfIpcStats*out){*out=(SfIpcStats){sizeof(*out),SF_IPC_STATS_VERSION,send_bytes,receive_bytes};}
 static Cap *cap(Task*t,uint64_t h,uint32_t rights){if(h>UINT32_MAX)return 0;unsigned i=(h&255);if(!i||i>32)return 0;Cap*c=&t->caps[i-1];if(!c->endpoint||c->generation!=(h>>8)||(c->rights&rights)!=rights)return 0;Endpoint*e=&endpoints[c->endpoint-1];return e->owner&&c->epoch==e->epoch?c:0;}
 static int cap_slot(const Task*t){
  if(t->cap_limit>SF_CAP_LIMIT_MAX||task_caps_used(t)>=t->cap_limit)return -1;
@@ -44,15 +47,16 @@ long ipc_syscall(uint64_t call,uint64_t a,uint64_t b,uint64_t c){
  }
  if(call==SYS_SEND){
   Cap*x=cap(t,a,RIGHT_SEND);if(!x)return SF_STALE_HANDLE;SfMessage m;if(copy_in(t,&m,b,sizeof(m)))return SF_DENIED;
+  copied(&send_bytes,sizeof(m));
   if(m.h.size!=40||m.h.protocol_major!=1||m.h.protocol_minor||m.h.payload_bytes>sizeof(m)-40||m.h.cap_count||m.length>SF_MSG_BYTES)return SF_INVALID;
   if(m.h.deadline_ns&&ticks*10000000ull>=m.h.deadline_ns)return SF_TIMEOUT;
   Endpoint*e=&endpoints[x->endpoint-1];m.h.flags=t->pid;
-  for(unsigned j=0;j<SF_MAX_TASKS;j++){Task*r=&tasks[j];if(r->state==T_BLOCKED&&r->wait_endpoint==x->endpoint){if(copy_out(r,r->recv_buffer,&m,sizeof(m)))panic("receive mapping changed");r->frame->rax=t->pid;r->state=T_READY;r->ready_since=ticks;return 0;}}
+  for(unsigned j=0;j<SF_MAX_TASKS;j++){Task*r=&tasks[j];if(r->state==T_BLOCKED&&r->wait_endpoint==x->endpoint){if(copy_out(r,r->recv_buffer,&m,sizeof(m)))panic("receive mapping changed");copied(&receive_bytes,sizeof(m));r->frame->rax=t->pid;r->state=T_READY;r->ready_since=ticks;return 0;}}
   if(e->count==8)return SF_WOULD_BLOCK;e->queue[(e->head+e->count)%8]=m;e->count++;return 0;
  }
  if(call==SYS_RECV){
   Cap*x=cap(t,a,RIGHT_RECV);if(!x)return SF_STALE_HANDLE;if(!user_range(t,b,sizeof(SfMessage),1))return SF_DENIED;Endpoint*e=&endpoints[x->endpoint-1];
-  if(e->count){SfMessage*m=&e->queue[e->head];long sender=m->h.flags;copy_out(t,b,m,sizeof(*m));e->head=(e->head+1)%8;e->count--;return sender;}
+  if(e->count){SfMessage*m=&e->queue[e->head];long sender=m->h.flags;if(copy_out(t,b,m,sizeof(*m)))return SF_DENIED;copied(&receive_bytes,sizeof(*m));e->head=(e->head+1)%8;e->count--;return sender;}
   if(c&&ticks*10000000ull>=c)return SF_TIMEOUT;
   t->state=T_BLOCKED;t->wait_endpoint=x->endpoint;t->recv_buffer=b;t->wait_deadline=c;return 0;
  }

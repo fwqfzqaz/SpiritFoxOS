@@ -71,6 +71,7 @@ static long syscall(Frame*f){Task*t=&tasks[current];uint64_t a=f->rdi,b=f->rsi,c
  case SYS_YIELD:return 0;
  case SYS_LOG:{if(b>512||!user_range(t,a,b,0))return SF_DENIED;char buf[513];copy_in(t,buf,a,b);buf[b]=0;serial(buf);return b;}
  case SYS_TICKS:return ticks;
+ case SYS_IPC_STATS:{if(t->pid!=1)return SF_DENIED;if(b!=sizeof(SfIpcStats)||c)return SF_INVALID;SfIpcStats info;ipc_stats_snapshot(&info);return copy_out(t,a,&info,sizeof(info));}
  case SYS_TASK_PAGE_LIMIT:{
   if(t->pid!=1)return SF_DENIED;
   if(!a||a>INT32_MAX||(c!=SF_LIMIT_QUERY&&c!=SF_LIMIT_SET&&c!=SF_LIMIT_USED)||b>SF_PAGE_LIMIT_MAX||(c!=SF_LIMIT_SET&&b))return SF_INVALID;

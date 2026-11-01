@@ -3,8 +3,8 @@
 更新日期：2026-11-01（北京时间；本轮自 10 月 31 日跨日接续）。
 
 - 工作区：`E:\SpiritFoxOS`；分支 `codex/requirements-followup-20261031`；origin `https://github.com/fwqfzqaz/SpiritFoxOS.git`。
-- 本轮目标：占用查询已完整验证推送 dff04b0 / PR #14；接续 M1 私有物理池页面预算、显式预算创建、占用/上限与回收。
-- status: memory_quota_local_verified_pending_publish
+- 本轮目标：私有池页面预算已完整验证推送 d3001aa / PR #14；按原设计13.3补齐实际IPC用户复制字节计量。
+- status: ipc_stats_local_verified_pending_publish
 - round_complete: false
 - continuous_work: true
 - quota_paused: false
@@ -17,9 +17,9 @@
 - 已推送 M0 后续：`789581f` / PR #13，真实编译共享头文件探针，采集首轮 549 项编号/大小/对齐/成员偏移/宽度/标量种类；9 组专项含三类真实临时头文件漂移。该 head 四项 Windows/Linux 已成功，证明 `.cache/abi-round-hosted-proof-20261031.json`。
 - M0 后续验证：含初始构建 host-only 75.08 秒通过，原 25 个 C 测试及 51 组 Python 用例保留；日志 `build/abi-inventory-host-full-20261031.log`、`build/abi-snapshot-final-20261031.log`，结果 `build/abi-inventory-host-20261031-results.json`。当前 DUP 轮次的完整验证见下节，不能沿用此旧结果。
 - 已交付 M0 摘要：七项产品摘要当时与作者基线相同，549 项 ABI 参考/采集为 `2036cab366d18b535cd005430eec23cd7c4acc3ee1a11b8663c0e1fda417bf24`。DUP 已提交 be5bda1，ABI 为 550 项，完整本地验证和发布门已通过。
-- 进程：本轮完整回归以0退出，无本地存活测试/VM。
-- 当前完整验证：页面预算含初始构建完整1192.6秒/166VM，298045项分配器与3033项core、567项ABI及全部原回归通过，七项产物相符。
-- 下一步：发布门、实际ZIP14项离线验证后正常提交推送并更新实际PR，核对新HEAD CI；继续下一项非M7有界工作。
+- 进程：本轮完整回归以0退出，无存活本地测试/VM。
+- 当前完整验证：IPC复制计量含初始构建完整1246.1秒/168VM，10041/6001项新增宿主、583项ABI和七项产物及全部旧回归通过。
+- 下一步：发布门与实际ZIP14项离线检查后正常提交推送，核对新HEAD CI；继续下一项有界任务。
 
 ## 同所有者文件句柄复制（2026-10-31）
 
@@ -325,3 +325,21 @@ SYS_SPAWN_LIMITED=23 在分配前配置子任务0–4096页预算，原 SfLoadPl
 ABI只新增SYS_SPAWN_LIMITED、SYS_TASK_PAGE_LIMIT、SF_PAGE_LIMIT_MAX，前564项无删改，当前567项，参考/采集摘要af54b2bf8424c9aed4c4faf59b8bcda98cee32ea76bcdd106aa9fe927f0e1480。协议与边界见PAGE_LIMITS.md。本地通过不能替代本轮新HEAD托管Windows/Linux，按真实提交独立核对。
 
 页面配额发布门及实际ZIP验证通过：476111字节、43项CRC/所有摘要，七项产物与完整结果相同，14项解压离线工具检查通过。证明.cache/memory-quota-release-proof-20261101.json；新HEAD托管结果独立核对。
+
+IPC复制计量草稿：10041项真实IPC/独立事件和128位饱和参照、6001项core接口检查已通过。只新增常量和SfIpcStats固定24字节结构的16项目录，旧567项无删改、当前583项；不把数值审阅称为语义冻结。队列复制失败现在DENIED且保留消息。专项/完整未完成时不提交推送；协议边界见IPC_STATS.md。quota_paused=false，user_paused=false。
+
+IPC复制计量草稿：10041项真实IPC/独立事件和128位饱和参照、6001项core接口检查已通过。只新增常量和SfIpcStats固定24字节结构的16项目录，旧567项无删改、当前583项；不把数值审阅称为语义冻结。队列复制失败现在DENIED且保留消息。专项/完整未完成时不提交推送；协议边界见IPC_STATS.md。quota_paused=false，user_paused=false。
+
+## 实际IPC用户复制字节计量（2026-11-01）
+
+SYS_IPC_STATS=25 仅根任务读取固定24字节SfIpcStats版本1，两个64位全局计数分别在UINT64_MAX饱和。有效能力后的成功SEND输入复制即计费，之后拒绝不倒扣；只给实际成功输出复制计费，内部队列/撤回/普通系统调用和查询本身不计。队列输出复制失败现在DENIED且保留消息。它测实际完整消息复制字节，不是payload/业务成功数、延迟或吞吐优化。
+
+10041项实际IPC检查由独立成功复制事件日志与128位饱和参照验证，含1000组坏格式/期限/满队列/失败复制/队列与直接交付/撤回/撤销轨迹、完整状态/输出保护和panic边界；6001项实际core接口检查含1000组参数/成功/失败复制、完整64位值与普通先拒绝。含构建65.48秒/四VM专项已通过。
+
+最终tools/test.py含初始构建完整通过（1246.1秒、168VM），日志build/ipc-stats-final-full-20261101.log，结果build/ipc-stats-final-test-results.json。新增legacy/modern两VM各四次真实往返/计数与只读输出检查；普通拒绝、页面/句柄预算、撤回/文件/回收和磁盘字节保持。全部原CPU/FPU/服务/设备/签名/更新/旧事务回归保留，七项产物逐项相符。
+
+ABI只追加两个常量和SfIpcStats布局的16个项目，旧567项无删改，当前583项，参考/采集摘要e997517a9410dc1a02ef0a8a9fbf7350d7a88466b088ac23981f57514bd503c5。布局用独立<IIQQ核对，显式常量审阅命令不能自动批准结构元数据。新HEAD托管Windows/Linux独立核对。
+
+前一页面预算d3001aa的四项Windows/Linux托管检查已独立核对成功，证明.cache/memory-quota-hosted-proof-20261101.json；本轮计量新HEAD仍另行检查。
+
+IPC计量发布门与实际ZIP验证通过：CRC/全部摘要、七项产物相符，14项实际解压离线工具检查通过。证明.cache/ipc-stats-release-proof-20261101.json；记录验证状态后重新打包并核对最终副本，新HEAD托管检查独立核对。

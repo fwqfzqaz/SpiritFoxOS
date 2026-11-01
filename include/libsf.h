@@ -8,6 +8,7 @@ static inline long sf_task_cap_usage(uint64_t pid){return sf_sys(SYS_TASK_CAP_LI
 static inline long sf_spawn_limited(const SfLoadPlan*plan,uint64_t pages){return sf_sys(SYS_SPAWN_LIMITED,(uint64_t)plan,pages,0);}
 static inline long sf_task_page_limit(uint64_t pid,uint64_t pages,uint64_t op){return sf_sys(SYS_TASK_PAGE_LIMIT,pid,pages,op);}
 static inline long sf_task_page_usage(uint64_t pid){return sf_task_page_limit(pid,0,SF_LIMIT_USED);}
+static inline long sf_ipc_stats(SfIpcStats*out){return sf_sys(SYS_IPC_STATS,(uint64_t)out,sizeof(*out),0);}
 static inline void sf_log(const char*s){sf_sys(SYS_LOG,(uint64_t)s,strlen(s),0);}
 static inline long sf_send(uint32_t h,SfMessage*m){return sf_sys(SYS_SEND,h,(uint64_t)m,0);}
 static inline int64_t sf_send_cancel(uint64_t h,uint64_t id){return sf_sys(SYS_SEND_CANCEL,h,id,0);}

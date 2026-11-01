@@ -27,6 +27,7 @@ int space_map(Task*,uint64_t,uint64_t,uint32_t);int user_range(Task*,uint64_t,ui
 void *user_phys(Task*,uint64_t);int copy_in(Task*,void*,uint64_t,size_t);int copy_out(Task*,uint64_t,const void*,size_t);
 int task_new(const SfLoadPlan*,int);int task_new_limited(const SfLoadPlan*,int,uint32_t);void task_dead(Task*,int);Frame *schedule(void);
 long ipc_syscall(uint64_t,uint64_t,uint64_t,uint64_t);void ipc_cleanup(Task*);
+void ipc_stats_snapshot(SfIpcStats*);
 int ipc_grant(Task*,Task*,uint32_t,uint32_t);void ipc_deadlines(void);
 long pci_read(uint64_t,uint64_t);long device_io(Task*,uint64_t,uint64_t,uint64_t);
 int device_grant(Task*,uint32_t,uint32_t,SfBootArgs*);int device_release(Task*);

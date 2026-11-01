@@ -37,6 +37,8 @@ host_test('test_memory_quota','tests/host/test_memory_quota.c','kernel/memory.c'
 host_test('test_page_limit','tests/host/test_page_limit.c','kernel/pid.c','kernel/sched_policy.c','services/arguments.c',no_unused=True)
 host_test('test_ipc_budget','tests/host/test_ipc_budget.c')
 host_test('test_ipc_cancel','tests/host/test_ipc_cancel.c')
+host_test('test_ipc_stats','tests/host/test_ipc_stats.c')
+host_test('test_ipc_stats_control','tests/host/test_ipc_stats_control.c','kernel/pid.c','kernel/sched_policy.c','services/arguments.c',no_unused=True)
 host_test('test_supervisor','tests/host/test_supervisor.c','services/supervisor.c')
 host_test('test_manager','tests/host/test_manager.c','services/manager.c')
 host_test('test_services','tests/host/test_services.c','services/manager.c','services/namespace.c')
@@ -76,6 +78,7 @@ if not args.host_only:
     subprocess.run([sys.executable, 'tests/qemu/qemu_cap_limit_test.py'], check=True)
     subprocess.run([sys.executable, 'tests/qemu/qemu_page_quota_test.py'], check=True)
     subprocess.run([sys.executable, 'tests/qemu/qemu_ipc_cancel_test.py'], check=True)
+    subprocess.run([sys.executable, 'tests/qemu/qemu_ipc_stats_test.py'], check=True)
     subprocess.run([sys.executable, 'tests/qemu/qemu_file_client_test.py'], check=True)
     subprocess.run([sys.executable, 'tests/qemu/qemu_rmdir_test.py'], check=True)
     subprocess.run([sys.executable, 'tests/qemu/qemu_stat_test.py'], check=True)
@@ -123,7 +126,7 @@ result['manifest_source_profile'] = 'native-source-v1'
 result['manifest_profile_host_tests'] = 12
 result['manifest_schema_sha256'] = manifest_schema_sha256
 result['abi_snapshot_host_tests'] = 9
-result['abi_snapshot_entries'] = 567
+result['abi_snapshot_entries'] = 583
 result['abi_reference_sha256'] = abi_reference_sha256
 result['abi_capture_sha256'] = abi_capture_sha256
 result['net_qemu'] = not args.host_only
@@ -153,6 +156,11 @@ result['ipc_budget_host_checks'] = 55043
 result['cap_limit_qemu'] = not args.host_only
 result['cap_limit_qemu_boots'] = 0 if args.host_only else 2
 result['ipc_cancel_host_checks'] = 25776
+result['ipc_copy_host_checks'] = 10041
+result['ipc_stats_control_host_checks'] = 6001
+result['ipc_copy_profile'] = 'successful-user-copy-bytes-v1'
+result['ipc_stats_qemu'] = not args.host_only
+result['ipc_stats_qemu_boots'] = 0 if args.host_only else 2
 result['ipc_cancel_qemu'] = not args.host_only
 result['ipc_cancel_qemu_boots'] = 0 if args.host_only else 2
 result['kernel_capability_width'] = True

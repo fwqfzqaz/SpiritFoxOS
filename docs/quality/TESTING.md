@@ -415,3 +415,17 @@ SYS_SPAWN_LIMITED=23 在分配前配置子任务0–4096页预算，原 SfLoadPl
 ABI只新增SYS_SPAWN_LIMITED、SYS_TASK_PAGE_LIMIT、SF_PAGE_LIMIT_MAX，前564项无删改，当前567项，参考/采集摘要af54b2bf8424c9aed4c4faf59b8bcda98cee32ea76bcdd106aa9fe927f0e1480。协议与边界见PAGE_LIMITS.md。本地通过不能替代本轮新HEAD托管Windows/Linux，按真实提交独立核对。
 
 页面配额发布门及实际ZIP验证通过：476111字节、43项CRC/所有摘要，七项产物与完整结果相同，14项解压离线工具检查通过。证明.cache/memory-quota-release-proof-20261101.json；新HEAD托管结果独立核对。
+
+## 实际IPC用户复制字节计量（2026-11-01）
+
+SYS_IPC_STATS=25 仅根任务读取固定24字节SfIpcStats版本1，两个64位全局计数分别在UINT64_MAX饱和。有效能力后的成功SEND输入复制即计费，之后拒绝不倒扣；只给实际成功输出复制计费，内部队列/撤回/普通系统调用和查询本身不计。队列输出复制失败现在DENIED且保留消息。它测实际完整消息复制字节，不是payload/业务成功数、延迟或吞吐优化。
+
+10041项实际IPC检查由独立成功复制事件日志与128位饱和参照验证，含1000组坏格式/期限/满队列/失败复制/队列与直接交付/撤回/撤销轨迹、完整状态/输出保护和panic边界；6001项实际core接口检查含1000组参数/成功/失败复制、完整64位值与普通先拒绝。含构建65.48秒/四VM专项已通过。
+
+最终tools/test.py含初始构建完整通过（1246.1秒、168VM），日志build/ipc-stats-final-full-20261101.log，结果build/ipc-stats-final-test-results.json。新增legacy/modern两VM各四次真实往返/计数与只读输出检查；普通拒绝、页面/句柄预算、撤回/文件/回收和磁盘字节保持。全部原CPU/FPU/服务/设备/签名/更新/旧事务回归保留，七项产物逐项相符。
+
+ABI只追加两个常量和SfIpcStats布局的16个项目，旧567项无删改，当前583项，参考/采集摘要e997517a9410dc1a02ef0a8a9fbf7350d7a88466b088ac23981f57514bd503c5。布局用独立<IIQQ核对，显式常量审阅命令不能自动批准结构元数据。新HEAD托管Windows/Linux独立核对。
+
+前一页面预算d3001aa的四项Windows/Linux托管检查已独立核对成功，证明.cache/memory-quota-hosted-proof-20261101.json；本轮计量新HEAD仍另行检查。
+
+IPC计量发布门与实际ZIP验证通过：CRC/全部摘要、七项产物相符，14项实际解压离线工具检查通过。证明.cache/ipc-stats-release-proof-20261101.json；记录验证状态后重新打包并核对最终副本，新HEAD托管检查独立核对。
