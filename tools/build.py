@@ -314,6 +314,12 @@ def main(policy_path=None):
     # 块请求由 sf-init 的 broker 转发，模块自身不持有 virtio-blk 端点。
     image = link_elf('sf-fs', shared + objects('fs', ['services/fs_main.c', 'services/fs_format.c', 'services/readfs.c', *CRYPTO], extra=USER_SECTIONS), 'services/user.ld')
     packages.append(('sf-fs.sfmod', pack({'module_id': 'org.spiritfox.fs.disk', 'version': '0.1.0', 'category': 'service', 'requested_caps': [], 'resource_limits': {'memory': 2097152}}, image, 1, seed)))
+    # sf-wm：有界类 niri 平铺合成器；framebuffer 由 PID1 经 SYS_FB_GRANT 授权。
+    image = link_elf('sf-wm', shared + objects('wm', ['services/sf_wm.c', 'services/tiling.c', 'services/launcher.c', 'services/sfk.c']), 'services/user.ld')
+    packages.append(('sf-wm.sfmod', pack({'module_id': 'org.spiritfox.wm', 'version': '0.1.0', 'category': 'service', 'requested_caps': [], 'resource_limits': {'memory': 262144}}, image, 1, seed)))
+    # sf-gui-probe：演示应用注册，向 WM service 端点发送 OP_WM_REGISTER 后常驻。
+    image = link_elf('sf-gui-probe', shared + objects('gui-probe', ['services/sf_gui_probe.c']), 'services/user.ld')
+    packages.append(('sf-gui-probe.sfmod', pack({'module_id': 'org.spiritfox.gui-probe', 'version': '0.1.0', 'category': 'service', 'requested_caps': [], 'resource_limits': {'memory': 131072}}, image, 1, seed)))
     Path('build/storage.img').write_bytes(create_readfs(disk_files))
     Path('build/storage-v2.img').write_bytes(create_readfs(disk_files, format=2))
     Path('build/persistent.img').write_bytes(create_persist(disk_files))
@@ -331,7 +337,7 @@ def main(policy_path=None):
     Path('build/interrupts.S').write_text('\n'.join(asm)+'\n')
     print('Building Core 0', flush=True)
     # 内核：sched_policy.c 策略函数已迁入 rust/sfcore（sf_sched_pick）。
-    kernel = objects('kernel', ['kernel/entry.S', 'kernel/arch.c', 'kernel/smp.c', 'kernel/core.c', 'kernel/pid.c', 'kernel/memory.c', 'kernel/ipc.c', 'kernel/device.c', 'kernel/acpi.c', 'kernel/vtd_tables.c', 'kernel/iommu.c', 'services/memory.c', 'services/arguments.c', 'build/interrupts.S'])
+    kernel = objects('kernel', ['kernel/entry.S', 'kernel/arch.c', 'kernel/smp.c', 'kernel/core.c', 'kernel/pid.c', 'kernel/memory.c', 'kernel/ipc.c', 'kernel/device.c', 'kernel/ps2.c', 'kernel/acpi.c', 'kernel/vtd_tables.c', 'kernel/iommu.c', 'services/memory.c', 'services/arguments.c', 'build/interrupts.S'])
     link_elf('kernel', kernel, 'kernel/linker.ld')
     # Content-addressed incbin inputs prevent assembler caches reusing old bytes.
     embedded = {}

@@ -29,6 +29,9 @@ static SfAccountStore accounts;static SfSessionTable sessions;
 static int password_pending;static char password_user[SF_ACCOUNT_NAME_MAX+1];static char password_buffer[SF_ACCOUNT_PASSWORD_MAX+1];static unsigned password_used;
 typedef struct {uint32_t pid,service,reply;} EchoPeer;
 static int net_slot=-1;static uint32_t net_pid,net_ep,net_reply;static int net_ready,net_dhcp;static SfNetInfo net_info;
+/* 图形合成器：单实例、无特权模块，framebuffer 由 PID1 显式授权。
+ * probe 用于演示应用注册：持有 WM service 端点发送权即可登记目录。 */
+static int wm_slot=-1;static uint32_t wm_pid,wm_ep,probe_pid;
 static EchoPeer echo_peers[16];static SfSupervisor echo_watch;static uint64_t echo_health_at;static SfSupervisor native_watch;static uint64_t native_health_at;static int native_draining;
 static int echo_request(uint32_t,uint32_t,unsigned);
 static uint64_t echo_after(uint64_t now,uint64_t delay){return delay>UINT64_MAX-now?UINT64_MAX:now+delay;}
@@ -806,11 +809,11 @@ static void help_text(void){
  sf_log("help | login <user> [password] | logout | whoami | users | sessions | ls [path] | cat <path> | write <path> <text> | truncate <path> <bytes> | stat <path> | rm <path> | mkdir <path> | rmdir <path>\n");
  sf_log("run <app or installed> [args] | runat <read-only-dir> <app> [args]\nrunenv [NAME=VALUE ...] -- <app> [args] | runenvat <dir> [NAME=VALUE ...] -- <app> [args]\n");
  sf_log("Administrator only: priority <pid> [0..3] | cap-limit <pid> [0..32] | page-limit <pid> [0..4096] | threads <pid> [1..8] | cpu-budget <pid> [0..100] | ipc-stats-test | trust | revoke-key /disk/pkg\n");
- sf_log("install /disk/bin/app.sfk | persist | stop echo | start echo | echo-status | echo-crash | echo-hang | echo-bad-reply | echo-bad-op | mount /disk | unmount /disk | stop disk | start disk | selftest | shutdown\n");
+ sf_log("install /disk/bin/app.sfk | persist | stop echo | start echo | echo-status | echo-crash | echo-hang | echo-bad-reply | echo-bad-op | mount /disk | unmount /disk | stop disk | start disk | gui | selftest | shutdown\n");
  sf_log("ifconfig | dhcp | ping <ip> | udp <ip> <port> <text> | tcp <ip> <port> <text> | open <ip> <port> | send <handle> <text> | recv <handle> | close <handle> | conns | stop native | start native | native-status | native-crash | native-hang | native-bad-reply | native-bad-op\n");
 }
 static int root_only(const char*line){
- static const char*const names[]={"persist","dma-test ","disk-crash","install ","trust","priority-test","priority ","ipc-stats-test","threads-test","threads ","page-quota-test","cap-limit-test","ipc-cancel-test","page-limit ","cap-limit ","cpu-budget ","cpu-state-test","revoke-key ","channel-test","echo-channel-test","echo-capacity-test","native-capacity-test","native-drain-test","native-crash","native-hang","native-bad-reply","native-bad-op","start native","stop native","echo-crash","echo-hang","echo-bad-reply","echo-bad-op","start echo","stop echo","mount /disk","unmount /disk","start disk","stop disk","dhcp","selftest","shutdown"};
+ static const char*const names[]={"persist","dma-test ","disk-crash","install ","trust","priority-test","priority ","ipc-stats-test","threads-test","threads ","page-quota-test","cap-limit-test","ipc-cancel-test","page-limit ","cap-limit ","cpu-budget ","cpu-state-test","revoke-key ","channel-test","echo-channel-test","echo-capacity-test","native-capacity-test","native-drain-test","native-crash","native-hang","native-bad-reply","native-bad-op","start native","stop native","echo-crash","echo-hang","echo-bad-reply","echo-bad-op","start echo","stop echo","mount /disk","unmount /disk","start disk","stop disk","dhcp","gui","selftest","shutdown"};
  for(unsigned i=0;i<sizeof(names)/sizeof(*names);i++){size_t len=strlen(names[i]);if(!strcmp(line,names[i])||(names[i][len-1]==' '&&!strncmp(line,names[i],len)))return 1;}
  return 0;
 }
@@ -851,6 +854,80 @@ static void sessions_line(void){
   sf_log("session: id=");sf_number(i+1);sf_log(" user=");sf_log(s->name);sf_log(" uid=");sf_number(s->uid);
   sf_log(sf_session_active(&sessions)==i+1?" active=1\n":" active=0\n");
  }
+}
+/* 回收图形模块：先停任务，再归还服务端点与模块生命周期状态，
+ * 使 gui 可以再次启动同一模块。 */
+static void gui_cleanup(void){
+ if(probe_pid){
+  if(sf_sys(SYS_TASK_STATUS,probe_pid,0,0)==SF_TASK_RUNNING)sf_sys(SYS_KILL,probe_pid,0,0);
+  probe_pid=0;
+ }
+ if(wm_pid){
+  if(sf_sys(SYS_TASK_STATUS,wm_pid,0,0)==SF_TASK_RUNNING)sf_sys(SYS_KILL,wm_pid,0,0);
+  wm_pid=0;
+ }
+ if(wm_ep){sf_sys(SYS_CAP_REVOKE,wm_ep,0,0);wm_ep=0;}
+ if(wm_slot>=0){sfmod_prepare(&manager,wm_slot);sfmod_stop(&manager,wm_slot);}
+}
+static int gui_start(void){
+ if(wm_slot<0){wm_slot=sfmod_add(&manager,"org.spiritfox.wm",0,0);if(wm_slot<0)return wm_slot;}
+ int r=sfmod_start(&manager,wm_slot);if(r)return r;
+ wm_ep=sf_sys(SYS_EP_CREATE,0,0,0);if((int)wm_ep<0){r=(int)wm_ep;wm_ep=0;goto fail;}
+ int pid=spawn_package("sf-wm.sfmod",wm_ep,RIGHT_RECV);if(pid<0){r=pid;goto fail;}
+ wm_pid=(uint32_t)pid;
+ long granted=sf_sys(SYS_FB_GRANT,wm_pid,0,0);
+ if(granted){r=(int)granted;goto fail;}
+ /* 注册演示应用：失败视为图形路径不完整，回收后返回错误。 */
+ int probe=spawn_package("sf-gui-probe.sfmod",wm_ep,RIGHT_SEND);if(probe<0){r=probe;goto fail;}
+ probe_pid=(uint32_t)probe;
+ return 0;
+fail:
+ if(probe_pid){sf_sys(SYS_KILL,probe_pid,SF_DEVICE_GONE,0);probe_pid=0;}
+ if(wm_pid)sf_sys(SYS_KILL,wm_pid,SF_DEVICE_GONE,0);wm_pid=0;
+ if(wm_ep){sf_sys(SYS_CAP_REVOKE,wm_ep,0,0);wm_ep=0;}
+ sfmod_prepare(&manager,wm_slot);sfmod_stop(&manager,wm_slot);return r;
+}
+/* gui：串口按键转发给合成器；Ctrl-] 退出并回到串口 shell。 */
+static void gui_line(void){
+ if(wm_slot>=0&&manager.modules[wm_slot].state==MOD_ACTIVE){sf_log("gui: busy\n");return;}
+ int r=gui_start();
+ if(r){sf_log("gui: unavailable code=");sf_number(r<0?-(int64_t)r:r);sf_log("\n");return;}
+ sf_log("GUI: started pid=");sf_number(wm_pid);sf_log("\n");
+ /* 指针从屏幕中心开始，同时清掉进入图形前的积压移动。 */
+ sf_sys(SYS_POINTER_READ,1,0,0);
+ for(;;){
+  echo_supervise();native_supervise();manager_serve();
+  long pointer=sf_sys(SYS_POINTER_READ,0,0,0);
+  if(pointer>0){
+   /* 合并同一轮询周期内的多个移动包，只转发最新位置，避免逐包全屏重绘。 */
+   long latest=pointer;
+   for(unsigned i=0;i<64;i++){
+    long next=sf_sys(SYS_POINTER_READ,0,0,0);
+    if(next<=0)break;
+    latest=next;
+   }
+   SfMessage p;sf_message(&p,OP_WM_POINTER,0);p.handle=(uint64_t)latest;
+   if(sf_send(wm_ep,&p)){sf_log("GUI: wm exited\n");break;}
+  }
+  long key=sf_sys(SYS_CONSOLE_READ,0,0,0);
+  if(key<0){
+   if(key==SF_EVENT_OVERFLOW)continue;
+   /* 图形模式用很短的等待，保证 PS/2 移动包在 i8042 队列溢出前被取走。 */
+   serve_once(1);sf_yield();continue;
+  }
+  SfMessage m;int stop=key==0x1d;
+  sf_message(&m,stop?OP_WM_STOP:OP_WM_INPUT,0);m.length=1;m.data[0]=(uint8_t)key;
+  int sent=sf_send(wm_ep,&m);
+  if(sent){sf_log("GUI: wm exited\n");break;}
+  if(stop)break;
+ }
+ if(wm_pid){
+  /* 给模块留出打印最终状态的时间，再强制回收。 */
+  uint64_t until=sf_ticks()+50;
+  while(sf_ticks()<until&&sf_sys(SYS_TASK_STATUS,wm_pid,0,0)==SF_TASK_RUNNING)sf_yield();
+ }
+ gui_cleanup();
+ sf_log("GUI: stopped\n");
 }
 static void command(char*line){
  if(!*line)return;
@@ -941,9 +1018,36 @@ static void command(char*line){
   if(h<0)sf_log("cat: error\n");else{for(unsigned page=0;page<16;page++){long n=sf_ns_read(&ns,owner,h,out,sizeof(out));if(n<0){sf_log("cat: error\n");break;}if(!n)break;console_write(out,n);}sf_ns_close(&ns,owner,h);}}
  else if(!memcmp(line,"write ",6)){char*p=line+6,*text=p;while(*text&&*text!=' ')text++;uint32_t uid,gid,owner;int ir=session_identity(&uid,&gid,&owner);
   if(ir)sf_log("write: error\n");else if(*text){*text++=0;int h=shell_open(p,2);if(h==SF_NOT_FOUND){sf_ns_create_owned(&ns,p,NODE_FILE,0,uid,gid,0644);h=shell_open(p,2);}long n=h<0?h:sf_ns_write(&ns,owner,h,text,strlen(text));sf_log(n>=0?"write: OK\n":"write: error\n");if(h>=0)sf_ns_close(&ns,owner,h);}else sf_log("write: expected path and text\n");}
+ else if(!strcmp(line,"gui")){gui_line();}
  else if(!strcmp(line,"selftest")){object_tests();sf_assert(!echo_call(echo_ep,echo_pid),"shell echo health");sf_log("SELFTEST OK\n");}
  else if(!strcmp(line,"shutdown")){sf_log("SHUTDOWN OK\n");sf_sys(SYS_SHUTDOWN,0,0,0);}
  else if(*line)sf_log("unknown command; type help\n");
+}
+/* 启动 Logo：移植自宏内核阶段 shell_init 的开机画面，自检完成后显示 2 秒。 */
+static const char*const boot_logo[]={
+"                               *****                      ******",
+"                              *+++++++++++          ++++++++++++*",
+"                              +++++===========++=========++++++++",
+"                             +++==============++++===========+++++",
+"                             +=======::=================:=======++",
+"                             ====::::======================:=====+",
+"                              ==:::===::============::=======::===",
+"                              =====:::::::::::::::::::::::=======",
+"                              ==::::::::::::::::::::::::::::::::=",
+"                                        .:::::::::::::.",
+"                                           .:::::::.          ..",
+"                              ++++++++++++   .:+:.     =:      ...",
+"                             ++++++++++++===        :::::::=   ....",
+"                             +****+++++++=====     :::::==      .",
+"                             ******++++++=======    ==",
+"                              ****++++++======::==",
+"                                *+++++++======:::::::..      ...",
+"                                  ++++++=======::::::::::::==",
+"                                        +++=============",
+0};
+static void boot_splash(void){
+ for(unsigned i=0;boot_logo[i];i++){sf_log(boot_logo[i]);sf_log("\n");}
+ uint64_t until=sf_ticks()+200;while(sf_ticks()<until)sf_yield();
 }
 long sf_main(const SfBootArgs*a,size_t size){
  boot=a;if(size!=sizeof(*a)||a->abi_major!=1||!a->bundle)return SF_INVALID;
@@ -961,6 +1065,7 @@ long sf_main(const SfBootArgs*a,size_t size){
  {int net=net_start();if(!net)sf_log("net: READY\n");else if(net!=SF_NOT_FOUND){sf_log("NET UNAVAILABLE code=");sf_number(-net);sf_log("\n");}}
  sf_assert(!sf_supervisor_init(&echo_watch,3,25,1000),"echo restart policy configured");sf_supervisor_enable(&echo_watch,sf_ticks(),1);echo_health_at=echo_after(sf_ticks(),100);
  sf_assert(!sf_supervisor_init(&native_watch,3,25,1000),"native restart policy configured");sf_supervisor_enable(&native_watch,sf_ticks(),1);native_health_at=echo_after(sf_ticks(),100);
+ boot_splash();
  sf_log("BOOT TESTS PASSED\nSpiritFoxOS ready. Type help.\n");prompt();char line[192]={0};unsigned used=0;
  for(;;){echo_supervise();native_supervise();manager_serve();long c=sf_sys(SYS_CONSOLE_READ,0,0,0);
   if(c>=0){

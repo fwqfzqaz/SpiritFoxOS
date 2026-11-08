@@ -6,6 +6,9 @@
 Task tasks[SF_MAX_THREADS];int cpu_currents[SF_MAX_CPUS];KernelLock kernel_lock;uint64_t ticks;
 static uint64_t cpu_window_end;
 static uint32_t next_pid=1;static uint64_t bundle_phys,bundle_bytes,boot_cr3;
+/* Framebuffer：固件提供的显示内存，经 PID1 授权后可被单一客户端映射。 */
+static uint64_t fb_physical,fb_bytes,fb_width,fb_height,fb_pitch;
+static uint32_t fb_bpp,fb_grant_pid;
 static void kill_process(uint32_t,int);
 /* UEFI 传递的内存描述符（与 boot/efi_stub 的 SfBootInfo.memory_map 对齐）。 */
 typedef struct {uint64_t physical,virtual_address,pages,attribute;uint32_t type,reserved;} BootMemory;
@@ -241,6 +244,7 @@ static long syscall(Frame*f){Task*t=&tasks[current];uint64_t a=f->rdi,b=f->rsi,c
   if(x->state!=T_DEAD)return SF_TASK_RUNNING;return (long)x->exit_status;
  }
  case SYS_CONSOLE_READ:if(t->pid!=1)return SF_DENIED;return console_read();
+ case SYS_POINTER_READ:if(t->pid!=1)return SF_DENIED;return ps2_mouse_read((int)a);
  case SYS_SHUTDOWN:if(t->pid!=1)return SF_DENIED;__asm__ volatile("outl %0,%1"::"a"((uint32_t)a),"Nd"((uint16_t)0xf4));outb(0x604,0);return 0;
  case SYS_MAP_TEST:return SF_DENIED;
  case SYS_PCI_READ:if(t->pid!=1)return SF_DENIED;return pci_read(a,b);
@@ -252,6 +256,24 @@ static long syscall(Frame*f){Task*t=&tasks[current];uint64_t a=f->rdi,b=f->rsi,c
  case SYS_IRQ_ACQUIRE:return device_irq_acquire(t);
  case SYS_IRQ_RELEASE:return device_irq_release(t);
  case SYS_IRQ_WAIT:{int r=device_irq_wait(t,(uint32_t)a);if(r==SF_WOULD_BLOCK){t->state=T_BLOCKED;return 0;}return r;}
+ /* PID1 把显示内存的使用权授予单个合成器进程。 */
+ case SYS_FB_GRANT:{
+  if(t->pid!=1||b!=0||c!=0)return SF_DENIED;
+  if(!a||a>INT32_MAX)return SF_INVALID;
+  Task*x=pid_main(a,1);if(!x)return SF_NOT_FOUND;
+  fb_grant_pid=(uint32_t)a;return SF_OK;
+ }
+ /* 被授权进程把显示内存映射到 SF_FB，并取得 SfFbInfo。 */
+ case SYS_FB_MAP:{
+  if(!fb_grant_pid||t->pid!=fb_grant_pid)return SF_DENIED;
+  if(b||c)return SF_INVALID;
+  if(!fb_bytes)return SF_NOT_FOUND;
+  if(!user_range(t,a,sizeof(SfFbInfo),1))return SF_INVALID;
+  /* 以本任务页表为准判断是否已映射：PID 槽位复用时不会误跳过映射。 */
+  if(!user_phys(t,SF_FB)){int r=space_map_fb(t,SF_FB,fb_physical,fb_bytes);if(r)return r;}
+  SfFbInfo info={sizeof(info),(uint32_t)fb_width,(uint32_t)fb_height,(uint32_t)fb_pitch,fb_bpp,0,fb_bytes};
+  return copy_out(t,a,&info,sizeof(info));
+ }
  default:return ipc_syscall(f->rax,a,b,c);
  }
 }
@@ -267,10 +289,12 @@ Frame *interrupt_dispatch(Frame*f){
  if(f->vector==0x71){uint64_t cr3;__asm__ volatile("mov %%cr3,%0":"=r"(cr3));__asm__ volatile("mov %0,%%cr3"::"r"(cr3):"memory");apic_eoi();kernel_lock_release();return f;}
  if(f->vector==255){apic_eoi();kernel_lock_release();return f;}
  /* 设备 INTx：IOAPIC 固定投递到 0x50；固件只接 8259 时走 0x20+line，
-  * 从片中断还需先经主片级联 0x22 并分别 EOI。 */
- if(f->vector==0x50){device_irq_vector();apic_eoi();}
+  * 从片中断还需先经主片级联 0x22 并分别 EOI。PS/2 鼠标的 IRQ12 在两种
+  * 拓扑下都可能落在 0x2c / 0x22 / 0x50，统一先排空 i8042 再按路径 EOI。 */
+ if(f->vector==0x50){ps2_irq();device_irq_vector();apic_eoi();}
+ else if(f->vector==0x2c){ps2_irq();outb(0xa0,0x20);outb(0x20,0x20);}
  else if(f->vector>=0x28&&f->vector<=0x2f){device_irq_vector();outb(0xa0,0x20);outb(0x20,0x20);}
- else if(f->vector==0x22){outb(0x20,0x20);}
+ else if(f->vector==0x22){ps2_irq();outb(0xa0,0x20);outb(0x20,0x20);}
  if(f->vector==32&&cpu_index()==0){ticks++;outb(0x20,0x20);cpu_window_reset();cpu_account();ipc_deadlines();smp_preempt_all();}
  if(f->vector==36)console_irq();
  /* 空闲 CPU 在 ring0 收到中断时 current 为 -1，不能索引任务表；直接返回
@@ -293,7 +317,16 @@ void kernel_main(SfBootInfo*b){
  if((b->bundle&4095)||!b->bundle_bytes||b->bundle_bytes>4*1024*1024||b->bundle>=0x40000000ull||b->bundle_bytes>0x40000000ull-b->bundle)panic("bundle bounds");
  if(b->memory_map_descriptor_size!=sizeof(BootMemory)||!b->memory_map_entry_count||b->memory_map_entry_count>2048||b->memory_map_size!=b->memory_map_entry_count*sizeof(BootMemory)||b->memory_map>=0x40000000ull||b->memory_map_size>0x40000000ull-b->memory_map)panic("memory map bounds");
  if(!boot_memory(b,(uint64_t)b,sizeof(*b))||!boot_memory(b,b->bundle,b->bundle_bytes))panic("unreserved boot object");
- bundle_phys=b->bundle;bundle_bytes=b->bundle_bytes;arch_init();device_init(b);smp_init(b);device_irq_init();SfLoadPlan p={0};p.size=sizeof(p);p.count=b->init_segment_count;p.entry=b->init_entry;
+ /* 保存固件 framebuffer 描述；任一约束不满足则视为无图形（不影响串口路径）。 */
+ fb_physical=fb_bytes=fb_width=fb_height=fb_pitch=0;fb_bpp=fb_grant_pid=0;
+ if(b->framebuffer_base&&!(b->framebuffer_base&4095)&&b->framebuffer_size&&
+    b->framebuffer_size<=SF_FB_BYTES&&b->framebuffer_base<=0x000ffffffffff000ull-b->framebuffer_size&&
+    b->pitch&&b->width&&b->height&&b->width<=8192&&b->height<=8192&&
+    (uint64_t)b->pitch*b->height<=b->framebuffer_size){
+  fb_physical=b->framebuffer_base;fb_bytes=b->framebuffer_size;
+  fb_width=b->width;fb_height=b->height;fb_pitch=b->pitch;fb_bpp=b->bpp;
+ }
+ bundle_phys=b->bundle;bundle_bytes=b->bundle_bytes;arch_init();ps2_mouse_init((uint32_t)fb_width,(uint32_t)fb_height);device_init(b);smp_init(b);device_irq_init();SfLoadPlan p={0};p.size=sizeof(p);p.count=b->init_segment_count;p.entry=b->init_entry;
  for(unsigned i=0;i<p.count;i++){SfBootSegment*s=&b->init_segments[i];if(s->reserved||s->file_bytes>s->memory_bytes||(s->physical&4095)||!boot_memory(b,s->physical,(s->memory_bytes+4095)&~4095ull))panic("boot segment");if(s->physical<b->bundle+b->bundle_bytes&&b->bundle<s->physical+s->memory_bytes)panic("boot segment overlaps bundle");for(unsigned j=0;j<i;j++){SfBootSegment*t=&b->init_segments[j];if(s->physical<t->physical+t->memory_bytes&&t->physical<s->physical+s->memory_bytes)panic("overlapping boot segments");}p.segments[i]=(SfLoadSegment){s->rva,s->memory_bytes,s->physical,s->flags,0};}
  if(task_new(&p,1)!=1)panic("bootstrap plan rejected");serial("[CORE] entering isolated sf-init.sfmod, timer=100Hz\n");
  kernel_lock_acquire();Frame*f=schedule();kernel_lock_release();arch_enter(f);

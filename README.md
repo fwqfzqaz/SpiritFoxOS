@@ -27,6 +27,7 @@
 | 文件 SDK | 有界 C 客户端封装文件 RPC，支持规范句柄、元数据、固定截止时间与只读目录委派 |
 | 网络切片 | ring-3 legacy `virtio-net`、IOAPIC INTx、DHCP、ARP/IPv4/ICMP、UDP/TCP、有界连接对象与 `/net` 投影 |
 | 多用户会话 | 构建期账户、四个有界控制台会话、uid/gid 所有者权限与管理员命令门 |
+| 图形切片（有界） | PID 1 授权 framebuffer、ring-3 `sf-wm` 合成器、类 niri 可滚动平铺与上栏、PS/2 指针命中，串口驱动 `gui` 命令 |
 | 双语言实现 | C + Rust：SHA-256、参数打包、网络帧、调度策略四个纯逻辑组件以 no_std Rust 实现（[语言分工](docs/architecture/LANGUAGE.md)） |
 
 ## 架构
@@ -40,6 +41,7 @@ flowchart LR
     INIT <-->|文件/持久化 RPC| FS[sf-fs.sfmod<br/>命名空间 · RAMFS · SFRFS]
     FS --> BLK[virtio-blk]
     INIT --> NET[virtio-net<br/>ARP · IPv4 · ICMP · UDP · TCP]
+    INIT -->|framebuffer 授权 + 串口输入| WM[sf-wm.sfmod<br/>类 niri 平铺合成器]
     NATIVE --> APP[hello.sfk<br/>签名应用]
 ```
 
@@ -103,6 +105,14 @@ ls /proc
 cat /proc/uptime
 cat /sys/modules
 ```
+
+图形切片在 root 会话中用 `gui` 进入（`Ctrl-]` 退出）：
+
+```text
+gui
+```
+
+本环境 QEMU 仅有 `none`/`vnc` 显示后端，可用 `python3 tools/gui_run.py` 自动启动 QEMU、进入 `gui` 并通过 VNC 观察。图形化不接受布局快捷键，全部操作由鼠标指针完成：点击上栏工作区 pill 切换工作区，点击 `SEARCH` 打开应用列表（点击行打开应用、点击面板外关闭），点击 `SHELL` 打开 SFK 图形 shell（输入 `help`/`apps`/`open <app>`/`ws <1-4>`/`exit`，点击右上角 X 关闭）。`Ctrl-]` 仅用于退出 `gui` 回到串口 shell。无窗口验证用 `python3 tests/qemu/qemu_gui_screenshot_test.py`。细节见[图形切片](docs/architecture/GRAPHICS.md)。
 
 启动后自动建立 uid 0 的 root 会话，因此以上命令与旧版 `fox>` 行为不变。`config/accounts.txt` 在构建期生成加盐账户表并嵌入签名 sf-init（当前 `root/fox-root`、`alice/alice`、`bob/bob` 仅为开发口令，生产部署必须更换并改用随机盐）；控制台可复用四个有界会话：
 
@@ -187,7 +197,7 @@ python3 tools/package/sfpack.py trust --policy build/trust-policy.json
 
 - 原型无 Secure Boot 配置、生产密钥或发布签名流程；不支持物理断电与真实硬件复位验证。
 - VT-d 模式仍拒绝 legacy 设备；网络设备经共享 INTx 向量 `0x50` 由 IOAPIC 投递，尚无 MSI/MSI-X、IRQ 重映射或通用设备隔离。
-- 无图形界面；SMP 与四个有界会话已实现，但真实硬件多核、x2APIC、CPU 热插拔与中断亲和仍未验证。
+- 图形只有有界纵向切片：单个 `sf-wm` 合成器直接写固件 framebuffer，无 GUI 客户端协议、无 GPU/DRM；输入为 IRQ12 中断驱动的 PS/2 指针（内核环形缓冲）加串口文本（无 USB HID、无滚轮）。SMP 与四个有界会话已实现，但真实硬件多核、x2APIC、CPU 热插拔与中断亲和仍未验证。
 - 无通用动态链接、多库依赖、资源包或完整 POSIX 兼容层；仅有单一认证运行时库的有界导入表与 POSIX 子集。
 - `relative-v1` 提供有界基址切换，不是安全随机化；应用隔离依赖页表与 W^X，而非完整沙箱。
 
@@ -201,7 +211,8 @@ python3 tools/package/sfpack.py trust --policy build/trust-policy.json
 | [持久化](docs/architecture/PERSISTENCE.md) / [信任策略](docs/architecture/TRUST.md) | 双银行事务、A/B 更新、公钥用途与撤销 |
 | [调度与配额](docs/architecture/SCHEDULING.md) / [IPC](docs/architecture/IPC.md) | SMP/线程、FPU 隔离、页面配额、句柄上限与撤回 |
 | [应用接口](docs/architecture/APP_SDK.md) / [native](docs/architecture/NATIVE.md) | argv/环境、文件 RPC 客户端、装载格式 |
-| [会话](docs/architecture/SESSIONS.md) / [项目状态](docs/project/STATUS.md) | 账户与会话、当前交付状态 |
+| [会话](docs/architecture/SESSIONS.md) / [图形切片](docs/architecture/GRAPHICS.md) | 账户与会话、framebuffer 授权、类 niri 平铺与 `gui` 命令 |
+| [项目状态](docs/project/STATUS.md) | 当前交付状态 |
 | [路线图](docs/project/ROADMAP.md) / [测试记录](docs/quality/TESTING.md) | 下一阶段方向与验收条件、验证范围 |
 
 ## 许可证

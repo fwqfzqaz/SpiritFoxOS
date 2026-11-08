@@ -15,6 +15,9 @@
 #define SF_BUNDLE 0x60000000ull
 #define SF_DMA 0x50000000ull
 #define SF_DMA_BYTES 65536u
+/* 用户侧 framebuffer 映射基点：仅经 SYS_FB_MAP 授权后可见。 */
+#define SF_FB 0x70000000ull
+#define SF_FB_BYTES 0x2000000ull
 /* Relocatable images occupy a separate, 2 MiB aligned arena below DMA. */
 static inline int sf_image_base_valid(uint64_t base){return !base||base==SF_BASE||(base>=SF_PIE_MIN&&base<=SF_DMA-SF_IMAGE_MAX&&!(base&(SF_IMAGE_MAX-1)));}
 #define SF_MAX_TASKS 12
@@ -53,6 +56,13 @@ enum { SYS_EXIT, SYS_YIELD, SYS_LOG, SYS_TICKS, SYS_EP_CREATE,
 #define SYS_IRQ_ACQUIRE 29
 #define SYS_IRQ_RELEASE 30
 #define SYS_IRQ_WAIT 31
+/* Framebuffer：PID1 授权目标进程，目标进程再把显示内存映射到 SF_FB。 */
+#define SYS_FB_GRANT 32
+#define SYS_FB_MAP 33
+/* PS/2 指针轮询：参数 a=1 表示回到屏幕中心并清空积压；否则返回
+ * bit31 事件标记 | buttons[26..28] | y[13..25] | x[0..12]，
+ * 无新事件返回 SF_WOULD_BLOCK。仅 PID1 可用。 */
+#define SYS_POINTER_READ 34
 enum { SF_PRIORITY_MIN=0, SF_PRIORITY_DEFAULT=1, SF_PRIORITY_MAX=3, SF_PRIORITY_AGING_TICKS=4,
  SF_PRIORITY_QUERY=0, SF_PRIORITY_SET=1 };
 enum { SF_CAP_LIMIT_MAX=32, SF_LIMIT_QUERY=0, SF_LIMIT_SET=1, SF_LIMIT_USED=2 };
@@ -76,6 +86,10 @@ enum { OP_ECHO=1, OP_ECHO_DIAGNOSTIC=2, OP_OPEN=10, OP_READ, OP_WRITE, OP_CLOSE,
  OP_PERSIST_DRIVER_DOWN,
  OP_FS_ATTACH_SEND=95, OP_FS_ATTACH_REPLY, OP_FS_MOUNT, OP_FS_ENTRY,
  OP_FS_FIND, OP_FS_READ, OP_FS_STOP, OP_FS_BLOCK_READ };
+/* 合成器输入与生命周期：sf-init 把串口按键转发给 sf-wm。
+ * OP_WM_REGISTER 供 GUI 应用登记目录，data 为 id\0title\0。
+ * OP_WM_POINTER 的 handle 携带 SYS_POINTER_READ 的打包指针状态。 */
+enum { OP_WM_INPUT=110, OP_WM_STOP, OP_WM_STATUS, OP_WM_REGISTER, OP_WM_POINTER };
 enum { SF_FILE_READ_ONLY=1, SF_FILE_MOUNTED=2, SF_FILE_SEEKABLE=4 };
 typedef struct {uint32_t bytes,type,mode,flags;uint64_t size,offset;} SfFileStat;
 _Static_assert(sizeof(SfFileStat)==32,"file stat ABI");
@@ -97,6 +111,12 @@ typedef struct { SfIpcHeader h; int64_t status; uint64_t handle,offset;
  uint32_t length,mode; uint8_t data[SF_MSG_BYTES]; } SfMessage;
 typedef struct {uint32_t size,flags;uint64_t entry,argument;} SfThreadRequest;
 _Static_assert(sizeof(SfThreadRequest)==24,"thread request ABI");
+/* Framebuffer 查询结果（SYS_FB_MAP 返回；pitch 为字节步长）。 */
+typedef struct {
+ uint32_t size,width,height,pitch,bpp,reserved;
+ uint64_t bytes;
+} SfFbInfo;
+_Static_assert(sizeof(SfFbInfo)==32,"framebuffer info ABI");
 typedef struct {
  uint32_t size; uint16_t abi_major,abi_minor;
  uint64_t bundle, bundle_bytes;

@@ -57,3 +57,5 @@ M1私有物理池页面预算本地完整通过：1192.6秒/166VM、298045项分
 本轮任务槽复用内核栈清理已本地完整通过（1268.57秒/168VM、10022项创建/上下文检查），583项ABI保持，相关结论已并入 [调度与资源配额](../architecture/SCHEDULING.md)。
 
 SMP、线程与配额本轮已实现：MADT 收集启用 LAPIC，AP 经 0x8000 trampoline 启动并建立每 CPU GDT/TSS/故障栈/空闲栈，IPI 抢占与 TLB 刷新接入全局 ticket 锁；`SYS_THREAD_CREATE` 创建共享 CR3 的同进程线程，`SYS_THREAD_LIMIT` 与 `SYS_TASK_CPU_BUDGET` 提供线程上限和 100 tick 窗口预算。`tests/qemu/qemu_smp_test.py` 已用 `-smp 1` 与 `-smp 2` 启动产品镜像验证启动、线程/预算 CLI 与关机；ABI 只追加 14 项至 597。x2APIC、CPU 热插拔、线程 join 未实现，真实硬件多核仍待独立验证。
+
+有界图形切片已本地验证：固件 GOP framebuffer 经 PID 1 授权后由 ring-3 `sf-wm` 映射（RW+NX+缓存禁用），类 niri 布局核心（工作区/列/纵向堆叠/滚动）宿主 368 项检查通过，QEMU `gui` 测试断言初始布局、增删/拆列/焦点/工作区切换状态行、至少两个不同 framebuffer 校验和，并确认退出后串口 shell 仍可用。无真实输入驱动、GUI 客户端协议、GPU/DRM 与多显示器；串口/VNC 回退路径不变，详见 [GRAPHICS](../architecture/GRAPHICS.md)。

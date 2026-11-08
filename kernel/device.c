@@ -116,7 +116,9 @@ static void pic_unmask(uint32_t line){
 }
 static void ioapic_route(uint32_t gsi){
  if(!ioapic_ready||gsi>(uint32_t)ioapic_max_gsi)return;
- uint32_t high=(uint32_t)cpus[0].apic_id<<24,low=IRQ_VECTOR|(1u<<13)|(1u<<15);
+ /* GSI 12 是 ISA 的 PS/2 鼠标中断，按 ISA 规范配成边缘触发、高电平有效；
+  * 其余 PIRQ 才是 PCI 的低电平/电平触发。用错极性会在缓冲非空时反复触发。 */
+ uint32_t high=(uint32_t)cpus[0].apic_id<<24,low=IRQ_VECTOR|(gsi==12?0u:((1u<<13)|(1u<<15)));
  ioapic_write(0x10u+gsi*2u,ioapic_read(0x10u+gsi*2u)|(1u<<16));
  ioapic_write(0x11u+gsi*2u,high);
  ioapic_write(0x10u+gsi*2u,low);

@@ -52,6 +52,7 @@ static inline void kernel_lock_release(void){__atomic_fetch_add(&kernel_lock.ser
 static inline unsigned task_caps_used(const Task*t){const Task*m=task_main_c(t);unsigned count=0;for(unsigned i=0;i<SF_CAP_LIMIT_MAX;i++)if(m->caps[i].endpoint)count++;return count;}
 void serial(const char*);void hex(uint64_t);void panic(const char*);
 void console_irq(void);long console_read(void);
+void ps2_mouse_init(uint32_t,uint32_t);long ps2_mouse_read(int);void ps2_irq(void);
 void arch_init(void);void arch_cpu_init(unsigned);void arch_load_idt(void);void arch_task(Task*);void arch_save(Task*);void arch_enter(Frame*) __attribute__((noreturn));
 /* 空闲等待：enter_idle 切换到每 CPU 独立栈并释放全局锁，idle_loop 在
  * sti;hlt 后重新抢占全局锁调度；两者都不返回。 */
@@ -75,6 +76,7 @@ void device_irq_init(void);int device_irq_acquire(Task*);int device_irq_release(
 int device_irq_wait(Task*,uint32_t);void device_irq_vector(void);
 int space_mmio_init(uint64_t);
 int space_device_mmio(uint64_t);int space_map_mmio(Task*,uint64_t,uint64_t);
+int space_map_fb(Task*,uint64_t,uint64_t,uint64_t);
 void iommu_init(SfBootInfo*);unsigned iommu_mode(void);
 int iommu_grant(uint32_t,uint64_t,uint64_t*);int iommu_revoke(uint32_t);int iommu_active(void);
 int iommu_fault(uint32_t*,uint32_t*,uint64_t*);

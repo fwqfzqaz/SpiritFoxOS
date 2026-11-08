@@ -109,6 +109,21 @@ int space_map(Task*t,uint64_t v,uint64_t physical,uint32_t flags){
 }
 /* 设备 MMIO 映射：RW+NX 并附加 PTE_MMIO/Cache 禁用位（第 4-5 位）。 */
 int space_map_mmio(Task*t,uint64_t v,uint64_t physical){int r=space_map(t,v,physical,3);if(!r)*pte(t,v,0)|=0x18|PTE_MMIO;return r;}
+/* 显示内存映射：仅允许固定基址，逐页 RW+NX 并禁用缓存。
+ * Framebuffer 不是设备寄存器，因此不置 PTE_MMIO（允许按普通 RAM 写）。 */
+int space_map_fb(Task*t,uint64_t v,uint64_t physical,uint64_t bytes){
+ if(v!=SF_FB||(physical&4095)||!bytes||bytes>SF_FB_BYTES||physical>0x000ffffffffff000ull-bytes)return SF_INVALID;
+ for(uint64_t off=0;off<bytes;off+=4096){
+  uint64_t*p=pte(t,v+off,0);
+  if(p&&(*p&1)){ /* 已映射且指向同一物理页则只补缓存位，支持重试。 */
+   if((*p&0x000ffffffffff000ull)!=physical+off)return SF_INVALID;
+   *p|=0x18;continue;
+  }
+  int r=space_map(t,v+off,physical+off,3);if(r)return r;
+  *pte(t,v+off,0)|=0x18;
+ }
+ return SF_OK;
+}
 /* 用户区间校验：整段逐页检查存在/用户/可写位，且拒绝 MMIO 页——
  * copy 系列经内核直映解引用物理地址，设备寄存器不是 RAM 缓冲。 */
 int user_range(Task*t,uint64_t v,uint64_t n,int write){

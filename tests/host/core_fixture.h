@@ -15,7 +15,7 @@ static int core_copy_out_denied;static unsigned core_copy_out_calls;
 static int core_map_deny;static unsigned core_unmap_calls;static uint64_t core_unmap_bytes;static unsigned core_page_free_calls;
 #define CHECK(x) do{checks++;if(!(x)){printf("FAIL line %d: %s (next=%u, slot1_pid=%u, state=%u, allocations=%u)\n",__LINE__,#x,next_pid,tasks[1].pid,tasks[1].state,allocation_calls);return 1;}}while(0)
 void serial(const char*s){(void)s;}void hex(uint64_t x){(void)x;}void panic(const char*s){fprintf(stderr,"Unexpected panic: %s\n",s);abort();}
-void console_irq(void){}long console_read(void){return SF_WOULD_BLOCK;}void arch_init(void){}void arch_task(Task*t){if(core_allow_schedule){core_last_arch=t;return;}abort();}void arch_save(Task*t){(void)t;abort();}void arch_enter(Frame*f){(void)f;abort();}
+void console_irq(void){}long console_read(void){return SF_WOULD_BLOCK;}void ps2_mouse_init(uint32_t width,uint32_t height){(void)width;(void)height;}long ps2_mouse_read(int reset){(void)reset;return SF_WOULD_BLOCK;}void ps2_irq(void){}void arch_init(void){}void arch_task(Task*t){if(core_allow_schedule){core_last_arch=t;return;}abort();}void arch_save(Task*t){(void)t;abort();}void arch_enter(Frame*f){(void)f;abort();}
 void*page_alloc(uint32_t owner){
  allocation_calls++;if(allocated>=fail_after||allocated>=256)return 0;Task*t=0;
  for(unsigned i=0;i<SF_MAX_THREADS;i++)if(tasks[i].main&&tasks[i].pid==owner){t=&tasks[i];break;}

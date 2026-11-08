@@ -71,6 +71,12 @@ host_test('test_version','tests/host/test_version.c','services/version.c')
 host_test('test_net','tests/host/test_net.c')
 host_test('test_sdk','tests/host/test_sdk.c','services/sdk.c')
 host_test('test_iommu','tests/host/test_iommu.c','kernel/acpi.c','kernel/vtd_tables.c',no_unused=True)
+# 类 niri 可滚动平铺布局核心（services/tiling.c）。
+host_test('test_tiling','tests/host/test_tiling.c','services/tiling.c')
+# 有界应用目录与搜索启动器核心（services/launcher.c）。
+host_test('test_launcher','tests/host/test_launcher.c','services/launcher.c')
+# 有界图形 shell 核心（services/sfk.c）。
+host_test('test_sfk','tests/host/test_sfk.c','services/sfk.c')
 for name,source in [('ipc','kernel/ipc.c'),('memory','kernel/memory.c')]:
     host_test('test_'+name,'tests/host/test_'+name+'.c',source,no_unused=True)
 host_test('test_trust','tests/host/test_trust.c',*build.CRYPTO)
@@ -116,6 +122,10 @@ if not args.host_only:
     subprocess.run([sys.executable, 'tests/qemu/qemu_persist_test.py'], check=True)
     subprocess.run([sys.executable, 'tests/qemu/qemu_net_test.py'], check=True)
     subprocess.run([sys.executable, 'tests/qemu/qemu_net_test.py', '--disk'], check=True)
+    # 类 niri 合成器：framebuffer 映射、布局与串口输入转发。
+    subprocess.run([sys.executable, 'tests/qemu/qemu_gui_test.py'], check=True)
+    # 真实扫描输出：QMP screendump + PPM 像素断言（窗口/页签/背景色）。
+    subprocess.run([sys.executable, 'tests/qemu/qemu_gui_screenshot_test.py'], check=True)
     subprocess.run([sys.executable, 'tests/qemu/qemu_iommu_test.py'], check=True)
     subprocess.run([sys.executable, 'tests/qemu/qemu_smp_test.py'], check=True)
     subprocess.run([sys.executable, 'tests/qemu/qemu_security_test.py'], check=True)

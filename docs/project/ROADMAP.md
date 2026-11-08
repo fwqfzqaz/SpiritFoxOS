@@ -112,3 +112,5 @@
 2026-11-07：构建期账户表、四个有界控制台会话与 uid/gid 所有者权限完成，说明见 [SESSIONS](../architecture/SESSIONS.md)。
 
 2026-11-07：SMP、线程与配额完成；MADT/LAPIC、IPI 抢占、共享 CR3 线程、线程上限与 100 tick CPU 时间预算已实现；ABI 只追加 14 项至 597。x2APIC、CPU 热插拔与线程 join 仍未实现，真实硬件多核待独立验证。
+
+2026-11-08：M7 的有界图形切片完成。内核追加 `SF_FB=0x70000000`、`SfFbInfo`、`SYS_FB_GRANT=32` 与 `SYS_FB_MAP=33`：仅 PID 1 可把固件 framebuffer 授权给单一进程，目标进程经 `space_map_fb` 逐页建立 RW+NX+缓存禁用映射（不占私有数据页）。新增 `sf-wm.sfmod`（`org.spiritfox.wm`）与纯 C 布局核心 `services/tiling.c`：4 工作区 × 16 列 × 8 窗口、列内纵向堆叠、列宽/窗口高度千分比、水平滚动、consume/expel、焦点夹紧与容量无副作用。`sf-init` 新增 root `gui` 命令，经模块生命周期启动合成器、串口字节以 `OP_WM_INPUT` 转发、`Ctrl-]` 退出并恢复 shell；期间继续驱动既有服务监督。宿主 `test_tiling` 与 QEMU `qemu_gui_test.py`（`-display none -vga std`）验证布局状态与不同 framebuffer 校验和。真实输入驱动、GUI 客户端协议、多显示器与 GPU 仍未实现，详见 [GRAPHICS](../architecture/GRAPHICS.md)。
