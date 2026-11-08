@@ -2,17 +2,16 @@
 断言上栏按钮命中、搜索面板点击、工作区切换与 framebuffer 校验和变化。
 串口只用于启动 gui 与 SFK 内部文本输入，不再有任何布局快捷键。"""
 import hashlib
-import json
 import os
 from pathlib import Path
 import queue
 import re
 import shutil
-import socket
 import subprocess
 import sys
 import threading
 import time
+from qmp import QmpListener
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / 'tools/package'))
@@ -37,10 +36,9 @@ else:
     FIRMWARE = ROOT / '.tools/qemu/share/edk2-x86_64-code.fd'
     VARS_SRC = ROOT / '.tools/qemu/share/edk2-i386-vars.fd'
 
-SOCK = ROOT / 'build/qmp-gui-test.sock'
 
 
-def command():
+def command(qmp_endpoint):
     # 显式 std VGA 让固件建立 GOP framebuffer；-display none 仍不打开窗口。
     return [str(QEMU), '-machine', 'q35', '-accel', 'tcg', '-cpu', 'qemu64,+nx',
             '-m', '256', '-smp', '1',
@@ -49,53 +47,22 @@ def command():
             '-drive', 'format=raw,file=fat:rw:'+str(ROOT / 'build/esp'),
             '-net', 'none', '-display', 'none', '-vga', 'std',
             '-serial', 'stdio', '-monitor', 'none', '-no-reboot',
-            '-qmp', 'unix:'+str(SOCK)+',server,nowait',
+            '-qmp', qmp_endpoint.argument(),
             '-device', 'isa-debug-exit,iobase=0xf4,iosize=0x04']
-
-
-class Qmp:
-    def __init__(self, path):
-        self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        self.sock.settimeout(10)
-        self.sock.connect(str(path))
-        self.buffer = b''
-        self.read()
-        self.execute('qmp_capabilities')
-
-    def read(self):
-        while b'\n' not in self.buffer:
-            data = self.sock.recv(4096)
-            if not data:
-                raise RuntimeError('QMP connection closed')
-            self.buffer += data
-        line, _, self.buffer = self.buffer.partition(b'\n')
-        return json.loads(line)
-
-    def execute(self, name, arguments=None):
-        payload = {'execute': name}
-        if arguments is not None:
-            payload['arguments'] = arguments
-        self.sock.sendall((json.dumps(payload)+'\r\n').encode())
-        while True:
-            reply = self.read()
-            if 'return' in reply:
-                return reply['return']
-            if 'error' in reply:
-                raise RuntimeError('QMP %s failed: %r' % (name, reply['error']))
-
-    def close(self):
-        self.sock.close()
 
 
 def main():
     if not QEMU or not FIRMWARE:
         raise RuntimeError('Linux needs qemu-system-x86_64 and OVMF (ovmf package) installed')
     os.chdir(ROOT)
-    if SOCK.exists():
-        SOCK.unlink()
     shutil.copyfile(VARS_SRC, ROOT / 'build/OVMF_VARS.fd')
-    process = subprocess.Popen(command(), stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                               stderr=subprocess.STDOUT, bufsize=0)
+    qmp_endpoint = QmpListener()
+    try:
+        process = subprocess.Popen(command(qmp_endpoint), stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                   stderr=subprocess.STDOUT, bufsize=0)
+    except BaseException:
+        qmp_endpoint.close()
+        raise
     chunks = queue.Queue()
 
     def read():
@@ -229,7 +196,7 @@ def main():
         if last_wm()[:3] != (1, 1, 1):
             raise RuntimeError('unexpected initial layout %r' % (last_wm()[:3],))
 
-        qmp = Qmp(SOCK)
+        qmp = qmp_endpoint.accept()
 
         # 快速滑动：连续相对位移只应增量重画光标，不应产生整屏重绘/状态行。
         drain(.2)
@@ -250,8 +217,8 @@ def main():
 
         # 上栏 SHELL 按钮打开 SFK；文本输入仍只属于 SFK 输入行。
         click(1084, 16, 'SHELL')
-        send(b'apps\r')
-        send(b'open settings\r')
+        send(b'apps\n')
+        send(b'open settings\n')
         wait_win(2, 10)
 
         # 面板右上角 X 关闭 SFK。
@@ -307,8 +274,7 @@ def main():
         if process.poll() is None:
             process.kill()
             process.wait()
-        if SOCK.exists():
-            SOCK.unlink()
+        qmp_endpoint.close()
 
 
 if __name__ == '__main__':

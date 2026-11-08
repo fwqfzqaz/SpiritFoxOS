@@ -28,6 +28,10 @@ int space_map(Task*t,uint64_t a,uint64_t b,uint32_t flags){(void)t;(void)a;(void
 int space_unmap_range(Task*t,uint64_t v,uint64_t n){(void)v;core_unmap_calls++;core_unmap_bytes+=n;Task*m=t->main?t:&tasks[t->main_slot];uint64_t pages=n/4096;if(pages>m->page_count)pages=m->page_count;m->page_count-=(uint32_t)pages;return 0;}
 int user_exec(Task*t,uint64_t v){(void)t;return v>=SF_BASE&&v<SF_BASE+0x1000;}
 int user_range(Task*t,uint64_t a,uint64_t n,int write){(void)t;(void)a;(void)n;(void)write;return 1;}
+/* Core-only tests do not model framebuffer mappings. Fail if a test starts
+ * using those paths; actual mappings are exercised by the GUI VM tests. */
+void*user_phys(Task*t,uint64_t v){(void)t;(void)v;abort();}
+int space_map_fb(Task*t,uint64_t v,uint64_t physical,uint64_t bytes){(void)t;(void)v;(void)physical;(void)bytes;abort();}
 int copy_in(Task*t,void*d,uint64_t s,size_t n){(void)t;memcpy(d,(void*)(uintptr_t)s,n);return 0;}
 int copy_out(Task*t,uint64_t d,const void*s,size_t n){(void)t;core_copy_out_calls++;if(core_copy_out_denied)return SF_DENIED;memcpy((void*)(uintptr_t)d,s,n);return 0;}
 long ipc_syscall(uint64_t a,uint64_t b,uint64_t c,uint64_t d){(void)a;(void)b;(void)c;(void)d;abort();}
