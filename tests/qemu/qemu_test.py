@@ -65,7 +65,7 @@ def run(memory=256, interactive=False, storage='normal', persistent=False, iommu
         if not disk.exists():
             shutil.copyfile(ROOT/'build/persistent.img', disk)
         return subprocess.call(command(memory, disk, writable=True, iommu=iommu))
-    disk = None if storage == 'missing' else ROOT / 'build/storage.img'
+    disk = None if storage == 'missing' else ROOT / ('build/storage-v2.img' if storage == 'v2' else 'build/storage.img')
     if storage in ('badheader', 'badhash', 'badsignature'):
         data = bytearray(disk.read_bytes())
         if storage == 'badheader':
@@ -126,7 +126,7 @@ def run(memory=256, interactive=False, storage='normal', persistent=False, iommu
             raise RuntimeError('VT-d not active')
         if iommu and storage == 'normal' and b'MMIO BUFFER TESTS PASSED' not in output:
             raise RuntimeError('MMIO syscall buffer isolation not exercised')
-        if storage == 'normal':
+        if storage in ('normal', 'v2'):
             if b'STORAGE READY' not in output or b'signed disk application runs through native runtime' not in output:
                 raise RuntimeError('Disk-backed module/application path not exercised')
         elif storage == 'badsignature':
@@ -134,8 +134,10 @@ def run(memory=256, interactive=False, storage='normal', persistent=False, iommu
                 raise RuntimeError('Untrusted disk application executed or rejection missing')
         elif b'STORAGE UNAVAILABLE' not in output:
             raise RuntimeError('Unavailable storage was not diagnosed')
-        tests = [('help', 'help | ls'), ('modules', 'sf-init ACTIVE pinned'), ('echo', 'echo: ping'), ('run hello.sfk', 'sfexec: exit 0'), ('stop echo', 'echo: STOPPED'), ('start echo', 'echo: ACTIVE'), ('write /tmp/check persistent-in-ram', 'write: OK'), ('cat /tmp/check', 'persistent-in-ram'), ('ls /tmp', 'notes'), ('selftest', 'SELFTEST OK'), ('shutdown', 'SHUTDOWN OK')]
-        if storage == 'normal':
+        if storage == 'v2':
+            expect('[STORAGE] format 2', 60)
+        tests = [('help', 'help | login'), ('modules', 'sf-init ACTIVE pinned'), ('echo', 'echo: ping'), ('run hello.sfk', 'sfexec: exit 0'), ('stop echo', 'echo: STOPPED'), ('start echo', 'echo: ACTIVE'), ('write /tmp/check persistent-in-ram', 'write: OK'), ('cat /tmp/check', 'persistent-in-ram'), ('ls /tmp', 'notes'), ('selftest', 'SELFTEST OK'), ('shutdown', 'SHUTDOWN OK')]
+        if storage in ('normal', 'v2'):
             tests[-1:-1] = [('cat /disk/etc/readme.txt', 'SpiritFoxOS read-only disk mounted'), ('run /disk/bin/diskhello.sfk', 'sfexec: exit 0'), ('write /disk/etc/readme.txt forbidden', 'write: error'), ('stop disk', 'disk: stop refused'), ('unmount /disk', 'disk: UNMOUNTED'), ('stop disk', 'disk: STOPPED'), ('start disk', 'disk: ACTIVE'), ('mount /disk', 'disk: MOUNTED'), ('run /disk/bin/diskhello.sfk', 'sfexec: exit 0')]
         elif storage == 'badsignature':
             tests[-1:-1] = [('run /disk/bin/diskhello.sfk', 'sfexec: failed code=4'), ('run hello.sfk', 'sfexec: exit 0')]
@@ -173,6 +175,6 @@ if __name__ == '__main__':
     parser.add_argument('--interactive', action='store_true')
     parser.add_argument('--persistent', action='store_true', help='Interactive writable copy, build/user-persistent.img; kept across runs')
     parser.add_argument('--iommu', action='store_true', help='Q35 Intel VT-d, 39-bit legacy remapping')
-    parser.add_argument('--storage', choices=['normal', 'missing', 'badheader', 'badhash', 'badsignature', 'writable', 'ioerror'], default='normal')
+    parser.add_argument('--storage', choices=['normal', 'v2', 'missing', 'badheader', 'badhash', 'badsignature', 'writable', 'ioerror'], default='normal')
     args = parser.parse_args()
     run(args.memory, args.interactive, args.storage, args.persistent, args.iommu)

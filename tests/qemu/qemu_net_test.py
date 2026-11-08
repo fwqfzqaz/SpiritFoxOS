@@ -1,7 +1,11 @@
-"""Legacy virtio-net in QEMU user-mode networking: ring-3 driver, ARP, ICMP echo, UDP and TCP.
+"""Legacy virtio-net in QEMU user-mode networking: ring-3 driver, IOAPIC INTx,
+DHCP, ARP, ICMP echo, UDP, TCP and bounded connection objects.
 
-The boot has no disk so the single DMA arena and single device owner are free;
-the service must bring the device up and answer real slirp traffic.
+The default boot has no disk; the driver must acquire its own DMA arena and
+device grant, lease an address from slirp DHCP, receive real interrupts through
+the IOAPIC, and answer network traffic. ``--disk`` boots the storage image as
+well, proving a disk and a network device hold both kernel device slots, DMA
+arenas, IOMMU windows and interrupt lines at the same time.
 """
 import os
 import queue
@@ -63,7 +67,7 @@ def tcp_echo_server(stop):
         server.close()
 
 
-def main():
+def main(disk=False):
     if not qemu_test.QEMU or not qemu_test.FIRMWARE:
         raise RuntimeError('Linux needs qemu-system-x86_64 and OVMF (ovmf package) installed')
     os.chdir(ROOT)
@@ -74,7 +78,8 @@ def main():
     server.start()
     stream = threading.Thread(target=tcp_echo_server, args=(stop,), daemon=True)
     stream.start()
-    args = qemu_test.command(memory=128)
+    args = qemu_test.command(memory=256 if disk else 128,
+                             disk=(ROOT / 'build/storage.img') if disk else None)
     index = args.index('-net')
     assert args[index + 1] == 'none'
     args[index:index + 2] = ['-netdev', 'user,id=net0']
@@ -111,15 +116,33 @@ def main():
         return bytes(output[start:])
 
     try:
-        print('Network VM: no disk, slirp 10.0.2.0/24', flush=True)
+        label = 'disk+net' if disk else 'net'
+        print('Network VM: %s, slirp 10.0.2.0/24' % label, flush=True)
         wait('BOOT TESTS PASSED')
         if b'net: READY' not in output:
             raise RuntimeError('network service did not report readiness\n' + output[-2500:].decode(errors='replace'))
-        if b'STORAGE READY' in output:
+        grants = output.count(b'[DEV] bdf=')
+        if disk:
+            wait('STORAGE READY')
+            if b'STORAGE READY' not in output:
+                raise RuntimeError('disk did not become ready alongside the network device\n' + output[-2500:].decode(errors='replace'))
+            if grants < 2:
+                raise RuntimeError('disk and network did not hold both device slots: ' + repr(output[-2500:]))
+            app = command('run /disk/bin/diskhello.sfk', 'sfexec: exit 0', 30)
+            if b'Hello from diskhello.sfk!' not in app:
+                raise RuntimeError('disk application did not run while the network device was active: ' + repr(app))
+        elif b'STORAGE READY' in output:
             raise RuntimeError('network VM unexpectedly mounted storage')
         info = command('ifconfig', 'link=up\r\n')
-        if b'ip=10.0.2.15' not in info or b'gateway=10.0.2.2' not in info or b'netmask=255.255.255.0' not in info:
-            raise RuntimeError('ifconfig did not report the slirp profile: ' + repr(info))
+        if b'ip=10.0.2.15' not in info or b'gateway=10.0.2.2' not in info or b'netmask=255.255.255.0' not in info or b'dhcp=leased' not in info:
+            raise RuntimeError('ifconfig did not report the DHCP lease: ' + repr(info))
+        if b'[IRQ] IOAPIC ready' not in output:
+            raise RuntimeError('IOAPIC route was not established\n' + output[-2500:].decode(errors='replace'))
+        if b'[NET] interrupt-driven' not in output:
+            raise RuntimeError('driver never observed an interrupt wakeup\n' + output[-2500:].decode(errors='replace') + repr(info))
+        lease = command('dhcp', 'dhcp: LEASED ip=10.0.2.15', 40)
+        if b'dhcp: LEASED' not in lease:
+            raise RuntimeError('DHCP renewal did not lease from slirp: ' + repr(lease))
         reply = command('ping 10.0.2.2', ' ms\r\n', 40)
         if b'ping: reply from 10.0.2.2' not in reply:
             raise RuntimeError('ping reply missing: ' + repr(reply))
@@ -130,6 +153,9 @@ def main():
             raise RuntimeError('device MAC not read from virtio config: ' + repr(again))
         if not counts or int(counts.group(1)) < 1 or int(counts.group(2)) < 1:
             raise RuntimeError('traffic counters did not advance: ' + repr(again))
+        irq = re.search(rb'irq=(\d+)', again)
+        if not irq or int(irq.group(1)) < 1:
+            raise RuntimeError('interrupt counter did not advance: ' + repr(again))
         command('ping 10.0.2.2', 'ping: reply from 10.0.2.2', 40)
         datagram = command('udp 10.0.2.2 %d hello' % UDP_PORT, 'udp: reply from 10.0.2.2:%d "ACK:hello"' % UDP_PORT, 40)
         if b'udp: reply' not in datagram:
@@ -137,11 +163,36 @@ def main():
         session = command('tcp 10.0.2.2 %d hello' % TCP_PORT, 'tcp: reply from 10.0.2.2:%d "ACK:hello"' % TCP_PORT, 40)
         if b'tcp: reply' not in session:
             raise RuntimeError('TCP round trip missing: ' + repr(session))
+        command('conns', 'conns: 0 active', 20)
+        netinfo = command('cat /net/info', 'dhcp=leased', 30)
+        if b'state=up' not in netinfo or b'ip=10.0.2.15' not in netinfo:
+            raise RuntimeError('/net/info projection missing lease: ' + repr(netinfo))
+        opened = command('open 10.0.2.2 %d' % TCP_PORT, 'state=established', 60)
+        match = re.search(rb'handle=(\d+)', opened)
+        if not match:
+            raise RuntimeError('connection object was not created: ' + repr(opened))
+        handle = int(match.group(1))
+        sent = command('send %d hello' % handle, 'sent=5', 40)
+        if b'sent=5' not in sent:
+            raise RuntimeError('connection send did not report progress: ' + repr(sent))
+        received = command('recv %d' % handle, '"ACK:hello" state=', 40)
+        if b'"ACK:hello"' not in received:
+            raise RuntimeError('connection receive lost the echo: ' + repr(received))
+        listed = command('cat /net/connections', 'peer=10.0.2.2:%d' % TCP_PORT, 30)
+        if b'conn handle=%d' % handle not in listed:
+            raise RuntimeError('/net/connections did not list the object: ' + repr(listed))
+        active = command('conns', 'handle=%d' % handle, 30)
+        if b'conns: 1 active' not in active or b'recv=9' not in active:
+            raise RuntimeError('connection listing did not report traffic: ' + repr(active))
+        closed = command('close %d' % handle, 'state=closed', 30)
+        if b'state=closed' not in closed:
+            raise RuntimeError('connection close did not complete: ' + repr(closed))
+        command('conns', 'conns: 0 active', 30)
         command('shutdown', 'SHUTDOWN OK')
         code = process.wait(timeout=10)
         if code != 1:
             raise RuntimeError('Unexpected QEMU exit code ' + str(code))
-        print('NETWORK QEMU PASS (rx/tx advanced, ARP, ICMP, UDP and TCP over slirp)', flush=True)
+        print('NETWORK QEMU PASS (%s: IOAPIC INTx, DHCP, ARP, ICMP, UDP, TCP and connection objects over slirp)' % label, flush=True)
     finally:
         stop.set()
         if process.poll() is None:
@@ -149,8 +200,11 @@ def main():
             process.wait(timeout=5)
         while not chunks.empty():
             output.extend(chunks.get())
-        (ROOT / 'build/qemu-net.log').write_bytes(output)
+        (ROOT / ('build/qemu-net-disk.log' if disk else 'build/qemu-net.log')).write_bytes(output)
 
 
 if __name__ == '__main__':
-    main()
+    import argparse
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument('--disk', action='store_true', help='boot the storage image alongside the network device')
+    main(parser.parse_args().disk)

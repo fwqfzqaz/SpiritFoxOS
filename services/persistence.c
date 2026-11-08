@@ -1,15 +1,22 @@
 #include "libsf.h"
 #include "txn.h"
 #include "storage.h"
-#include "persistence.h"
+#include "persist_server.h"
 #include "update.h"
 #include "version.h"
 #include "trust.h"
+/* This file is linked only into sf-persist.sfmod. The transaction volume and
+ * the update state machine execute in that process; sf-init reaches them
+ * through the bounded persist RPC in include/persistence.h. */
 static SfTxn volume;
 static uint8_t scratch[SF_TXN_FILE_BYTES];
-static long(*disk_read)(unsigned,uint64_t,void*,size_t);
+static uint8_t stage[SF_TXN_FILE_BYTES];
+static size_t stage_bytes;
+static uint8_t export[SF_TXN_FILE_BYTES];
+static long export_bytes=-1;
+static int export_preview=-1;
 static int commit(const char*const*paths,const void*const*data,const uint32_t*bytes,unsigned count){
- int r=sf_storage_transaction(1);if(r)return r;r=sf_txn_commit(&volume,paths,data,bytes,count);sf_storage_transaction(0);return r;
+ int r=sf_storage_transaction(1);if(r)return r;r=sf_txn_commit(&volume,paths,data,bytes,count);sf_storage_transaction(0);export_bytes=-1;export_preview=-1;return r;
 }
 static const char*slot_path(char slot){return slot=='a'?"/slots/a.sfk":"/slots/b.sfk";}
 static int package_policy(const void*data,size_t bytes,char id[64],SfVersion*version,int enforce,const uint8_t**key_id){
@@ -43,26 +50,24 @@ static int state_commit(const SfUpdate*s){
  uint8_t encoded[SF_UPDATE_BYTES];int r=sf_update_encode(s,encoded);if(r)return r;
  const char*paths[]={"/boot/current"};const void*data[]={encoded};uint32_t lengths[]={sizeof(encoded)};return commit(paths,data,lengths,1);
 }
-static long notes_read(unsigned index,uint64_t offset,void*out,size_t bytes){
- if(index!=UINT32_MAX)return disk_read?disk_read(index,offset,out,bytes):SF_DEVICE_GONE;
+long persist_notes_read(uint64_t offset,void*out,size_t bytes){
  if(!sf_storage_writable())return SF_DEVICE_GONE;long n=sf_txn_get(&volume,"/notes/user",scratch,sizeof(scratch));if(n==SF_NOT_FOUND)return 0;if(n<0)return n;
  if(offset>=(uint64_t)n)return 0;if(bytes>(uint64_t)n-offset)bytes=n-offset;memcpy(out,scratch+offset,bytes);return bytes;
 }
-static long notes_write(unsigned index,uint64_t offset,const void*data,size_t bytes){
- if(index!=UINT32_MAX)return SF_READ_ONLY;if(!sf_storage_writable())return SF_DEVICE_GONE;if(offset>sizeof(scratch)||bytes>sizeof(scratch)-offset)return SF_NO_SPACE;
+long persist_notes_write(uint64_t offset,const void*data,size_t bytes){
+ if(!sf_storage_writable())return SF_DEVICE_GONE;if(offset>sizeof(scratch)||bytes>sizeof(scratch)-offset)return SF_NO_SPACE;
  long old=sf_txn_get(&volume,"/notes/user",scratch,sizeof(scratch));if(old<0&&old!=SF_NOT_FOUND)return old;if(old<0)old=0;
  if(offset>(uint64_t)old)memset(scratch+old,0,offset-old);memcpy(scratch+offset,data,bytes);
  uint32_t length=offset+bytes;if(length<(uint64_t)old)length=old;const char*paths[]={"/notes/user"};const void*items[]={scratch};int r=commit(paths,items,&length,1);return r?r:(long)bytes;
 }
-static int notes_truncate(unsigned index,uint64_t bytes){
- if(index!=UINT32_MAX)return SF_READ_ONLY;if(!sf_storage_writable()||!volume.ready)return SF_DEVICE_GONE;
+int persist_notes_truncate(uint64_t bytes){
+ if(!sf_storage_writable()||!volume.ready)return SF_DEVICE_GONE;
  int r=sf_storage_transaction(1);if(r)return r;r=sf_txn_resize(&volume,"/notes/user",bytes);sf_storage_transaction(0);return r;
 }
-int sf_persist_mount(SfNamespace*ns){
- volume.ready=0;if(!sf_storage_writable())return SF_READ_ONLY;
+int persist_mount(uint64_t*notes){
+ volume.ready=0;export_bytes=-1;export_preview=-1;if(!sf_storage_writable())return SF_READ_ONLY;
  int r=sf_txn_mount(&volume,sf_storage_sector_read,sf_storage_sector_write,sf_storage_flush,0);if(r)return r;
  r=sf_storage_write_range(SF_TXN_HEADER+1,SF_TXN_BANK+2*SF_TXN_BANK_SECTORS);if(r){volume.ready=0;return r;}
- sf_storage_write_tests();
  /* Load persisted key revocations before any package is verified again, so
   * a revocation committed before shutdown applies immediately after restart. */
  long revoked=sf_txn_get(&volume,"/boot/revoked",scratch,sizeof(scratch));
@@ -72,43 +77,45 @@ int sf_persist_mount(SfNamespace*ns){
  SfUpdate state;r=state_read(&state);if(r){volume.ready=0;return r;}
  if(state.phase==SF_UPDATE_TRYING){sf_update_finish(&state,0);r=state_commit(&state);if(r){volume.ready=0;return r;}sf_log("update: RECOVERED interrupted trial\n");}
  long n=sf_txn_get(&volume,"/notes/user",scratch,sizeof(scratch));if(n<0&&n!=SF_NOT_FOUND){volume.ready=0;return n;}
- r=sf_ns_create(ns,"/persist",NODE_DIR,0);if(r){volume.ready=0;return r;}
- unsigned directory=0;for(unsigned i=0;i<32;i++)if(!strcmp(ns->nodes[i].path,"/persist"))directory=i;
- r=sf_ns_create(ns,"/persist/notes",NODE_DISK,0);if(r){memset(&ns->nodes[directory],0,sizeof(SfNode));volume.ready=0;return r;}
- for(unsigned i=0;i<32;i++)if(!strcmp(ns->nodes[i].path,"/persist/notes")){ns->nodes[i].external=UINT32_MAX;ns->nodes[i].mount_tag=1;ns->nodes[i].size=n<0?0:n;}
- ns->nodes[directory].readonly=1;ns->nodes[directory].mount_tag=1;
- if(ns->external_read!=notes_read)disk_read=ns->external_read;ns->external_read=notes_read;ns->external_write=notes_write;ns->external_truncate=notes_truncate;
+ if(notes)*notes=n<0?0:n;
  sf_log("PERSIST READY generation=");sf_number(volume.generation);sf_log("\n");return 0;
 }
-int sf_persist_install(const char*source){
+int persist_volume_ready(void){return volume.ready&&sf_storage_writable();}
+int persist_stage(uint64_t offset,const void*data,size_t bytes){
+ if(offset>sizeof(stage)||bytes>sizeof(stage)-offset)return SF_NO_SPACE;
+ if(offset==0)stage_bytes=0;memcpy(stage+offset,data,bytes);
+ if(offset+bytes>stage_bytes)stage_bytes=offset+bytes;return 0;
+}
+size_t persist_staged_bytes(void){return stage_bytes;}
+int persist_install(void){
  if(!sf_storage_writable()||!volume.ready)return SF_DEVICE_GONE;
+ if(!stage_bytes)return SF_BAD_FORMAT;
  SfUpdate state;int r=state_read(&state);if(r)return r;if(state.phase!=SF_UPDATE_STABLE)return SF_BUSY;
  SfVersion floor,version;if(state.good){r=confirmed_version(&state,&floor);if(r)return r;}
- long n=sf_storage_load(source,scratch,sizeof(scratch));if(n<0)return n;
- char id[64];r=package_policy(scratch,n,id,&version,1,0);if(r)return r;uint8_t hash[32],encoded[SF_UPDATE_BYTES];sf_sha256(hash,scratch,n);
+ char id[64];r=package_policy(stage,stage_bytes,id,&version,1,0);if(r)return r;uint8_t hash[32],encoded[SF_UPDATE_BYTES];sf_sha256(hash,stage,stage_bytes);
  if(state.good){if(strcmp(state.app_id,id))return SF_DEPENDENCY;r=sf_version_upgrade(&floor,state.good_hash,&version,hash);if(r)return r;}
  r=sf_update_stage(&state,id,hash);if(r)return r;r=sf_update_encode(&state,encoded);if(r)return r;
- const char*paths[]={slot_path(state.candidate),"/boot/current"};const void*data[]={scratch,encoded};uint32_t lengths[]={n,sizeof(encoded)};
+ const char*paths[]={slot_path(state.candidate),"/boot/current"};const void*data[]={stage,encoded};uint32_t lengths[]={stage_bytes,sizeof(encoded)};
  return commit(paths,data,lengths,2);
 }
-int sf_persist_begin(void){
+int persist_begin(void){
  if(!sf_storage_writable())return SF_DEVICE_GONE;SfUpdate state;int r=state_read(&state);if(r)return r;
  if(state.phase==SF_UPDATE_STABLE)return state.good?0:SF_NOT_FOUND;
  r=sf_update_begin(&state);if(r)return r;r=state_commit(&state);if(r)return r;
  sf_log("update: TRIAL started\n");return 1;
 }
-int sf_persist_finish(int success){
+int persist_finish(int success){
  if(!sf_storage_writable())return SF_DEVICE_GONE;SfUpdate state;int r=state_read(&state);if(r)return r;
  r=sf_update_finish(&state,success);if(r)return r;r=state_commit(&state);if(r){sf_log("update: health commit failed\n");return r;}
  sf_log(success?"update: CONFIRMED\n":"update: ROLLED BACK\n");return 0;
 }
-/* Revoke the anchor key that signed a stored package. The package itself must
+/* Revoke the anchor key that signed a staged package. The package itself must
  * carry a valid anchor signature; revocation then outlives restarts through
  * the transaction volume. 1 means the signer was already revoked. */
-int sf_persist_revoke(const char*source){
+int persist_revoke(void){
  if(!sf_storage_writable()||!volume.ready)return SF_DEVICE_GONE;
- long n=sf_storage_load(source,scratch,sizeof(scratch));if(n<0)return n;
- SfPackage p;int r=sf_trust_open(&sf_trust,&p,scratch,n);if(r==SF_REVOKED)return 1;if(r)return r;
+ if(!stage_bytes)return SF_BAD_FORMAT;
+ SfPackage p;int r=sf_trust_open(&sf_trust,&p,stage,stage_bytes);if(r==SF_REVOKED)return 1;if(r)return r;
  if(sf_trust_revoked(&sf_trust,p.key_id))return 1;
  uint8_t list[SF_TRUST_MAX*32];long old=sf_txn_get(&volume,"/boot/revoked",list,sizeof(list));
  if(old<0&&old!=SF_NOT_FOUND)return old;if(old<0)old=0;
@@ -117,13 +124,6 @@ int sf_persist_revoke(const char*source){
  memcpy(list+old,p.key_id,32);
  const char*paths[]={"/boot/revoked"};const void*data[]={list};uint32_t lengths[]={old+32};
  return commit(paths,data,lengths,1);
-}
-void sf_persist_trust_status(void){
- sf_log("trust: anchors=");sf_number(sf_trust.policy.count);sf_log(" revoked=");sf_number(sf_trust.revoked);sf_log("\n");
- static const char hex[]="0123456789abcdef";
- for(unsigned i=0;i<sf_trust.revoked;i++){sf_log("trust: revoked key=");char text[17];
-  for(unsigned j=0;j<8;j++){text[j*2]=hex[sf_trust.revoked_ids[i][j]>>4];text[j*2+1]=hex[sf_trust.revoked_ids[i][j]&15];}
-  text[16]=0;sf_log(text);sf_log("...\n");}
 }
 static long selected_package(void*out,size_t capacity,int preview){
  if(!sf_storage_writable())return SF_DEVICE_GONE;SfUpdate state;int r=state_read(&state);if(r)return r;
@@ -135,9 +135,20 @@ static long selected_package(void*out,size_t capacity,int preview){
  if(candidate&&state.good){SfVersion floor;r=confirmed_version(&state,&floor);if(r)return r;r=sf_version_upgrade(&floor,state.good_hash,&version,hash);if(r<0)return r;}
  return n;
 }
-long sf_persist_package(void*out,size_t capacity){return selected_package(out,capacity,0);}
-long sf_persist_preview(void*out,size_t capacity){return selected_package(out,capacity,1);}
-void sf_persist_status(void){
+/* The RPC layer exports the selected package in 256-byte chunks; the cache is
+ * invalidated by every commit so a chunk sequence always reflects one state. */
+long persist_export(int preview){
+ if(export_bytes>=0&&export_preview==preview)return export_bytes;
+ long n=selected_package(export,sizeof(export),preview);
+ if(n>=0){export_bytes=n;export_preview=preview;}else{export_bytes=-1;export_preview=-1;}
+ return n;
+}
+const uint8_t* persist_export_data(void){return export;}
+long persist_revoked_list(void*out,size_t capacity){
+ if(!volume.ready)return SF_DEVICE_GONE;
+ long n=sf_txn_get(&volume,"/boot/revoked",out,capacity);return n==SF_NOT_FOUND?0:n;
+}
+void persist_status(void){
  sf_log(volume.ready&&sf_storage_writable()?"persist: ACTIVE generation=":"persist: UNAVAILABLE generation=");sf_number(volume.generation);sf_log("\n");
  SfUpdate state;if(!sf_storage_writable()||state_read(&state))return;
  sf_log(state.phase==SF_UPDATE_STABLE?"update: STABLE good=":state.phase==SF_UPDATE_PENDING?"update: PENDING good=":"update: TRYING good=");

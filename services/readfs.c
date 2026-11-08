@@ -9,11 +9,11 @@ int sf_readfs_path(const char*p){
  return 1;
 }
 int sf_readfs_mount(SfReadFs*fs,SfSectorRead read,void*context,uint64_t capacity){
- memset(fs,0,sizeof(*fs));if(!read||capacity<1024||capacity>SF_READFS_IMAGE_MAX||(capacity&511))return SF_BAD_FORMAT;
- uint8_t header[512],table[SF_READFS_MAX_ENTRIES*128];int r=read(context,0,header);if(r)return r;
+ memset(fs,0,sizeof(*fs));if(!read||capacity<1024||capacity>SF_READFS1_IMAGE_MAX||(capacity&511))return SF_BAD_FORMAT;
+ uint8_t header[512],table[SF_READFS1_MAX_ENTRIES*128];int r=read(context,0,header);if(r)return r;
  if(memcmp(header,"SFRFS1\0\0",8)||sf_u32(header+8)!=1||sf_u32(header+12)!=512||sf_u64(header+16)!=capacity||sf_u32(header+28)!=128||sf_u64(header+32)!=512||!zero(header+80,432))return SF_BAD_FORMAT;
  uint32_t count=sf_u32(header+24);uint64_t bytes=sf_u64(header+40);
- if(!count||count>SF_READFS_MAX_ENTRIES||bytes!=count*128ull||512+bytes>capacity)return SF_BAD_FORMAT;
+ if(!count||count>SF_READFS1_MAX_ENTRIES||bytes!=count*128ull||512+bytes>capacity)return SF_BAD_FORMAT;
  for(uint64_t off=0;off<bytes;off+=512){uint8_t sector[512];r=read(context,1+off/512,sector);if(r)return r;size_t n=bytes-off;if(n>512)n=512;memcpy(table+off,sector,n);if(n<512&&!zero(sector+n,512-n))return SF_BAD_FORMAT;}
  uint8_t digest[32];sf_sha256(digest,table,bytes);if(memcmp(digest,header+48,32))return SF_BAD_FORMAT;
  uint64_t data_start=(512+bytes+511)&~511ull;
@@ -21,7 +21,7 @@ int sf_readfs_mount(SfReadFs*fs,SfSectorRead read,void*context,uint64_t capacity
   const uint8_t*e=table+i*128;size_t len=0;while(len<64&&e[len])len++;
   if(len==64||!zero(e+len,64-len)||sf_u32(e+112)!=1||!zero(e+116,12))return SF_BAD_FORMAT;
   SfReadFile*f=&fs->files[i];memcpy(f->path,e,64);f->offset=sf_u64(e+64);f->bytes=sf_u64(e+72);memcpy(f->hash,e+80,32);
-  if(!sf_readfs_path(f->path)||!f->bytes||f->bytes>SF_READFS_FILE_MAX||(f->offset&511)||f->offset<data_start||f->offset>capacity||f->bytes>capacity-f->offset)return SF_BAD_FORMAT;
+  if(!sf_readfs_path(f->path)||!f->bytes||f->bytes>SF_READFS1_FILE_MAX||(f->offset&511)||f->offset<data_start||f->offset>capacity||f->bytes>capacity-f->offset)return SF_BAD_FORMAT;
   if(i&&strcmp(fs->files[i-1].path,f->path)>=0)return SF_BAD_FORMAT;
   for(unsigned j=0;j<i;j++){SfReadFile*g=&fs->files[j];if(f->offset<g->offset+g->bytes&&g->offset<f->offset+f->bytes)return SF_BAD_FORMAT;size_t n=strlen(g->path);if(!memcmp(g->path,f->path,n)&&f->path[n]=='/')return SF_BAD_FORMAT;}
  }

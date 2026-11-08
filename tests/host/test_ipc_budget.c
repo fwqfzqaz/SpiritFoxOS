@@ -2,8 +2,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include "../../kernel/ipc.c"
-Task tasks[SF_MAX_TASKS];int current;uint64_t ticks;
-static Frame frames[SF_MAX_TASKS];static Task saved_tasks[SF_MAX_TASKS];static Endpoint saved_eps[ENDPOINTS];static unsigned checks;
+Task tasks[SF_MAX_THREADS];int cpu_currents[SF_MAX_CPUS];uint64_t ticks;
+void task_wake(Task*t){t->state=T_READY;t->ready_since=ticks;}
+static Frame frames[SF_MAX_THREADS];static Task saved_tasks[SF_MAX_THREADS];static Endpoint saved_eps[ENDPOINTS];static unsigned checks;
 #define CHECK(x) do{checks++;if(!(x)){fprintf(stderr,"IPC BUDGET FAIL line %d: %s\n",__LINE__,#x);exit(1);}}while(0)
 int copy_in(Task*t,void*out,uint64_t from,size_t n){(void)t;memcpy(out,(void*)(uintptr_t)from,n);return 0;}
 int copy_out(Task*t,uint64_t to,const void*in,size_t n){(void)t;memcpy((void*)(uintptr_t)to,in,n);return 0;}
@@ -11,7 +12,7 @@ int user_range(Task*t,uint64_t a,uint64_t n,int write){(void)t;(void)a;(void)n;(
 void panic(const char*s){fprintf(stderr,"Unexpected panic: %s\n",s);abort();}
 static void setup(void){
  memset(tasks,0,sizeof(tasks));memset(endpoints,0,sizeof(endpoints));memset(frames,0,sizeof(frames));
- for(unsigned i=0;i<SF_MAX_TASKS;i++){tasks[i].pid=i+1;tasks[i].state=T_READY;tasks[i].cap_limit=32;tasks[i].frame=&frames[i];}
+ for(unsigned i=0;i<SF_MAX_TASKS;i++){tasks[i].pid=i+1;tasks[i].state=T_READY;tasks[i].cap_limit=32;tasks[i].frame=&frames[i];tasks[i].main=1;tasks[i].main_slot=i;tasks[i].tid=1;tasks[i].thread_limit=SF_THREAD_LIMIT_MAX;tasks[i].thread_count=1;tasks[i].thread_slots=1;tasks[i].next_tid=1;tasks[i].cpu=-1;}
  current=0;ticks=0;
 }
 static void snapshot(void){memcpy(saved_tasks,tasks,sizeof(tasks));memcpy(saved_eps,endpoints,sizeof(endpoints));}

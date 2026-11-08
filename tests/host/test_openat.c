@@ -30,11 +30,11 @@ int main(void){
  root=sf_ns_open(&ns,42,"/","/cap",OPEN_READ|OPEN_WRITE|OPEN_DIRECTORY);CHECK(root>0);sub=sf_ns_openat(&ns,42,root,"sub",OPEN_READ|OPEN_DIRECTORY);CHECK(sub>0);CHECK(sf_ns_openat(&ns,42,sub,"data",OPEN_WRITE)==SF_DENIED);writer=sf_ns_openat(&ns,42,root,"sub/data",OPEN_WRITE);CHECK(writer>0);CHECK(sf_ns_read(&ns,42,writer,out,1)==SF_DENIED);sf_ns_reap(&ns,42);
  /* Parent and child hold independent mount leases. Admission failures and
     capacity exhaustion must never leak a lease. */
- ns.mount_open=mount_open;ns.mount_close=mount_close;for(unsigned i=0;i<32;i++)if(ns.nodes[i].type&&(!strcmp(ns.nodes[i].path,"/cap")||!strcmp(ns.nodes[i].path,"/cap/sub")||!strcmp(ns.nodes[i].path,"/cap/sub/data")))ns.nodes[i].mount_tag=7;
+ ns.mount_open=mount_open;ns.mount_close=mount_close;for(unsigned i=0;i<SF_NS_NODE_MAX;i++)if(ns.nodes[i].type&&(!strcmp(ns.nodes[i].path,"/cap")||!strcmp(ns.nodes[i].path,"/cap/sub")||!strcmp(ns.nodes[i].path,"/cap/sub/data")))ns.nodes[i].mount_tag=7;
  root=sf_ns_open(&ns,42,"/","/cap",OPEN_READ|OPEN_DIRECTORY);CHECK(root>0&&leases==1);file=sf_ns_openat(&ns,42,root,"sub/data",OPEN_READ);CHECK(file>0&&leases==2);CHECK(sf_ns_unmount(&ns,7)==SF_BUSY);
  admission=0;CHECK(sf_ns_openat(&ns,42,root,"sub/data",OPEN_READ)==SF_DRAINING&&leases==2);admission=1;
  CHECK(!sf_ns_close(&ns,42,root)&&leases==1);CHECK(sf_ns_unmount(&ns,7)==SF_BUSY);CHECK(!sf_ns_close(&ns,42,file)&&leases==0);
- root=sf_ns_open(&ns,42,"/","/cap",OPEN_READ|OPEN_DIRECTORY);CHECK(root>0);for(unsigned i=0;i<31;i++)CHECK(sf_ns_openat(&ns,42,root,"sub/data",OPEN_READ)>0);CHECK(leases==32);CHECK(sf_ns_openat(&ns,42,root,"sub/data",OPEN_READ)==SF_NO_SPACE&&leases==32);sf_ns_reap(&ns,42);CHECK(leases==0);
- for(unsigned i=0;i<64;i++)ns.handles[i].generation=0x7fffff;CHECK(sf_ns_open(&ns,42,"/","/cap",OPEN_READ)==SF_NO_SPACE&&leases==0);ns.handles[63].generation=0;root=sf_ns_open(&ns,42,"/","/cap",OPEN_READ|OPEN_DIRECTORY);CHECK(root>0&&(root&255)==64&&leases==1);CHECK(!sf_ns_close(&ns,42,root)&&leases==0);CHECK(!sf_ns_unmount(&ns,7));
+ root=sf_ns_open(&ns,42,"/","/cap",OPEN_READ|OPEN_DIRECTORY);CHECK(root>0);for(unsigned i=0;i<SF_NS_DESCRIPTION_MAX-1;i++)CHECK(sf_ns_openat(&ns,42,root,"sub/data",OPEN_READ)>0);CHECK(leases==SF_NS_DESCRIPTION_MAX);CHECK(sf_ns_openat(&ns,42,root,"sub/data",OPEN_READ)==SF_NO_SPACE&&leases==SF_NS_DESCRIPTION_MAX);sf_ns_reap(&ns,42);CHECK(leases==0);
+ for(unsigned i=0;i<SF_NS_HANDLE_MAX;i++)ns.handles[i].generation=0x7fffff;CHECK(sf_ns_open(&ns,42,"/","/cap",OPEN_READ)==SF_NO_SPACE&&leases==0);ns.handles[SF_NS_HANDLE_MAX-1].generation=0;root=sf_ns_open(&ns,42,"/","/cap",OPEN_READ|OPEN_DIRECTORY);CHECK(root>0&&(root&255)==SF_NS_HANDLE_MAX&&leases==1);CHECK(!sf_ns_close(&ns,42,root)&&leases==0);CHECK(!sf_ns_unmount(&ns,7));
  printf("OPENAT PASS: %u assertions\n",checks);return 0;
 }

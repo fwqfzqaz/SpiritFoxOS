@@ -3,8 +3,9 @@
 #include <string.h>
 #include <setjmp.h>
 #include "../../kernel/ipc.c"
-Task tasks[SF_MAX_TASKS];int current;uint64_t ticks;
-static Frame frames[2];static SfMessage buffers[2];static Task saved_tasks[SF_MAX_TASKS];static Endpoint saved_eps[ENDPOINTS];
+Task tasks[SF_MAX_THREADS];int cpu_currents[SF_MAX_CPUS];uint64_t ticks;
+void task_wake(Task*t){t->state=T_READY;t->ready_since=ticks;}
+static Frame frames[2];static SfMessage buffers[2];static Task saved_tasks[SF_MAX_THREADS];static Endpoint saved_eps[ENDPOINTS];
 static unsigned checks;static int fail_in,fail_out,expected_panic;static jmp_buf recovery;
 static unsigned __int128 actual_input,actual_output;
 static uint32_t root_handle,peer_handle;
@@ -24,7 +25,7 @@ static void audit(void){
 }
 static void setup(uint64_t id){
  memset(tasks,0,sizeof(tasks));memset(endpoints,0,sizeof(endpoints));memset(frames,0,sizeof(frames));memset(buffers,0,sizeof(buffers));fail_in=fail_out=0;
- for(unsigned i=0;i<2;i++){tasks[i].pid=i+1;tasks[i].state=T_READY;tasks[i].cap_limit=32;tasks[i].frame=&frames[i];}
+ for(unsigned i=0;i<2;i++){tasks[i].pid=i+1;tasks[i].state=T_READY;tasks[i].cap_limit=32;tasks[i].frame=&frames[i];tasks[i].main=1;tasks[i].main_slot=i;tasks[i].tid=1;tasks[i].thread_limit=SF_THREAD_LIMIT_MAX;tasks[i].thread_count=1;tasks[i].thread_slots=1;tasks[i].next_tid=1;tasks[i].cpu=-1;}
  current=0;ticks=100;root_handle=ipc_syscall(SYS_EP_CREATE,0,0,0);peer_handle=ipc_grant(&tasks[0],&tasks[1],root_handle,RIGHT_SEND|RIGHT_RECV);CHECK(root_handle&&peer_handle);
  buffers[0].h=(SfIpcHeader){40,1,0,OP_ECHO,99,id,sizeof(SfMessage)-40,0,0};buffers[0].length=id%257;
 }

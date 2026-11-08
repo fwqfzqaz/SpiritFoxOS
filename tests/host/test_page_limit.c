@@ -2,7 +2,7 @@
 static long page_limit(uint64_t pid,uint64_t pages,uint64_t op){Frame f={0};f.rax=SYS_TASK_PAGE_LIMIT;f.rdi=pid;f.rsi=pages;f.rdx=op;return syscall(&f);}
 static long spawn_limited(SfLoadPlan*p,uint64_t pages,uint64_t reserved){Frame f={0};f.rax=SYS_SPAWN_LIMITED;f.rdi=(uintptr_t)p;f.rsi=pages;f.rdx=reserved;return syscall(&f);}
 int main(void){
- reset(42);tasks[1].pid=2;tasks[1].state=T_BLOCKED;tasks[1].page_limit=4096;tasks[1].page_count=7;
+ reset(42);tasks[1].pid=2;tasks[1].state=T_BLOCKED;tasks[1].main=1;tasks[1].main_slot=1;tasks[1].page_limit=4096;tasks[1].page_count=7;
  memcpy(saved,tasks,sizeof(tasks));CHECK(page_limit(2,0,SF_LIMIT_USED)==7&&page_limit(2,0,SF_LIMIT_QUERY)==4096&&!memcmp(saved,tasks,sizeof(tasks)));
  CHECK(page_limit(2,6,SF_LIMIT_SET)==SF_BUSY&&!memcmp(saved,tasks,sizeof(tasks)));
  CHECK(page_limit(2,7,SF_LIMIT_SET)==7&&tasks[1].page_count==7&&tasks[1].state==T_BLOCKED);
@@ -14,7 +14,7 @@ int main(void){
  current=1;CHECK(page_limit(2,0,SF_LIMIT_USED)==SF_DENIED&&page_limit(2,4096,SF_LIMIT_SET)==SF_DENIED&&page_limit(UINT64_MAX,UINT64_MAX,UINT64_MAX)==SF_DENIED&&spawn_limited(0,UINT64_MAX,UINT64_MAX)==SF_DENIED&&!memcmp(saved,tasks,sizeof(tasks)));current=0;
  uint32_t seed=0xad49u;
  for(unsigned trial=0;trial<1000;trial++){
-  reset(42);tasks[1].pid=2;tasks[1].state=trial&1?T_READY:T_BLOCKED;tasks[1].page_limit=4096;
+  reset(42);tasks[1].pid=2;tasks[1].state=trial&1?T_READY:T_BLOCKED;tasks[1].main=1;tasks[1].main_slot=1;tasks[1].page_limit=4096;
   seed=seed*1664525u+1013904223u;unsigned used=trial==0?0:trial==1?4096:seed%4097;tasks[1].page_count=used;
   seed=seed*1664525u+1013904223u;unsigned requested=seed%4097;memcpy(saved,tasks,sizeof(tasks));
   CHECK(page_limit(2,0,SF_LIMIT_USED)==(long)used&&!memcmp(saved,tasks,sizeof(tasks)));

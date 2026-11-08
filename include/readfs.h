@@ -1,9 +1,13 @@
 #ifndef READFS_H
 #define READFS_H
 #include "package.h"
-#define SF_READFS_MAX_ENTRIES 16u
-#define SF_READFS_FILE_MAX (128u*1024u)
-#define SF_READFS_IMAGE_MAX (8u*1024u*1024u)
+#define SF_READFS_MAX_ENTRIES 48u
+#define SF_READFS_FILE_MAX (1024u*1024u)
+#define SF_READFS_IMAGE_MAX (32u*1024u*1024u)
+/* SFRFS1 keeps the original bounded profile; SFRFS2 is the generic tree profile. */
+#define SF_READFS1_MAX_ENTRIES 16u
+#define SF_READFS1_FILE_MAX (128u*1024u)
+#define SF_READFS1_IMAGE_MAX (8u*1024u*1024u)
 typedef int (*SfSectorRead)(void*,uint64_t,uint8_t[512]);
 typedef struct {char path[64];uint64_t offset,bytes;uint8_t hash[32];} SfReadFile;
 typedef struct {SfSectorRead read;void*context;uint64_t capacity;uint32_t count,mounted;SfReadFile files[SF_READFS_MAX_ENTRIES];} SfReadFs;

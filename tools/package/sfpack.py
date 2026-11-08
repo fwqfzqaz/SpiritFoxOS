@@ -154,6 +154,136 @@ def elf_relative_records(image):
     return b''.join(struct.pack('<Qq',target,addend) for target,addend in records)
 
 
+def elf_symbols(image):
+    """Read defined symbols from .symtab (preferred) or .dynsym."""
+    fields = struct.unpack_from('<HHIQQQIHHHHHH', image, 16)
+    shoff, entsize, count = fields[5], fields[10], fields[11]
+    if entsize != 64 or not count or shoff > len(image) or count*64 > len(image)-shoff:
+        raise ValueError('Expected bounded ELF section table')
+    sections = [struct.unpack_from('<IIQQQQIIQQ', image, shoff+i*64) for i in range(count)]
+    table = None
+    for want in (2, 11):
+        for section in sections:
+            typ, off, size, link, stride = section[1], section[4], section[5], section[6], section[9]
+            if typ == want and stride == 24 and off <= len(image) and size <= len(image)-off:
+                table = (off, size, link)
+                break
+        if table:
+            break
+    if not table:
+        raise ValueError('ELF symbol table is required for imports/exports')
+    off, size, link = table
+    if link >= count:
+        raise ValueError('ELF symbol table string link out of bounds')
+    string = sections[link]
+    soff, ssize = string[4], string[5]
+    if soff > len(image) or ssize > len(image)-soff:
+        raise ValueError('ELF string table out of bounds')
+    symbols = {}
+    for pos in range(off, off+size, 24):
+        name, info, other, shndx, value, symbol_size = struct.unpack_from('<IBBHQQ', image, pos)
+        if not shndx or not name:
+            continue
+        if name >= ssize:
+            raise ValueError('ELF symbol name out of bounds')
+        end = image.find(b'\0', soff+name, soff+ssize)
+        if end < 0:
+            raise ValueError('Unterminated ELF symbol name')
+        text = image[soff+name:end].decode('ascii', 'strict')
+        symbols.setdefault(text, (info, shndx, value, symbol_size))
+    return symbols
+
+
+def _identifier(value, limit=31):
+    if not isinstance(value, str) or not 1 <= len(value) <= limit:
+        raise ValueError('Bounded identifier required')
+    if not (value[0].isalpha() or value[0] == '_') or not all(c.isalnum() or c == '_' for c in value):
+        raise ValueError('Identifier must be a C symbol name')
+    return value
+
+
+def _writable(segments, rva):
+    return any(kind == 3 and rva >= start and rva-start+8 <= memory
+               for kind, _flags, start, memory, _data in segments)
+
+
+def _executable(segments, rva):
+    return any(kind == 1 and rva >= start and rva-start < memory
+               for kind, _flags, start, memory, _data in segments)
+
+
+def native_imports(manifest, image, segments):
+    imports = manifest.get('native_imports')
+    if imports is None:
+        return None
+    if not isinstance(imports, list) or not 1 <= len(imports) <= 32:
+        raise ValueError('native_imports must contain 1..32 entries')
+    if 'import_relocations' in manifest:
+        raise ValueError('sfpack owns the generated import relocation subtable')
+    symbols = elf_symbols(image)
+    result, seen_name, seen_slot = [], set(), set()
+    for entry in imports:
+        if not isinstance(entry, dict) or set(entry) != {'name', 'abi', 'slot'}:
+            raise ValueError('Import entries require exactly name, abi and slot')
+        name, abi, slot = (_identifier(entry['name']), entry['abi'], _identifier(entry['slot']))
+        if abi != 'libsf-posix-1':
+            raise ValueError('Unsupported import ABI')
+        if name in seen_name:
+            raise ValueError('Duplicate import name')
+        symbol = symbols.get(slot)
+        if not symbol:
+            raise ValueError('Missing import slot symbol ' + slot)
+        info, _shndx, value, size = symbol
+        if (info >> 4) not in (1, 2) or (info & 15) != 1 or size != 8:
+            raise ValueError('Import slot must be a global 8-byte object')
+        if value % 8 or not _writable(segments, value):
+            raise ValueError('Import slot must be aligned in writable memory')
+        if value in seen_slot:
+            raise ValueError('Duplicate import slot address')
+        seen_name.add(name)
+        seen_slot.add(value)
+        result.append({'name': name, 'abi': abi, 'slot_rva': value})
+    return result
+
+
+def native_exports(manifest, image, segments):
+    exports = manifest.get('native_exports')
+    if exports is None:
+        return None
+    if not isinstance(exports, list) or not 1 <= len(exports) <= 64:
+        raise ValueError('native_exports must contain 1..64 entries')
+    symbols = elf_symbols(image)
+    result, seen = [], set()
+    for entry in exports:
+        if not isinstance(entry, dict) or set(entry) != {'name', 'abi'}:
+            raise ValueError('Export entries require exactly name and abi')
+        name, abi = _identifier(entry['name']), entry['abi']
+        if abi != 'libsf-posix-1':
+            raise ValueError('Unsupported export ABI')
+        if name in seen:
+            raise ValueError('Duplicate export name')
+        symbol = symbols.get(name)
+        if not symbol:
+            raise ValueError('Missing export symbol ' + name)
+        info, _shndx, value, _size = symbol
+        if (info >> 4) not in (1, 2) or (info & 15) != 2:
+            raise ValueError('Exports must be global functions')
+        if not _executable(segments, value):
+            raise ValueError('Export must live in executable memory')
+        seen.add(name)
+        result.append({'name': name, 'abi': abi, 'rva': value})
+    return result
+
+
+def native_library(manifest):
+    library = manifest.get('native_library')
+    if not isinstance(library, str) or not 1 <= len(library) <= 63:
+        raise ValueError('native_library must name the runtime library module')
+    if not all(c.isalnum() or c in '._-' for c in library):
+        raise ValueError('native_library must be a module identifier')
+    return library
+
+
 def seal(blob, seed, crypto=None):
     crypto = crypto or Crypto()
     result = bytearray(blob)
@@ -166,16 +296,46 @@ def seal(blob, seed, crypto=None):
 
 def pack(manifest, image, kind, seed):
     relative = manifest.get('native_profile') == 'relative-v1'
-    if relative and kind != 2:
-        raise ValueError('PIE profile is for native applications only')
+    role = manifest.get('native_role')
+    if role not in (None, 'library'):
+        raise ValueError('native_role must be library')
+    if role == 'library' and (kind != 1 or not relative):
+        raise ValueError('Library images must be relative-v1 modules')
+    if manifest.get('native_imports') is not None and not relative:
+        raise ValueError('Import tables require the relative-v1 profile')
+    if manifest.get('native_exports') is not None and not relative:
+        raise ValueError('Export tables require the relative-v1 profile')
+    if relative and kind != 2 and not (kind == 1 and role == 'library'):
+        raise ValueError('PIE profile is for native applications and runtime libraries only')
     entry, segments = elf_segments(image,relative)
     if relative:
         records = elf_relative_records(image)
+        imports = native_imports(manifest, image, segments)
+        exports = native_exports(manifest, image, segments)
+        if imports and kind != 2:
+            raise ValueError('Import tables are for native applications only')
+        if exports and (kind != 1 or role != 'library'):
+            raise ValueError('Export tables require a library module')
+        if role == 'library' and (not exports or imports):
+            raise ValueError('A runtime library exports symbols and imports none')
+        if imports:
+            native_library(manifest)
         manifest = dict(manifest)
-        if 'relative_relocations' in manifest:
-            raise ValueError('sfpack owns the generated relative relocation subtable')
+        for key in ('relative_relocations','import_relocations'):
+            if key in manifest:
+                raise ValueError('sfpack owns generated relocation subtables')
         manifest['relative_relocations'] = {'section':len(segments),'offset':0,'bytes':len(records)}
-        segments.append((4,0,0,len(records),records))
+        import_records = b''
+        if imports:
+            manifest['native_imports'] = imports
+            order = sorted(range(len(imports)), key=lambda i: imports[i]['slot_rva'])
+            import_records = b''.join(struct.pack('<QII', imports[i]['slot_rva'], i, 0)
+                                      for i in order)
+            manifest['import_relocations'] = {'section':len(segments),'offset':len(records),
+                                              'bytes':len(import_records)}
+        if exports:
+            manifest['native_exports'] = exports
+        segments.append((4,0,0,len(records)+len(import_records),records+import_records))
     encoded = cbor(manifest)
     result = bytearray(96+64*len(segments))
     moff = len(result)

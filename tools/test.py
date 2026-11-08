@@ -21,28 +21,37 @@ if not args.skip_build:
     # Windows a loaded DLL blocks the trust-policy tests from rebuilding it.
     subprocess.run([sys.executable, str(ROOT / 'tools' / 'build.py')], check=True)
 def host_test(name,*sources,no_unused=False):
-    flags=['-target',build.HOST,'-g0','-O2','-Wall','-Wextra','-Werror']
+    flags=['-target',build.HOST,'-g0','-O2','-Wall','-Wextra','-Werror','-DSF_HOST_TEST']
     if no_unused: flags.append('-Wno-unused-parameter')
-    build.run([*flags,'-Iinclude','-Ivendor/monocypher',*sources,'-o','build/'+name+build.EXE])
+    # 追加 Rust 宿主静态库：argparse/net_proto/sha256/sched_policy 已迁入
+    # rust/sfcore，链接器只拉取本测试实际引用的成员。
+    build.run([*flags,'-Iinclude','-Ivendor/monocypher',*sources,build.rust_lib('host'),'-o','build/'+name+build.EXE])
     subprocess.run([str(ROOT/('build/'+name+build.EXE))],check=True)
 
-host_test('test_arguments','tests/host/test_arguments.c','services/arguments.c','services/argparse.c')
-host_test('test_environment','tests/host/test_environment.c','services/arguments.c','services/argparse.c')
+# 参数打包与拆分：services/argparse.c → rust/sfcore/src/argparse.rs
+host_test('test_arguments','tests/host/test_arguments.c','services/arguments.c')
+host_test('test_environment','tests/host/test_environment.c','services/arguments.c')
 host_test('test_file_rpc','tests/host/test_file_rpc.c','services/file_rpc.c','services/namespace.c')
-host_test('test_task_pid','tests/host/test_task_pid.c','kernel/pid.c','kernel/sched_policy.c','services/arguments.c',no_unused=True)
-host_test('test_scheduler','tests/host/test_scheduler.c','kernel/pid.c','kernel/sched_policy.c','services/arguments.c',no_unused=True)
+# 调度策略：kernel/sched_policy.c → rust/sfcore/src/sched.rs
+host_test('test_task_pid','tests/host/test_task_pid.c','kernel/pid.c','services/arguments.c',no_unused=True)
+host_test('test_scheduler','tests/host/test_scheduler.c','kernel/pid.c','services/arguments.c',no_unused=True)
 host_test('test_sched_ipc','tests/host/test_sched_ipc.c')
-host_test('test_cap_limit','tests/host/test_cap_limit.c','kernel/pid.c','kernel/sched_policy.c','services/arguments.c',no_unused=True)
+host_test('test_cap_limit','tests/host/test_cap_limit.c','kernel/pid.c','services/arguments.c',no_unused=True)
 host_test('test_memory_quota','tests/host/test_memory_quota.c','kernel/memory.c',no_unused=True)
-host_test('test_page_limit','tests/host/test_page_limit.c','kernel/pid.c','kernel/sched_policy.c','services/arguments.c',no_unused=True)
+host_test('test_page_limit','tests/host/test_page_limit.c','kernel/pid.c','services/arguments.c',no_unused=True)
 host_test('test_ipc_budget','tests/host/test_ipc_budget.c')
 host_test('test_ipc_cancel','tests/host/test_ipc_cancel.c')
 host_test('test_ipc_stats','tests/host/test_ipc_stats.c')
-host_test('test_ipc_stats_control','tests/host/test_ipc_stats_control.c','kernel/pid.c','kernel/sched_policy.c','services/arguments.c',no_unused=True)
+host_test('test_threads','tests/host/test_threads.c','kernel/pid.c','services/arguments.c',no_unused=True)
+host_test('test_ipc_stats_control','tests/host/test_ipc_stats_control.c','kernel/pid.c','services/arguments.c',no_unused=True)
 host_test('test_supervisor','tests/host/test_supervisor.c','services/supervisor.c')
 host_test('test_manager','tests/host/test_manager.c','services/manager.c')
+host_test('test_lifecycle_rpc','tests/host/test_lifecycle_rpc.c','services/manager.c','services/lifecycle_rpc.c')
 host_test('test_services','tests/host/test_services.c','services/manager.c','services/namespace.c')
 host_test('test_openat','tests/host/test_openat.c','services/namespace.c')
+host_test('test_ns_identity','tests/host/test_ns_identity.c','services/namespace.c')
+host_test('test_accounts','tests/host/test_accounts.c','services/accounts.c')
+host_test('test_sessions','tests/host/test_sessions.c','services/session.c','services/accounts.c')
 host_test('test_file_client','tests/host/test_file_client.c','services/namespace.c','services/file_rpc.c')
 host_test('test_file_dup','tests/host/test_file_dup.c','services/namespace.c','services/file_rpc.c')
 host_test('test_file_pread','tests/host/test_file_pread.c','services/namespace.c','services/file_rpc.c')
@@ -50,13 +59,16 @@ host_test('test_stat','tests/host/test_stat.c','services/namespace.c','services/
 host_test('test_rmdir','tests/host/test_rmdir.c','services/namespace.c','services/file_rpc.c')
 host_test('test_unlink','tests/host/test_unlink.c','services/namespace.c','services/file_rpc.c')
 host_test('test_truncate','tests/host/test_truncate.c','services/namespace.c')
-host_test('test_resize_txn','tests/host/test_resize_txn.c','services/txn.c','services/sha256.c',no_unused=True)
+host_test('test_projection','tests/host/test_projection.c','services/namespace.c')
+# 事务与 SHA-256：services/sha256.c → rust/sfcore/src/sha256.rs
+host_test('test_resize_txn','tests/host/test_resize_txn.c','services/txn.c',no_unused=True)
 host_test('test_storage','tests/host/test_storage.c','services/namespace.c',no_unused=True)
-host_test('test_txn','tests/host/test_txn.c','services/txn.c','services/sha256.c',no_unused=True)
-host_test('test_txn_compat','tests/host/test_txn_compat.c','services/txn.c','services/sha256.c',no_unused=True)
-host_test('test_update','tests/host/test_update.c','services/update.c','services/txn.c','services/sha256.c',no_unused=True)
+host_test('test_txn','tests/host/test_txn.c','services/txn.c',no_unused=True)
+host_test('test_txn_compat','tests/host/test_txn_compat.c','services/txn.c',no_unused=True)
+host_test('test_update','tests/host/test_update.c','services/update.c','services/txn.c',no_unused=True)
 host_test('test_version','tests/host/test_version.c','services/version.c')
-host_test('test_net','tests/host/test_net.c','services/net_proto.c')
+# 网络帧逻辑：services/net_proto.c → rust/sfcore/src/net.rs
+host_test('test_net','tests/host/test_net.c')
 host_test('test_sdk','tests/host/test_sdk.c','services/sdk.c')
 host_test('test_iommu','tests/host/test_iommu.c','kernel/acpi.c','kernel/vtd_tables.c',no_unused=True)
 for name,source in [('ipc','kernel/ipc.c'),('memory','kernel/memory.c')]:
@@ -82,6 +94,7 @@ if not args.host_only:
     subprocess.run([sys.executable, 'tests/qemu/qemu_file_client_test.py'], check=True)
     subprocess.run([sys.executable, 'tests/qemu/qemu_rmdir_test.py'], check=True)
     subprocess.run([sys.executable, 'tests/qemu/qemu_stat_test.py'], check=True)
+    subprocess.run([sys.executable, 'tests/qemu/qemu_projection_test.py'], check=True)
     subprocess.run([sys.executable, 'tests/qemu/qemu_unlink_test.py'], check=True)
     subprocess.run([sys.executable, 'tests/qemu/qemu_invocation_preflight_test.py'], check=True)
     subprocess.run([sys.executable, 'tests/qemu/qemu_native_supervision_test.py'], check=True)
@@ -92,6 +105,7 @@ if not args.host_only:
     subprocess.run([sys.executable, 'tests/qemu/qemu_block_channel_test.py'], check=True)
     subprocess.run([sys.executable, 'tests/qemu/qemu_file_rpc_test.py'], check=True)
     subprocess.run([sys.executable, 'tests/qemu/qemu_native_test.py'], check=True)
+    subprocess.run([sys.executable, 'tests/qemu/qemu_posix_test.py'], check=True)
     subprocess.run([sys.executable, 'tests/qemu/qemu_environment_test.py'], check=True)
     subprocess.run([sys.executable, 'tests/qemu/qemu_arguments_test.py'], check=True)
     subprocess.run([sys.executable, 'tests/qemu/qemu_trust_policy_test.py'], check=True)
@@ -101,9 +115,12 @@ if not args.host_only:
         subprocess.run([sys.executable, 'tests/qemu/qemu_test.py', '--storage', case], check=True)
     subprocess.run([sys.executable, 'tests/qemu/qemu_persist_test.py'], check=True)
     subprocess.run([sys.executable, 'tests/qemu/qemu_net_test.py'], check=True)
+    subprocess.run([sys.executable, 'tests/qemu/qemu_net_test.py', '--disk'], check=True)
     subprocess.run([sys.executable, 'tests/qemu/qemu_iommu_test.py'], check=True)
+    subprocess.run([sys.executable, 'tests/qemu/qemu_smp_test.py'], check=True)
     subprocess.run([sys.executable, 'tests/qemu/qemu_security_test.py'], check=True)
     subprocess.run([sys.executable, 'tests/qemu/qemu_openat_test.py'], check=True)
+    subprocess.run([sys.executable, 'tests/qemu/qemu_user_test.py'], check=True)
     subprocess.run([sys.executable, 'tests/qemu/qemu_truncate_test.py'], check=True)
     subprocess.run([sys.executable, 'tests/qemu/qemu_trust_test.py'], check=True)
     subprocess.run([sys.executable, 'tests/qemu/qemu_txn_compat_test.py'], check=True)
@@ -119,18 +136,20 @@ result['iommu_host_assertions'] = 229
 result['iommu_qemu'] = not args.host_only
 result['security_host'] = True
 result['security_qemu'] = not args.host_only
-result['ipc_host_assertions'] = 40908
+result['ipc_host_assertions'] = 40950
 result['net_host_checks'] = 14084
 result['sdk_host_checks'] = 368490
 result['manifest_source_profile'] = 'native-source-v1'
 result['manifest_profile_host_tests'] = 12
 result['manifest_schema_sha256'] = manifest_schema_sha256
 result['abi_snapshot_host_tests'] = 9
-result['abi_snapshot_entries'] = 583
+result['abi_snapshot_entries'] = 600
 result['abi_reference_sha256'] = abi_reference_sha256
 result['abi_capture_sha256'] = abi_capture_sha256
+result['posix_qemu'] = not args.host_only
+result['posix_import_bindings'] = 15
 result['net_qemu'] = not args.host_only
-result['net_qemu_boots'] = 0 if args.host_only else 1
+result['net_qemu_boots'] = 0 if args.host_only else 2
 result['memory_host_assertions'] = 42
 result['openat_host_assertions'] = 108
 result['openat_qemu'] = not args.host_only

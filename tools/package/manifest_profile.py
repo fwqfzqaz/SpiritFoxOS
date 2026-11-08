@@ -103,7 +103,7 @@ def _check(value, rule, path):
         if rule.get('uniqueItems') and len(set(value)) != len(value):
             raise ValueError(path+': duplicate items')
     elif kind == 'string':
-        if not rule.get('minLength', 0) <= len(value) <= rule['maxLength']:
+        if not rule.get('minLength', 0) <= len(value) <= rule.get('maxLength', 1 << 30):
             raise ValueError(path+': invalid length')
         if 'pattern' in rule and re.fullmatch(rule['pattern'], value) is None:
             raise ValueError(path+': invalid text')
@@ -117,4 +117,19 @@ def validate(value, kind):
         raise ValueError('Manifest kind must be module or app')
     _bounded(value)
     _check(value, schema()['oneOf'][0 if kind == 'module' else 1], 'manifest')
+    # Schema shape alone cannot express the cross-field rules below.
+    if kind == 'module':
+        if value.get('native_role') is not None or value.get('native_profile') == 'relative-v1':
+            if (value.get('native_role') != 'library' or
+                    value.get('native_profile') != 'relative-v1' or
+                    not value.get('native_exports')):
+                raise ValueError('manifest: relative-v1 modules must be runtime libraries with exports')
+    else:
+        imports, library = value.get('native_imports'), value.get('native_library')
+        if imports is not None and not library:
+            raise ValueError('manifest: native_imports requires native_library')
+        if imports is not None and value.get('native_profile') != 'relative-v1':
+            raise ValueError('manifest: native_imports requires relative-v1')
+        if library is not None and imports is None:
+            raise ValueError('manifest: native_library requires native_imports')
     return value

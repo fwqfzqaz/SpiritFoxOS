@@ -1,18 +1,33 @@
 #ifndef NAMESPACE_H
 #define NAMESPACE_H
 #include "sf.h"
-enum { NODE_DIR=1,NODE_FILE,NODE_PIPE,NODE_CONSOLE,NODE_DISK };
+enum { NODE_DIR=1,NODE_FILE,NODE_PIPE,NODE_CONSOLE,NODE_DISK,NODE_PROJECTION };
+#define SF_NS_NODE_MAX 128
+/* 句柄槽号编码在低 8 位，容量上限不能超过 255。 */
+#define SF_NS_DESCRIPTION_MAX 64
+#define SF_NS_HANDLE_MAX 128
 enum { OPEN_READ=1,OPEN_WRITE=2,OPEN_NONBLOCK=4,OPEN_DIRECTORY=8 };
-typedef struct {char path[96];uint8_t type,readonly;uint16_t writers;uint32_t size,head,external,mount_tag;uint8_t data[1024];} SfNode;
+/* mode holds the classic nine permission bits (owner/group/other rwx).
+ * uid 0 bypasses permission checks; ownership is assigned by the trusted
+ * init when it materialises account homes and shared directories. */
+typedef struct {char path[96];uint8_t type,readonly,reserved;uint16_t mode,writers;uint32_t size,head,external,mount_tag,owner_uid,owner_gid;uint8_t data[1024];} SfNode;
 typedef struct {uint32_t node,offset,mode,refs;} SfDescription;
 typedef struct {uint32_t owner,generation,description;} SfFileHandle;
-typedef struct {SfNode nodes[32];SfDescription descriptions[32];SfFileHandle handles[64];long(*console)(const void*,size_t);long(*external_read)(unsigned,uint64_t,void*,size_t);long(*external_write)(unsigned,uint64_t,const void*,size_t);int(*external_truncate)(unsigned,uint64_t);int(*mount_open)(unsigned);void(*mount_close)(unsigned);} SfNamespace;
+typedef struct {SfNode nodes[SF_NS_NODE_MAX];SfDescription descriptions[SF_NS_DESCRIPTION_MAX];SfFileHandle handles[SF_NS_HANDLE_MAX];long(*console)(const void*,size_t);long(*external_read)(unsigned,uint64_t,void*,size_t);long(*external_write)(unsigned,uint64_t,const void*,size_t);int(*external_truncate)(unsigned,uint64_t);int(*mount_open)(unsigned);void(*mount_close)(unsigned);long(*projection_read)(unsigned,uint64_t,void*,size_t);} SfNamespace;
 void sf_ns_init(SfNamespace*,long(*)(const void*,size_t));
 int sf_ns_create(SfNamespace*,const char*,unsigned,int);
+int sf_ns_create_owned(SfNamespace*,const char*,unsigned,int,uint32_t,uint32_t,unsigned);
+int sf_ns_assign(SfNamespace*,const char*,uint32_t,uint32_t,unsigned);
+int sf_ns_project(SfNamespace*,const char*,unsigned);
+int sf_ns_protect(SfNamespace*,const char*);
 int sf_ns_open(SfNamespace*,uint32_t,const char*,const char*,unsigned);
+int sf_ns_open_as(SfNamespace*,uint32_t,const char*,const char*,unsigned,uint32_t,uint32_t);
 int sf_ns_openat(SfNamespace*,uint32_t,uint32_t,const char*,unsigned);
+int sf_ns_openat_as(SfNamespace*,uint32_t,uint32_t,const char*,unsigned,uint32_t,uint32_t);
 int sf_ns_unlink(SfNamespace*,uint32_t,uint32_t,const char*);
+int sf_ns_unlink_as(SfNamespace*,uint32_t,uint32_t,const char*,uint32_t,uint32_t);
 int sf_ns_rmdir(SfNamespace*,uint32_t,uint32_t,const char*);
+int sf_ns_rmdir_as(SfNamespace*,uint32_t,uint32_t,const char*,uint32_t,uint32_t);
 int sf_ns_stat(SfNamespace*,uint32_t,uint32_t,SfFileStat*);
 int sf_ns_dup(SfNamespace*,uint32_t,uint32_t);
 int sf_ns_close(SfNamespace*,uint32_t,uint32_t);

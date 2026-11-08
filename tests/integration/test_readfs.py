@@ -20,6 +20,9 @@ class ReadFs(unittest.TestCase):
     def check(self,data,contents=True):
         return self.crypto.lib.sf_fs_check(bytes(data),len(data),int(contents))
 
+    def check_auto(self,data,contents=True,format=0):
+        return self.crypto.lib.sf_fs_check_auto(bytes(data),len(data),int(contents),int(format))
+
     def rehash(self,data):
         size=struct.unpack_from('<Q',data,40)[0]
         data[48:80]=hashlib.sha256(data[512:512+size]).digest()
@@ -61,6 +64,54 @@ class ReadFs(unittest.TestCase):
         for _ in range(500):
             data=bytearray(self.good);data[rng.randrange(768)]^=1<<rng.randrange(8)
             self.assertLess(self.check(data),0)
+
+    def test_auto_probe_selects_format(self):
+        v2=create({'/bin/a':b'v2','/empty':b'','/nested/deep/file':b'x'},format=2)
+        self.assertEqual(self.check_auto(self.good,contents=False),1)
+        self.assertEqual(self.check_auto(v2,contents=False),2)
+        self.assertEqual(self.check_auto(v2),2)
+        self.assertEqual(self.check_auto(self.good,format=1),1)
+        self.assertEqual(self.check_auto(v2,format=2),2)
+        self.assertLess(self.check_auto(v2,format=1),0)
+        self.assertLess(self.check_auto(v2,format=3),0)
+
+    def test_sfrfs1_profile_stays_strict(self):
+        with self.assertRaises(ValueError): create({},format=1)
+        with self.assertRaises(ValueError): create({'/empty':b''},format=1)
+        with self.assertRaises(ValueError): create({'/one':b'x'*(128*1024+1)},format=1)
+        with self.assertRaises(ValueError): create({'/f%02d'%i:b'x' for i in range(17)},format=1)
+
+    def test_sfrfs2_builder_bounds(self):
+        self.assertEqual(self.check_auto(create({},format=2),contents=False),2)
+        nested=create({'/usr/share/a':b'1','/usr/local/b':b'2','/empty':b''},format=2)
+        self.assertEqual(self.check_auto(nested),2)
+        with self.assertRaises(ValueError): create({'/big':b'x'*(1024*1024+1)},format=2)
+        with self.assertRaises(ValueError): create({'/a':b'x'},image_bytes=33*1024*1024,format=2)
+        with self.assertRaises(ValueError): create({'/f%02d'%i:b'x' for i in range(49)},format=2)
+        with self.assertRaises(ValueError): create({'/a':b'1','/a/b':b'2'},format=2)
+
+    def test_sfrfs2_rejects_malformed_tables(self):
+        good=create({'/a':b'1','/b':b'2'},format=2)
+        self.assertEqual(self.check_auto(good,contents=False),2)
+        data_start=1024
+        data=bytearray(good);data[520]^=1
+        self.assertLess(self.check_auto(data),0)
+        data=bytearray(good);struct.pack_into('<Q',data,512+64,data_start+1)
+        self.assertLess(self.check_auto(self.rehash(data)),0)
+        data=bytearray(good);struct.pack_into('<Q',data,512+128+64,data_start);struct.pack_into('<Q',data,512+128+72,1)
+        self.assertLess(self.check_auto(self.rehash(data)),0)
+        data=bytearray(good);data[512:640],data[640:768]=data[640:768],data[512:640]
+        self.assertLess(self.check_auto(self.rehash(data)),0)
+        data=bytearray(good);struct.pack_into('<Q',data,512+64,4*1024*1024)
+        self.assertLess(self.check_auto(self.rehash(data)),0)
+        tree=create({'/a/x':b'1','/a/y':b'2'},format=2)
+        data=bytearray(tree);data[512:576]=b'/a\0'+bytes(62)
+        self.assertLess(self.check_auto(self.rehash(data)),0)
+        data=bytearray(good);data[512:576]=b'/../evil\0'+bytes(55)
+        self.assertLess(self.check_auto(self.rehash(data)),0)
+        data=bytearray(good);bad=bytearray(good);off=struct.unpack_from('<Q',data,512+64)[0];bad[off]^=1
+        self.assertEqual(self.check_auto(bad,contents=False),2)
+        self.assertLess(self.check_auto(bad),0)
 
 
 if __name__=='__main__':unittest.main(verbosity=2)

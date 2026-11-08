@@ -1,4 +1,4 @@
-/* Q35 VT-d legacy mode: one segment, one bus, one fixed DMA grant. */
+/* Q35 VT-d legacy mode: one segment, one bus, up to two concurrent DMA grants. */
 #include "kernel.h"
 #include "iommu.h"
 static SfVtdTables tables __attribute__((aligned(4096)));
@@ -7,7 +7,7 @@ static unsigned mode,iotlb_offset,fault_offset,fault_records;
 static uint64_t capability;
 static int coherent;
 static SfDmarInfo topology;
-static uint32_t active_bdf=UINT32_MAX;
+static uint32_t active_bdf[SF_DMA_IOVA_SLOTS]={UINT32_MAX,UINT32_MAX};
 static uint32_t r32(unsigned off){return *(volatile uint32_t*)(registers+off);}
 static uint64_t r64(unsigned off){return *(volatile uint64_t*)(registers+off);}
 static void w32(unsigned off,uint32_t n){*(volatile uint32_t*)(registers+off)=n;}
@@ -46,15 +46,22 @@ void iommu_init(SfBootInfo*b){
 }
 unsigned iommu_mode(void){return mode;}
 int iommu_grant(uint32_t bdf,uint64_t physical,uint64_t*address){
- if(!mode){*address=physical;return 0;}if(mode!=1||active_bdf!=UINT32_MAX)return SF_DEVICE_GONE;if(bdf>=256||!topology.covered[bdf])return SF_DENIED;
- if(sf_vtd_tables(&tables,(uint64_t)&tables,bdf,physical)||invalidate())return SF_DEVICE_GONE;
- active_bdf=bdf;*address=SF_DMA_IOVA;return 0;
+ if(!mode){*address=physical;return 0;}if(mode!=1)return SF_DEVICE_GONE;if(bdf>=256||!topology.covered[bdf])return SF_DENIED;
+ unsigned slot=SF_DMA_IOVA_SLOTS;for(unsigned i=0;i<SF_DMA_IOVA_SLOTS;i++)if(active_bdf[i]==UINT32_MAX){slot=i;break;}
+ if(slot==SF_DMA_IOVA_SLOTS)return SF_DEVICE_GONE;
+ int first=!iommu_active();
+ if((first?sf_vtd_tables(&tables,(uint64_t)&tables,bdf,physical):sf_vtd_tables_add(&tables,(uint64_t)&tables,bdf,physical,slot))||invalidate())return SF_DEVICE_GONE;
+ active_bdf[slot]=bdf;*address=SF_DMA_IOVA+(uint64_t)slot*SF_DMA_IOVA_STRIDE;return 0;
 }
 int iommu_revoke(uint32_t bdf){
- if(!mode)return 0;if(mode!=1)return SF_DEVICE_GONE;if(active_bdf==UINT32_MAX)return 0;if(active_bdf!=bdf)return SF_DENIED;
- tables.context[bdf*2]=0;barrier();if(invalidate())return SF_DEVICE_GONE;memset(&tables,0,sizeof(tables));table_sync();active_bdf=UINT32_MAX;return 0;
+ if(!mode)return 0;if(mode!=1)return SF_DEVICE_GONE;
+ unsigned slot=SF_DMA_IOVA_SLOTS;for(unsigned i=0;i<SF_DMA_IOVA_SLOTS;i++)if(active_bdf[i]==bdf){slot=i;break;}
+ if(slot==SF_DMA_IOVA_SLOTS)return 0;
+ tables.context[bdf*2]=0;tables.context[bdf*2+1]=0;barrier();if(invalidate())return SF_DEVICE_GONE;
+ memset(tables.level3[slot],0,sizeof(tables.level3[slot]));memset(tables.level2[slot],0,sizeof(tables.level2[slot]));memset(tables.level1[slot],0,sizeof(tables.level1[slot]));
+ table_sync();active_bdf[slot]=UINT32_MAX;return 0;
 }
-int iommu_active(void){return active_bdf!=UINT32_MAX;}
+int iommu_active(void){for(unsigned i=0;i<SF_DMA_IOVA_SLOTS;i++)if(active_bdf[i]!=UINT32_MAX)return 1;return 0;}
 int iommu_fault(uint32_t*source,uint32_t*reason,uint64_t*address){
  if(mode!=1)return 0;for(unsigned i=0;i<fault_records;i++){unsigned off=fault_offset+i*16;uint64_t high=r64(off+8);if(!(high&(1ull<<63)))continue;
   *source=high&65535;*reason=(high>>32)&255;*address=r64(off)&~4095ull;w64(off+8,1ull<<63);w32(0x34,1);return 1;}

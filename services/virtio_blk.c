@@ -88,9 +88,10 @@ static void mmio_buffer_tests(void){
 long sf_main(const SfBootArgs*a,size_t size){
  boot=a;if(size!=sizeof(*a)||a->abi_major!=1)return SF_ABI_MISMATCH;mmio_buffer_tests();int startup=start();if(startup)stop();
  sf_log(startup?"[VIRTIO] device initialization refused\n":writable?"[VIRTIO] flush-capable write service in ring 3\n":"[VIRTIO] readonly block service in ring 3\n");
+ /* 持有服务端点能力即获授权：sf-init 与 sf-persist 都通过派生/转移得到的
+  * RIGHT_SEND 句柄访问块服务，不再以发送方 PID 作为授权依据。 */
  for(;;){SfMessage m;long sender=sf_recv(a->service,&m,0);if(sender<0){stop();return sender;}int result=0;
-  if(sender!=1)result=SF_DENIED;
-  else if(m.h.opcode==OP_BLOCK_STOP){result=stop();m.status=result;sf_send(a->manager,&m);continue;}
+  if(m.h.opcode==OP_BLOCK_STOP){result=stop();m.status=result;sf_send(a->manager,&m);continue;}
   else if(startup)result=startup;
   else if(!online)result=SF_DEVICE_GONE;
   else if(m.h.opcode==OP_BLOCK_INFO){SfBlockInfo info={capacity,512,!writable};memcpy(m.data,&info,sizeof(info));m.length=sizeof(info);}

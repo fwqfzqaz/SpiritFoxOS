@@ -1,0 +1,22 @@
+# SpiritFoxOS 核心纯逻辑组件（Rust 实现）。
+#
+# 本 crate 编译为 no_std 静态库，导出与原 C 实现完全一致的 C ABI 符号，
+# 由 zig cc 在链接阶段以归档形式并入内核、服务镜像与 UEFI 引导程序。
+# 不依赖任何第三方 crate，构建完全离线可复现。
+[package]
+name = "sfcore"
+version = "0.1.0"
+edition = "2021"
+description = "SpiritFoxOS 纯逻辑组件的 Rust 实现（SHA-256、参数打包、网络帧、调度策略）"
+
+[lib]
+name = "sfcore"
+# 产出 C 可链接的静态归档（libsfcore.a），供 zig cc 直接并入各镜像。
+crate-type = ["staticlib"]
+
+[profile.release]
+# 体积优先：内核与用户镜像都受 SF_IMAGE_MAX（2 MiB）约束。
+opt-level = "z"
+# 注意：不要启用 lto=true / codegen-units=1——它们会把整个 crate 合并为
+# 单个目标文件，破坏静态归档的成员粒度（拉取任一符号即拖入全部代码，
+# 并引入对 C 侧符号的隐式依赖）。成员粒度让链接器按需拉取。

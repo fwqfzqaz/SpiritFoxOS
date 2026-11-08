@@ -1,16 +1,16 @@
 #include "core_fixture.h"
-static Frame frames[SF_MAX_TASKS];
+static Frame frames[SF_MAX_THREADS];
 static void ready(unsigned count){
  reset(100);ticks=0;core_allow_schedule=1;core_last_arch=0;
- for(unsigned i=0;i<count;i++){tasks[i].pid=i+1;tasks[i].state=T_READY;tasks[i].priority=SF_PRIORITY_DEFAULT;
+ for(unsigned i=0;i<count;i++){tasks[i].pid=i+1;tasks[i].state=T_READY;tasks[i].main=1;tasks[i].main_slot=i;tasks[i].tid=1;tasks[i].cpu=-1;tasks[i].thread_limit=SF_THREAD_LIMIT_MAX;tasks[i].thread_count=1;tasks[i].thread_slots=1;tasks[i].next_tid=1;tasks[i].priority=SF_PRIORITY_DEFAULT;
   memset(&frames[i],0,sizeof(frames[i]));frames[i].rsp=SF_STACK-8;tasks[i].frame=&frames[i];}
  current=(int)count-1;
 }
 static long control(uint64_t pid,uint64_t level,uint64_t op){Frame f={0};f.rax=SYS_TASK_PRIORITY;f.rdi=pid;f.rsi=level;f.rdx=op;return syscall(&f);}
 int main(void){
- SfSchedEntry entries[SF_MAX_TASKS]={0},copy[SF_MAX_TASKS];
+ SfSchedEntry entries[SF_MAX_THREADS]={0},copy[SF_MAX_THREADS];
  CHECK(sf_sched_pick(0,1,-1,0)==-1&&sf_sched_pick(entries,0,-1,0)==-1);
- CHECK(sf_sched_pick(entries,SF_MAX_TASKS+1,-1,0)==-1&&sf_sched_pick(entries,2,-2,0)==-1&&sf_sched_pick(entries,2,2,0)==-1);
+ CHECK(sf_sched_pick(entries,SF_MAX_THREADS+1,-1,0)==-1&&sf_sched_pick(entries,2,-2,0)==-1&&sf_sched_pick(entries,2,2,0)==-1);
  CHECK(sf_sched_pick(entries,2,-1,0)==-1);
  entries[0]=(SfSchedEntry){0,0,1};entries[1]=(SfSchedEntry){0,3,1};memcpy(copy,entries,sizeof(copy));
  CHECK(sf_sched_pick(entries,2,-1,11)==1&&sf_sched_pick(entries,2,1,12)==0);

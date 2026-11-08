@@ -3,7 +3,7 @@
 static SfNamespace ns,saved;static unsigned checks;
 #define CHECK(x) do{checks++;if(!(x)){printf("RMDIR FAIL line %d: %s\n",__LINE__,#x);return 1;}}while(0)
 #define REJECT(expr,error) do{saved=ns;CHECK((expr)==(error));CHECK(!memcmp(&ns,&saved,sizeof(ns)));}while(0)
-static int find(const char*p){for(unsigned i=0;i<32;i++)if(ns.nodes[i].type&&!strcmp(ns.nodes[i].path,p))return i;return -1;}
+static int find(const char*p){for(unsigned i=0;i<SF_NS_NODE_MAX;i++)if(ns.nodes[i].type&&!strcmp(ns.nodes[i].path,p))return i;return -1;}
 int main(void){
  sf_ns_init(&ns,0);CHECK(!sf_ns_create(&ns,"/cap",NODE_DIR,0));CHECK(!sf_ns_create(&ns,"/cap/sub",NODE_DIR,0));CHECK(!sf_ns_create(&ns,"/cap/sub/item",NODE_DIR,0));CHECK(!sf_ns_create(&ns,"/cap/sub/item2",NODE_DIR,0));
  int root=sf_ns_open(&ns,42,"/","/cap",OPEN_READ|OPEN_WRITE|OPEN_DIRECTORY),read=sf_ns_open(&ns,43,"/","/cap",OPEN_READ|OPEN_DIRECTORY),global=sf_ns_open(&ns,1,"/","/",OPEN_WRITE|OPEN_DIRECTORY);CHECK(root>0&&read>0&&global>0);
@@ -34,6 +34,6 @@ int main(void){
  uint64_t masks[]={1ull<<32,1ull<<63,0xffffffff00000000ull};
  for(unsigned i=0;i<3;i++){memset(&g.m,0,sizeof(g.m));g.m.h.opcode=OP_RMDIR;g.m.handle=masks[i]|(uint32_t)root;g.m.length=6;memcpy(g.m.data,"empty",6);REJECT(sf_file_dispatch(&ns,42,&owned,&g.m),SF_STALE_HANDLE);CHECK(!g.m.length&&owned==(unsigned)root);}
  g.m.handle=read;g.m.length=6;REJECT(sf_file_dispatch(&ns,43,&owned,&g.m),SF_DENIED);g.m.handle=root;CHECK(!sf_file_dispatch(&ns,42,&owned,&g.m));CHECK(g.m.handle==(unsigned)root&&owned==(unsigned)root&&find("/cap/empty")<0);
- CHECK(!sf_ns_close(&ns,42,root));REJECT(sf_ns_rmdir(&ns,42,root,"sub"),SF_STALE_HANDLE);sf_ns_reap(&ns,1);sf_ns_reap(&ns,43);for(unsigned i=0;i<32;i++)CHECK(!ns.descriptions[i].refs);
+ CHECK(!sf_ns_close(&ns,42,root));REJECT(sf_ns_rmdir(&ns,42,root,"sub"),SF_STALE_HANDLE);sf_ns_reap(&ns,1);sf_ns_reap(&ns,43);for(unsigned i=0;i<SF_NS_DESCRIPTION_MAX;i++)CHECK(!ns.descriptions[i].refs);
  printf("RMDIR PASS: %u assertions\n",checks);return 0;
 }

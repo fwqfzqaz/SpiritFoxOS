@@ -92,7 +92,7 @@ int main(void){
  CHECK(sf_file_write(&c,copy,"ok",2)==2&&console_bytes==2&&!sf_file_close(&c,copy));
  /* Retired/free slots cannot be reused to manufacture a stale reference. */
  setup();c=client();file=sf_ns_openat(&ns,42,roots[0],"item",OPEN_READ);CHECK(file>0);
- for(unsigned i=0;i<64;i++)if(!ns.handles[i].description)ns.handles[i].generation=0x7fffff;
+ for(unsigned i=0;i<SF_NS_HANDLE_MAX;i++)if(!ns.handles[i].description)ns.handles[i].generation=0x7fffff;
  snapshot=ns;CHECK(sf_file_dup(&c,file)==SF_NO_SPACE&&!memcmp(&snapshot,&ns,sizeof(ns))&&!c.error);
  /* Repeated duplication never grows the description or mount reference count. */
  setup();c=client();file=sf_ns_openat(&ns,42,roots[0],"item",OPEN_READ|OPEN_WRITE);CHECK(file>0);
@@ -102,7 +102,7 @@ int main(void){
   CHECK(!sf_file_close(&c,copy)&&sf_file_stat(&c,copy,&info)==SF_STALE_HANDLE);
  }
  CHECK(!sf_file_close(&c,file));
- for(unsigned i=0;i<32;i++)CHECK(!ns.descriptions[i].refs||ns.descriptions[i].node==1);
+ for(unsigned i=0;i<SF_NS_DESCRIPTION_MAX;i++)CHECK(!ns.descriptions[i].refs||ns.descriptions[i].node==1);
  /* Authenticated malformed success replies poison only the client; reaping
   * still releases references created before the reply was lost/corrupted. */
  for(unsigned bad=1;bad<=10;bad++){
@@ -110,7 +110,7 @@ int main(void){
   corrupt=bad;
   CHECK(sf_file_dup(&c,file)==SF_BAD_FORMAT&&c.error==SF_BAD_FORMAT);
   prior=calls;CHECK(sf_file_dup(&c,file)==SF_BAD_FORMAT&&calls==prior);
-  sf_ns_reap(&ns,42);for(unsigned i=0;i<64;i++)CHECK(!ns.handles[i].description||ns.handles[i].owner!=42);
+  sf_ns_reap(&ns,42);for(unsigned i=0;i<SF_NS_HANDLE_MAX;i++)CHECK(!ns.handles[i].description||ns.handles[i].owner!=42);
  }
  printf("FILE DUP PASS: %u checks; same-owner shared cursor/rights, root aliases, mount/pipe lifetime, exhaustion, 1000 reuses and malformed replies\n",checks);
  return 0;

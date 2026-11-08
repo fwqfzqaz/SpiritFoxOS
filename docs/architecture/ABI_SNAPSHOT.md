@@ -69,3 +69,7 @@ python3 tools/abi.py check-additions before.json after.json --allow-add constant
 私有池页面预算追加SYS_SPAWN_LIMITED=23、SYS_TASK_PAGE_LIMIT=24、SF_PAGE_LIMIT_MAX=4096，当前567项，旧564项无删改，SfLoadPlan等wire布局保持；三项新增已由显式审阅命令核对。
 
 IPC复制计数追加SYS_IPC_STATS=25、SF_IPC_STATS_VERSION=1与SfIpcStats的size/align及四成员布局，共16项；当前583项，旧567项无删改。新结构固定24字节，<IIQQ，偏移0/4/8/16，不改变原消息结构。
+
+SMP/线程/配额追加SYS_THREAD_CREATE=26、SYS_THREAD_LIMIT=27、SYS_TASK_CPU_BUDGET=28 与 SF_MAX_CPUS/SF_MAX_THREADS/SF_THREAD_LIMIT_MAX/SF_THREAD_STACK_BASE/SF_THREAD_STACK_BYTES/SF_CPU_WINDOW_TICKS 六项常量，以及 SfThreadRequest 的 size 与 entry/argument 各偏移/宽度，共14项；当前597项，旧583项无删改。新结构固定24字节，<IIQQ，偏移0/8/16，flags 位于偏移4，不改变既有消息与装载计划布局。
+
+设备中断投递追加 SYS_IRQ_ACQUIRE=29、SYS_IRQ_RELEASE=30、SYS_IRQ_WAIT=31 三个常量，当前600项，旧597项无删改；系统调用参数沿用固定宽度寄存器值，没有新增 wire 结构。

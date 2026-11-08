@@ -84,7 +84,7 @@ M5 回归为 151 条 C 断言、14 组 Python 测试中的包/只读格式部分
 - 开始试运行写 EIO 时不执行；恢复写 EIO 时拒绝持久化挂载；应用已退出 0 但确认写 EIO 时不输出确认或成功。解除故障后重新启动恢复。
 - 旧单字节选择器经认证读取，下一次安装迁移；新记录非法保留字节即使卷摘要正确也拒绝挂载。
 
-最终源码已构建后，`python3 tools/test.py --skip-build` 完整通过，耗时 227.14 秒，输出为 `build/update-final-test.txt`。最新结果含 `update_fault_scenarios=3132`、`update_health_qemu=true`。打包门同时要求完整更新回归和精确镜像摘要；串口输出仍在 `qemu-persist-*.log`。协议和不包含的数据副作用回滚见 `../architecture/UPDATES.md`。
+最终源码已构建后，`python3 tools/test.py --skip-build` 完整通过，耗时 227.14 秒，输出为 `build/update-final-test.txt`。最新结果含 `update_fault_scenarios=3132`、`update_health_qemu=true`。打包门同时要求完整更新回归和精确镜像摘要；串口输出仍在 `qemu-persist-*.log`。协议和不包含的数据副作用回滚见 `../architecture/PERSISTENCE.md`。
 
 ## 已确认版本策略
 
@@ -122,7 +122,7 @@ M5 回归为 151 条 C 断言、14 组 Python 测试中的包/只读格式部分
 
 在上一轮 79 次 VM 上，legacy 与 VT-d/modern 各新增八次，共 95 次。验证最大容量、零扩展、清空、截断后再扩展不会暴露旧尾部、重启恢复、非法参数和同长度操作整盘不变、只读文件应用 RPC 拒绝、已安装包与更新/版本记录不变。实际 OUT/FLUSH EIO 不输出成功，卷关闭并释放 dirty 资源；银行中段暂停后终止 VM，重新启动恢复已确认文件与应用。原始构建盘和只读底区保持不变。
 
-最终产品源码构建后，`python3 tools/test.py --skip-build` 完整通过（386.03 秒），日志 `build/truncate-final-test.txt`，机器结果包含 truncate_host_assertions=83、resize_fault_scenarios=3132、truncate_qemu=true 及全部已有标记和精确镜像摘要。打包门对缺少新增标记的旧结果作拒绝测试。详细语义及安全擦除限制见 `../architecture/TRUNCATE.md`。
+最终产品源码构建后，`python3 tools/test.py --skip-build` 完整通过（386.03 秒），日志 `build/truncate-final-test.txt`，机器结果包含 truncate_host_assertions=83、resize_fault_scenarios=3132、truncate_qemu=true 及全部已有标记和精确镜像摘要。打包门对缺少新增标记的旧结果作拒绝测试。详细语义及安全擦除限制见 `../architecture/NAMESPACE.md`。
 
 ## 构建时签名信任策略
 
@@ -146,7 +146,7 @@ M5 回归为 151 条 C 断言、14 组 Python 测试中的包/只读格式部分
 
 legacy 与 modern 各新增一个参数 VM：带参数的普通、目录委派、installed 调用均通过；未提供额外参数保留旧布局。写参数页触发隔离页故障，随后回显及十次进程重用正常。非法引号/数量在 PENDING 更新试运行前拒绝，磁盘不变；有效参数调用完成健康确认，参数本身不落盘。所有目录及描述符可正常回收并卸载。
 
-最终源码构建后完整 `python tools/test.py --skip-build` 通过，547.21 秒、111 次实际启动，日志 `build/arguments-final-test.txt`。全部已有签名、设备、内核、命名空间与事务/故障回归通过，交付六个摘要一致。结果和发布门增加 arguments_host_checks=8155、arguments_qemu=true；协议与尚未冻结的装载计划 ABI 见 `ARGUMENTS.md`。
+最终源码构建后完整 `python tools/test.py --skip-build` 通过，547.21 秒、111 次实际启动，日志 `build/arguments-final-test.txt`。全部已有签名、设备、内核、命名空间与事务/故障回归通过，交付六个摘要一致。结果和发布门增加 arguments_host_checks=8155、arguments_qemu=true；协议与尚未冻结的装载计划 ABI 见 `APP_SDK.md`。
 
 ## 显式环境与调用隔离
 
@@ -258,7 +258,7 @@ native-drain-test 持有两个真实读取应用：忙显式停止保留 ACTIVE�
 
 CPU基线在c565c40的两种真实VM中以连续签名应用复现XMM0跨退出泄漏。实际task_new模型新增一千次带脏FP槽复用，完整512字节初始映像和对齐检查使总数为8022。两个新增max CPU VM实际宣告AVX/XSAVE硬件但OSXSAVE关闭；每种十二组同时存活应用、每任务不同x87/MMX/XMM0–15与舍入/状态，经历yield及非主动让出的TSC循环；AVX/x87/待处理异常与超时仅回收原任务，随后新任务清零且服务/持久字节保持。
 
-本地QEMU11.0.92 TCG对未屏蔽SSE 0/0仅记录0x1f01而无#XM。测试另外检查该标志跨yield保持，将两种传输的status-only观察写入总结果，不把它称为真实SIMD异常交付已通过。非零异常指针完整恢复受模型限制；恢复前清零环境，初始指针以FNSTENV实测；真实CPU语义仍待扩展验证，见CPU_CONTEXT.md。
+本地QEMU11.0.92 TCG对未屏蔽SSE 0/0仅记录0x1f01而无#XM。测试另外检查该标志跨yield保持，将两种传输的status-only观察写入总结果，不把它称为真实SIMD异常交付已通过。非零异常指针完整恢复受模型限制；恢复前清零环境，初始指针以FNSTENV实测；真实CPU语义仍待扩展验证，见SCHEDULING.md。
 
 最终完整python tools/test.py --skip-build通过（1074.85秒、143次启动），日志build/kernel-cpu-isolation-final-test.txt。全部既有宿主/VM回归及六项交付摘要一致；新版发布门拒绝缺少新标记的139VM结果，并要求实际能力/FP两组VM与SIMD观察记录。
 
@@ -412,7 +412,7 @@ SYS_SPAWN_LIMITED=23 在分配前配置子任务0–4096页预算，原 SfLoadPl
 
 含初始构建专项101.31秒/四VM已通过；完整 tools/test.py 全部通过（1192.6秒、166VM），日志build/memory-quota-final-full-20261101.log，结果build/memory-quota-final-test-results.json。新增legacy/modern各四次实际诊断，反复失败预算仍可成功创建，真实计数、精确used降低、非合作任务抢占、死亡回收/默认复用、普通拒绝、文件IPC和磁盘字节保持；FPU/调度/能力/撤回/服务/设备/签名/更新/旧事务全部保留，七项产物逐项核对。
 
-ABI只新增SYS_SPAWN_LIMITED、SYS_TASK_PAGE_LIMIT、SF_PAGE_LIMIT_MAX，前564项无删改，当前567项，参考/采集摘要af54b2bf8424c9aed4c4faf59b8bcda98cee32ea76bcdd106aa9fe927f0e1480。协议与边界见PAGE_LIMITS.md。本地通过不能替代本轮新HEAD托管Windows/Linux，按真实提交独立核对。
+ABI只新增SYS_SPAWN_LIMITED、SYS_TASK_PAGE_LIMIT、SF_PAGE_LIMIT_MAX，前564项无删改，当前567项，参考/采集摘要af54b2bf8424c9aed4c4faf59b8bcda98cee32ea76bcdd106aa9fe927f0e1480。协议与边界见SCHEDULING.md。本地通过不能替代本轮新HEAD托管Windows/Linux，按真实提交独立核对。
 
 页面配额发布门及实际ZIP验证通过：476111字节、43项CRC/所有摘要，七项产物与完整结果相同，14项解压离线工具检查通过。证明.cache/memory-quota-release-proof-20261101.json；新HEAD托管结果独立核对。
 
@@ -439,3 +439,29 @@ IPC计量发布门与实际ZIP验证通过：CRC/全部摘要、七项产物相�
 按用户最新指示，本轮是最后收尾：停止其余实现/测试，spiritfoxos-2保持PAUSED。只完成本轮正常发布和新HEAD CI核对；未经再次明确继续，不因额度刷新开始新开发。
 
 本轮发布门、实际ZIP的CRC/全部摘要和14项解压离线工具检查通过；记录收尾与暂停状态后重新打包核对最终副本，新HEAD托管CI单独核对。自动任务保持PAUSED，不开始下一轮。
+
+## sf-fs 拆分与 SFRFS2（2026-11-07）
+
+磁盘格式探测、SFRFS1/SFRFS2 解析和文件服务迁入独立 `sf-fs.sfmod`；sf-init 仍是 virtio-blk 回复的唯一接收方，并以块代理完成 sf-fs 的 256 字节半块请求。`tests/integration/test_readfs.py` 新增自动探测、SFRFS2 构建器上限（条目/单文件/镜像）、空文件与嵌套目录、目录表损坏、越界/未对齐/重叠/未排序记录、文件作为父目录及内容摘要失真用例，全部通过宿主 `sf_fs_check_auto` 执行；SFRFS1 原有 16 条目/128 KiB/8 MiB 限制继续由独立用例锁定。
+
+`tests/qemu/qemu_test.py --storage v2` 使用 `build/storage-v2.img` 启动真实产品镜像，断言 `[STORAGE] format 2`，并复用完整磁盘命令集：只读读取、磁盘应用运行、写拒绝、停止拒绝、卸载、停止、重启、重新挂载与再次运行。默认 `normal` 以 `build/storage.img` 覆盖 SFRFS1。两种镜像运行前后 SHA-256 均保持不变。
+
+本轮 `python3 tools/build.py`、`python3 tools/test.py --host-only`、默认 QEMU 与 v2 QEMU 全部通过；sf-fs RW 1058112 字节，低于 2 MiB 映像上限。完整 `tools/test.py` 与托管 CI 需另行按当前提交核对。
+
+## 网络中断、DHCP、连接对象与双设备授权（2026-11-07）
+
+内核新增 `SYS_IRQ_ACQUIRE=29`、`SYS_IRQ_RELEASE=30`、`SYS_IRQ_WAIT=31`，把授权设备的 PCI `0x3C` 中断线写入 IOAPIC 重定向表（固定向量 `0x50`，低电平有效/电平触发，目标 BSP），`SYS_IRQ_WAIT` 通过 `wait_deadline` 阻塞并在中断或超时时唤醒；8259 级联路径同时保留。`kernel/memory.c` 为 IOAPIC MMIO 建立独立页表页，避免与 LAPIC/VT-d 的 2 MiB 映射窗口冲突。
+
+`tests/qemu/qemu_net_test.py` 断言 `[IRQ] IOAPIC ready`、`[NET] interrupt-driven`、`ifconfig` 的 `irq=` 从 1 递增到 3，并通过 DHCP、ARP、ICMP、UDP、TCP、`open/send/recv/close`、`/net/info`、`/net/connections` 全套场景。q35 上固件写入 `0x3C=0x0B`，但实际 PIRQ 落在 GSI 10，早期只预置 GSI 16–23 时设备 ISR 已置位而 CPU 收不到中断；改为预置 GSI 9–23 并解除整段 PCI 中断线屏蔽后稳定投递，i440fx 对照同样通过。
+
+新增 `--disk` 模式把 `build/storage.img` 与网卡同时挂载，日志显示磁盘 `[DEV] bdf=0x28`、网卡 `[DEV] bdf=0x30` 两次授权且 `STORAGE READY` 后磁盘应用仍在网络激活期间运行，证明两设备槽、DMA arena、IOMMU 窗口与中断线互不排斥。
+
+本轮回归：宿主测试（`tools/test.py --skip-build --host-only`，含 600 项 ABI 快照）、`qemu_test.py --memory 256`、`qemu_iommu_test.py`、`qemu_smp_test.py`（IPI 迁移到 `0x70/0x71` 后 1/2 CPU）、`qemu_net_test.py` 与 `qemu_net_test.py --disk` 全部通过。
+
+## 账户与多用户会话（2026-11-07）
+
+`tests/host/test_accounts.c` 直接调用产品 `services/accounts.c`，33 项检查覆盖账户行解析、注释/空行忽略、名称/uid/摘要/字段/CR 边界、超过 8 条拒绝、唯一名称/uid 与唯一 uid-0 root 不变量，以及固定向量上的加盐迭代 SHA-256 接受、错误口令、篡改摘要与超长口令拒绝。`tests/host/test_sessions.c` 用真实会话表与真实账户验证 25 项：root 引导、登录成功/失败、未知用户、槽位上限、登出后附着到最高剩余槽位及 owner 标签。`tests/host/test_ns_identity.c` 直接链接产品命名空间，42 项覆盖所有者/同组/其他位、逐层目录 execute、创建与删除的父目录写+执行守卫、uid 0 绕过、私有主目录不可穿越，以及 `/tmp` 0777 无 sticky 位语义。
+
+`tests/qemu/qemu_user_test.py` 在 legacy 与 VT-d/modern 各启动一次真实产品镜像：启动即验证 root 自动会话与 `fox> ` 提示；`users/whoami/sessions` 输出；内联口令失败与隐藏口令输入（确认 `topsecret` 不回显）；`login alice` 后的 uid=1000/会话 2；alice 写读 `/home/alice/private`，而列举/读取/写入/创建/删除 `/home/bob` 全部被拒；非 root 的 `persist/install/shutdown` 返回 `denied: root session required`；bob 登录为会话 3 且不能读 alice 文件；`logout` 逐级重附着并使 root 可读全部主目录；四个槽位占满后登录返回 `login: no free session slot`；root 登出后 `login> ` 控制台只接受会话命令；最后重新登录 root 并以真实 `shutdown` 关闭。整个会话与 RAM 主目录操作期间持久盘字节保持不变。
+
+本轮 `python3 tools/build.py`、`python3 tools/test.py --skip-build --host-only` 与完整 QEMU 清单逐项执行：`qemu_test.py` 三种内存与六种存储故障、persist、net、net --disk、iommu、smp、security、openat、user、truncate、trust、txn_compat 全部通过。连续 TCG 负载下，`qemu_environment_test.py` 曾一次出现首次 install 的 `SF_COMMIT_UNCERTAIN`，`qemu_persist_test.py` 的 interrupted-recovery 与 `qemu_net_test.py --disk` 各出现一次 45 秒等待超时；三者单独重跑均通过，且 network/interrupt 与 flush 路径未改动，判断为 TCG 计时敏感抖动，不是身份改动引入的回归。因新增 help 行，`qemu_test.py` 的 help 标记由 `help | ls` 更新为 `help | login`；托管 CI 需按当前提交另行核对。

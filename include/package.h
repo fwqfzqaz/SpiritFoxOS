@@ -5,6 +5,14 @@
 #define SF_TRUST_MAX 8u
 #define SF_TRUST_MODULE 1u
 #define SF_TRUST_APP 2u
+/* Bounded import/export metadata for the relative-v1 profile. Names are short
+ * C identifiers, ABIs are versioned runtime library tags. */
+#define SF_NATIVE_ROLE_PROCESS 0u
+#define SF_NATIVE_ROLE_LIBRARY 1u
+#define SF_NATIVE_NAME_MAX 32u
+#define SF_NATIVE_ABI_MAX 32u
+#define SF_NATIVE_IMPORT_MAX 32u
+#define SF_NATIVE_EXPORT_MAX 64u
 typedef struct { uint8_t public_key[32]; uint32_t usage,revoked; } SfTrustKey;
 _Static_assert(sizeof(SfTrustKey)==40,"trust key host ABI");
 typedef struct { const SfTrustKey *keys; uint32_t count; } SfTrustStore;
@@ -12,7 +20,11 @@ typedef struct { uint32_t type,flags; uint64_t offset,bytes,memory,rva,alignment
 typedef struct {
  const uint8_t *data,*manifest,*key_id; uint64_t bytes,manifest_bytes,entry,signature;
  uint32_t count; uint16_t kind; uint16_t native_profile;
- uint64_t relocation_offset; uint32_t relocation_count; SfSection sections[64];
+ uint64_t relocation_offset; uint32_t relocation_count;
+ uint64_t import_relocation_offset; uint32_t import_relocation_count;
+ const uint8_t *import_table,*export_table;
+ uint16_t import_count,export_count,native_role;
+ SfSection sections[64];
 } SfPackage;
 /* Runtime revocations overlay the immutable purpose-aware policy. */
 typedef struct { SfTrustStore policy; unsigned revoked; uint8_t revoked_ids[SF_TRUST_MAX][32]; } SfRuntimeTrust;
@@ -32,5 +44,8 @@ int sf_trust_open(const SfRuntimeTrust *,SfPackage *,const void *,uint64_t);
 int sf_manifest_text(const SfPackage *,const char *key,char *out,size_t size);
 int sf_manifest_capability(const SfPackage *,const char *);
 int sf_native_relocations_validate(const SfPackage *);
+int sf_native_import(const SfPackage *,unsigned,char[SF_NATIVE_NAME_MAX],char[SF_NATIVE_ABI_MAX],uint64_t *);
+int sf_native_export(const SfPackage *,unsigned,char[SF_NATIVE_NAME_MAX],char[SF_NATIVE_ABI_MAX],uint64_t *);
+int sf_native_library(const SfPackage *,char *,size_t);
 int sf_bundle_find(const void *,uint64_t,const char *,const uint8_t **,uint64_t *);
 #endif

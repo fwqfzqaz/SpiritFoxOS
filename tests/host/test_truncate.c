@@ -15,7 +15,7 @@ int main(void){
  CHECK(!sf_ns_truncate(&ns,42,h,1024));CHECK(sf_ns_truncate(&ns,42,h,1025)==SF_NO_SPACE);CHECK(sf_ns_truncate(&ns,42,h,UINT64_MAX)==SF_NO_SPACE);CHECK(sf_ns_seek(&ns,42,r,1023)==1023&&sf_ns_read(&ns,42,r,out,1)==1&&out[0]==0);
  const char*special[]={"/","/pipe","/console"};for(unsigned i=0;i<3;i++){int s=sf_ns_open(&ns,42,"/",special[i],OPEN_WRITE);CHECK(s>0);CHECK(sf_ns_truncate(&ns,42,s,0)==SF_INVALID);CHECK(!sf_ns_close(&ns,42,s));}
  int ro=sf_ns_open(&ns,42,"/","/rom",OPEN_READ);CHECK(ro>0&&sf_ns_truncate(&ns,42,ro,0)==SF_DENIED);
- unsigned node=0;for(unsigned i=0;i<32;i++)if(!strcmp(ns.nodes[i].path,"/disk"))node=i;ns.nodes[node].external=7;
+ unsigned node=0;for(unsigned i=0;i<SF_NS_NODE_MAX;i++)if(!strcmp(ns.nodes[i].path,"/disk"))node=i;ns.nodes[node].external=7;
  int d=sf_ns_open(&ns,42,"/","/disk",3);CHECK(d>0);CHECK(sf_ns_truncate(&ns,42,d,3)==SF_READ_ONLY);ns.external_truncate=resize;ns.external_read=read_disk;
  memcpy(disk,"abcdef",6);disk_size=ns.nodes[node].size=6;CHECK(sf_ns_seek(&ns,42,d,6)==6);CHECK(!sf_ns_truncate(&ns,42,d,2)&&ns.nodes[node].size==2);CHECK(sf_ns_read(&ns,42,d,out,1)==0);
  CHECK(!sf_ns_truncate(&ns,42,d,10)&&ns.nodes[node].size==10);CHECK(sf_ns_seek(&ns,42,d,0)==0);CHECK(sf_ns_read(&ns,42,d,out,10)==10&&!memcmp(out,"ab",2));for(unsigned i=2;i<10;i++)CHECK(out[i]==0);

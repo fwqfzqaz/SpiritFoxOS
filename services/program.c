@@ -8,6 +8,11 @@ static uint8_t native_upload[128*1024];
 static uint32_t native_have,native_expected;
 #endif
 static __attribute__((unused)) int rpc(const SfBootArgs*a,SfMessage*m){long r=sf_send(a->manager,m);if(r)return r;r=sf_recv(a->service,m,sf_deadline(3000));return r<0?r:(int)m->status;}
+#if ROLE == 18
+static volatile uint64_t thread_started,thread_run;
+/* 线程入口：递增共享计数后阻塞在用户态自旋，主线程置 run=0 后自行退出。 */
+static int thread_worker(uint64_t argument){(void)argument;__atomic_fetch_add(&thread_started,1,__ATOMIC_SEQ_CST);while(__atomic_load_n(&thread_run,__ATOMIC_ACQUIRE))__asm__ volatile("pause");sf_sys(SYS_EXIT,0,0,0);for(;;)__asm__ volatile("pause");}
+#endif
 #if ROLE == 14 || ROLE == 15
 static int file_metadata(const SfBootArgs*a,SfMessage*m,uint32_t handle,SfFileStat*out){
  sf_message(m,OP_STAT,1);m->handle=handle;int r=rpc(a,m);if(r)return r;
@@ -92,6 +97,39 @@ long sf_main(const SfBootArgs*a,size_t bytes){
  SfIpcStats counters={0};
  int ok=sf_sys(SYS_SPAWN,0,0,0)==SF_DENIED&&sf_sys(SYS_LOG,0x100000,16,0)==SF_DENIED&&sf_sys(SYS_MAP_TEST,SF_BASE,7,0)==SF_DENIED&&sf_sys(SYS_SEND,0x1234,0,0)==SF_STALE_HANDLE&&sf_sys(SYS_CAP_DERIVE,a->manager,7,0)==SF_DENIED&&sf_sys(SYS_PCI_READ,0,0,0)==SF_DENIED&&sf_sys(SYS_PORT_IO,0xcf8,4,0)==SF_DENIED;
  ok=ok&&sf_sys(SYS_DMA_STATUS,0,0,0)==SF_DENIED&&sf_sys(SYS_TASK_PRIORITY,a->pid,0,SF_PRIORITY_QUERY)==SF_DENIED&&sf_sys(SYS_TASK_PRIORITY,a->pid,SF_PRIORITY_MAX,SF_PRIORITY_SET)==SF_DENIED&&sf_sys(SYS_TASK_CAP_LIMIT,a->pid,0,SF_LIMIT_QUERY)==SF_DENIED&&sf_sys(SYS_TASK_CAP_LIMIT,a->pid,SF_CAP_LIMIT_MAX,SF_LIMIT_SET)==SF_DENIED&&sf_task_cap_usage(a->pid)==SF_DENIED&&sf_spawn_limited(0,UINT64_MAX)==SF_DENIED&&sf_task_page_usage(a->pid)==SF_DENIED&&sf_task_page_limit(a->pid,SF_PAGE_LIMIT_MAX,SF_LIMIT_SET)==SF_DENIED&&sf_ipc_stats(&counters)==SF_DENIED&&sf_sys(SYS_IPC_STATS,0,UINT64_MAX,UINT64_MAX)==SF_DENIED;SfMessage m;sf_message(&m,OP_HELLO,1);m.status=ok?0:SF_DENIED;if(ok)sf_log("CAPABILITY WIDTH APP PASSED\n");sf_send(a->manager,&m);return ok?0:1;
+#elif ROLE == 17
+ /* 能力派生树与随消息转移：队列交付、同权新句柄、非委派拒绝、cap_count
+  * 上界、整端点撤销后派生链失效。跨任务子树撤销由宿主测试覆盖。 */
+ long owned=sf_ep_create();if(owned<=0)return 10;long inbox=sf_ep_create();if(inbox<=0)return 11;
+ SfMessage m;sf_message(&m,OP_ECHO,0x1701);if(sf_send_cap(inbox,&m,owned))return 12;
+ sf_message(&m,OP_ECHO,0x1702);long sender=sf_recv(inbox,&m,sf_deadline(500));
+ if(sender!=a->pid||m.h.cap_count!=1||!m.handle)return 13;long received=(long)m.handle;
+ sf_message(&m,OP_ECHO,0x1703);if(sf_send(received,&m))return 14;
+ if(sf_recv(owned,&m,sf_deadline(500))!=a->pid||m.h.request_id!=0x1703)return 15;
+ long limited=sf_cap_derive(owned,RIGHT_SEND|RIGHT_RECV);if(limited<=0)return 16;
+ sf_message(&m,OP_ECHO,0x1704);if(sf_send_cap(inbox,&m,limited)!=SF_DENIED)return 17;
+ sf_message(&m,OP_ECHO,0x1705);m.h.cap_count=2;if(sf_send(inbox,&m)!=SF_INVALID)return 18;
+ long child=sf_cap_derive(owned,7);if(child<=0)return 19;
+ if(sf_cap_revoke(owned)!=0)return 20;
+ if(sf_send(child,&m)!=SF_STALE_HANDLE||sf_send(received,&m)!=SF_STALE_HANDLE)return 21;
+ if(sf_cap_close(inbox))return 22;
+ sf_log("CAP TREE APP PASSED\n");return 0;
+#elif ROLE == 18
+ /* 线程探针：同进程多执行流共享地址空间；默认上限 8（主线程+7），
+  * 第 8 个线程必须被拒绝；线程退出后槽位可复用。 */
+ thread_started=0;thread_run=1;unsigned made=0;
+ for(;made<SF_THREAD_LIMIT_MAX-1;made++)if(sf_thread_create((void*)thread_worker,0x1800+made)<=0)break;
+ if(made!=SF_THREAD_LIMIT_MAX-1)return 20;
+ uint64_t deadline=sf_ticks()+200;
+ while(sf_ticks()<deadline&&__atomic_load_n(&thread_started,__ATOMIC_ACQUIRE)!=made)sf_yield();
+ if(__atomic_load_n(&thread_started,__ATOMIC_ACQUIRE)!=made)return 21;
+ if(sf_thread_create((void*)thread_worker,0)!=SF_NO_SPACE)return 22;
+ thread_run=0;uint64_t grace=sf_ticks()+200;
+ while(sf_ticks()<grace)sf_yield();
+ long reused=sf_thread_create((void*)thread_worker,0);thread_run=0;
+ if(reused<=0)return 23;
+ sf_log("THREAD TEST PASSED\n");
+ SfMessage m;sf_message(&m,OP_HELLO,1);m.status=0;sf_send(a->manager,&m);return 0;
 #elif ROLE == 10
  return *(volatile uint32_t*)0xfed90000ull;
 #elif ROLE == 11

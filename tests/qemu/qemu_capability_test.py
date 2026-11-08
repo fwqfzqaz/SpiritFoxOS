@@ -12,6 +12,7 @@ def run():
             for _ in range(40):
                 start=vm.send('run probe.sfk');vm.expect('CAPABILITY WIDTH APP PASSED',start);vm.expect('sfexec: exit 0',start)
             vm.command('run hello.sfk','sfexec: exit 0')
+            start=vm.send('run captree.sfk');vm.expect('CAP TREE APP PASSED',start);vm.expect('sfexec: exit 0',start)
             start=vm.send('run pieprobe.sfk');vm.expect('PIE PASS base=',start);vm.expect('sfexec: exit 0',start)
             vm.command('runenv MODE=cap -- argprobe.sfk --require-mode','sfexec: exit 0')
             vm.command('runat /disk/etc readprobe.sfk','OPENAT APP PASSED');vm.command('runat /tmp fileprobe.sfk','OPENAT APP PASSED')
@@ -20,7 +21,7 @@ def run():
             assert disk.read_bytes()==before,'Capability rejection changed persistent bytes'
         finally:vm.close()
     assert (ROOT/'build/persistent.img').read_bytes()==source
-    print('CAPABILITY WIDTH QEMU PASS: 2 boots; high-bit SEND/RECV/CLOSE/DERIVE/REVOKE rejected, valid IPC and last-reference cleanup, 40 task reuses, normal native/file RPC and persistent bytes preserved',flush=True)
+    print('CAPABILITY WIDTH QEMU PASS: 2 boots; high-bit SEND/RECV/CLOSE/DERIVE/REVOKE rejected, valid IPC and last-reference cleanup, attached capability transfer and derived-tree revocation, 40 task reuses, normal native/file RPC and persistent bytes preserved',flush=True)
 
 
 if __name__=='__main__':run()

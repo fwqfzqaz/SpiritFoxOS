@@ -1,7 +1,7 @@
 #include "core_fixture.h"
 static long limit(uint64_t pid,uint64_t budget,uint64_t op){Frame f={0};f.rax=SYS_TASK_CAP_LIMIT;f.rdi=pid;f.rsi=budget;f.rdx=op;return syscall(&f);}
 int main(void){
- reset(10);tasks[1].pid=2;tasks[1].state=T_BLOCKED;tasks[1].cap_limit=32;tasks[1].priority=3;tasks[1].ready_since=7;
+ reset(10);tasks[1].pid=2;tasks[1].state=T_BLOCKED;tasks[1].main=1;tasks[1].main_slot=1;tasks[1].cap_limit=32;tasks[1].priority=3;tasks[1].ready_since=7;
  CHECK(limit(2,0,SF_LIMIT_QUERY)==32&&limit(2,0,SF_LIMIT_SET)==0&&limit(2,0,SF_LIMIT_QUERY)==0);
  CHECK(tasks[1].state==T_BLOCKED&&tasks[1].priority==3&&tasks[1].ready_since==7);
  CHECK(limit(2,32,SF_LIMIT_SET)==32);
@@ -14,9 +14,9 @@ int main(void){
  current=1;CHECK(limit(2,32,SF_LIMIT_SET)==SF_DENIED&&limit(2,0,SF_LIMIT_QUERY)==SF_DENIED&&limit(2,0,SF_LIMIT_USED)==SF_DENIED&&limit(UINT64_MAX,UINT64_MAX,UINT64_MAX)==SF_DENIED&&!memcmp(saved,tasks,sizeof(tasks)));current=0;
  uint32_t seed=0x7acf18u;
  for(unsigned trial=0;trial<1000;trial++){
-  reset(100);tasks[1].pid=2;tasks[1].state=trial&1?T_BLOCKED:T_READY;tasks[1].cap_limit=32;tasks[1].priority=3;tasks[1].ready_since=1234;
+  reset(100);tasks[1].pid=2;tasks[1].state=trial&1?T_BLOCKED:T_READY;tasks[1].main=1;tasks[1].main_slot=1;tasks[1].cap_limit=32;tasks[1].priority=3;tasks[1].ready_since=1234;
   seed=1664525u*seed+1013904223u;uint32_t mask=seed;unsigned used=0;
-  for(unsigned i=0;i<32;i++){if(mask&(1u<<i)){tasks[1].caps[i]=(Cap){i+1,7,i&7,91+i};used++;}}
+  for(unsigned i=0;i<32;i++){if(mask&(1u<<i)){tasks[1].caps[i]=(Cap){i+1,7,i&7,91+i,0,0,0};used++;}}
   seed=1664525u*seed+1013904223u;unsigned requested=seed%33;memcpy(saved,tasks,sizeof(tasks));
   CHECK(limit(2,0,SF_LIMIT_USED)==(long)used&&!memcmp(saved,tasks,sizeof(tasks)));
   long r=limit(2,requested,SF_LIMIT_SET);CHECK(r==(used>requested?SF_BUSY:(long)requested));

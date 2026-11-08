@@ -73,6 +73,23 @@ class ManifestProfile(unittest.TestCase):
         self.reject(dict(MODULE,category='kernel'),'module')
         profile.validate(dict(APP,native_profile='relative-v1'),'app')
         profile.validate(dict(APP,native_profile='static-v1'),'app')
+        library=dict(MODULE,native_profile='relative-v1',native_role='library',
+                     native_exports=[{'name':'open','abi':'libsf-posix-1'}])
+        profile.validate(copy.deepcopy(library),'module')
+        for broken in [dict(library,native_role=None),dict(library,native_exports=[]),
+                       dict(library,native_profile='static-v1'),
+                       dict(MODULE,native_role='library')]:
+            self.reject(broken,'module')
+        imports=[{'name':'open','abi':'libsf-posix-1','slot':'__sf_import_open'}]
+        app=dict(APP,native_profile='relative-v1',native_library='org.spiritfox.posix',
+                 native_imports=imports)
+        profile.validate(copy.deepcopy(app),'app')
+        for broken in [dict(APP,native_library='org.spiritfox.posix'),
+                       dict(APP,native_imports=imports),
+                       dict(APP,native_profile='relative-v1',native_library='org.spiritfox.posix'),
+                       dict(app,native_profile='static-v1'),
+                       dict(app,native_imports=[{'name':'open','abi':'libsf-posix-1'}])]:
+            self.reject(broken)
 
     def test_identifier_ascii_and_ends(self):
         for value in ['a','A0._-','x'*63]:

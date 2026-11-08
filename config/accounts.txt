@@ -1,0 +1,6 @@
+# SpiritFoxOS 开发账户表（构建期嵌入签名 sf-init，仅保留加盐摘要）
+# 格式：name:uid:gid:password；最多 8 条，必须且仅有一个 uid=0 gid=0 的 root。
+# 生产部署请替换下列开发口令，并把 salt 派生改为随机盐。
+root:0:0:fox-root
+alice:1000:1000:alice
+bob:1001:1001:bob

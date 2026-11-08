@@ -58,6 +58,21 @@ interrupt_common:
  call interrupt_dispatch
  mov %rax,%rsp
  jmp restore_frame
+/* 进入每 CPU 空闲栈：当前内核栈仍属于刚被换出的任务，另一 CPU 可能马上
+ * 调度该任务并复用同一 kstack；必须先切到独立空闲栈，再切换到内核地址
+ * 空间（任务页表可能随后被回收，LAPIC 必须始终可写），清除该任务的
+ * cpu 归属，最后释放全局锁并进入 hlt 循环。 */
+.global enter_idle
+enter_idle:
+ cli
+ mov %rdi,%rsp
+ mov %rdx,%cr3
+ test %rsi,%rsi
+ jz 1f
+ movl $-1,(%rsi)
+1:
+ lock incl kernel_lock+4(%rip)
+ jmp idle_loop
 .global load_gdt
 load_gdt:
  lgdt (%rdi)

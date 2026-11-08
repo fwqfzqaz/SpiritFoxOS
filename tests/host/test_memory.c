@@ -1,10 +1,10 @@
 #include <stdio.h>
 #include "../../kernel/kernel.h"
-Task tasks[SF_MAX_TASKS];
+Task tasks[SF_MAX_THREADS];
 static unsigned checks;
 #define CHECK(x) do{checks++;if(!(x)){printf("Memory FAIL line %d: %s\n",__LINE__,#x);return 1;}}while(0)
 int main(void){
- Task task={0};task.pid=17;tasks[0].pid=17;tasks[0].page_limit=SF_PAGE_LIMIT_MAX;task.cr3=space_new(task.pid);CHECK(task.cr3);
+ Task task={0};task.pid=17;tasks[0].pid=17;tasks[0].main=1;tasks[0].main_slot=0;tasks[0].page_limit=SF_PAGE_LIMIT_MAX;task.cr3=space_new(task.pid);CHECK(task.cr3);
  uint8_t*a=page_alloc(task.pid),*b=page_alloc(task.pid),*ro=page_alloc(task.pid);CHECK(a&&b&&ro);
  CHECK(!space_map(&task,SF_BASE,(uint64_t)a,3));CHECK(!space_map(&task,SF_BASE+4096,(uint64_t)b,3));CHECK(!space_map(&task,SF_ARGS,(uint64_t)ro,1));
  for(unsigned i=0;i<16384;i+=4096)CHECK(!space_map_mmio(&task,SF_DEVICE_MMIO+i,0xc0000000ull+i));
@@ -19,5 +19,8 @@ int main(void){
  uint8_t*edge=page_alloc(task.pid);CHECK(edge);CHECK(!space_map(&task,SF_DEVICE_MMIO-4096,(uint64_t)edge,3));
  CHECK(copy_out(&task,SF_DEVICE_MMIO-16,data,sizeof(data))==SF_DENIED);CHECK(edge[4095]==0);CHECK(copy_in(&task,out,SF_DEVICE_MMIO-16,sizeof(out))==SF_DENIED);
  CHECK(!space_map(&task,SF_DMA,(uint64_t)page_alloc(task.pid),3));CHECK(!copy_out(&task,SF_DMA,data,sizeof(data)));CHECK(!copy_in(&task,out,SF_DMA,sizeof(out))&&!memcmp(out,data,sizeof(out)));
+ uint8_t*x=page_alloc(task.pid);CHECK(x);CHECK(!space_map(&task,SF_BASE+8192,(uint64_t)x,5));CHECK(user_exec(&task,SF_BASE+8192)&&!user_exec(&task,SF_BASE));
+ uint32_t before=tasks[0].page_count;CHECK(!space_unmap_range(&task,SF_BASE+8192,4096));CHECK(!user_range(&task,SF_BASE+8192,1,0)&&tasks[0].page_count==before-1);
+ CHECK(space_unmap_range(&task,SF_BASE+1,4096)==SF_INVALID&&space_unmap_range(&task,SF_BASE,0)==SF_INVALID);
  pages_free(task.pid);printf("Memory tests passed: %u assertions\n",checks);return 0;
 }

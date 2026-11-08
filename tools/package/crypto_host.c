@@ -2,6 +2,7 @@
 #include "native_image.h"
 #include "monocypher-ed25519.h"
 #include "readfs.h"
+#include "fs_format.h"
 #ifdef _WIN32
 #define EXPORT __declspec(dllexport)
 #else
@@ -42,5 +43,13 @@ EXPORT void sf_hash(uint8_t hash[32],const uint8_t*data,size_t n){sf_sha256(hash
 typedef struct {const uint8_t*data;size_t bytes;} MemoryDisk;
 static int memory_sector(void*context,uint64_t sector,uint8_t out[512]){MemoryDisk*d=context;if(sector>=d->bytes/512)return SF_INVALID;memcpy(out,d->data+sector*512,512);return 0;}
 EXPORT int sf_fs_check(const uint8_t*data,size_t bytes,int contents){MemoryDisk disk={data,bytes};SfReadFs fs;int r=sf_readfs_mount(&fs,memory_sector,&disk,bytes);if(r||!contents)return r;uint8_t buffer[SF_READFS_FILE_MAX];for(unsigned i=0;i<fs.count;i++){long n=sf_readfs_load(&fs,i,buffer,sizeof(buffer));if(n<0)return n;}return 0;}
+EXPORT int sf_fs_check_auto(const uint8_t*data,size_t bytes,int contents,int format){MemoryDisk disk={data,bytes};SfReadFs fs;int detected=0;int r=sf_fs_mount_auto(&fs,memory_sector,&disk,bytes,format,&detected);if(r||!contents)return r?r:detected;uint8_t buffer[SF_READFS_FILE_MAX];for(unsigned i=0;i<fs.count;i++){long n=sf_readfs_load(&fs,i,buffer,sizeof(buffer));if(n<0)return n;}return detected;}
 
 EXPORT int sf_image_prepare(const uint8_t*data,size_t n,const uint8_t pub[32],uint64_t base,uint8_t*image,size_t capacity){SfPackage p;int r=sf_package_open(&p,data,n,pub);if(r)return r;SfLoadPlan plan={0};r=sf_native_image(&p,base,image,capacity,&plan);if(r)return r;uint64_t bytes=0;for(unsigned i=0;i<plan.count;i++)bytes+=(plan.segments[i].bytes+4095)&~4095ull;return (int)bytes;}
+EXPORT int sf_image_link(const uint8_t*app_data,size_t app_n,const uint8_t*app_pub,const uint8_t*lib_data,size_t lib_n,const uint8_t*lib_pub,uint64_t base,uint8_t*image,size_t capacity,uint8_t*out,size_t out_bytes){
+ if(!out||out_bytes<sizeof(SfLoadPlan))return SF_INVALID;
+ SfPackage app,library;int r=sf_package_open(&app,app_data,app_n,app_pub);if(r)return r;
+ r=sf_package_open(&library,lib_data,lib_n,lib_pub);if(r)return r;
+ SfLoadPlan plan={0};r=sf_native_link(&app,&library,base,image,capacity,&plan);if(r)return r;
+ memcpy(out,&plan,sizeof(plan));return 0;
+}

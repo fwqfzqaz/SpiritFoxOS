@@ -18,7 +18,7 @@ int main(void){
  reset(42);fail_after=2;CHECK(task_new(&p,0)==SF_NO_SPACE);CHECK(next_pid==43&&tasks[1].state==T_DEAD&&tasks[1].pid==42);CHECK(freed==1&&freed_pid==42);
  allocated=allocation_calls=0;fail_after=64;CHECK(task_new(&p,0)==43);CHECK(next_pid==44&&tasks[1].state==T_READY&&tasks[1].pid==43);
  reset(100);p.count=0;memcpy(saved,tasks,sizeof(tasks));CHECK(task_new(&p,0)==SF_INVALID);CHECK(next_pid==100&&!allocation_calls&&!space_calls&&!memcmp(saved,tasks,sizeof(tasks)));p=plan();
- reset(100);for(unsigned i=0;i<SF_MAX_TASKS;i++){tasks[i].state=T_READY;tasks[i].pid=i+1;}memcpy(saved,tasks,sizeof(tasks));CHECK(task_new(&p,0)==SF_NO_SPACE);CHECK(next_pid==100&&!allocation_calls&&!space_calls&&!memcmp(saved,tasks,sizeof(tasks)));
+ reset(100);for(unsigned i=0;i<SF_MAX_TASKS;i++){tasks[i].state=T_READY;tasks[i].pid=i+1;tasks[i].main=1;tasks[i].main_slot=i;}memcpy(saved,tasks,sizeof(tasks));CHECK(task_new(&p,0)==SF_NO_SPACE);CHECK(next_pid==100&&!allocation_calls&&!space_calls&&!memcmp(saved,tasks,sizeof(tasks)));
  reset(100);tasks[0].pid=2;Frame f={0};f.rax=SYS_SPAWN;f.rdi=(uint64_t)(uintptr_t)&p;memcpy(saved,tasks,sizeof(tasks));CHECK(syscall(&f)==SF_DENIED);CHECK(next_pid==100&&!allocation_calls&&!space_calls&&!memcmp(saved,tasks,sizeof(tasks)));
  for(unsigned i=0;i<1000;i++){
   reset(100+i);tasks[1].state=T_DEAD;memset(tasks[1].fxstate,0xa5,sizeof(tasks[1].fxstate));

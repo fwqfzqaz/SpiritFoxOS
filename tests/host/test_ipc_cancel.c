@@ -2,9 +2,10 @@
 #include <stdlib.h>
 #include <string.h>
 #include "../../kernel/ipc.c"
-Task tasks[SF_MAX_TASKS];int current;uint64_t ticks;
-static Frame frames[SF_MAX_TASKS];static SfMessage buffers[SF_MAX_TASKS],saved_buffers[SF_MAX_TASKS];
-static Task saved_tasks[SF_MAX_TASKS];static Endpoint saved_eps[ENDPOINTS];
+Task tasks[SF_MAX_THREADS];int cpu_currents[SF_MAX_CPUS];uint64_t ticks;
+void task_wake(Task*t){t->state=T_READY;t->ready_since=ticks;}
+static Frame frames[SF_MAX_THREADS];static SfMessage buffers[SF_MAX_THREADS],saved_buffers[SF_MAX_THREADS];
+static Task saved_tasks[SF_MAX_THREADS];static Endpoint saved_eps[ENDPOINTS];
 static unsigned checks,copies;static uint32_t handles[2];static unsigned ep;
 #define CHECK(x) do{checks++;if(!(x)){fprintf(stderr,"IPC CANCEL FAIL line %d: %s\n",__LINE__,#x);exit(1);}}while(0)
 int user_range(Task*t,uint64_t p,uint64_t n,int write){(void)write;uint64_t base=(uintptr_t)&buffers[t-tasks];return p>=base&&p-base<=sizeof(SfMessage)&&n<=sizeof(SfMessage)-(p-base);}
@@ -13,7 +14,7 @@ int copy_out(Task*t,uint64_t p,const void*in,size_t n){copies++;if(!user_range(t
 void panic(const char*s){fprintf(stderr,"Unexpected panic: %s\n",s);abort();}
 static void setup(void){
  memset(tasks,0,sizeof(tasks));memset(endpoints,0,sizeof(endpoints));memset(frames,0,sizeof(frames));memset(buffers,0,sizeof(buffers));
- for(unsigned i=0;i<SF_MAX_TASKS;i++){tasks[i].pid=i+1;tasks[i].state=T_READY;tasks[i].cap_limit=32;tasks[i].frame=&frames[i];tasks[i].priority=1;tasks[i].ready_since=3;}
+ for(unsigned i=0;i<SF_MAX_TASKS;i++){tasks[i].pid=i+1;tasks[i].state=T_READY;tasks[i].cap_limit=32;tasks[i].frame=&frames[i];tasks[i].priority=1;tasks[i].ready_since=3;tasks[i].main=1;tasks[i].main_slot=i;tasks[i].tid=1;tasks[i].thread_limit=SF_THREAD_LIMIT_MAX;tasks[i].thread_count=1;tasks[i].thread_slots=1;tasks[i].next_tid=1;tasks[i].cpu=-1;}
  current=0;ticks=100;handles[0]=ipc_syscall(SYS_EP_CREATE,0,0,0);CHECK((int)handles[0]>0);
  handles[1]=ipc_grant(&tasks[0],&tasks[1],handles[0],RIGHT_SEND|RIGHT_RECV);CHECK((int)handles[1]>0);
  ep=tasks[0].caps[(handles[0]&255)-1].endpoint-1;

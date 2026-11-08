@@ -45,7 +45,7 @@ class AbiSnapshot(unittest.TestCase):
     def test_capture_and_independent_wire_sizes(self):
         self.assertEqual(self.current,self.reference)
         values=self.current['values']
-        self.assertEqual(len(values),583)
+        self.assertEqual(len(values),600)
         self.assertEqual(values['constant.OP_DUP'],25)
         self.assertEqual(values['constant.OP_PREAD'],26)
         self.assertEqual(values['constant.SYS_TASK_PRIORITY'],20)
@@ -57,6 +57,23 @@ class AbiSnapshot(unittest.TestCase):
         self.assertEqual(values['constant.SYS_TASK_PAGE_LIMIT'],24)
         self.assertEqual(values['constant.SF_PAGE_LIMIT_MAX'],4096)
         self.assertEqual(values['constant.SYS_SEND_CANCEL'],22)
+        self.assertEqual(values['constant.SYS_THREAD_CREATE'],26)
+        self.assertEqual(values['constant.SYS_THREAD_LIMIT'],27)
+        self.assertEqual(values['constant.SYS_TASK_CPU_BUDGET'],28)
+        self.assertEqual(values['constant.SYS_IRQ_ACQUIRE'],29)
+        self.assertEqual(values['constant.SYS_IRQ_RELEASE'],30)
+        self.assertEqual(values['constant.SYS_IRQ_WAIT'],31)
+        self.assertEqual(values['constant.SF_MAX_THREADS'],32)
+        self.assertEqual(values['constant.SF_MAX_CPUS'],8)
+        self.assertEqual(values['constant.SF_THREAD_LIMIT_MAX'],8)
+        self.assertEqual(values['constant.SF_THREAD_STACK_BASE'],0x40300000)
+        self.assertEqual(values['constant.SF_THREAD_STACK_BYTES'],65536)
+        self.assertEqual(values['constant.SF_CPU_WINDOW_TICKS'],100)
+        self.assertEqual(values['size.SfThreadRequest'],24)
+        self.assertEqual(values['offset.SfThreadRequest.entry'],8)
+        self.assertEqual(values['width.SfThreadRequest.entry'],8)
+        self.assertEqual(values['offset.SfThreadRequest.argument'],16)
+        self.assertEqual(values['width.SfThreadRequest.argument'],8)
         # These fixed little-endian formats are independent of C sizeof/offsetof.
         formats={'SfIpcStats':'<IIQQ','SfIpcHeader':'<IHHIIQIIQ','SfMessage':'<IHHIIQIIQqQQII256s',
                  'SfBootArgs':'<IHHQQ12IQQIHH','SfFileStat':'<IIIIQQ',

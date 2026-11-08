@@ -1,0 +1,10 @@
+# 目标专属编译选项：所有变体均使用 abort 恐慌策略（no_std 环境无展开栈）。
+# 宿主与 windows-gnu 变体额外启用 PIC，便于并入 sfcrypto 动态库。
+[target.x86_64-unknown-none]
+rustflags = ["-C", "panic=abort"]
+
+[target.x86_64-unknown-linux-gnu]
+rustflags = ["-C", "panic=abort", "-C", "relocation-model=pic"]
+
+[target.x86_64-pc-windows-gnu]
+rustflags = ["-C", "panic=abort", "-C", "relocation-model=pic"]

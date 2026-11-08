@@ -28,7 +28,7 @@ static void setup(void){
  CHECK(!sf_ns_create(&ns,"/data/disk",NODE_DISK,1));
  for(unsigned i=0;i<sizeof(expected);i++)expected[i]=(uint8_t)((i*17+3)%251);
  int h=sf_ns_open(&ns,42,"/","/data/item",OPEN_WRITE);CHECK(h>0&&sf_ns_write(&ns,42,h,expected,sizeof(expected))==sizeof(expected));CHECK(!sf_ns_close(&ns,42,h));
- for(unsigned i=0;i<32;i++)if(!strcmp(ns.nodes[i].path,"/data/disk")){ns.nodes[i].external=7;ns.nodes[i].size=sizeof(expected);}
+ for(unsigned i=0;i<SF_NS_NODE_MAX;i++)if(!strcmp(ns.nodes[i].path,"/data/disk")){ns.nodes[i].external=7;ns.nodes[i].size=sizeof(expected);}
  ns.external_read=disk_read;root=sf_ns_open(&ns,42,"/","/data",OPEN_READ|OPEN_DIRECTORY);CHECK((int)root>0);
  actor=42;corrupt=backend_calls=backend_mode=0;
 }

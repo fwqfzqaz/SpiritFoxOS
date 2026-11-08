@@ -54,7 +54,7 @@ if result.get('unlink_host_assertions') != 17340 or result.get('unlink_qemu') is
     raise SystemExit('Run RAM unlink rights, busy-reference, slot reuse and VM regressions before packaging')
 if result.get('stat_host_assertions') != 6180 or result.get('canonical_file_handles') is not True or result.get('stat_qemu') is not True or result.get('stat_qemu_boots') != 2:
     raise SystemExit('Run canonical file handle and fixed metadata regressions before packaging')
-if result.get('ipc_host_assertions') != 40908 or result.get('kernel_capability_width') is not True or result.get('capability_width_qemu') is not True or result.get('capability_width_qemu_boots') != 2:
+if result.get('ipc_host_assertions') != 40950 or result.get('kernel_capability_width') is not True or result.get('capability_width_qemu') is not True or result.get('capability_width_qemu_boots') != 2:
     raise SystemExit('Run canonical kernel capability host and VM regressions before packaging')
 if result.get('fpu_task_init_host_checks') != 3000 or result.get('fpu_profile') != 'fxsave64-x87-mmx-sse' or result.get('fpu_context_qemu') is not True or result.get('fpu_context_qemu_boots') != 2:
     raise SystemExit('Run fresh/interleaved FP context and isolated exception VM regressions before packaging')
@@ -79,7 +79,7 @@ if result.get('manifest_schema_sha256') != hashlib.sha256(schema_path.read_bytes
     raise SystemExit('Manifest schema changed since source validation')
 abi_reference = ROOT/'abi/x86_64-current.json'
 abi_capture = BUILD/'abi-current.json'
-if result.get('abi_snapshot_host_tests') != 9 or result.get('abi_snapshot_entries') != 583:
+if result.get('abi_snapshot_host_tests') != 9 or result.get('abi_snapshot_entries') != 600:
     raise SystemExit('Run compiled ABI capture, offline comparison and header-drift regressions before packaging')
 if result.get('ipc_copy_host_checks') != 10041 or result.get('ipc_stats_control_host_checks') != 6001 or result.get('ipc_copy_profile') != 'successful-user-copy-bytes-v1' or not result.get('ipc_stats_qemu') or result.get('ipc_stats_qemu_boots') != 2:
     raise SystemExit('Run actual IPC copy event/control oracles and both production stats VM transports before packaging')

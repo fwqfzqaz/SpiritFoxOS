@@ -1,6 +1,9 @@
 /.tools/
 /.cache/
+/.cache-*.log
 /build/
+# Rust 构建产物（若未使用 CARGO_TARGET_DIR 重定向时的默认目录）
+/rust/target/
 __pycache__/
 *.pyc
 /.keys/

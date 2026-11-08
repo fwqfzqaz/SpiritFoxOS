@@ -1,19 +1,19 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include "../../kernel/kernel.h"
-Task tasks[SF_MAX_TASKS];
+Task tasks[SF_MAX_THREADS];
 static unsigned checks;
 static uintptr_t addresses[SF_PAGE_LIMIT_MAX];
 static uint8_t zero[4096],borrowed[4096] __attribute__((aligned(4096)));
 #define CHECK(x) do{checks++;if(!(x)){printf("MEMORY QUOTA FAIL line %d: %s\n",__LINE__,#x);return 1;}}while(0)
 static int order(const void*a,const void*b){uintptr_t x=*(const uintptr_t*)a,y=*(const uintptr_t*)b;return (x>y)-(x<y);}
 int main(void){
- tasks[0].pid=1;tasks[0].page_limit=0;
+ tasks[0].pid=1;tasks[0].main=1;tasks[0].main_slot=0;tasks[0].page_limit=0;
  CHECK(!page_alloc(1)&&!tasks[0].page_count);
  tasks[0].page_limit=2;uint8_t*a=page_alloc(1),*b=page_alloc(1);
  CHECK(a&&b&&a!=b&&tasks[0].page_count==2&&!memcmp(a,zero,4096)&&!memcmp(b,zero,4096));
  memset(a,0xa5,4096);memset(b,0x5a,4096);CHECK(!page_alloc(1)&&tasks[0].page_count==2);
- tasks[1].pid=2;tasks[1].state=T_BLOCKED;tasks[1].page_limit=1;uint8_t*c=page_alloc(2);
+ tasks[1].pid=2;tasks[1].state=T_BLOCKED;tasks[1].main=1;tasks[1].main_slot=1;tasks[1].page_limit=1;uint8_t*c=page_alloc(2);
  CHECK(c&&c!=a&&c!=b&&tasks[1].page_count==1);memset(c,0x3c,4096);
  tasks[0].state=T_DEAD;pages_free(1);CHECK(!tasks[0].page_count&&!memcmp(a,zero,4096)&&!memcmp(b,zero,4096));
  CHECK(!page_alloc(1)&&tasks[1].page_count==1&&c[0]==0x3c&&c[4095]==0x3c);

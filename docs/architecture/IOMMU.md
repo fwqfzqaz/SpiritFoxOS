@@ -36,7 +36,7 @@ python3 tests/qemu/qemu_test.py --interactive --persistent --iommu
 python3 tests/qemu/qemu_iommu_test.py
 ```
 
-QEMU 使用 `intel-iommu,intremap=off,caching-mode=on,device-iotlb=off,aw-bits=39`，块设备使用 `disable-legacy=on,iommu_platform=on,vectors=0`。没有设备 ATS/IOTLB，没有 MSI/MSI-X 或中断重映射。轮询 virtio 和既有 PIC/PIT/串口是当前验证配置。
+QEMU 使用 `intel-iommu,intremap=off,caching-mode=on,device-iotlb=off,aw-bits=39`，块设备使用 `disable-legacy=on,iommu_platform=on,vectors=0`。没有设备 ATS/IOTLB，没有 MSI/MSI-X 或中断重映射；VT-d 模式的块设备仍轮询 virtio，网络切片则使用 IOAPIC INTx（共享向量 `0x50`）。
 
 ## 故障与验证
 

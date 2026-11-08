@@ -7,7 +7,7 @@ import sys
 import unittest
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0,str(ROOT/'tools/package'))
-from sfpack import Crypto,cbor,seal,pack,elf_relative_records,elf_segments
+from sfpack import Crypto,cbor,seal,pack,elf_relative_records,elf_segments,elf_symbols
 
 
 class Native(unittest.TestCase):
@@ -146,6 +146,67 @@ class Native(unittest.TestCase):
             targets=[t for t,_ in records]
             valid=targets==sorted(set(targets)) and all(t%8==0 and any(s[0]==3 and s[5]<=t<=s[5]+s[4]-8 for s in self.sections) for t in targets)
             self.assertEqual(self.crypto.verify(self.make(records=records),self.pub),0 if valid else -3)
+
+
+class Link(unittest.TestCase):
+    """Bounded import tables bind against the authenticated POSIX runtime library."""
+    @classmethod
+    def setUpClass(cls):
+        cls.crypto=Crypto()
+        cls.app_seed=(ROOT/'.keys/application.seed').read_bytes()
+        cls.lib_seed=(ROOT/'.keys/development.seed').read_bytes()
+        cls.app_pub=cls.crypto.key(cls.app_seed)[1]
+        cls.lib_pub=cls.crypto.key(cls.lib_seed)[1]
+        cls.app=(ROOT/'build/posixprobe.sfk').read_bytes()
+        cls.lib=(ROOT/'build/sf-libsf.sfmod').read_bytes()
+        cls.app_symbols=elf_symbols((ROOT/'build/posixprobe.elf').read_bytes())
+        cls.lib_symbols=elf_symbols((ROOT/'build/sf-libsf.elf').read_bytes())
+        cls.link=cls.crypto.lib.sf_image_link
+        cls.link.argtypes=[C.c_void_p,C.c_size_t,C.c_void_p,C.c_void_p,C.c_size_t,C.c_void_p,
+                           C.c_uint64,C.c_void_p,C.c_size_t,C.c_void_p,C.c_size_t]
+        cls.manifest={'app_id':'org.spiritfox.posixprobe','version':'0.1.0','runtime_id':'org.spiritfox.native',
+                      'app_abi':1,'native_profile':'relative-v1','native_library':'org.spiritfox.posix',
+                      'requested_caps':['stdio','namespace.read'],'resource_limits':{'memory':131072}}
+
+    def run_link(self,app,base=0x44000000):
+        image=C.create_string_buffer(65536)
+        out=C.create_string_buffer(1024)
+        status=self.link(app,len(app),self.app_pub,self.lib,len(self.lib),self.lib_pub,
+                         base,image,len(image),out,len(out))
+        return status,image,out
+
+    def segments(self,out):
+        count=struct.unpack_from('<I',out.raw,4)[0]
+        return [struct.unpack_from('<QQQII',out.raw,48+i*32) for i in range(count)]
+
+    def test_import_slots_bind_to_library_exports(self):
+        base=0x44000000
+        status,image,out=self.run_link(self.app,base)
+        self.assertEqual(status,0)
+        self.assertEqual(struct.unpack_from('<Q',out.raw,16)[0],base)
+        segments=self.segments(out)
+        self.assertEqual(len(segments),6)
+        app_rw=next(s for s in segments[:3] if s[3]==3)
+        library=segments[3:]
+        lib_offset=min(s[0] for s in library)
+        _,app_segments=elf_segments((ROOT/'build/posixprobe.elf').read_bytes(),True)
+        span=max(rva+((memory+4095)&~4095) for _kind,_flags,rva,memory,_data in app_segments)
+        self.assertEqual(lib_offset,span)
+        library_rx=next(s for s in library if s[3]==5)
+        image_base=C.addressof(image)
+        names=('open','read','write','close','lseek','fstat','stat','getpid',
+               '_exit','sleep','printf','puts','getenv','__errno_location','strerror')
+        for name in names:
+            slot=self.app_symbols['__sf_import_'+name][2]
+            host_offset=app_rw[2]-image_base+slot-app_rw[0]
+            address=struct.unpack_from('<Q',image.raw,host_offset)[0]
+            self.assertEqual(address,base+lib_offset+self.lib_symbols[name][2],name)
+            self.assertTrue(library_rx[0]<=address-base<library_rx[0]+library_rx[1],name)
+
+    def test_missing_export_is_a_dependency_failure(self):
+        manifest=dict(self.manifest,native_imports=[{'name':'missing_fn','abi':'libsf-posix-1','slot':'__sf_import_open'}])
+        app=pack(manifest,(ROOT/'build/posixprobe.elf').read_bytes(),2,self.app_seed)
+        self.assertEqual(self.run_link(app)[0],-6)
 
 
 if __name__=='__main__': unittest.main(verbosity=2)

@@ -18,6 +18,12 @@
 /* Relocatable images occupy a separate, 2 MiB aligned arena below DMA. */
 static inline int sf_image_base_valid(uint64_t base){return !base||base==SF_BASE||(base>=SF_PIE_MIN&&base<=SF_DMA-SF_IMAGE_MAX&&!(base&(SF_IMAGE_MAX-1)));}
 #define SF_MAX_TASKS 12
+#define SF_MAX_THREADS 32
+#define SF_MAX_CPUS 8
+#define SF_THREAD_LIMIT_MAX 8
+#define SF_THREAD_STACK_BASE 0x40300000ull
+#define SF_THREAD_STACK_BYTES 65536u
+#define SF_CPU_WINDOW_TICKS 100u
 #define SF_MSG_BYTES 256
 #define SF_ARGUMENT_MAX 8u
 #define SF_ENVIRONMENT_MAX 8u
@@ -39,6 +45,14 @@ enum { SYS_EXIT, SYS_YIELD, SYS_LOG, SYS_TICKS, SYS_EP_CREATE,
  SYS_SEND, SYS_RECV, SYS_SPAWN, SYS_KILL, SYS_TASK_STATUS,
  SYS_CONSOLE_READ, SYS_SHUTDOWN, SYS_CAP_DERIVE, SYS_CAP_CLOSE,
  SYS_MAP_TEST, SYS_CAP_REVOKE, SYS_PCI_READ, SYS_PORT_IO, SYS_DEVICE_RELEASE, SYS_DMA_STATUS, SYS_TASK_PRIORITY, SYS_TASK_CAP_LIMIT, SYS_SEND_CANCEL, SYS_SPAWN_LIMITED, SYS_TASK_PAGE_LIMIT, SYS_IPC_STATS };
+#define SYS_THREAD_CREATE 26
+#define SYS_THREAD_LIMIT 27
+#define SYS_TASK_CPU_BUDGET 28
+/* 设备中断：取得当前授权设备的 INTx（写入 IOAPIC 重定向），释放，以及
+ * 阻塞等待一次中断（参数为超时滴答数，0 表示无限等待）。 */
+#define SYS_IRQ_ACQUIRE 29
+#define SYS_IRQ_RELEASE 30
+#define SYS_IRQ_WAIT 31
 enum { SF_PRIORITY_MIN=0, SF_PRIORITY_DEFAULT=1, SF_PRIORITY_MAX=3, SF_PRIORITY_AGING_TICKS=4,
  SF_PRIORITY_QUERY=0, SF_PRIORITY_SET=1 };
 enum { SF_CAP_LIMIT_MAX=32, SF_LIMIT_QUERY=0, SF_LIMIT_SET=1, SF_LIMIT_USED=2 };
@@ -50,7 +64,18 @@ enum { OP_ECHO=1, OP_ECHO_DIAGNOSTIC=2, OP_OPEN=10, OP_READ, OP_WRITE, OP_CLOSE,
  OP_POLL, OP_CREATE, OP_DESCRIBE, OP_ENUMERATE, OP_OPENAT, OP_ROOT, OP_TRUNCATE, OP_UNLINK, OP_STAT, OP_RMDIR, OP_DUP=25, OP_PREAD=26, OP_HELLO=30, OP_NATIVE_PREPARE=40,
  OP_NATIVE_STAGE, OP_NATIVE_HEALTH, OP_NATIVE_DIAGNOSTIC, OP_BLOCK_INFO=50, OP_BLOCK_READ, OP_BLOCK_WRITE, OP_BLOCK_STOP,
  OP_BLOCK_FLUSH, OP_BLOCK_WRITE_RANGE, OP_BLOCK_DMA_PROBE,
- OP_NET_INFO=60, OP_NET_PING, OP_NET_UDP, OP_NET_TCP };
+ OP_NET_INFO=60, OP_NET_PING, OP_NET_UDP, OP_NET_TCP,
+ OP_NET_DHCP=64, OP_NET_OPEN, OP_NET_SEND, OP_NET_RECV, OP_NET_CLOSE, OP_NET_LIST,
+ OP_MODULE_STATUS=70, OP_MODULE_LIST, OP_MODULE_START, OP_MODULE_PREPARE,
+ OP_MODULE_CANCEL, OP_MODULE_STOP, OP_MODULE_UNLOAD, OP_MODULE_ACQUIRE,
+ OP_MODULE_RELEASE,
+ OP_PERSIST_ATTACH_SEND=80, OP_PERSIST_ATTACH_REPLY, OP_PERSIST_MOUNT,
+ OP_PERSIST_READ, OP_PERSIST_WRITE, OP_PERSIST_TRUNCATE, OP_PERSIST_STAGE,
+ OP_PERSIST_INSTALL, OP_PERSIST_BEGIN, OP_PERSIST_FINISH, OP_PERSIST_REVOKE,
+ OP_PERSIST_STATUS, OP_PERSIST_PACKAGE, OP_PERSIST_PREVIEW, OP_PERSIST_REVOKED,
+ OP_PERSIST_DRIVER_DOWN,
+ OP_FS_ATTACH_SEND=95, OP_FS_ATTACH_REPLY, OP_FS_MOUNT, OP_FS_ENTRY,
+ OP_FS_FIND, OP_FS_READ, OP_FS_STOP, OP_FS_BLOCK_READ };
 enum { SF_FILE_READ_ONLY=1, SF_FILE_MOUNTED=2, SF_FILE_SEEKABLE=4 };
 typedef struct {uint32_t bytes,type,mode,flags;uint64_t size,offset;} SfFileStat;
 _Static_assert(sizeof(SfFileStat)==32,"file stat ABI");
@@ -70,6 +95,8 @@ typedef struct {uint32_t size,version;uint64_t send_bytes,receive_bytes;} SfIpcS
 _Static_assert(sizeof(SfIpcStats)==24,"IPC counters ABI");
 typedef struct { SfIpcHeader h; int64_t status; uint64_t handle,offset;
  uint32_t length,mode; uint8_t data[SF_MSG_BYTES]; } SfMessage;
+typedef struct {uint32_t size,flags;uint64_t entry,argument;} SfThreadRequest;
+_Static_assert(sizeof(SfThreadRequest)==24,"thread request ABI");
 typedef struct {
  uint32_t size; uint16_t abi_major,abi_minor;
  uint64_t bundle, bundle_bytes;
@@ -108,4 +135,5 @@ void *memset(void *,int,size_t);
 int memcmp(const void *,const void *,size_t);
 size_t strlen(const char *);
 int strcmp(const char *,const char *);
+int strncmp(const char *,const char *,size_t);
 #endif

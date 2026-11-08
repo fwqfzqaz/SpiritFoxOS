@@ -1,6 +1,6 @@
 # 存储服务与只读区域
 
-2026-10-23。该实现将真正的磁盘请求交给独立 CPL3 `sf-virtio-blk.sfmod`，SFRFS1 解析器和命名空间适配器暂组合于 sf-init。没有把磁盘文件预装进引导包来模拟磁盘加载。
+2026-11-07。真正的磁盘请求交给独立 CPL3 `sf-virtio-blk.sfmod`；格式探测、SFRFS1/SFRFS2 解析与文件服务已迁入独立 `sf-fs.sfmod`。sf-init 只保留 `/disk` 命名空间投影、块 RPC 代理与装载暂存。没有把磁盘文件预装进引导包来模拟磁盘加载。
 
 ## 硬件与授权
 
@@ -30,15 +30,39 @@ sf-init 枚举 PCI 总线 0，Core 0 再核对设备身份和 BAR。legacy 驱�
 
 文件系统通过两个半块请求取得一扇区。驱动缓存一个已成功完成的扇区。使用单调截止时间；超时先撤销设备再报错。校验完成索引变化、描述符 ID、成功状态和已写长度；失败不将旧缓存当作新数据。
 
-## SFRFS1 格式
+## 文件系统服务（sf-fs.sfmod）
 
-该格式是本项目的有界只读目录，不宣称兼容 FAT、ext4 或通用 POSIX 文件系统。所有整数小端；镜像为 512 字节倍数，范围 1 KiB–8 MiB，最多 16 个文件，每文件最多 128 KiB。构建器默认生成 1 MiB 镜像。
+磁盘格式层与文件服务运行在独立 ring-3 地址空间 `org.spiritfox.fs.disk`。它不直接持有 virtio-blk 端点：`sf-init` 仍是驱动回复的唯一接收方，`sf-fs` 通过 `OP_FS_BLOCK_READ` 请求 256 字节半块，由 init 的 `serve_once` 与 `fs_wait_reply` 内的块代理执行。这样避免两个进程并发接收同一驱动端点，持久化拆分后的回复路由保持不变。
+
+| 操作 | 请求 | 成功回复 |
+| --- | --- | --- |
+| `OP_FS_ATTACH_SEND (95)` | 附带 SEND 能力；data 无 | status=0；模块记录块代理请求端点与容量 |
+| `OP_FS_ATTACH_REPLY (96)` | 附带 RECV 能力 | status=0；模块记录代理回复端点 |
+| `OP_FS_MOUNT (97)` | hint:0 自动、1 SFRFS1、2 SFRFS2 | status=0，offset=探测到的格式号；模块逐个校验文件摘要 |
+| `OP_FS_ENTRY (98)` | offset=索引；length=输出容量 | 路径、大小与数据偏移 |
+| `OP_FS_FIND (99)` | data=绝对路径 | offset=索引，length=文件大小；未找到 `SF_NOT_FOUND` |
+| `OP_FS_READ (100)` | offset=索引、handle=文件内偏移、length≤256 | 有界数据块 |
+| `OP_FS_STOP (101)` | 无 | 模块退出，由管理器回收 |
+| `OP_FS_BLOCK_READ (102)` | offset=512 对齐，mode=0/256，length=256 | 半个扇区；只接受已附着的代理回复端点 |
+
+能力仍由 `SYS_CAP_DERIVE` 派生并随 `cap_count=1` 转移；服务端回复前清零 `cap_count` 与 `deadline_ns`，避免把附带能力反向转移或让长校验被请求截止时间拒绝。模块映像常住 1 MiB 文件校验缓冲，因此 sf-init 装载暂存区为 1280 KiB（仍在 2 MiB 可写段预算内）。命名空间目录、RAMFS、`/disk` 节点投影和持久化客户端仍留在 sf-init。
+
+## SFRFS1 与 SFRFS2 格式
+
+两者都是本项目的有界只读目录，不宣称兼容 FAT、ext4 或通用 POSIX 文件系统。所有整数小端；镜像为 512 字节倍数，共享 512 字节头部、128 字节目录记录与目录表 SHA-256。启动时按 magic 自动探测；未知 magic 返回 `SF_BAD_FORMAT`。
+
+| 格式 | magic | 条目 | 单文件 | 镜像 | 空文件 |
+| --- | --- | --- | --- | --- | --- |
+| SFRFS1 | `SFRFS1\0\0` | 1–16 | ≤128 KiB | 1 KiB–8 MiB | 拒绝 |
+| SFRFS2 | `SFRFS2\0\0` | 0–48 | ≤1 MiB | 1 KiB–32 MiB | 允许 |
+
+SFRFS2 增加嵌套目录路径、空文件和更大的单文件/总容量；记录仍按路径字节序严格递增，文件偏移 512 对齐且互不重叠，任何文件不能同时作为父目录。SFRFS1 保持原始上限，旧镜像行为不变。
 
 头部固定 512 字节：
 
 | 偏移 | 字段 |
 | --- | --- |
-| 0 | magic[8] = `SFRFS1\0\0` |
+| 0 | magic[8] = `SFRFS1\0\0` 或 `SFRFS2\0\0` |
 | 8 | version:u32 = 1 |
 | 12 | header_bytes:u32 = 512 |
 | 16 | image_bytes:u64，与设备容量完全相等 |
@@ -49,14 +73,15 @@ sf-init 枚举 PCI 总线 0，Core 0 再核对设备身份和 BAR。legacy 驱�
 | 48 | table_sha256[32] |
 | 80 | reserved[432]，全零 |
 
-每条目录记录固定 128 字节：path[64]、offset:u64、bytes:u64、sha256[32]、flags:u32=1、reserved[12]=0。path 为 NUL 终止的可打印 ASCII 绝对路径，尾部填零；拒绝空分量、`.`、`..`、反斜线、尾随 `/`、重复路径和文件作为父目录。记录按路径字节序严格递增；文件偏移 512 对齐，必须位于目录之后，非空且互不重叠。
+每条目录记录固定 128 字节：path[64]、offset:u64、bytes:u64、sha256[32]、flags:u32=1、reserved[12]=0。path 为 NUL 终止的可打印 ASCII 绝对路径，尾部填零；拒绝空分量、`.`、`..`、反斜线、尾随 `/`、重复路径和文件作为父目录。记录按路径字节序严格递增；文件偏移 512 对齐，必须位于目录之后，非空文件互不重叠。SFRFS1 要求每个文件非空；SFRFS2 允许长度为 0，但仍要求偏移合法且对齐。
 
 挂载先校验容量、结构、目录摘要和每个文件摘要，再发布只读节点。摘要用于检测损坏，不能认证磁盘来源；可执行包仍须独立通过 Ed25519 信任策略。文件摘要通过但包签名错误的场景有专门 VM 测试。
 
-创建自定义镜像：
+创建自定义镜像（默认 SFRFS1；`--format 2` 生成 SFRFS2）：
 
 ```powershell
 python3 tools/package/mkreadfs.py --out build/custom.img /bin/demo.sfk=build/hello.sfk
+python3 tools/package/mkreadfs.py --format 2 --out build/custom2.img /bin/demo.sfk=build/hello.sfk
 ```
 
 ## 装载与引用
@@ -69,4 +94,6 @@ python3 tools/package/mkreadfs.py --out build/custom.img /bin/demo.sfk=build/hel
 
 M5 的 151 条宿主 C 断言和九组 QEMU 回归继续保留，所有只读场景的镜像运行前后 SHA-256 一致。可写介质拒绝用例针对没有事务格式的旧盘。M6 额外验证可写事务盘、重启与故障恢复，详见 `PERSISTENCE.md`、`../quality/TESTING.md` 和本机 `build/test-results.json`。
 
-接口实现依据 [OASIS virtio 1.1 legacy 规范](https://docs.oasis-open.org/virtio/virtio/v1.1/virtio-v1.1.html)、[QEMU PCI ID 定义](https://www.qemu.org/docs/master/specs/pci-ids.html)和 [QEMU blkdebug 文档](https://www.qemu.org/docs/master/devel/testing/blkdebug.html)。SFRFS1、RPC 和授权策略由本项目定义。
+`tests/integration/test_readfs.py` 通过宿主 `sf_fs_check_auto` 覆盖自动探测、SFRFS2 空文件/嵌套目录、构建器上限、目录表损坏、越界/重叠/未排序记录和文件作为父目录的拒绝。`tests/qemu/qemu_test.py --storage v2` 使用 `build/storage-v2.img` 启动产品镜像，断言 `[STORAGE] format 2` 并重复挂载、只读拒绝、卸载/再挂载和从盘运行签名包等命令；默认 `normal` 继续覆盖 SFRFS1。
+
+接口实现依据 [OASIS virtio 1.1 legacy 规范](https://docs.oasis-open.org/virtio/virtio/v1.1/virtio-v1.1.html)、[QEMU PCI ID 定义](https://www.qemu.org/docs/master/specs/pci-ids.html)和 [QEMU blkdebug 文档](https://www.qemu.org/docs/master/devel/testing/blkdebug.html)。SFRFS1、SFRFS2、RPC 和授权策略由本项目定义。

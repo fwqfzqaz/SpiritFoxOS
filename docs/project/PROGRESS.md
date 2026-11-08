@@ -1,6 +1,18 @@
 # SpiritFoxOS 实施进度
 
-更新日期：2026-11-01（北京时间；本轮自 10 月 31 日跨日接续）。
+更新日期：2026-11-07（Asia/Shanghai）。
+
+## 当前状态（2026-11-07）
+
+- 工作区：`/home/fwqfzqaz/work/SpiritFoxOS`；主分支 `main`；origin `https://github.com/fwqfzqaz/SpiritFoxOS.git`。
+- 已完成：M0–M7 纵向切片（含网络、账户会话、SMP/线程、有界导入与 POSIX 子集）；具体能力与剩余项见 [STATUS](STATUS.md)。
+- 下一阶段：`v0.3` 模块化收尾与运行时加固，P0 为 `sf-init` 剩余拆分，目标、优先级与验收条件见 [ROADMAP](ROADMAP.md)。
+- 本轮文档整理：合并同类架构文档、删除失效指针与已完成临时规格、重写 [文档索引](../README.md)；`docs/specs/` 中 SMP/线程/配额与 `sf-persist` 拆分的结论已并入 [SCHEDULING](../architecture/SCHEDULING.md)、[PERSISTENCE](../architecture/PERSISTENCE.md) 与本文。
+- 协作规则：提交、推送与 PR 门禁见 [CONTRIBUTING](../../CONTRIBUTING.md)；项目以 GPL-3.0-only 发布，见 [LICENSE](../../LICENSE)。
+
+## 历史轮次（2026-10-31 至 2026-11-01）
+
+> 以下工作区、分支与运行状态均为当时记录，不代表当前状态。
 
 - 工作区：`E:\SpiritFoxOS`；分支 `codex/requirements-followup-20261031`；origin `https://github.com/fwqfzqaz/SpiritFoxOS.git`。
 - 本轮目标：IPC复制计量已完整验证推送1a7dc5c / PR #14；接续M1任务槽复用时的内核栈字节清理。
@@ -21,12 +33,75 @@
 - 当前完整验证：内核栈复用清理含初始构建完整1268.57秒/168VM、10022项创建/上下文检查通过；583项ABI保持，七项产物相符。
 - 下一步：本轮发布门/ZIP14项离线验证、正常推送并核对新HEAD Windows/Linux；随后等待用户指示，不开始新开发，自动任务PAUSED。
 
+## 账户与多用户会话（2026-11-07）
+
+用户要求解决“无用户会话、无多用户”问题。新增构建期账户表 `config/accounts.txt` → `build/accounts_table.h`（1–8 条、唯一 uid-0 root、确定性盐 + 256 轮 SHA-256，明文不入镜像），运行期 `services/accounts.c` 严格解析并由签名 sf-init 加载。`services/session.c` 提供四个有界控制台会话，启动自动建立 root 会话以保持旧 `fox> ` 与全部 root 命令；新增 `login/logout/whoami/users/sessions`，口令可隐藏输入，登出后附着最高剩余槽位，无会话时仅接受会话命令。
+
+命名空间节点新增所有者 uid/gid 与九位模式：非 root 打开按属主/同组/其他检查目标权限并逐层要求目录 execute，创建/删除要求父目录写+执行；`/home/<name>` 为 0700、`/tmp` 为 0777（无 sticky）、`/dev/console` 与 `/run/pipe` 为 0666。应用文件 RPC 由真实发送者 PID 映射 `Child.uid/gid`，服务端 `sf_file_dispatch_as` 强制检查；会话 owner 使用 `0x80000000|id` 与 PID 句柄空间分离。`run installed` 与 persist/install/trust/mount/stop/start/测试类管理命令仅 root 会话可用。未改动内核 ABI，未引入新组件。
+
+验证：`test_accounts.c` 33 项、`test_sessions.c` 25 项、`test_ns_identity.c` 42 项宿主断言通过；`python3 tools/build.py` 与 `tools/test.py --skip-build --host-only` 通过；新增 `tests/qemu/qemu_user_test.py` 在 legacy/modern 各启动一次真实 VM 并覆盖登录、隔离、管理门、槽位上限、登出重附着、无会话控制台与持久盘字节不变，已通过；`qemu_test.py`（help 标记改为 `help | login`）与 `qemu_stat_test.py` 回归通过。完整 QEMU 清单逐项执行，全部通过；连续 TCG 负载下 environment/persist/net --disk 各出现一次计时敏感超时或 `SF_COMMIT_UNCERTAIN`，单独重跑均通过。sf-init RW 1,604,392 B / 2 MiB。托管 CI 需按当前提交另行核对。格式与限制见 `docs/architecture/SESSIONS.md`。
+
 ## 同所有者文件句柄复制（2026-10-31）
 
 OP_DUP=25 / sf_file_dup 通过现有描述引用实现同所有者复制，保留权限、共享游标和最后引用回收；关闭默认根后显式目录副本仍可使用，但 OP_ROOT 不会重新授予根。挂载、管道 EOF、控制台、回收与槽位耗尽语义由真实 namespace/file_rpc 宿主组合验证。畸形成功回复会停止客户端；不确定超时可能保留引用至进程回收，不提供跨进程转移或取消。
 
 完整含初始构建回归 1107.92 秒、158 VM 通过；复制复用现有 legacy/modern 两次客户端 VM，没有为复制额外增加启动。全部既有 CPU/能力/服务/签名/设备/更新/旧事务兼容测试通过，七项交付摘要与本轮验证产物逐项相同。ABI 参考及采集均为 408e6cbdcf7ccf50eb900b7e06401280812c8bf823eca2ce7510dc0d575fd7ab。当前本地通过，托管 CI 按新提交另行核对。
 
+
+## 随 IPC 的能力转移与派生树撤销（2026-11-07）
+
+M1 前置项之一。`SfMessage.cap_count=1` 时 `handle` 指定要转移的能力，内核要求发送方持有 `RIGHT_DELEGATE`，接收方在 RECV 时安装同权新句柄；阻塞直递与队列交付共用安装路径，发送后端点撤销或重生则在交付时按 `SF_REVOKED` 清空能力。每个能力新增父 PID、槽位和 generation 锚点；`SYS_CAP_REVOKE` 对端点所有者仍回收整条端点，对其他持有者只撤销自己这一支及其后代，父能力与同层兄弟保持。新增 `sf_ep_create`/`sf_cap_close`/`sf_cap_derive`/`sf_cap_revoke`/`sf_send_cap` 内联封装，不改变公开结构布局。宿主 IPC 断言 40908→40950，覆盖跨任务转移、子树级联、兄弟/父保持、非委派拒绝、接收方槽耗尽与 cap_count 上界；新增 `captree.sfk` 在 legacy 与 VT-d/modern 两次真实 VM 验证队列交付、同权新句柄、整端点撤销后派生链失效。
+
+## 文件 RPC 通道与生命周期 RPC（2026-11-07）
+
+`fs_ep` 成为应用文件 RPC 的独立通道：应用仍从 `SfBootArgs.manager` 取得它，但 `manager_ep` 不再承载文件请求，普通应用没有管理端点。`serve_once` 只从 `fs_ep` 接收，回复仍走每个 Child 的私有回复端点，因此后续把文件分发放进独立 sf-fs 进程不需要改应用 SDK 或 BootArgs。cap-limit/cancel 引导测试同步改用 `fs_ep`，验证同一请求编号在同一队列中的撤回语义不变。
+
+新增 `services/lifecycle_rpc.c` 与 `include/lifecycle_rpc.h`：在 `manager_ep`/`manager_reply` 上以 `SfMessage` 分发状态、列表、启动、准备、取消、停止、卸载与资源租约操作。调用者身份取自内核填写的真实发送者，当前仅根进程可调用；非根按 `SF_DENIED` 拒绝且不回填槽位信息。分发层只做消息头校验、身份检查和 `manager.c` 状态机调用，不复制状态转换。宿主 `test_lifecycle_rpc` 覆盖非法头、未知操作、越界槽、重复启动不改变状态、准备/取消/带租约停止、卸载和租约非负记账；引导阶段以根身份自调用验证真实 IPC、回复端点与状态返回值，输出 `LIFECYCLE RPC TEST PASSED`。
+
+## sf-persist.sfmod 拆分（2026-11-07）
+
+持久化整体迁入独立地址空间：`services/persistence.c`、`txn.c`、`update.c`、`version.c` 与约 296 KiB
+的 `SfTxn volume` 只链接进 `sf-persist.sfmod`；`sf-init` 新增 `services/persist_client.c`，删除本地
+事务卷。`sf-init` 用 `SYS_CAP_DERIVE` 派生 `SEND|DELEGATE` 与 `RECV|DELEGATE` 两枚块端点能力并随
+ATTACH 消息转移，原句柄保留给 readfs、写测试、`stop disk` 与 DMA 探测；`sf-virtio-blk` 改为以持有
+服务端点能力作为授权，不再检查发送方 PID。
+
+新增 15 个有界持久化操作码（attach/mount/read/write/truncate/stage/install/begin/finish/revoke/
+status/package/preview/revoked/driver-down），数据按 256 字节分块；`ATTACH_REPLY` 的容量经 `offset`
+传递（`handle` 已被内核占用为能力字段）。`/persist` 与 `/persist/notes` 投影改为客户端 external
+钩子，dirty 租约仍由 sf-init 维护，`DRIVER_DOWN`/重新 ATTACH 覆盖 stop/start/unmount/mount 与
+crash/dma 测试。挂载后用 `OP_PERSIST_REVOKED` 把撤销集合同步回 sf-init 的本地信任状态。
+
+装载暂存区由 256 KiB 扩为 512 KiB。构建输出 sf-persist RW 349496 字节、sf-init RW 818656 字节，
+均低于 2 MiB 映像上限且预算门通过。回归中发现并修复三个客户端/服务端问题：分块包导出必须逐块复制
+（否则大包只写入首块，残留旧缓冲导致 `SF_BAD_FORMAT`），外部写入必须返回实际字节数（否则
+命名空间节点 `size` 不更新，`stat`/`fileprobe` 失败），以及 sf-persist 回复时复用接收到的消息头
+（`cap_count=1` 会让每次 ATTACH 把驱动能力反向转移进 sf-init，能力槽按每次挂载 2 个泄漏，
+最终 `SYS_EP_CREATE` 返回 `SF_NO_SPACE`）；服务端回复前清零 `cap_count`，能力转移 ABI 不变。
+磁盘格式、双银行提交顺序、A/B 槽、版本策略与故障注入语义均未改变。
+
+## sf-fs.sfmod 与 SFRFS2（2026-11-07）
+
+磁盘格式层与文件服务迁入独立地址空间 `org.spiritfox.fs.disk`：`services/fs_format.c` 负责探测与
+SFRFS1/SFRFS2 解析，`services/fs_main.c` 提供挂载、条目、查找、分块读取和退出操作。`sf-readfs`
+只链接进该模块，sf-init 不再持有解析器。
+
+驱动回复仍只由 sf-init 接收，避免与持久化拆分后的回复路由产生并发接收者。sf-init 派生并转移
+块代理端点的 `SEND|DELEGATE` 与 `RECV|DELEGATE` 能力，sf-fs 用 `OP_FS_BLOCK_READ` 请求 256 字节
+半块，`serve_once` 与 `fs_wait_reply` 内的代理校验发送者 PID、请求编号、长度、模式与偏移后回复。
+模块挂载时逐个校验文件摘要；服务端回复前清零 `cap_count`/`deadline_ns`，避免能力反向转移和
+长校验被 3 秒请求截止时间拒绝。
+
+新增 SFRFS2：与 SFRFS1 共享 512 字节头、128 字节条目和目录表 SHA-256，magic 为 `SFRFS2\0\0`，
+允许 0–48 个条目、空文件、嵌套目录路径、单文件 ≤1 MiB、镜像 ≤32 MiB；SFRFS1 保持 1–16 条目、
+每文件 ≤128 KiB、镜像 ≤8 MiB 且拒绝空文件。`tools/package/mkreadfs.py --format 2` 生成新镜像，
+构建同时输出 `build/storage.img` 与 `build/storage-v2.img`。
+
+模块常驻 1 MiB 文件校验缓冲使映像超过旧暂存区，sf-init 装载暂存区由 512 KiB 扩为 1280 KiB，
+仍在 2 MiB 可写段预算内（sf-fs RW 1058112 字节，预算门通过）。`tests/integration/test_readfs.py`
+新增自动探测、SFRFS2 构建器上限、空文件/嵌套目录和损坏/越界/重叠/未排序/文件作为父目录的宿主
+用例；`tests/qemu/qemu_test.py --storage v2` 断言 `[STORAGE] format 2` 并复用全部磁盘命令。
+本轮构建、host-only、默认 QEMU 与 v2 QEMU 均通过。
 
 ## 已完成
 
@@ -47,7 +122,7 @@ OP_DUP=25 / sf_file_dup 通过现有描述引用实现同所有者复制，保�
 15. 上一轮发布包为 `build/SpiritFoxOS-M6-IOMMU.zip`，通过打包门检查精确镜像摘要；格式与限制见 `docs/architecture/IOMMU.md`。
 16. 本轮：160 字节规范更新状态绑定应用身份与包摘要；备用包和 PENDING 原子提交，先持久化 TRYING 再执行，按时退出 0 后确认；页故障、非零退出、超时、装载失败与中断后回退已确认槽。待更新时拒绝覆盖，首装失败回到未安装，旧单字节记录经签名认证迁移。回退只影响应用选择器，不撤销外部副作用。
 17. 完整测试通过：151 条基础/存储 C 断言、229 条 IOMMU 检查、783 个原事务故障场景、3132 个更新阶段故障场景及规范状态检查、14 组 Python 测试与 2000 次变异、61 次 VM 启动。legacy 与 VT-d/modern 都覆盖真实故障/超时、试运行终止、开始/恢复/确认写 EIO、身份/摘要/签名拒绝及旧格式兼容。结果 `build/test-results.json` 记录精确镜像摘要与完整更新标记。
-18. 更新阶段发布包为 `build/SpiritFoxOS-M6-Updates.zip`；当前同名包已更新为下述版本策略成果。协议与限制见 `docs/architecture/UPDATES.md`。
+18. 更新阶段发布包为 `build/SpiritFoxOS-M6-Updates.zip`；当前同名包已更新为下述版本策略成果。协议与限制见 `docs/architecture/PERSISTENCE.md`。
 19. 本轮：已确认包的签名 `major.minor.patch` 形成软件版本下限；拒绝降级及同版本换包，精确重装不写盘并返回 UNCHANGED。候选失败/中断不提高下限，健康确认事务成功后才与已确认包一起更新。既有 160 字节格式保留，旧待更新记录在执行时也重新校验版本；`persist` 显示经认证的版本策略。
 20. 最终完整验证通过：151 条基础/存储 C 断言、229 条 IOMMU 检查、4069 条版本策略检查、783 个事务故障及 3132 个更新故障场景、14 组 Python 测试、75 次 VM 启动。legacy 与 VT-d/modern 均覆盖降级、同版本换包、幂等安装字节不变、签名正确的非法版本、失败后版本下限保留、确认后重启、旧 PENDING 策略拒绝及全部已有恢复测试。
 21. 当前发布包仍为 `build/SpiritFoxOS-M6-Updates.zip`；打包门新增要求完整版本宿主/VM 标记，并校验精确镜像摘要。软件下限不能抵御旧磁盘回放；损坏后恢复旧银行快照时以下层完整快照为准，不宣称 TPM/可信单调计数。
@@ -56,13 +131,13 @@ OP_DUP=25 / sf_file_dup 通过现有描述引用实现同所有者复制，保�
 24. M3：目录句柄 openat、OPEN_DIRECTORY 类型限制、父权限衰减、规范相对路径及显式 runat 只读委派。应用必须经签名清单声明 namespace.read，并由 shell 选择目录；默认 run 没有文件根。通过真实 IPC 获得目录、列举和读取，父关闭不撤销子文件，退出/故障/超时回收全部引用。协议与限制见 `docs/architecture/NAMESPACE.md`。
 25. 最终完整测试通过（320.67 秒）：108 条新增 openat 检查、签名请求能力第十组包测试、legacy/modern 两个新增 VM，实际总数 79。连续 40 次进程遗留文件仍可卸载，故障/超时后恢复；持久化只读授权不改盘，设备失效后也不能读取缓存。全部原有回归通过，发布门增加 openat 标记要求，发布包仍为 `build/SpiritFoxOS-M6-Updates.zip`。
 26. M3/M6：统一文件句柄 truncate 与 RPC，RAMFS 和持久笔记支持缩短/清空/补零扩展，保持打开偏移；旧偏移写入会补零空洞。只读目录派生文件不能截断。笔记使用原双银行格式，同长度不写盘、不提高 generation；写/flush 错误关闭卷但仍释放 dirty 引用，应用槽与更新选择器不变。
-27. 最终完整验证通过（386.03 秒）：83 条截断检查、3132 个新增故障场景、legacy/modern 各八次新增 VM，实际总数 95；原有全部内核、目录、包、版本、IOMMU、事务/更新回归继续通过。语义与边界在 `docs/architecture/TRUNCATE.md`，发布门要求本轮标记和精确镜像摘要；发布包仍为 `build/SpiritFoxOS-M6-Updates.zip`。
+27. 最终完整验证通过（386.03 秒）：83 条截断检查、3132 个新增故障场景、legacy/modern 各八次新增 VM，实际总数 95；原有全部内核、目录、包、版本、IOMMU、事务/更新回归继续通过。语义与边界在 `docs/architecture/NAMESPACE.md`，发布门要求本轮标记和精确镜像摘要；发布包仍为 `build/SpiritFoxOS-M6-Updates.zip`。
 28. M6：构建时最多八个公钥，签名尾部 key_id 从外部策略精确选取公钥，区分 module/app 用途并拒绝撤销密钥，无开发根回退。启动器、管理器、持久化安装/已安装包读取和独立 native 运行时采用同一策略；guest `trust` 与离线工具可查询。开发默认策略保持单公钥，外部应用密钥可先重叠信任、确认新包，再撤销旧密钥并重建启动。
 29. 最终完整验证通过（461.53 秒）：21 组 Python 测试、3000 次变异、105 次 VM，新增十次验证启动用途/撤销、跨密钥更新、未知/撤销/用途错误拒绝、已确认旧密钥版本下限失败关闭、待更新旧密钥撤销后回退；全部旧回归通过。临时策略结束后重新构建原有效策略，EFI/两种盘/公钥/策略摘要一致。发布门新增信任标记及策略摘要，语义和恢复限制见 `docs/architecture/TRUST.md`。
 30. 默认开发签名角色分离：保留已有模块种子，首次创建独立应用种子，两个公钥必须不同；默认模块仅 module、应用仅 app。所有构建应用与已签名版本负例改用应用种子，模块继续使用原种子。自定义策略必须显式准入两个实际签名者的对应用途；不自动补齐或放宽用户策略。公开 application.pub 纳入交付摘要和发布包，私钥不提交。
 31. 最终完整验证通过（486.45 秒、109 VM）：新增默认角色宿主检查，应用密钥签署 bootstrap/模块和模块密钥签署应用均拒绝；legacy/modern 各新增两次旧单密钥显式迁移与严格策略重启，确认新应用密钥包后移除旧应用用途仍可执行已确认新包，拒绝旧签名不改盘。十四次信任 VM 后恢复原策略，EFI、两种盘、两个公钥、策略摘要一致；所有已有回归通过，测试结果增加 separate_signing_keys=true。
 32. M4：native argv 有界传递，最多八项、512 字节规范载荷，96 字节 BootArgs 头保持不变。显式参数复制到私有只读页，内核与 SDK 独立检查规范偏移、数量、长度和终止符；无额外参数保持旧 96 字节/argc=0 布局。run/runat 引号、空串和转义在启动及试运行事务前解析，模块拒绝额外参数，调用参数不写入安装状态。
-33. 完整验证通过（547.21 秒、111 VM）：8155 项 C 检查含 1000 次往返，真实 syscall 拒绝头部偏移/数量溢出，两个新增 legacy/modern VM 验证 argv、只读页写故障、最大数量、进程重用、runat、installed 健康确认及非法参数不改盘；全部既有回归通过。SDK 及兼容边界见 docs/architecture/ARGUMENTS.md，发布门新增 arguments_host_checks=8155 和 arguments_qemu=true。
+33. 完整验证通过（547.21 秒、111 VM）：8155 项 C 检查含 1000 次往返，真实 syscall 拒绝头部偏移/数量溢出，两个新增 legacy/modern VM 验证 argv、只读页写故障、最大数量、进程重用、runat、installed 健康确认及非法参数不改盘；全部既有回归通过。SDK 及兼容边界见 docs/architecture/APP_SDK.md，发布门新增 arguments_host_checks=8155 和 arguments_qemu=true。
 
 34. M4：显式 runenv/runenvat 环境，最多八个 NAME=VALUE 与八个 argv 共用 512 字节规范载荷；环境不继承，标识符/重复名/数量和词法在启动及持久化试运行前拒绝。BootArgs 固定头保持 96 字节，环境和参数同属子进程私有只读页，提供完整字符串与按名称查值 SDK。
 35. 完整验证通过（602.82 秒、113 VM）：12034 项环境检查含 1000 次往返，两个新增 VM 验证 legacy/modern、空值/缺失/字面量、目录委派、8+8 上限、只读环境写故障、进程复用与已安装更新确认。全部原有测试通过，发布门要求 environment_host_checks=12034、environment_qemu=true；六个交付摘要一致。
@@ -122,9 +197,11 @@ OP_DUP=25 / sf_file_dup 通过现有描述引用实现同所有者复制，保�
 
 70. 修复Windows原型CI在`python tools/test.py`阶段的编译失败：tests/host/test_sdk.c原先用`sf_atol("2147483648")==2147483648L`断言64位long，但Windows（LLP64）的long是32位，`-Werror -Wtautological-constant-out-of-range-compare`直接拒绝编译，导致全部宿主检查中断。现按`LONG_MAX`宽度分支断言（64位宿主比较2147483648L，32位宿主比较LONG_MAX），`%p`改为断言SDK自身形式`0x1234`（UCRT/mingw不输出0x前缀，不再依赖宿主方言），检查数171739。另以`x86_64-windows-gnu`交叉编译全部25个宿主测试（含-Wno-unused-parameter分支）确认无其他Windows编译错误；Linux host-only套件通过。
 
+71. M4受限导入与POSIX子集：新增`native_role: library`（仅relative-v1、kind=1、最多64项`native_exports`）与APP`native_imports`（最多32项`{name,abi,slot}`）及`native_library`。sfpack从`.symtab`/`.dynsym`解析RW全局OBJECT槽与RX全局FUNC导出，生成`slot_rva`/`rva`和16字节导入重定位记录，紧接相对记录放在唯一RELOC段；作者提供这些生成字段或未定义ELF导入仍被拒绝。C验证器按名称/ABI/槽对齐/可写性/导出范围/目标等于槽/索引唯一/不与相对目标重叠逐项校验，并修复了相对子表解析后复用越界CBOR游标导致任何导入包静默返回`SF_BAD_FORMAT`的缺陷。sf-init认证`org.spiritfox.posix`/`sf-libsf.sfmod`后用`sf_native_link`把库段追加到`page_up(应用页对齐总长)`，按（名称, ABI）把`image_base+库偏移+导出RVA`写入槽，合并计划最多八段，缺失导出返回`SF_DEPENDENCY`；内核仍不解析CBOR/ELF。运行时库导出`open/read/write/close/lseek/fstat/stat/getpid/_exit/sleep/printf/puts/getenv/__errno_location/strerror`，复用文件RPC/SDK/启动参数，应用保持只读（`O_CREAT`/`O_TRUNC`→`EACCES`，`/dev/console`写打开走进程控制台通道），不含malloc/线程/信号/fork/exec/管道/TLS。`posixprobe.sfk`15个导入槽在QEMU经`runat /tmp`实际通过控制台写、文件元数据、相对读取、缺失路径`ENOENT`、`printf`/`puts`与退出0；宿主`test_native.py`断言槽值等于基址+库偏移+导出RVA并构造缺失导出负例，`qemu_posix_test.py`并入完整套件。限制：单一库、无依赖图/惰性绑定/符号版本/多库共享，不是完整POSIX/libc。
+
 ## 交付与续做
 
-M3空目录删除完整验证通过（1166.82秒、145VM），当前全部VM关闭。正常提交推送当前origin分支、核对PR10后继续下一有界任务；不得因本轮交付停止。M4有界用户态SDK已并入并通过171738项宿主检查；下一有界事项按既有顺序从文件系统/存储子系统的有界能力开始，runtime ELF装载器按DESIGN-v0.2不迁入。保留当前只读授权与全部旧协议/探针。
+M3空目录删除完整验证通过（1166.82秒、145VM），当前全部VM关闭。正常提交推送当前origin分支、核对PR10后继续下一有界任务；不得因本轮交付停止。M4有界用户态SDK与单一认证运行时库导入/POSIX子集已并入并通过宿主与QEMU专项检查；下一有界事项按既有顺序从文件系统/存储子系统的有界能力开始，runtime ELF装载器按DESIGN-v0.2不迁入。保留当前只读授权与全部旧协议/探针。
 
 内核能力与FP隔离已推送8aeb118、通过143VM。额外入口审查在两种实际VM中检查NT/DF/AC、SYSCALL/SYSENTER及FSGSBASE，均安全返回或只隔离原调用者，六项摘要与持久字节保持；记录build/entry-audit-results.json，未复现新漏洞，不把审查候选当成已确认漏洞。
 
@@ -282,7 +359,7 @@ SYS_SEND_CANCEL=22 / sf_send_cancel 仅移除当前端点队列中实际发送�
 
 含初始构建的完整 tools/test.py 全部通过（1210.79 秒、164 VM）。25776 项产品 IPC 宿主检查和 legacy/modern 各八次分阶段应用验证认证发送者隔离、完整编号/0/重复、环绕 FIFO、继承 SEND-only 能力、交付后无副作用和配额占满仍可撤回。原内核/CPU/能力/文件/服务/设备/签名/更新/旧事务回归保留，七项产物逐项相符。
 
-仅新增 SYS_SEND_CANCEL=22，旧 562 项 ABI 无删改，当前 563 项；参考/采集 SHA-256 为 f6d0963368d0c9448a8488edfb9df9b6d88c5392aeb884bb381a77e2e758a674。边界见 IPC_CANCEL.md：撤回仅针对未投递队列，不代表取消在途操作、确认/排空或回滚副作用。此轮本地通过；正常推送后单独核对新 HEAD 托管检查。此前 2b728ef 四项 Windows/Linux 已全部成功，Windows PR 完整 1248.55 秒、ZIP 446035 字节，证据 .cache/cap-limit-hosted-proof-20261031.json。
+仅新增 SYS_SEND_CANCEL=22，旧 562 项 ABI 无删改，当前 563 项；参考/采集 SHA-256 为 f6d0963368d0c9448a8488edfb9df9b6d88c5392aeb884bb381a77e2e758a674。边界见 IPC.md：撤回仅针对未投递队列，不代表取消在途操作、确认/排空或回滚副作用。此轮本地通过；正常推送后单独核对新 HEAD 托管检查。此前 2b728ef 四项 Windows/Linux 已全部成功，Windows PR 完整 1248.55 秒、ZIP 446035 字节，证据 .cache/cap-limit-hosted-proof-20261031.json。
 
 本轮撤回发布门与实际 ZIP 验证通过：465689 字节、42 项 CRC/全部摘要，七项产物与完整 1210.79 秒/164 VM 结果一致；12 项实际解压离线检查通过。验证证明 .cache/ipc-cancel-release-proof-20261031.json。
 
@@ -310,9 +387,9 @@ SF_LIMIT_USED=2 / sf_task_cap_usage(pid) 复用 SYS_TASK_CAP_LIMIT=21，只允�
 
 占用查询发布门与实际 ZIP 已通过：470100 字节、42 项 CRC/全部摘要，七项产物与本轮完整结果相同，14 项实际解压离线工具检查通过。新 HEAD 托管检查独立核对。
 
-物理池页面配额草稿：实际分配器298045项、core3033项宿主已通过；只新增 SYS_SPAWN_LIMITED=23、SYS_TASK_PAGE_LIMIT=24、SF_PAGE_LIMIT_MAX=4096，前564项不变、当前567项。quota_paused=false，user_paused=false；完整验证/推送未完成。协议见 PAGE_LIMITS.md，实际恢复状态见 .cache/progress-live.json。DeepSeek纯文本矩阵120秒超时，无可用答案或审查通过结论；独立实现/验证不依赖其输出。
+物理池页面配额草稿：实际分配器298045项、core3033项宿主已通过；只新增 SYS_SPAWN_LIMITED=23、SYS_TASK_PAGE_LIMIT=24、SF_PAGE_LIMIT_MAX=4096，前564项不变、当前567项。quota_paused=false，user_paused=false；完整验证/推送未完成。协议见 SCHEDULING.md，实际恢复状态见 .cache/progress-live.json。DeepSeek纯文本矩阵120秒超时，无可用答案或审查通过结论；独立实现/验证不依赖其输出。
 
-物理池页面配额草稿：实际分配器298045项、core3033项宿主已通过；只新增 SYS_SPAWN_LIMITED=23、SYS_TASK_PAGE_LIMIT=24、SF_PAGE_LIMIT_MAX=4096，前564项不变、当前567项。quota_paused=false，user_paused=false；完整验证/推送未完成。协议见 PAGE_LIMITS.md，实际恢复状态见 .cache/progress-live.json。DeepSeek纯文本矩阵120秒超时，无可用答案或审查通过结论；独立实现/验证不依赖其输出。
+物理池页面配额草稿：实际分配器298045项、core3033项宿主已通过；只新增 SYS_SPAWN_LIMITED=23、SYS_TASK_PAGE_LIMIT=24、SF_PAGE_LIMIT_MAX=4096，前564项不变、当前567项。quota_paused=false，user_paused=false；完整验证/推送未完成。协议见 SCHEDULING.md，实际恢复状态见 .cache/progress-live.json。DeepSeek纯文本矩阵120秒超时，无可用答案或审查通过结论；独立实现/验证不依赖其输出。
 
 ## 私有物理池页面预算与计数（2026-11-01）
 
@@ -322,13 +399,13 @@ SYS_SPAWN_LIMITED=23 在分配前配置子任务0–4096页预算，原 SfLoadPl
 
 含初始构建专项101.31秒/四VM已通过；完整 tools/test.py 全部通过（1192.6秒、166VM），日志build/memory-quota-final-full-20261101.log，结果build/memory-quota-final-test-results.json。新增legacy/modern各四次实际诊断，反复失败预算仍可成功创建，真实计数、精确used降低、非合作任务抢占、死亡回收/默认复用、普通拒绝、文件IPC和磁盘字节保持；FPU/调度/能力/撤回/服务/设备/签名/更新/旧事务全部保留，七项产物逐项核对。
 
-ABI只新增SYS_SPAWN_LIMITED、SYS_TASK_PAGE_LIMIT、SF_PAGE_LIMIT_MAX，前564项无删改，当前567项，参考/采集摘要af54b2bf8424c9aed4c4faf59b8bcda98cee32ea76bcdd106aa9fe927f0e1480。协议与边界见PAGE_LIMITS.md。本地通过不能替代本轮新HEAD托管Windows/Linux，按真实提交独立核对。
+ABI只新增SYS_SPAWN_LIMITED、SYS_TASK_PAGE_LIMIT、SF_PAGE_LIMIT_MAX，前564项无删改，当前567项，参考/采集摘要af54b2bf8424c9aed4c4faf59b8bcda98cee32ea76bcdd106aa9fe927f0e1480。协议与边界见SCHEDULING.md。本地通过不能替代本轮新HEAD托管Windows/Linux，按真实提交独立核对。
 
 页面配额发布门及实际ZIP验证通过：476111字节、43项CRC/所有摘要，七项产物与完整结果相同，14项解压离线工具检查通过。证明.cache/memory-quota-release-proof-20261101.json；新HEAD托管结果独立核对。
 
-IPC复制计量草稿：10041项真实IPC/独立事件和128位饱和参照、6001项core接口检查已通过。只新增常量和SfIpcStats固定24字节结构的16项目录，旧567项无删改、当前583项；不把数值审阅称为语义冻结。队列复制失败现在DENIED且保留消息。专项/完整未完成时不提交推送；协议边界见IPC_STATS.md。quota_paused=false，user_paused=false。
+IPC复制计量草稿：10041项真实IPC/独立事件和128位饱和参照、6001项core接口检查已通过。只新增常量和SfIpcStats固定24字节结构的16项目录，旧567项无删改、当前583项；不把数值审阅称为语义冻结。队列复制失败现在DENIED且保留消息。专项/完整未完成时不提交推送；协议边界见IPC.md。quota_paused=false，user_paused=false。
 
-IPC复制计量草稿：10041项真实IPC/独立事件和128位饱和参照、6001项core接口检查已通过。只新增常量和SfIpcStats固定24字节结构的16项目录，旧567项无删改、当前583项；不把数值审阅称为语义冻结。队列复制失败现在DENIED且保留消息。专项/完整未完成时不提交推送；协议边界见IPC_STATS.md。quota_paused=false，user_paused=false。
+IPC复制计量草稿：10041项真实IPC/独立事件和128位饱和参照、6001项core接口检查已通过。只新增常量和SfIpcStats固定24字节结构的16项目录，旧567项无删改、当前583项；不把数值审阅称为语义冻结。队列复制失败现在DENIED且保留消息。专项/完整未完成时不提交推送；协议边界见IPC.md。quota_paused=false，user_paused=false。
 
 ## 实际IPC用户复制字节计量（2026-11-01）
 
@@ -359,3 +436,15 @@ IPC计量发布门与实际ZIP验证通过：CRC/全部摘要、七项产物相�
 按用户最新指示，本轮是最后收尾：停止其余实现/测试，spiritfoxos-2保持PAUSED。只完成本轮正常发布和新HEAD CI核对；未经再次明确继续，不因额度刷新开始新开发。
 
 本轮发布门、实际ZIP的CRC/全部摘要和14项解压离线工具检查通过；记录收尾与暂停状态后重新打包核对最终副本，新HEAD托管CI单独核对。自动任务保持PAUSED，不开始下一轮。
+
+## 网络中断、DHCP、连接对象与双设备授权（2026-11-07）
+
+内核新增 `SYS_IRQ_ACQUIRE=29`、`SYS_IRQ_RELEASE=30`、`SYS_IRQ_WAIT=31`。取得中断时按 PCI 配置 `0x3C` 的 line 写入 IOAPIC 重定向表（固定向量 `0x50`、PCI INTx 低电平/电平触发、目标 BSP），同时解除 8259 对应的 PCI 中断线并保留主片级联；等待方以 `wait_deadline` 阻塞，设备中断或超时经 `ipc_deadlines` 唤醒。`kernel/memory.c` 为 IOAPIC 建立独立映射页，避开与 LAPIC/VT-d 同处的 2 MiB 窗口；SMP 的 IPI 迁移到 `0x70/0x71`，让出 8259 重映射后的 `0x20..0x2F`。
+
+q35 的固件写入 `0x3C=0x0B`，但实际 PIRQ 落在 GSI 10；早期只预置 GSI 16–23 时设备 ISR 已置位而 CPU 收不到中断。改为预置 GSI 9–23 并解除整段 PCI 中断线屏蔽后，`qemu_net_test.py` 的 `[NET] interrupt-driven` 与 `ifconfig` 的 `irq=1→3` 稳定成立，i440fx 对照同样投递。
+
+virtio-net 驱动取得 INTx 后把 avail ring `flags` 从 1（抑制中断）改为 0，并在所有等待循环调用 `SYS_IRQ_WAIT`（1 tick 超时后回退队列轮询）。DHCP 由 `rust/sfcore` 构建/解析 DISCOVER/OFFER/REQUEST/ACK，超时回退静态地址；连接对象上限 8 个，投影到 `/net/info`、`/net/connections`。
+
+`qemu_net_test.py --disk` 同时挂载 `build/storage.img` 与网卡：日志出现磁盘 `[DEV] bdf=0x28`、网卡 `[DEV] bdf=0x30` 两次授权，`STORAGE READY` 后磁盘应用在网络激活期间仍可运行，证明两个设备槽、DMA arena、IOMMU 窗口与中断线不再互斥。
+
+回归：`tools/test.py --skip-build --host-only`（ABI 600 项）、`qemu_test.py --memory 256`、`qemu_iommu_test.py`、`qemu_smp_test.py`、`qemu_net_test.py` 与 `--disk` 全部通过。ABI 只追加 3 个常量，无既有条目删改。

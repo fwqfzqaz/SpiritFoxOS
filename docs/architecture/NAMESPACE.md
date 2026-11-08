@@ -1,8 +1,12 @@
-# 目录能力与相对打开
+# 命名空间、目录能力与文件语义
+
+本文件合并原目录能力说明与文件截断语义，覆盖 openat 委派、所有者权限、回收边界以及文件长度变更。
+
+## 目录能力与相对打开
 
 日期：2026-10-24。目录和文件逻辑继续位于用户态 sf-init 的命名空间服务中；内核只提供带真实发送者身份的 IPC。此阶段补齐受限 `openat` 与显式只读目录委派。
 
-## 授权与使用
+### 授权与使用
 
 ```text
 run fileprobe.sfk                   # 无目录授权，探针退出 2
@@ -18,7 +22,7 @@ sf-init 在创建进程前验证目录、保留打开描述和挂载引用；包
 
 当前通过根服务 RPC 引导目录句柄，`BootArgs.root_cap` 仍为 0；该句柄不是可调用内核端点的能力整数。BootArgs 和内核消息布局保持不变，完整独立 namespace/SDK 与能力传递 ABI 仍属后续工作。
 
-## 消息接口
+### 消息接口
 
 头部沿用协议 1.0 和固定 `SfMessage`。操作号为追加定义，既有操作号不变。
 
@@ -30,14 +34,18 @@ sf-init 在创建进程前验证目录、保留打开描述和挂载引用；包
 | `OP_STAT (23)` | handle=本进程有效句柄；length=0 | status=0，length=32，data为下述固定元数据；handle不变，错误length=0 |
 | `OP_RMDIR (24)` | handle=可写目录；data=规范相对路径；length含唯一末尾NUL | status=0并保留目录handle；仅回收无引用、无后代的未挂载RAM目录 |
 | `OP_UNLINK (22)` | handle=可写目录；data=规范相对路径；length 包含唯一末尾 NUL | status=0，保留原目录 handle；仅删除无打开引用的 RAM 普通文件 |
-| `OP_TRUNCATE (21)` | handle=可写普通文件；offset=新的 64 位长度 | status=0；只读目录派生的文件拒绝此操作，详见 `TRUNCATE.md` |
+| `OP_TRUNCATE (21)` | handle=可写普通文件；offset=新的 64 位长度 | status=0；只读目录派生的文件拒绝此操作，详见 `NAMESPACE.md` |
 | `OP_READ/WRITE/CLOSE/SEEK/POLL` | 沿用现有文件句柄协议 | 权限、独立偏移、dup、挂载失效与退出清理沿用同一实现 |
 
 `OPEN_READ=1`、`OPEN_WRITE=2` 是权限；`OPEN_NONBLOCK=4` 保留现有行为；`OPEN_DIRECTORY=8` 要求目标实际是目录，不会增加访问权限。`sf_ns_openat` 的目标读写位必须是父目录权限的子集。信任域内的服务可用可写目录进一步衰减权限，应用的 shell 委派目前始终只读。
 
 同一目录反复打开文件得到独立偏移；dup 仍共享一个打开描述。打开子目录后再相对打开，继续执行权限衰减。读取、写入与列目录在使用句柄时也检查权限，不靠隐藏路径替代授权。
 
-## 路径边界与生命周期
+### 所有者与模式权限
+
+多用户会话下，每个节点另存属主 uid/gid 与九位 rwx 模式。uid 0 绕过检查；其他用户按属主/同组/其他取 6/3/0 位，打开需要读(4)或写(2)位，目录另需执行(1)位，且从委派根到目标直接父目录的每一层目录都必须授予执行。创建与删除要求直接父目录的写+执行位，卸载/只读/打开引用检查保持原有顺序。默认目录 0755、文件 0644；`/home/<name>` 为 0700，`/tmp` 为 0777（无 sticky 位），`/dev/console` 与 `/run/pipe` 为 0666。文件 RPC 由真实发送者 PID 映射到子进程的 uid/gid 后调用 `sf_ns_open_as/openat_as/unlink_as/rmdir_as`；shell 命令使用当前会话身份。账户、会话与权限模型见 [SESSIONS.md](SESSIONS.md)。
+
+### 路径边界与生命周期
 
 - 相对路径不得为空或以 `/` 开头；拒绝 `.`、`..`、重复分隔符、尾随斜线、非法 UTF-8 和嵌入 NUL。当前严格拒绝而不归一化这些形式。
 - 完整绝对路径最多 95 字节，不含末尾 NUL；合并目录前缀与相对路径时先检查容量。多字节 UTF-8 以字节计长。
@@ -48,7 +56,7 @@ sf-init 在创建进程前验证目录、保留打开描述和挂载引用；包
 
 持久化文件的失效检查同样适用于 openat：设备死亡后不能从文件句柄读取缓存数据。`runat` 执行 installed 入口仍共用原先的 TRYING/确认/回退流程，不绕过更新策略；普通已安装包若没有声明 namespace.read，会被目录委派策略拒绝。
 
-## 验证
+### 验证
 
 `tests/host/test_openat.c` 直接链接真实命名空间实现，108 条检查覆盖目录类型、相对路径、所有者与 generation、权限衰减、Unicode/长度边界、独立和共享偏移、父关闭、进程回收、排空拒绝、描述与退休句柄容量，以及失败时挂载引用不泄漏。
 
@@ -58,7 +66,7 @@ sf-init 在创建进程前验证目录、保留打开描述和挂载引用；包
 
 最终产品源码构建后完整回归通过（320.67 秒），共 79 个 VM；日志 `build/openat-final-test.txt`，机器结果包含 `openat_host_assertions=108` 与 `openat_qemu=true`。实际打包前还验证缺少 openat 标记的旧结果被拒绝。
 
-## 文件 RPC 的数据边界
+### 文件 RPC 的数据边界
 
 内核 SYS_SEND 原有检查已经拒绝 length>256，消息不会进入服务队列。服务现在另用 sf_file_dispatch 独立检查 OP_READ、OP_WRITE、OP_ENUMERATE 的长度；超过 SfMessage.data 时返回 SF_INVALID、响应 length=0，且不调用后端，不改变文件偏移、节点、目录根或控制台状态。内部直接调用必须遵守同一边界。
 
@@ -66,11 +74,11 @@ OP_OPEN/OP_OPENAT 保持有界完整 NUL 字符串规则；合法读写最多 25
 
 353 项宿主检查直接调用产品分发器，包含跨消息数据区的保护字节、最大长度、失败前置拒绝、偏移与节点字节保持、只读授权和根关闭。旧分发器宿主基线绕过了内核传输约束，其失败只证明服务自身缺少独立检查。真实 rpcprobe.sfk 检查 SYS_SEND 拒绝四种超长尺寸，再完成正常读写，避免把已由内核阻断的请求描述成曾能到达服务的漏洞。
 
-## 当前请求与回复通道
+### 当前请求与回复通道
 
 | 用途 | 请求端点 | 回复端点与生命周期 |
 | --- | --- | --- |
-| 应用文件对象 | 共享 manager_ep，应用只有 SEND | 每个 Child.reply，应用只有 RECV，进程回收时撤销 |
+| 应用文件对象 | 独立 fs_ep，应用只有 SEND | 每个 Child.reply，应用只有 RECV，进程回收时撤销 |
 | native 装载 | runtime_ep，root 发送 | 独立 runtime_reply，运行时重启时撤销重建 |
 | 块设备 RPC | driver_ep，root 发送 | 每个驱动实例的 driver_reply，启动失败或正常停止时撤销 |
 | Echo | 每个实例的服务端点，root 发送 | 每个 EchoPeer 的 reply，停止/替换/临时实例清理时撤销 |
@@ -79,11 +87,11 @@ channel-test 同时启动两个有只读 /disk/etc 根的 readprobe，完成各�
 
 echo-channel-test 在等待两个文件应用前同步调用 echo，用于验证两类请求均完成。echo-capacity-test 暂停 echo、实际耗尽并释放 root 的端点能力槽，验证两条启动分配失败路径与恢复。它们是当前单线程开发环境的诊断命令，要求正常回显服务及已挂载磁盘，不提供普通应用的特权接口。
 
-## RAM 文件删除与目录创建
+### RAM 文件删除与目录创建
 
 受信任串口 shell 提供 `rm <绝对路径>` 与 `mkdir <绝对路径>`，每条只接收一个参数，支持引号及原有参数词法中的转义，不进行变量或通配符展开。例如 `mkdir "/tmp/quoted dir"`、`mkdir /tmp/work`、`write /tmp/work/item data`、`rm /tmp/work/item`。现有 write 命令仍按首个空格分隔路径与文本。
 
-`rm` 打开直接父目录的可写目录句柄，调用同一用户态 `sf_ns_unlink` 后关闭它；失败也关闭父目录。`mkdir` 调用既有受信任 `sf_ns_create`，目录必须具有已存在且可写的直接父目录。路径最多95字节，只接受规范绝对形式；容量仍为32个节点，满时返回 SF_NO_SPACE。新目录可以列举和创建子节点，空目录删除规则见下节。
+`rm` 打开直接父目录的可写目录句柄，调用同一用户态 `sf_ns_unlink` 后关闭它；失败也关闭父目录。`mkdir` 调用既有受信任 `sf_ns_create`，目录必须具有已存在且可写的直接父目录。路径最多95字节，只接受规范绝对形式；节点容量为128（系统投影占用9个），描述表64、句柄表128；任一容量用满时返回 SF_NO_SPACE。新目录可以列举和创建子节点，空目录删除规则见下节。
 
 `OP_UNLINK` 使用与 OPENAT 相同的精确 NUL/长度边界与相对路径合并。操作首先验证所有者、代次、目录类型和 OPEN_WRITE；只读委派返回 SF_DENIED，即使目标已被打开。随后重新检查目录对象、相对路径经过的现有中间目录及目标的 readonly/mount_tag。不能从较宽的目录能力穿过只读或挂载子树删除目标。没有符号链接或别名解析。
 
@@ -93,14 +101,22 @@ echo-channel-test 在等待两个文件应用前同步调用 echo，用于验证
 
 `tests/host/test_unlink.c` 直接链接产品 namespace/file_rpc，检查能力和类型、当前只读子目录、挂载拒绝、跨所有者/dup忙引用、规范路径、Unicode/长度边界、一千次槽复用与数据清零、陈旧句柄和畸形RPC无副作用。`tests/qemu/qemu_unlink_test.py` 在两种传输中验证实际shell与只读应用IPC、每种四十次节点复用、引号、持久盘字节和卸载停止。
 
-## 句柄元数据与规范整数
+### 只读系统投影
+
+`/proc`、`/sys` 与 `/net` 下共挂载九个只读投影文件和 `/proc/self` 目录：`/proc/uptime`、`/proc/ipc-stats`、`/proc/self/status`、`/proc/children`、`/sys/modules`、`/sys/devices`、`/sys/dma`、`/net/info` 与 `/net/connections`。它们使用独立类型 6，不缓存内容；每次顺序读或定位读都由 sf-init 依据既有授权快照（ticks、IPC 统计、任务状态/配额、模块表、PCI 配置、DMA 状态、网络租约/计数、连接对象表）即时生成至多 1 KiB 文本。`size` 为 0、`flags` 只置只读位，`seek` 可设置任意 32 位偏移，越界读取返回 EOF。
+
+投影节点不能写入、截断、删除或重命名，也不能通过父目录创建新节点；`/proc`、`/proc/self`、`/sys` 与 `/net` 目录本身在启动完成后受只读保护。投影不引入新的内核系统调用或能力，仍只由受信任的 sf-init 解释路径，普通应用没有全局根，不能直接读取这些文件。
+
+`tests/host/test_projection.c` 覆盖投影创建、重复 id、顺序/定位读、EOF、seek、只读标志、拒绝写入/截断/删除、目录保护与节点容量；`tests/qemu/qemu_projection_test.py` 在真实内核中验证投影的列举与读取、实时文本、目录保护和重复读取。
+
+### 句柄元数据与规范整数
 
 `OP_STAT` 只操作调用者已持有的句柄；只写描述也可查询，不授予额外读写权限。固定32字节 `SfFileStat` 在此x86_64协议中按小端整数编码：
 
 | 字节偏移 | 字段 | 语义 |
 | --- | --- | --- |
 | 0 | bytes:u32 | 固定32 |
-| 4 | type:u32 | 1目录、2RAM文件、3管道、4控制台、5磁盘文件 |
+| 4 | type:u32 | 1目录、2RAM文件、3管道、4控制台、5磁盘文件、6只读系统投影 |
 | 8 | mode:u32 | 本打开描述的实际OPEN_*位，含权限与模式 |
 | 12 | flags:u32 | 1节点只读、2挂载对象、4可定位；其他位为零 |
 | 16 | size:u64 | 当前文件长度或管道排队字节；目录/控制台为零 |
@@ -113,7 +129,7 @@ echo-channel-test 在等待两个文件应用前同步调用 echo，用于验证
 SfMessage.handle的传输存储是64位，命名空间句柄规范值仍为32位。所有消费句柄的文件操作要求高32位为零，在窄化、后端访问和根关闭记账前拒绝，否则SF_STALE_HANDLE、length=0，保留原handle与根状态。OP_ROOT和受限OP_OPEN不消费传入的handle，按原协议处理。原所有者与generation验证继续执行；新增操作号不改变原有合法32位句柄。
 
 
-## 空目录回收
+### 空目录回收
 
 受信任shell提供 rmdir <单个绝对路径>，支持引号；打开直接父目录的可写目录描述，调用sf_ns_rmdir并在成功或失败后关闭。它与rm共用精确路径/权限/当前只读和挂载祖先检查，OP_RMDIR(24)也要求规范32位句柄、唯一末尾NUL及长度边界。普通应用仍只授予只读目录；真实fileprobe/readprobe通过IPC发出的RMDIR必须返回SF_DENIED，即使目标实际为文件也不能越过权限检查。
 
@@ -121,4 +137,51 @@ SfMessage.handle的传输存储是64位，命名空间句柄规范值仍为32位
 
 该操作只回收空RAM目录，不修改持久化格式、挂载租约或普通应用授权。宿主覆盖一千次目录/子文件复用、跨所有者忙引用、陈旧句柄、规范/UTF-8边界、只读/挂载拒绝及高位/畸形RPC无副作用；实际VM覆盖嵌套非空拒绝、引号、前缀边界、四十次回收和真实只读应用拒绝。完整回归结果见TESTING.md。
 
-公开客户端 `include/sf_file.h` / `services/file_client.c` 封装既有文件 RPC，采用显式 int64_t 返回并验证发送者、协议、编号、长度和输出；服务端仍独立检查所有者/代次/权限。普通 run 不授予文件根，显式目录委派仍只读，契约见 [FILE_SDK.md](FILE_SDK.md)。
+公开客户端 `include/sf_file.h` / `services/file_client.c` 封装既有文件 RPC，采用显式 int64_t 返回并验证发送者、协议、编号、长度和输出；服务端仍独立检查所有者/代次/权限。普通 run 不授予文件根，显式目录委派仍只读，契约见 [APP_SDK.md](APP_SDK.md)。
+
+### /disk 的文件系统后端
+
+`/disk` 节点、目录租约、只读权限和挂载/卸载状态仍由 sf-init 的命名空间服务维护；磁盘条目、路径查找和分块读取改由独立 `sf-fs.sfmod` 提供，经 `OP_FS_ENTRY`、`OP_FS_FIND` 与 `OP_FS_READ` 投影为类型 5 的只读节点。应用和 `runat` 看到的句柄语义、挂载引用计数与卸载阻塞规则不变，也没有新增应用可调用的磁盘操作码。sf-fs 不直接持有 virtio-blk 端点，块数据由 sf-init 的块代理转发，设计见 [STORAGE.md](STORAGE.md)。
+
+## 文件截断与补零扩展
+
+日期：2026-10-23。RAMFS 普通文件和 `/persist/notes` 支持显式改变文件长度；write 仍只覆盖写入部分并保留其余尾部。
+
+```text
+write /persist/notes abcdefghij
+truncate /persist/notes 4       # 内容为 abcd
+truncate /persist/notes 12      # 保留 abcd，后八字节补零
+truncate /persist/notes 0       # 清空
+```
+
+shell 的 `truncate <现有路径> <字节数>` 只接受无符号十进制数字，检查 64 位溢出；不接受符号、后缀或额外参数，不隐式创建命名空间节点。RAMFS 上限为 1024 字节，笔记上限为 16384 字节。`/persist/notes` 是始终存在的虚拟文件，首次空文件截断到 0 不必创建事务键。
+
+### 句柄与权限
+
+`sf_ns_truncate(namespace, owner, handle, length)` 验证所有者、generation、写权限和目标类型。只读句柄返回 SF_DENIED，只读节点返回 SF_READ_ONLY，目录、管道和控制台返回 SF_INVALID。长度超出容量返回 SF_NO_SPACE；不在失败后发布新的节点长度。
+
+操作只改变文件长度，保留所有打开描述的偏移，包括 dup 共享的偏移。缩短后偏移可以位于 EOF 之后，此时读返回 0；之后在旧偏移写入时，中间空洞补零。RAMFS 缩短时清零丢弃的内存尾部，扩展部分也清零，防止后续扩展重新暴露被截掉的内容。
+
+命名空间 RPC 追加 `OP_TRUNCATE=21`：handle 是已有文件句柄，offset 是新的 64 位长度；成功 status=0，失败为错误码。消息布局和已有操作号不变。`runat` 仍只授予读权限，应用不能利用 truncate 绕过只读目录策略。实际 fileprobe/readprobe 在获得只读文件后尝试截断，必须被拒绝，原数据仍可读取。
+
+NODE_DISK 通过 `external_truncate(index, length)` 回调处理，回调只有返回 0 才表示成功；正数被视为格式错误。持久化适配器仅接受笔记索引，A/B 槽、更新选择器和只读磁盘文件没有公开可写截断入口。
+
+### 持久化与恢复
+
+`sf_txn_resize` 与实际用户态服务共用同一事务引擎。它保留新旧长度公共前缀，把扩展部分初始化为零，然后调用现有双银行快照提交；格式和配额不变。暂存数据在 commit 重建银行之前复制到 next 状态，不依赖旧尾部残留为零。
+
+已挂载卷中的同长度请求直接成功，不写盘、不 flush、不提高 generation；尚不存在的空事务键视为适配器的空文件，截断到 0 也不改盘。设备死亡或卷已关闭时仍拒绝操作，不能用幂等请求绕过失效检查。
+
+改变长度持有真实 dirty 引用，最后一次 flush 成功后才公布内存状态和节点长度。任何写/flush 失败返回 SF_COMMIT_UNCERTAIN，并停止该卷后续读写与截断；dirty 引用仍被释放，关闭文件后可卸载。重挂载只能恢复完整旧文件或完整新文件；错误本身不保证新文件一定未落盘。失败时命名空间暂留原长度，但数据访问已被关闭，恢复时重新构造节点。
+
+笔记操作不会修改应用槽、更新记录或已确认版本。银行仍是整个卷的快照；旧银行可能保留旧内容，因此截断不是安全擦除。未来损坏导致回退旧的完整快照时，笔记也按该快照恢复。本轮没有改变既有回放/损坏恢复边界，也没有物理断电证明。
+
+### 验证入口
+
+- `tests/host/test_truncate.c`：83 条命名空间检查，覆盖写权限/类型、所有者与 generation、缩短/补零/空洞、偏移与 dup、容量、后端失败和节点长度只在成功后更新。
+- `tests/host/test_resize_txn.c`：真实 resize 与事务引擎执行缩短、扩展、清空、首次扩展四种转换，每种覆盖 261 个写/flush 边界 × 三种故障模式，共 3132 个故障场景。验证恢复长度、字节、零区、同长度不改盘和三个独立保护文件。
+- `tests/qemu/qemu_truncate_test.py`：legacy 与 VT-d/modern 各八次真实 VM 启动。验证缩短、零扩展、清空、最大容量、重启、同长度与非法请求不改盘、只读应用 RPC 拒绝、应用槽和选择器不变，以及实际 OUT/FLUSH EIO 和银行中段写入时终止 VM 后恢复。
+
+完整套件继续由 `python3 tools/test.py --skip-build` 运行，增加到 95 次 VM 启动。发布门要求 `truncate_host_assertions=83`、`resize_fault_scenarios=3132`、`truncate_qemu=true` 以及全部已有标记和精确镜像摘要。
+
+最终产品源码构建后完整回归通过（386.03 秒），实际日志计数为 95 个 VM，输出 `build/truncate-final-test.txt`。新增事务测试完成 474481 条内部检查及上述 3132 个有界故障场景；缺少本轮标记的旧结果被打包门拒绝。

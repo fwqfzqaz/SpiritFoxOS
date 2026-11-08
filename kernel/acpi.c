@@ -1,15 +1,37 @@
-/* Bounded ACPI discovery. Unsupported DMAR layouts fail closed. */
+/* 有界 ACPI 发掘：经 SfPhysRead 回调逐段读取物理内存，校验 RSDP→
+ * RSDT/XSDT→DMAR 表（魔数、长度、校验和）。DMAR 仅接受单一 DRHD、
+ * 段 0、include-all 或显式 0 号总线端点 scope 的布局，其余一律关闭
+ * （fail closed）——不支持的拓扑拒绝启用 VT-d。 */
 #include "iommu.h"
 static uint16_t u16(const uint8_t*p){uint16_t x;memcpy(&x,p,2);return x;}
 static uint32_t u32(const uint8_t*p){uint32_t x;memcpy(&x,p,4);return x;}
 static uint64_t u64(const uint8_t*p){uint64_t x;memcpy(&x,p,8);return x;}
+/* ACPI 表校验和：按 256 字节分块累加，总和为零视为有效。 */
 static int checksum(SfPhysRead read,void*c,uint64_t address,uint32_t bytes){
  if(address>UINT64_MAX-bytes)return 0;uint8_t block[256],sum=0;
  for(unsigned off=0;off<bytes;){unsigned n=bytes-off;if(n>sizeof(block))n=sizeof(block);if(read(c,address+off,block,n))return 0;for(unsigned i=0;i<n;i++)sum+=block[i];off+=n;}return !sum;
 }
+/* 读取并校验单张 ACPI 表头（魔数、长度 36–4096、校验和）。 */
 static int table(SfPhysRead read,void*c,uint64_t address,const char*magic,uint32_t*bytes){
  uint8_t h[36];if(read(c,address,h,sizeof(h))||memcmp(h,magic,4))return SF_BAD_FORMAT;
  *bytes=u32(h+4);return *bytes>=36&&*bytes<=4096&&checksum(read,c,address,*bytes)?0:SF_BAD_FORMAT;
+}
+/* 解析 MADT：只收集启用（flags bit0）的 type 0 LAPIC，最多 SF_MAX_CPUS 个。
+ * 与 DMAR 相同的有界读取与表校验；重复 APIC 表一律拒绝。 */
+int sf_acpi_madt(SfPhysRead read,void*c,uint64_t rsdp,SfMadtInfo*out){
+ memset(out,0,sizeof(*out));if(!rsdp)return SF_NOT_FOUND;uint8_t r[36];if(read(c,rsdp,r,20)||memcmp(r,"RSD PTR ",8)||!checksum(read,c,rsdp,20))return SF_BAD_FORMAT;
+ uint64_t root=u32(r+16);unsigned stride=4;uint32_t bytes;
+ if(r[15]>=2){if(read(c,rsdp,r,36)||u32(r+20)<36||u32(r+20)>4096||!checksum(read,c,rsdp,u32(r+20)))return SF_BAD_FORMAT;if(u64(r+24)){root=u64(r+24);stride=8;}}
+ if(table(read,c,root,stride==8?"XSDT":"RSDT",&bytes)||(bytes-36)%stride)return SF_BAD_FORMAT;
+ uint64_t madt=0;for(unsigned off=36;off<bytes;off+=stride){uint8_t e[8]={0},sig[4];if(read(c,root+off,e,stride))return SF_BAD_FORMAT;uint64_t address=stride==8?u64(e):u32(e);if(read(c,address,sig,4))return SF_BAD_FORMAT;if(!memcmp(sig,"APIC",4)){if(madt)return SF_BAD_FORMAT;madt=address;}}
+ if(!madt)return SF_NOT_FOUND;if(table(read,c,madt,"APIC",&bytes)||bytes<44)return SF_BAD_FORMAT;
+ uint8_t h[44];if(read(c,madt,h,44))return SF_BAD_FORMAT;out->lapic_base=u32(h+36);
+ unsigned off=44,count=0;
+ while(off<bytes){uint8_t e[4];if(bytes-off<4||read(c,madt+off,e,4))return SF_BAD_FORMAT;unsigned type=e[0],n=e[1];if(n<4||n>bytes-off)return SF_BAD_FORMAT;
+  if(type==0){uint8_t lapic[8];if(n<8||read(c,madt+off,lapic,8))return SF_BAD_FORMAT;if((u32(lapic+4)&1)&&count<SF_MAX_CPUS)out->apic_ids[count++]=lapic[3];}
+  off+=n;
+ }
+ out->count=count;return count?0:SF_NOT_FOUND;
 }
 int sf_acpi_dmar(SfPhysRead read,void*c,uint64_t rsdp,SfDmarInfo*out){
  memset(out,0,sizeof(*out));if(!rsdp)return SF_NOT_FOUND;uint8_t r[36];if(read(c,rsdp,r,20)||memcmp(r,"RSD PTR ",8)||!checksum(read,c,rsdp,20))return SF_BAD_FORMAT;

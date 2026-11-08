@@ -1,5 +1,6 @@
 #include "file_rpc.h"
-long sf_file_dispatch(SfNamespace*ns,uint32_t owner,uint32_t*root,SfMessage*m){
+long sf_file_dispatch(SfNamespace*ns,uint32_t owner,uint32_t*root,SfMessage*m){return sf_file_dispatch_as(ns,owner,root,m,0,0);}
+long sf_file_dispatch_as(SfNamespace*ns,uint32_t owner,uint32_t*root,SfMessage*m,uint32_t uid,uint32_t gid){
  if(!ns||!root||!m)return SF_INVALID;
  unsigned op=m->h.opcode;long status=SF_INVALID;
  /* Wire storage is 64-bit, namespace handles are canonical 32-bit values.
@@ -28,13 +29,13 @@ long sf_file_dispatch(SfNamespace*ns,uint32_t owner,uint32_t*root,SfMessage*m){
  case OP_UNLINK:
  case OP_RMDIR:
   if(!m->length||m->length>sizeof(m->data)||m->data[m->length-1]||strlen((char*)m->data)+1!=m->length)break;
-  if(op==OP_RMDIR){status=sf_ns_rmdir(ns,owner,m->handle,(char*)m->data);break;}
-  if(op==OP_UNLINK){status=sf_ns_unlink(ns,owner,m->handle,(char*)m->data);break;}
-  status=sf_ns_openat(ns,owner,m->handle,(char*)m->data,m->mode);if(status>=0){m->handle=status;status=0;}break;
+  if(op==OP_RMDIR){status=sf_ns_rmdir_as(ns,owner,m->handle,(char*)m->data,uid,gid);break;}
+  if(op==OP_UNLINK){status=sf_ns_unlink_as(ns,owner,m->handle,(char*)m->data,uid,gid);break;}
+  status=sf_ns_openat_as(ns,owner,m->handle,(char*)m->data,m->mode,uid,gid);if(status>=0){m->handle=status;status=0;}break;
  case OP_OPEN:
   if(!m->length||m->length>sizeof(m->data)||m->data[m->length-1]||strlen((char*)m->data)+1!=m->length)break;
   if(strcmp((char*)m->data,"/dev/console")||m->mode!=OPEN_WRITE){status=SF_DENIED;break;}
-  status=sf_ns_open(ns,owner,"/",(char*)m->data,m->mode);if(status>=0){m->handle=status;status=0;}break;
+  status=sf_ns_open_as(ns,owner,"/",(char*)m->data,m->mode,uid,gid);if(status>=0){m->handle=status;status=0;}break;
  case OP_WRITE:status=sf_ns_write(ns,owner,m->handle,m->data,m->length);break;
  case OP_TRUNCATE:status=sf_ns_truncate(ns,owner,m->handle,m->offset);break;
  case OP_READ:status=sf_ns_read(ns,owner,m->handle,m->data,m->length);if(status>=0)m->length=status;break;

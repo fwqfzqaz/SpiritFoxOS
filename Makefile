@@ -36,7 +36,7 @@ build: check-toolchain ## 构建内核、UEFI 镜像、签名包与测试盘
 	$(PYTHON) tools/build.py $(BUILD_ARGS)
 
 check-toolchain:
-	@$(PYTHON) -c "import os,sys; paths=(['.tools/zig/zig.exe'] if os.name == 'nt' else ['.tools/zig/zig'])+['vendor/monocypher/monocypher.c']; missing=[p for p in paths if not os.path.exists(p)]; sys.exit('missing '+', '.join(missing)+'; run make bootstrap first') if missing else None"
+	@$(PYTHON) -c "import os,sys,shutil; paths=(['.tools/zig/zig.exe'] if os.name == 'nt' else ['.tools/zig/zig'])+['vendor/monocypher/monocypher.c']; missing=[p for p in paths if not os.path.exists(p)]; missing.append('cargo') if not (shutil.which('cargo') or os.path.exists(os.path.expanduser('~/.cargo/bin/cargo.exe' if os.name=='nt' else '~/.cargo/bin/cargo'))) else None; sys.exit('missing '+', '.join(missing)+'; run make bootstrap first (cargo: install rustup with targets x86_64-unknown-none and x86_64-pc-windows-gnu)') if missing else None"
 
 check-build:
 	@$(PYTHON) -c "import os,sys; f='$(BUILD_DIR)/esp/EFI/BOOT/BOOTX64.EFI'; sys.exit(0) if os.path.exists(f) else sys.exit('missing '+f+'; run make build first')"

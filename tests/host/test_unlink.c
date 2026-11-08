@@ -3,7 +3,7 @@
 static SfNamespace ns,saved;static unsigned checks;
 #define CHECK(x) do{checks++;if(!(x)){printf("UNLINK FAIL line %d: %s\n",__LINE__,#x);return 1;}}while(0)
 #define REJECT(expr,error) do{saved=ns;CHECK((expr)==(error));CHECK(!memcmp(&ns,&saved,sizeof(ns)));}while(0)
-static int find(const char*p){for(unsigned i=0;i<32;i++)if(ns.nodes[i].type&&!strcmp(ns.nodes[i].path,p))return i;return -1;}
+static int find(const char*p){for(unsigned i=0;i<SF_NS_NODE_MAX;i++)if(ns.nodes[i].type&&!strcmp(ns.nodes[i].path,p))return i;return -1;}
 int main(void){
  sf_ns_init(&ns,0);CHECK(!sf_ns_create(&ns,"/cap",NODE_DIR,0));CHECK(!sf_ns_create(&ns,"/cap/sub",NODE_DIR,0));CHECK(!sf_ns_create(&ns,"/cap/sub/nested",NODE_DIR,0));CHECK(!sf_ns_create(&ns,"/cap/sub/nested/item",NODE_FILE,0));CHECK(!sf_ns_create(&ns,"/cap/item",NODE_FILE,0));
  int root=sf_ns_open(&ns,42,"/","/cap",OPEN_READ|OPEN_WRITE|OPEN_DIRECTORY),read=sf_ns_open(&ns,43,"/","/cap",OPEN_READ|OPEN_DIRECTORY),global=sf_ns_open(&ns,1,"/","/",OPEN_WRITE|OPEN_DIRECTORY);CHECK(root>0&&read>0&&global>0);
@@ -37,6 +37,6 @@ int main(void){
  }
  memset(&g.m,0,sizeof(g.m));g.m.h.opcode=OP_UNLINK;g.m.handle=read;g.m.length=5;memcpy(g.m.data,"item",5);REJECT(sf_file_dispatch(&ns,43,&owned,&g.m),SF_DENIED);
  g.m.handle=root;CHECK(!sf_file_dispatch(&ns,42,&owned,&g.m));CHECK(g.m.handle==(unsigned)root&&owned==(unsigned)root&&find("/cap/item")<0);g.m.h.opcode=OP_ROOT;CHECK(!sf_file_dispatch(&ns,42,&owned,&g.m)&&g.m.handle==owned);
- CHECK(!sf_ns_close(&ns,42,root));REJECT(sf_ns_unlink(&ns,42,root,"item"),SF_STALE_HANDLE);sf_ns_reap(&ns,1);sf_ns_reap(&ns,43);for(unsigned i=0;i<32;i++)CHECK(!ns.descriptions[i].refs);
+ CHECK(!sf_ns_close(&ns,42,root));REJECT(sf_ns_unlink(&ns,42,root,"item"),SF_STALE_HANDLE);sf_ns_reap(&ns,1);sf_ns_reap(&ns,43);for(unsigned i=0;i<SF_NS_DESCRIPTION_MAX;i++)CHECK(!ns.descriptions[i].refs);
  printf("UNLINK PASS: %u assertions\n",checks);return 0;
 }

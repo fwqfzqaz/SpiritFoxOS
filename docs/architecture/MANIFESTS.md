@@ -41,9 +41,13 @@ python3 tools/package/sfpack.py app --strict-manifest --manifest build/hello-sou
 | `runtime_id` / `app_abi` | APP 必需，分别为 `org.spiritfox.native` 和整数 `1` |
 | `requested_caps` | 最多 32 个不同名称，每个 1–64 个 ASCII 字符；首字符为字母或数字，其余另允许点、下划线、冒号和短横线；允许空数组 |
 | `resource_limits` | 只包含必需的整数 `memory`，范围 1–33554432 字节；APP 必需，模块可选 |
-| `native_profile` | 可省略；模块只允许 `static-v1`，APP 允许 `static-v1` / `relative-v1` |
+| `native_profile` | 可省略；模块允许 `static-v1`，或与 `native_role: library` + 非空 `native_exports` 一起使用 `relative-v1`；APP 允许 `static-v1` / `relative-v1` |
+| `native_role` | 仅模块；当前只允许 `library` 且要求 `relative-v1`、至少一个导出、无导入 |
+| `native_exports` | 仅 library 模块；最多 64 项 `{name, abi}`，`abi` 为 `libsf-posix-1` |
+| `native_imports` | 仅 APP；最多 32 项 `{name, abi, slot}`，`abi` 为 `libsf-posix-1`，`slot` 为 8 字节 RW 全局 OBJECT 符号名 |
+| `native_library` | APP 有导入时必需，当前只允许 `org.spiritfox.posix` |
 
-该约定关闭未知字段，区分 APP 和模块字段，并拒绝作者直接提供 `relative_relocations`、`import_relocations` 或 `native_imports`。PIE 的相对重定位子表由打包器从 ELF 生成。需要现有自由元数据时可使用不带 `--strict-manifest` 的打包命令；程序接口 `pack()` 继续供构建与签名负例使用。
+该约定关闭未知字段，区分 APP 和模块字段，并拒绝作者直接提供 `relative_relocations`、`import_relocations`、`slot_rva` 或 `rva`。PIE 的相对重定位子表、导入槽地址、导出 RVAs 和导入重定位子表均由打包器从 ELF 生成。需要现有自由元数据时可使用不带 `--strict-manifest` 的打包命令；程序接口 `pack()` 继续供构建与签名负例使用。
 
 这些约束有意比通用容器更窄，例如能力名称采用 ASCII。它们描述当前工具支持的 native 作者输入，不代表所有可能合法的签名 CBOR 清单，也不赋予能力。内存字段仍是装载准入的声明，不代表已实现通用动态资源配额。
 

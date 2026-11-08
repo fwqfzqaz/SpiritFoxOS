@@ -3,7 +3,7 @@
 static SfNamespace ns,saved;static unsigned checks,backend_calls;
 #define CHECK(x) do{checks++;if(!(x)){printf("STAT FAIL line %d: %s\n",__LINE__,#x);return 1;}}while(0)
 static long external_read(unsigned index,uint64_t offset,void*out,size_t count){(void)index;(void)offset;(void)out;(void)count;backend_calls++;return SF_DEVICE_GONE;}
-static int node(const char*p){for(unsigned i=0;i<32;i++)if(ns.nodes[i].type&&!strcmp(ns.nodes[i].path,p))return i;return -1;}
+static int node(const char*p){for(unsigned i=0;i<SF_NS_NODE_MAX;i++)if(ns.nodes[i].type&&!strcmp(ns.nodes[i].path,p))return i;return -1;}
 static struct{uint8_t left[32];SfMessage m;uint8_t right[32];}guard;
 static void request(unsigned op,uint64_t handle,unsigned length){memset(&guard,0xa5,sizeof(guard));memset(&guard.m,0,sizeof(guard.m));guard.m.h.opcode=op;guard.m.handle=handle;guard.m.length=length;}
 static int guards(void){for(unsigned i=0;i<32;i++)if(guard.left[i]!=0xa5||guard.right[i]!=0xa5)return 0;return 1;}
@@ -38,6 +38,6 @@ int main(void){
  }
  request(OP_STAT,read,0);saved=ns;CHECK(!sf_file_dispatch(&ns,42,&owned,&guard.m));CHECK(guard.m.length==sizeof(info)&&guard.m.handle==(unsigned)read&&guards());memcpy(&info,guard.m.data,sizeof(info));CHECK(info.bytes==32&&info.mode==OPEN_READ&&info.type==NODE_FILE);CHECK(!memcmp(&ns,&saved,sizeof(ns)));
  request(OP_STAT,read,0);saved=ns;CHECK(sf_file_dispatch(&ns,43,&owned,&guard.m)==SF_STALE_HANDLE&&!guard.m.length);CHECK(!memcmp(&ns,&saved,sizeof(ns))&&guards());
- CHECK(!sf_ns_close(&ns,42,root));memset(&info,0xa5,sizeof(info));previous=info;CHECK(sf_ns_stat(&ns,42,root,&info)==SF_STALE_HANDLE&&!memcmp(&info,&previous,sizeof(info)));sf_ns_reap(&ns,42);CHECK(sf_ns_stat(&ns,42,read,&info)==SF_STALE_HANDLE);for(unsigned i=0;i<32;i++)CHECK(!ns.descriptions[i].refs);
+ CHECK(!sf_ns_close(&ns,42,root));memset(&info,0xa5,sizeof(info));previous=info;CHECK(sf_ns_stat(&ns,42,root,&info)==SF_STALE_HANDLE&&!memcmp(&info,&previous,sizeof(info)));sf_ns_reap(&ns,42);CHECK(sf_ns_stat(&ns,42,read,&info)==SF_STALE_HANDLE);for(unsigned i=0;i<SF_NS_DESCRIPTION_MAX;i++)CHECK(!ns.descriptions[i].refs);
  printf("STAT PASS: %u assertions\n",checks);return 0;
 }
