@@ -34,6 +34,10 @@ def udp_echo_server(stop):
                 data, address = server.recvfrom(512)
             except socket.timeout:
                 continue
+            # Make RX asynchronous so the guest exercises SYS_IRQ_WAIT,
+            # even when slirp completed the startup DHCP exchange inline.
+            if stop.wait(.2):
+                break
             server.sendto(b'ACK:' + data, address)
     finally:
         server.close()
@@ -138,8 +142,6 @@ def main(disk=False):
             raise RuntimeError('ifconfig did not report the DHCP lease: ' + repr(info))
         if b'[IRQ] IOAPIC ready' not in output:
             raise RuntimeError('IOAPIC route was not established\n' + output[-2500:].decode(errors='replace'))
-        if b'[NET] interrupt-driven' not in output:
-            raise RuntimeError('driver never observed an interrupt wakeup\n' + output[-2500:].decode(errors='replace') + repr(info))
         lease = command('dhcp', 'dhcp: LEASED ip=10.0.2.15', 40)
         if b'dhcp: LEASED' not in lease:
             raise RuntimeError('DHCP renewal did not lease from slirp: ' + repr(lease))
@@ -153,13 +155,17 @@ def main(disk=False):
             raise RuntimeError('device MAC not read from virtio config: ' + repr(again))
         if not counts or int(counts.group(1)) < 1 or int(counts.group(2)) < 1:
             raise RuntimeError('traffic counters did not advance: ' + repr(again))
-        irq = re.search(rb'irq=(\d+)', again)
-        if not irq or int(irq.group(1)) < 1:
-            raise RuntimeError('interrupt counter did not advance: ' + repr(again))
         command('ping 10.0.2.2', 'ping: reply from 10.0.2.2', 40)
         datagram = command('udp 10.0.2.2 %d hello' % UDP_PORT, 'udp: reply from 10.0.2.2:%d "ACK:hello"' % UDP_PORT, 40)
         if b'udp: reply' not in datagram:
             raise RuntimeError('UDP round trip missing: ' + repr(datagram))
+        # A lease can be acquired entirely through already-completed queue
+        # entries. Require real interrupt evidence after delayed RX instead
+        # of assuming that startup must already have blocked for an IRQ.
+        interrupts = command('ifconfig', 'link=up\r\n')
+        irq = re.search(rb'irq=(\d+)', interrupts)
+        if b'[NET] interrupt-driven' not in output or not irq or int(irq.group(1)) < 1:
+            raise RuntimeError('driver never observed an interrupt wakeup after delayed UDP RX: ' + repr(interrupts))
         session = command('tcp 10.0.2.2 %d hello' % TCP_PORT, 'tcp: reply from 10.0.2.2:%d "ACK:hello"' % TCP_PORT, 40)
         if b'tcp: reply' not in session:
             raise RuntimeError('TCP round trip missing: ' + repr(session))

@@ -87,6 +87,7 @@ subprocess.run([sys.executable,'tests/integration/test_native.py'],check=True)
 subprocess.run([sys.executable,'tests/integration/test_manifest_profile.py'],check=True)
 manifest_schema_sha256 = hashlib.sha256((ROOT/'schemas/native-source-v1.schema.json').read_bytes()).hexdigest()
 subprocess.run([sys.executable,'tests/integration/test_abi_snapshot.py'],check=True)
+subprocess.run([sys.executable,'tests/integration/test_rust_archive.py'],check=True)
 abi_reference_sha256 = hashlib.sha256((ROOT/'abi/x86_64-current.json').read_bytes()).hexdigest()
 abi_capture_sha256 = hashlib.sha256((ROOT/'build/abi-current.json').read_bytes()).hexdigest()
 if not args.host_only:

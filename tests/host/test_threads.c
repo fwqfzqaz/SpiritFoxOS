@@ -104,7 +104,7 @@ int main(void){
  current=0;ticks=300;cpu_window_reset();CHECK(task_schedulable(&tasks[1]));
  /* 优先级设置传播到该进程全部线程。 */
  reset(2);tasks[0].cr3=0x2000;CHECK(create(0,entry,0)==2);
- CHECK(invoke(0,SYS_TASK_PRIORITY,1,2,SF_PRIORITY_SET)==tasks[0].priority);
+ CHECK(invoke(0,SYS_TASK_PRIORITY,1,2,SF_PRIORITY_SET)==2&&tasks[0].priority==2);
  CHECK(tasks[0].priority==2&&tasks[1].priority==2);
  printf("THREADS PASS: %u checks; create/share/exit/reuse, process kill, thread limit, failure rollback and CPU budget window filtering\n",checks);return 0;
 }

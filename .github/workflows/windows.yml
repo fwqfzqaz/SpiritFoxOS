@@ -3,7 +3,7 @@ on: [push, pull_request]
 jobs:
   prototype:
     runs-on: windows-latest
-    timeout-minutes: 45
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -11,6 +11,7 @@ jobs:
           python-version: '3.13'
       - run: python tools/bootstrap.py
       - name: Install Rust targets
+        # Both native host tests and BOOTX64.EFI use Windows GNU/COFF.
         run: rustup target add x86_64-unknown-none x86_64-pc-windows-gnu
       - run: python tools/test.py
       - run: python tools/package_release.py

@@ -40,6 +40,7 @@
 
 - [安全审查与修复](quality/SECURITY.md)：权限边界、已修复缺陷与回归范围。
 - [测试记录](quality/TESTING.md)：各阶段的宿主与 QEMU 验证结果。
+- [GitHub Actions 配置与排错](quality/CI.md)：Windows/Linux 两个工作流的完整 YAML、Rust 目标、手动命令和失败定位。
 
 ## 项目
 

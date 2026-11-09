@@ -50,7 +50,11 @@ Rust 实现位于 [`rust/sfcore/`](../../rust/sfcore/)（crate `sfcore`，`#![no
 - panic 策略为 abort（`.cargo/config.toml` 按目标设定）；宿主/efi 变体额外启用
   `relocation-model = "pic"` 以并入共享库。
 - 工具链要求：rustup + `x86_64-unknown-none`、`x86_64-pc-windows-gnu`，Linux 另加
-  `x86_64-unknown-linux-gnu`。`make check-toolchain` 与 CI 工作流均已检查。
+  `x86_64-unknown-linux-gnu`。`make check-toolchain` 只检查 Cargo 入口是否存在，
+  不检查已安装目标；完整 CI 配置与目标命令见 [CI 配置](../quality/CI.md)。
+- Windows GNU 归档在链接前复制为 `libsfcore-zig.a`，仅移除与 Zig compiler-rt
+  冲突的 Rust 栈探测成员，保留 Cargo 原件及其他内建函数。按归档索引识别成员，
+  不依赖 rustc 的哈希/编号；不关闭栈探测，不全局允许重复符号。
 
 ## 4. 跨语言契约（FFI）
 

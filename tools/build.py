@@ -7,6 +7,8 @@ from pathlib import Path
 import subprocess
 import struct
 import sys
+import shutil
+from rust_archive import stack_probe_member
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'tools' / 'package'))
 from sfpack import Crypto, pack, bundle
@@ -69,6 +71,17 @@ def rust_lib(kind):
         raise RuntimeError('Rust build failed')
     if not out.exists():
         raise RuntimeError('Rust build produced no artifact: ' + str(out))
+    if target == 'x86_64-pc-windows-gnu':
+        # Zig's compiler-rt provides the Windows stack probe. Rust staticlib
+        # bundles another strong definition, which otherwise clashes when
+        # Zig pulls its combined runtime object into host/UEFI links.
+        # Adapt a copy only; never alter Cargo's incremental output.
+        compatible = out.with_name('libsfcore-zig.a')
+        shutil.copyfile(out, compatible)
+        member = stack_probe_member(out.read_bytes())
+        if member:
+            subprocess.run([ZIG, 'ar', 'd', str(compatible), member], check=True)
+        return str(compatible)
     return str(out)
 
 
@@ -86,9 +99,9 @@ def build_accounts_table():
     """
     source = ROOT / 'config' / 'accounts.txt'
     rounds = int(__import__('re').search(r'#define SF_ACCOUNT_HASH_ROUNDS (\d+)',
-                                          (ROOT / 'include' / 'accounts.h').read_text()).group(1))
+                                          (ROOT / 'include' / 'accounts.h').read_text(encoding='utf-8')).group(1))
     entries = []
-    for raw in source.read_text().splitlines():
+    for raw in source.read_text(encoding='utf-8').splitlines():
         line = raw.strip()
         if not line or line.startswith('#'):
             continue

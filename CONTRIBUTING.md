@@ -65,6 +65,8 @@ Refs #42
 
 ## 推送前检查
 
+Windows/Linux CI 的完整 YAML、依赖和本地等价命令见 [GitHub Actions 配置与排错](docs/quality/CI.md)。
+
 在本地依次执行：
 
 ```bash

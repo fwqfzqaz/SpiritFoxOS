@@ -51,6 +51,8 @@ flowchart LR
 
 环境：Linux x64（使用系统 QEMU 与 OVMF），或 Windows x64 + Python 3.11+。工具链、缓存和密钥都在仓库内，无需全局安装或修改 `PATH`。Rust 组件需要 rustup 与目标 `x86_64-unknown-none`、`x86_64-pc-windows-gnu`（Linux CI 另需 `x86_64-unknown-linux-gnu`），详见[语言分工](docs/architecture/LANGUAGE.md)。
 
+Windows/Linux 两个 GitHub Actions 的完整 YAML、依赖、手动命令与排错见 [CI 配置](docs/quality/CI.md)。
+
 包作者可使用独立 `native-source-v1` schema 和无需密钥的离线清单检查；源文件界限与 `--strict-manifest` 用法见[清单说明](docs/architecture/MANIFESTS.md)。
 
 ```bash
