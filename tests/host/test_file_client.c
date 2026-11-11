@@ -40,7 +40,7 @@ int64_t model_syscall(uint64_t op,uint64_t a,uint64_t b,uint64_t deadline){
  case 6:m->h.payload_bytes--;break;case 7:m->h.cap_count=1;break;case 8:m->length=257;break;case 9:m->h.request_id=0;break;case 10:m->h.request_id++;break;case 11:m->h.opcode++;break;
  case 12:m->handle|=1ull<<32;break;case 13:m->handle=0;break;case 14:m->status=1;break;
  case 15:m->status=(int64_t)sent.length+1;break;case 16:m->length--;break;case 17:m->status=(int64_t)sent.offset+1;break;case 18:m->status=8;break;
- case 19:m->length=31;break;case 20:m->data[0]=31;break;case 21:m->data[4]=6;break;case 22:m->data[8]=0;break;case 23:m->data[8]=16;break;case 24:m->data[12]=8;break;
+ case 19:m->length=31;break;case 20:m->data[0]=31;break;case 21:m->data[4]=7;break;case 22:m->data[8]=0;break;case 23:m->data[8]=16;break;case 24:m->data[12]=8;break;
  }
  return 1;
 }

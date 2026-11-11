@@ -20,6 +20,12 @@
 
 本切片改变模块内部表示边界，实例仍与 sf-init 链接在同一地址空间；尚无跨进程客户端、故障隔离或重启后句柄保证。服务搬迁和后端 RPC 仍按 P0 后续完成。22 项纯公有接口检查与 7 组真实编译检查覆盖可用指针/API、禁止客户端分配对象/sizeof/访问成员，以及三个私有布局类型不可见；完整验证状态见 [PROGRESS](../project/PROGRESS.md)。
 
+## 投影元数据与偏移返回（2026-11-12）
+
+服务端已有的 NODE_PROJECTION=6 现在由应用 SDK 的 SF_TYPE_PROJECTION=6 识别；目录权限与只读策略不变，stat 不再把合法类型 6 当成坏回复并永久停止客户端。元数据仍为原 32 字节 SfFileStat，投影 size=0、flags=1 保持。
+
+sf_ns_seek、sf_file_dispatch 与 sf_file_dispatch_as 的 C 返回值和分发器局部状态使用 int64_t。原 Windows LLP64 宿主在合法定位至 UINT32_MAX 后，位置已改变却返回 -1；现在完整保留成功位置。freestanding x86_64 的消息 status 本来就是 64 位，操作号、消息布局和原有 guest 偏移边界没有改变。超过 UINT32_MAX 的投影 seek 仍拒绝且不改变共享偏移；定位读取不推进描述偏移。
+
 ## 目录能力与相对打开
 
 日期：2026-10-24。目录和文件逻辑继续位于用户态 sf-init 的命名空间服务中；内核只提供带真实发送者身份的 IPC。此阶段补齐受限 `openat` 与显式只读目录委派。

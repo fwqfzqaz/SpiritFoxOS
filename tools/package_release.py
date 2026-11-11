@@ -26,6 +26,8 @@ if result.get('namespace_opaque_host_assertions') != 22 or result.get('namespace
     raise SystemExit('Run opaque namespace client and real compile-boundary regressions before packaging')
 if result.get('namespace_handle_map_host_assertions') != 502975 or result.get('namespace_restart_host_assertions') != 24996:
     raise SystemExit('Run namespace client-generation and actual namespace restart regressions before packaging')
+if result.get('projection_width_host_assertions') != 9130 or result.get('projection_sdk_qemu') is not True or result.get('projection_sdk_qemu_boots') != 2:
+    raise SystemExit('Run projection metadata/full-width seek host and both transport SDK regressions before packaging')
 if result.get('host_poll_deadline_host_tests') != 8:
     raise SystemExit('Run paused-host polling budgets and silent-guest rejection regressions before packaging')
 if result.get('truncate_host_assertions') != 83 or result.get('resize_fault_scenarios') != 3132 or result.get('truncate_qemu') is not True:
@@ -87,7 +89,7 @@ if result.get('manifest_schema_sha256') != hashlib.sha256(schema_path.read_bytes
     raise SystemExit('Manifest schema changed since source validation')
 abi_reference = ROOT/'abi/x86_64-current.json'
 abi_capture = BUILD/'abi-current.json'
-if result.get('abi_snapshot_host_tests') != 9 or result.get('abi_snapshot_entries') != 600:
+if result.get('abi_snapshot_host_tests') != 9 or result.get('abi_snapshot_entries') != 601:
     raise SystemExit('Run compiled ABI capture, offline comparison and header-drift regressions before packaging')
 if result.get('ipc_copy_host_checks') != 10041 or result.get('ipc_stats_control_host_checks') != 6001 or result.get('ipc_copy_profile') != 'successful-user-copy-bytes-v1' or not result.get('ipc_stats_qemu') or result.get('ipc_stats_qemu_boots') != 2:
     raise SystemExit('Run actual IPC copy event/control oracles and both production stats VM transports before packaging')

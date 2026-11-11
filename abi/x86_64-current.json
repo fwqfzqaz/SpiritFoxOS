@@ -124,6 +124,7 @@
     "constant.SF_TRUST_APP": 2,
     "constant.SF_TRUST_MAX": 8,
     "constant.SF_TRUST_MODULE": 1,
+    "constant.SF_TYPE_PROJECTION": 6,
     "constant.SF_VERSION_REJECTED": -21,
     "constant.SF_WOULD_BLOCK": -15,
     "constant.SYS_CAP_CLOSE": 13,

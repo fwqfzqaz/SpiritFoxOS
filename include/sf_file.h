@@ -2,7 +2,7 @@
 #define SF_FILE_H
 #include "sf.h"
 enum {SF_OPEN_READ=1,SF_OPEN_WRITE=2,SF_OPEN_NONBLOCK=4,SF_OPEN_DIRECTORY=8};
-enum {SF_TYPE_DIRECTORY=1,SF_TYPE_FILE,SF_TYPE_PIPE,SF_TYPE_CONSOLE,SF_TYPE_DISK};
+enum {SF_TYPE_DIRECTORY=1,SF_TYPE_FILE,SF_TYPE_PIPE,SF_TYPE_CONSOLE,SF_TYPE_DISK,SF_TYPE_PROJECTION};
 /* One outstanding call per private reply endpoint; single-thread native ABI. */
 typedef struct {uint32_t manager,reply,timeout_ms;int64_t error;} SfFileClient;
 int sf_file_client_init(SfFileClient*,uint64_t manager,uint64_t reply,uint32_t timeout_ms);

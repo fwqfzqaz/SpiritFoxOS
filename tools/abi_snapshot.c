@@ -1,6 +1,7 @@
 /* Compile the shared fixed-width layouts; never execute kernel/service code. */
 #include <stdio.h>
 #include "sf.h"
+#include "sf_file.h"
 #include "net.h"
 #include "package.h"
 _Static_assert(sizeof(void*)==8&&sizeof(size_t)==8,"x86_64 snapshot only");
@@ -46,7 +47,7 @@ int main(void){
  U(OP_NATIVE_PREPARE);U(OP_NATIVE_STAGE);U(OP_NATIVE_HEALTH);U(OP_NATIVE_DIAGNOSTIC);
  U(OP_BLOCK_INFO);U(OP_BLOCK_READ);U(OP_BLOCK_WRITE);U(OP_BLOCK_STOP);U(OP_BLOCK_FLUSH);
  U(OP_BLOCK_WRITE_RANGE);U(OP_BLOCK_DMA_PROBE);U(OP_NET_INFO);U(OP_NET_PING);U(OP_NET_UDP);U(OP_NET_TCP);
- U(SF_FILE_READ_ONLY);U(SF_FILE_MOUNTED);U(SF_FILE_SEEKABLE);
+ U(SF_FILE_READ_ONLY);U(SF_FILE_MOUNTED);U(SF_FILE_SEEKABLE);U(SF_TYPE_PROJECTION);
  U(SF_NET_PAYLOAD_MAX);U(SF_PACKAGE_MAX);U(SF_TRUST_MAX);U(SF_TRUST_MODULE);U(SF_TRUST_APP);
  L(SfIpcHeader);F(SfIpcHeader,size);F(SfIpcHeader,protocol_major);F(SfIpcHeader,protocol_minor);
  F(SfIpcHeader,opcode);F(SfIpcHeader,flags);F(SfIpcHeader,request_id);

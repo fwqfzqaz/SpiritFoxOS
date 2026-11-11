@@ -1,6 +1,26 @@
 #include "libsf.h"
 #include "arguments.h"
 #include "sf_file.h"
+static int projection_case(SfFileClient*c,int64_t console,int64_t root,int64_t root_copy,const char*path){
+ int64_t file=sf_file_openat(c,(uint64_t)root,path,SF_OPEN_READ);if(file<0)return 32;
+ SfFileStat info;if(sf_file_stat(c,(uint64_t)file,&info)||info.type!=SF_TYPE_PROJECTION||info.size||info.offset||info.mode!=SF_OPEN_READ||info.flags!=SF_FILE_READ_ONLY)return 33;
+ int64_t copy=sf_file_dup(c,(uint64_t)file);if(copy<=0||copy==file)return 34;
+ const uint64_t positions[]={0x7fffffff,0x80000000,0xfffffffe,UINT32_MAX};
+ for(unsigned i=0;i<sizeof(positions)/sizeof(*positions);i++){
+  uint64_t position=positions[i];uint8_t out=0xa5;
+  if(sf_file_seek(c,(uint64_t)copy,position)!=(int64_t)position||sf_file_stat(c,(uint64_t)file,&info)||info.offset!=position)return 35;
+  if(sf_file_read(c,(uint64_t)file,&out,1)||out!=0xa5||sf_file_stat(c,(uint64_t)copy,&info)||info.offset!=position)return 36;
+  if(sf_file_pread(c,(uint64_t)copy,&out,1,0)!=1||sf_file_stat(c,(uint64_t)file,&info)||info.offset!=position)return 37;
+  out=0xa5;if(sf_file_pread(c,(uint64_t)copy,&out,1,UINT64_MAX)||out!=0xa5||sf_file_stat(c,(uint64_t)copy,&info)||info.offset!=position)return 38;
+ }
+ if(sf_file_seek(c,(uint64_t)file,(uint64_t)UINT32_MAX+1)!=SF_INVALID||sf_file_seek(c,(uint64_t)copy,UINT64_MAX)!=SF_INVALID)return 39;
+ if(sf_file_stat(c,(uint64_t)copy,&info)||info.offset!=UINT32_MAX||c->error)return 40;
+ if(sf_file_write(c,(uint64_t)file,"x",1)!=SF_DENIED||sf_file_truncate(c,(uint64_t)copy,0)!=SF_DENIED||sf_file_openat(c,(uint64_t)root,path,SF_OPEN_WRITE)!=SF_DENIED)return 41;
+ uint8_t text[64];if(sf_file_seek(c,(uint64_t)file,0)||sf_file_read(c,(uint64_t)copy,text,sizeof(text))<=0)return 42;
+ if(sf_file_close(c,(uint64_t)root)||sf_file_root(c)!=SF_DENIED||sf_file_stat(c,(uint64_t)root_copy,&info)||info.type!=SF_TYPE_DIRECTORY)return 43;
+ if(sf_file_close(c,(uint64_t)file)||sf_file_close(c,(uint64_t)copy)||sf_file_close(c,(uint64_t)root_copy)||sf_file_close(c,(uint64_t)console)||c->error)return 44;
+ sf_log("FILE PROJECTION APP PASSED\n");return 0;
+}
 long sf_main(const SfBootArgs*a,size_t bytes){
  if(sf_boot_arguments_validate(a,bytes))return 1;
  SfFileClient c;if(sf_file_client_init(&c,a->manager,a->service,3000))return 2;
@@ -13,6 +33,11 @@ long sf_main(const SfBootArgs*a,size_t bytes){
  if(sf_file_openat(&c,root,"../escape",SF_OPEN_READ)!=SF_INVALID)return 8;
  if(sf_file_close(&c,(1ull<<32)|(uint64_t)root)!=SF_STALE_HANDLE||sf_file_stat(&c,root,&info))return 9;
  int64_t root_copy=sf_file_dup(&c,root);if(root_copy<=0||root_copy==root||sf_file_stat(&c,root_copy,&info)||info.mode!=(SF_OPEN_READ|SF_OPEN_DIRECTORY))return 24;
+ const char*option=a->argc>1?sf_argument(a,bytes,1):0;
+ if(option&&!strcmp(option,"--projection")){
+  const char*target=a->argc>2?sf_argument(a,bytes,2):"uptime";if(!target)return 10;
+  return projection_case(&c,console,root,root_copy,target);
+ }
  const char*path=a->argc>1?sf_argument(a,bytes,1):"notes";if(!path)return 10;
  int64_t file=sf_file_openat(&c,root,path,SF_OPEN_READ);if(file<0)return 11;
  if(sf_file_stat(&c,file,&info)||(info.type!=SF_TYPE_FILE&&info.type!=SF_TYPE_DISK)||info.mode!=SF_OPEN_READ||!info.size||info.offset)return 12;

@@ -64,6 +64,7 @@ host_test('test_rmdir','tests/host/test_rmdir.c','services/namespace.c','service
 host_test('test_unlink','tests/host/test_unlink.c','services/namespace.c','services/file_rpc.c')
 host_test('test_truncate','tests/host/test_truncate.c','services/namespace.c')
 host_test('test_projection','tests/host/test_projection.c','services/namespace.c')
+host_test('test_projection_width','tests/host/test_projection_width.c','services/namespace.c','services/file_rpc.c')
 # 事务与 SHA-256：services/sha256.c → rust/sfcore/src/sha256.rs
 host_test('test_resize_txn','tests/host/test_resize_txn.c','services/txn.c',no_unused=True)
 host_test('test_storage','tests/host/test_storage.c','services/namespace.c',no_unused=True)
@@ -160,7 +161,7 @@ result['manifest_source_profile'] = 'native-source-v1'
 result['manifest_profile_host_tests'] = 12
 result['manifest_schema_sha256'] = manifest_schema_sha256
 result['abi_snapshot_host_tests'] = 9
-result['abi_snapshot_entries'] = 600
+result['abi_snapshot_entries'] = 601
 result['abi_reference_sha256'] = abi_reference_sha256
 result['abi_capture_sha256'] = abi_capture_sha256
 result['posix_qemu'] = not args.host_only
@@ -174,6 +175,9 @@ result['namespace_opaque_host_assertions'] = 22
 result['namespace_boundary_host_groups'] = 7
 result['namespace_handle_map_host_assertions'] = 502975
 result['namespace_restart_host_assertions'] = 24996
+result['projection_width_host_assertions'] = 9130
+result['projection_sdk_qemu'] = not args.host_only
+result['projection_sdk_qemu_boots'] = 0 if args.host_only else 2
 result['host_poll_deadline_host_tests'] = 8
 result['openat_qemu'] = not args.host_only
 result['truncate_host_assertions'] = 83

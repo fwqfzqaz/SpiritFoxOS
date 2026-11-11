@@ -1,6 +1,20 @@
 # SpiritFoxOS 实施进度
 
-更新日期：2026-11-11（Asia/Shanghai）。
+更新日期：2026-11-12（Asia/Shanghai）。
+
+## P0 迁移前置修复：投影 SDK 与返回宽度（本地完整通过）
+
+从已推送 `6b627d6` 接续。复现 Windows 宿主将合法 UINT32_MAX seek 返回为 -1，以及 SDK 将服务端已有类型 6 判为坏回复的两处问题；基线证明 `.cache/projection-width-baseline-20261112.json`。命名空间/分发器状态改为显式 int64_t，SDK 命名并接受 SF_TYPE_PROJECTION=6，保留其他类型、32 字节元数据、原操作号和目录只读授权。
+
+9130 项边界/一千个独立 32 位位置检查通过；7 组相关宿主与含初始构建的 legacy/modern 两 VM 专项通过（80.28 秒）。真实应用验证 stat、完整位置返回、dup 共享偏移、EOF、越界拒绝后状态保持和无环境根，磁盘字节保持；证明 `.cache/projection-focused-proof-20261112.json`。ABI 明确审阅只增加 constant.SF_TYPE_PROJECTION=6，旧 600 项无删改，当前 601 项；审阅证明 `.cache/projection-abi-review-20261112.json`。
+
+冻结源码的完整 `tools/test.py` 含初始构建通过（4308.43 秒、退出码 0），结果 `build/projection-verified-test-results-20261112.json`，日志 `build/projection-full-20261112.log`，证明 `.cache/projection-full-proof-20261112.json`。601 项参考/采集摘要均为 c12490bbacbfa2e976c7f5d30d2c3a27cf7e0ba2356d6370fb912312b1806781，七项产物一致、默认三密钥恢复，测试进程已退出。发布门/最终 ZIP 证明见 `.cache/projection-release-proof-20261112.json`；新 head 托管检查独立核对。
+
+发布门、实际 ZIP 的 CRC/42 项条目/七项产物摘要和 14 项解压离线工具检查通过；文档定稿后重新打包复核最终副本。后续 Linux workflow/docs 的单独修正不改变运行时代码，完整证明和 CI 来源差异审计分别保留。
+
+前一 6b627d6 的两项 Windows 托管已成功，Linux 两项因依赖仓库 DNS 失败在测试开始前耗尽 30 分钟后取消，不能称四项全绿。Linux workflow 修正单独提交并核对最新实际检查，不以本地 Windows 验证替代 Linux。恢复状态见 `.cache/progress-live.json`。
+
+此修复不表示命名空间已迁入独立 Fs。后续 RPC 控制器/客户端和 Root 后端代理仍是未接入运行时的单独草稿，不沿用任何旧完整证明。
 
 ## P0 后续：重启句柄映射（本地完整验证通过）
 
