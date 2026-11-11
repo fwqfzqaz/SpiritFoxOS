@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include "namespace.h"
 
+#include "../../services/namespace_state.h"
 static SfNamespace ns,before;
 static unsigned checks,leases,admission=1;
 #define CHECK(x) do{checks++;if(!(x)){printf("NS MOUNT FAIL line %d: %s\n",__LINE__,#x);return 1;}}while(0)

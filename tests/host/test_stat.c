@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include "file_rpc.h"
+#include "../../services/namespace_state.h"
 static SfNamespace ns,saved;static unsigned checks,backend_calls;
 #define CHECK(x) do{checks++;if(!(x)){printf("STAT FAIL line %d: %s\n",__LINE__,#x);return 1;}}while(0)
 static long external_read(unsigned index,uint64_t offset,void*out,size_t count){(void)index;(void)offset;(void)out;(void)count;backend_calls++;return SF_DEVICE_GONE;}

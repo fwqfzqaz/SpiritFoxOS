@@ -22,6 +22,8 @@ if result.get('openat_host_assertions') != 108 or result.get('openat_qemu') is n
     raise SystemExit('Run the directory capability host and VM regressions before packaging')
 if result.get('namespace_mount_host_assertions') != 256:
     raise SystemExit('Run atomic namespace mount publication and trusted handle handoff regressions before packaging')
+if result.get('namespace_opaque_host_assertions') != 22 or result.get('namespace_boundary_host_groups') != 7:
+    raise SystemExit('Run opaque namespace client and real compile-boundary regressions before packaging')
 if result.get('host_poll_deadline_host_tests') != 8:
     raise SystemExit('Run paused-host polling budgets and silent-guest rejection regressions before packaging')
 if result.get('truncate_host_assertions') != 83 or result.get('resize_fault_scenarios') != 3132 or result.get('truncate_qemu') is not True:

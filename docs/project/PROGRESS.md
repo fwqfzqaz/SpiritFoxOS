@@ -4,6 +4,14 @@
 
 ## P0 命名空间写入边界（2026-11-10 至 11，本地完整通过）
 
+### 后续验证通过：命名空间状态表示边界
+
+当前基于已推送的 `98159ed` / [PR #16](https://github.com/fwqfzqaz/SpiritFoxOS/pull/16) 继续。该 head 的四项 Windows/Linux 托管检查均已成功，证明 `.cache/ns-pr16-hosted-proof-20261111.json`；新提交仍独立核对。前轮 ZIP、完整证明和七项产物已保存在 `.cache/checkpoints/namespace-pr16-local-98159ed-20261111.zip`，不作为新草稿的通过证明。
+
+节点/描述/句柄布局已移到服务私有头文件；sf-init 使用稳定实例指针、公有头不暴露对象大小，14 个白盒宿主夹具显式包含私有布局。22 项公有 API 检查、7 组真实编译边界检查和全部 15 组命名空间专项已通过（22.12 秒）。冻结源码的完整含初始构建回归通过（4237.72 秒、退出码 0），日志 `build/ns-state-full-20261111.log`，结果 `build/ns-state-verified-test-results-20261111.json`，证明 `.cache/ns-state-full-proof-20261111.json`；600 项 ABI 不变，七项产物相符。sf-init RW 为 1,602,928 B / 2 MiB（剩余 23.6%），服务状态仍在同一地址空间，未宣称进程迁移或显著 RW 收缩完成。测试进程已退出并释放保持运行请求；现场 `.cache/progress-live.json`。本次发布门、真实 ZIP 的 CRC/42 项条目/七项产物摘要与 14 项解压离线检查已通过，证明 .cache/ns-state-release-proof-20261111.json；文档定稿后重新打包复核。新提交的托管结果不沿用 98159ed。
+
+### 首个写入边界切片（98159ed）
+
 - 用户明确恢复剩余开发；工作区 `E:\SpiritFoxOS`，分支 `codex/namespace-service-20261110`，作者基线 `main 03ba91e`。PR #15 已合并，该 main 的 Windows/Linux 托管检查均成功；保留作者 M7、GUI、网络和后续修复。下方 CI 修复及历史暂停仅描述此前轮次，已由本次继续指示撤销；额度监测 `spiritfoxos-2` 已恢复 ACTIVE。
 - 接续 v0.3 P0：将 `/disk` 和 `/persist` 节点发布收拢到命名空间内部，最多 128 项声明预检后原子发布，失败保留完整旧状态；管理器目录句柄交接验证所有者、generation 和目标身份，保持共享描述/偏移/租约。init、storage 与 persist 客户端不再直接读写命名空间节点/句柄/描述表或后端字段。
 - 本切片仍在 sf-init 的地址空间运行，尚未完成目录、RAMFS 与路径解析迁入 sf-fs，也未宣称 RW 显著收缩。下一步是认证有界客户端及后端代理，再补服务死亡、重启和旧引用失效回归。详见 [NAMESPACE](../architecture/NAMESPACE.md)。共享消息/ABI、包格式和盘格式保持；新增 C 接口仅用于受信任服务内部。
@@ -11,7 +19,7 @@
 - 本轮冻结源码的 `tools/test.py` 完整回归通过（含初始构建，3130.52 秒、退出码 0），日志 `build/ns-full-20261110.log`，结果 `build/ns-verified-test-results-20261110.json`，证明 `.cache/ns-full-proof-20261110.json`。新增 256 项挂载/交接检查、8 组宿主计时检查全部通过；14 组命名空间专项和 3 个 VM 专项保留。600 项 ABI 与作者基线一致，摘要 `f782093543486057b7cfa6567049a27723c72bdf65405bf01551a7e80b7d4b02`；七项运行产物逐项相符。sf-init RW 仍为 1,604,408 B / 2 MiB（剩余 23.5%），未宣称进程迁移或 RW 收缩完成。
 - 后续两轮分别在持久化 VM 启动和 modern 文件探针等待时超时，均保留为失败；宿主工具出现长时间中断，日志中的客户机后续仍有输出，不能据此认定客户机断言通过或确证休眠原因。通用串口轮询新增显式宿主调度间隔预算，保留客户机无应答拒绝；8 组确定性测试已通过，细则见 [CI](../quality/CI.md)。本地测试监督进程只在当前验证期间请求系统保持运行，退出后释放，电源方案保持原值。以上失败均不计为通过；修正宿主轮询预算后的新完整证明已生成，全部原客户机断言保留。测试监督进程退出后，保持运行请求已释放（`.cache/ns-awake-release-20261111.json`）。
 
-本轮发布门和真实 ZIP 的 CRC、42 项条目/七项产物摘要及 14 项解压离线检查已通过，证明 `.cache/ns-release-proof-20261111.json`。文档定稿后重新打包核对最终副本；新提交 Windows/Linux 托管 CI 独立核对。可恢复现场 `.cache/progress-live.json`；本地测试树已退出。额度允许时继续 P0 下一有界事项，不以本轮完成代替整个目标完成。
+首个写入边界切片的发布门和真实 ZIP 的 CRC、42 项条目/七项产物摘要及 14 项解压离线检查已通过，证明 `.cache/ns-release-proof-20261111.json`。文档定稿后重新打包核对最终副本；新提交 Windows/Linux 托管 CI 独立核对。可恢复现场 `.cache/progress-live.json`；本地测试树已退出。额度允许时继续 P0 下一有界事项，不以本轮完成代替整个目标完成。
 
 ## Windows/Linux CI 修复（2026-11-08）
 

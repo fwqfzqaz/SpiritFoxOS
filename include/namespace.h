@@ -10,15 +10,13 @@ enum { OPEN_READ=1,OPEN_WRITE=2,OPEN_NONBLOCK=4,OPEN_DIRECTORY=8 };
 /* mode holds the classic nine permission bits (owner/group/other rwx).
  * uid 0 bypasses permission checks; ownership is assigned by the trusted
  * init when it materialises account homes and shared directories. */
-typedef struct {char path[96];uint8_t type,readonly,reserved;uint16_t mode,writers;uint32_t size,head,external,mount_tag,owner_uid,owner_gid;uint8_t data[1024];} SfNode;
-typedef struct {uint32_t node,offset,mode,refs;} SfDescription;
-typedef struct {uint32_t owner,generation,description;} SfFileHandle;
-
 /* Trusted in-process mount declarations, not a wire ABI. Parents precede
  * children; the first entry is the mount directory. Publication is atomic. */
 typedef struct {char path[96];uint32_t type,readonly,external,size;} SfMountEntry;
 typedef long(*SfNsRead)(unsigned,uint64_t,void*,size_t);
-typedef struct {SfNode nodes[SF_NS_NODE_MAX];SfDescription descriptions[SF_NS_DESCRIPTION_MAX];SfFileHandle handles[SF_NS_HANDLE_MAX];long(*console)(const void*,size_t);long(*external_read)(unsigned,uint64_t,void*,size_t);long(*external_write)(unsigned,uint64_t,const void*,size_t);int(*external_truncate)(unsigned,uint64_t);int(*mount_open)(unsigned);void(*mount_close)(unsigned);long(*projection_read)(unsigned,uint64_t,void*,size_t);} SfNamespace;
+typedef struct SfNamespace SfNamespace;
+/* One service-owned instance per process; initialise explicitly before use. */
+SfNamespace*sf_ns_default(void);
 void sf_ns_init(SfNamespace*,long(*)(const void*,size_t));
 int sf_ns_mount_check(SfNamespace*,const char*);
 int sf_ns_mount_publish(SfNamespace*,const SfMountEntry*,unsigned,unsigned);

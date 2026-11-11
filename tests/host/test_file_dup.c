@@ -4,6 +4,7 @@
 #define SF_FILE_SYSCALL dup_syscall
 #include "../../services/file_client.c"
 #include "file_rpc.h"
+#include "../../services/namespace_state.h"
 static SfNamespace ns,snapshot;
 static uint32_t roots[2],actor=42;
 static SfMessage reply;

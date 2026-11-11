@@ -15,7 +15,7 @@
 | M4 | 独立 sf-native、验证装载计划、运行时租约、有界 argv/显式环境与只读 BootArgs/SDK、relative-v1 PI、libc 纯函数 SDK、文件 RPC 客户端 SDK、单一认证运行时库 `sf-libsf.sfmod` 的有界导入与 15 项 POSIX 子集 | 更完整 PI 配置、多库依赖与符号版本、TLS、完整 SDK/完整 POSIX、独立 sfexec/sf-process |
 | M5 | legacy 与受限 modern PCI virtio-blk、SFRFS1/SFRFS2 自动探测、独立 `sf-fs.sfmod` 文件系统服务、从盘验证并运行包、挂载租约、存储失败恢复 | 通用 modern/virtio MMIO、更多设备/传输、可写通用磁盘格式（当前两种格式均只读） |
 | M6 | 显式写权、OUT/FLUSH、双银行事务、笔记读写/截断、包 A/B、试运行确认与失败/中断回退、身份及摘要绑定、版本下限与精确重装幂等、Q35 VT-d RAM DMA 隔离、故障恢复、构建时公钥用途/撤销与重叠轮换、默认模块/应用密钥分离、运行期密钥撤销、旧事务几何兼容 | IRQ/通用设备隔离、ACS/多单元、真实硬件断电、通用持久文件系统、长期服务健康策略、运行期撤销扩展、独立生产根与可信防回滚 |
-| M7 | 独立故障域与服务协议基础；ring-3 legacy virtio-net、IOAPIC INTx、DHCP、有界 ARP/IPv4/ICMP、一次性 UDP/TCP、8 个连接对象与 `/net` 投影、磁盘与网络并行授权；构建期账户、四个有界会话、uid/gid 权限与管理员命令门 | 图形、选定服务状态迁移 |
+| M7 | 独立故障域与服务协议基础；ring-3 legacy virtio-net、IOAPIC INTx、DHCP、有界 ARP/IPv4/ICMP、一次性 UDP/TCP、8 个连接对象与 `/net` 投影、磁盘与网络并行授权；构建期账户、四个有界会话、uid/gid 权限与管理员命令门；ring-3 有界图形合成、滚动平铺与串口回退 | 选定服务状态迁移；图形后续仍限 P2 和 GRAPHICS 的既定边界 |
 
 ## 下一阶段方向：v0.3 模块化收尾与运行时加固
 
@@ -30,6 +30,8 @@
 ### P0：完成 sf-init 拆分（模块化收尾）
 
 2026-11-10 接续：先收拢命名空间写入边界，挂载改为最多 128 项声明的原子发布，管理器交接目录句柄改为验证所有者/generation 的内部函数。目录/RAMFS/句柄表仍驻留 sf-init，P0 的跨进程迁移及 RW 收缩验收尚未完成；当前验证状态见 [PROGRESS](PROGRESS.md)。
+
+2026-11-11 后续：将节点/描述/句柄布局转为服务私有状态，sf-init 改用不透明实例指针，为独立客户端提供表示边界。当前仍是同一地址空间，实例初始化、后端回调和进程生命周期的真正 RPC 迁移继续保留为下一步。
 
 当前 `sf-fs.sfmod` 已接管磁盘格式探测、SFRFS1/SFRFS2 解析与文件服务，`sf-persist.sfmod` 已接管事务卷与更新状态机；命名空间目录、RAMFS、`/disk` 节点投影与持久化客户端仍在 `sf-init`。
 

@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include "namespace.h"
+#include "../../services/namespace_state.h"
 static SfNamespace ns;static unsigned checks,calls;static uint8_t payload[64];static unsigned payload_size;static unsigned last_id;
 #define CHECK(x) do{checks++;if(!(x)){printf("PROJECTION FAIL line %d: %s\n",__LINE__,#x);return 1;}}while(0)
 static long provide(unsigned id,uint64_t offset,void*out,size_t bytes){calls++;last_id=id;if(id!=7)return SF_INVALID;if(offset>=payload_size)return 0;if(bytes>payload_size-offset)bytes=payload_size-offset;memcpy(out,payload+offset,bytes);return(long)bytes;}

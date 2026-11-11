@@ -7,6 +7,7 @@
 static unsigned checks,calls,sends,receives,corrupt,stales;
 static int64_t tick_value=10,send_error,recv_error,server_error;
 static SfMessage sent;static uint64_t saved_deadline,last_sent;
+#include "../../services/namespace_state.h"
 static SfNamespace real_namespace;static uint32_t real_root;static int use_server;static SfMessage real_response;static unsigned console_bytes;
 #define CHECK(x) do{checks++;if(!(x)){fprintf(stderr,"FILE CLIENT FAIL line %d: %s\n",__LINE__,#x);exit(1);}}while(0)
 static void reset(void){calls=sends=receives=corrupt=stales=0;tick_value=10;send_error=recv_error=server_error=0;memset(&sent,0,sizeof(sent));saved_deadline=last_sent=0;use_server=0;}

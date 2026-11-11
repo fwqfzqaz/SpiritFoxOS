@@ -4,6 +4,7 @@
 #define SF_FILE_SYSCALL pread_syscall
 #include "../../services/file_client.c"
 #include "file_rpc.h"
+#include "../../services/namespace_state.h"
 static SfNamespace ns,saved;
 static uint32_t actor=42,root;
 static SfMessage reply;

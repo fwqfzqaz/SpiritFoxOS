@@ -14,7 +14,7 @@
 #include "accounts.h"
 #include "session.h"
 static const SfBootArgs*boot;
-static uint32_t manager_ep,fs_ep,manager_reply;static SfManager manager;static SfNamespace ns;
+static uint32_t manager_ep,fs_ep,manager_reply;static SfManager manager;static SfNamespace*ns;
 static int runtime_slot,echo_slot;static uint32_t runtime_pid,runtime_ep,runtime_reply,echo_pid,echo_ep;
 /* 单应用映像的实际上限即此暂存区容量（1280 KiB）：sf-persist.sfmod 的
  * 事务卷常驻数据与 sf-fs.sfmod 的 SFRFS2 校验缓冲都经同一装载路径进入
@@ -298,32 +298,32 @@ static int session_identity(uint32_t*uid,uint32_t*gid,uint32_t*owner){
  const SfSession*s=sf_session_current(&sessions);if(!s)return SF_DENIED;
  if(uid)*uid=s->uid;if(gid)*gid=s->gid;if(owner)*owner=sf_session_owner(sf_session_active(&sessions));return 0;
 }
-static int shell_open(const char*path,unsigned mode){uint32_t uid,gid,owner;int r=session_identity(&uid,&gid,&owner);return r?r:sf_ns_open_as(&ns,owner,"/",path,mode,uid,gid);}
+static int shell_open(const char*path,unsigned mode){uint32_t uid,gid,owner;int r=session_identity(&uid,&gid,&owner);return r?r:sf_ns_open_as(ns,owner,"/",path,mode,uid,gid);}
 static int launch_app_root_args(const char*name,const char*root,const SfArguments*arguments){
  if(!strcmp(name,"installed"))name="/installed.sfk";
  int slot=-1;for(unsigned i=0;i<16;i++)if(!children[i].pid){slot=i;break;}if(slot<0)return SF_NO_SPACE;
  uint32_t uid,gid,owner;int ir=session_identity(&uid,&gid,&owner);if(ir)return ir;
  /* Reserve and pin the directory before creating a child. The trusted
   * handoff retains its lease; a failed handoff kills the unregistered child. */
- int directory=root?sf_ns_open_as(&ns,owner,"/",root,OPEN_READ|OPEN_DIRECTORY,uid,gid):0;if(directory<0)return directory;
+ int directory=root?sf_ns_open_as(ns,owner,"/",root,OPEN_READ|OPEN_DIRECTORY,uid,gid):0;if(directory<0)return directory;
  int ep=0,r=sfmod_acquire(&manager,runtime_slot,RES_LEASE);if(r)goto fail_root;
  ep=sf_sys(SYS_EP_CREATE,0,0,0);if(ep<0){r=ep;goto fail_lease;}
  int pid=spawn_package_policy(name,ep,RIGHT_RECV,0,0,directory!=0,arguments,0,2);if(pid<0){r=pid;goto fail_lease;}
- if(directory){r=sf_ns_handoff(&ns,owner,directory,(uint32_t)pid);if(r){sf_sys(SYS_KILL,pid,r,0);goto fail_lease;}}
+ if(directory){r=sf_ns_handoff(ns,owner,directory,(uint32_t)pid);if(r){sf_sys(SYS_KILL,pid,r,0);goto fail_lease;}}
  children[slot]=(Child){pid,ep,directory,1,uid,gid};return pid;
 fail_lease:if(ep>0)sf_sys(SYS_CAP_REVOKE,ep,0,0);sfmod_release(&manager,runtime_slot,RES_LEASE);
-fail_root:if(directory)sf_ns_close(&ns,owner,directory);return r;
+fail_root:if(directory)sf_ns_close(ns,owner,directory);return r;
 }
 static int launch_app_root(const char*name,const char*root){return launch_app_root_args(name,root,0);}
 static int launch_app(const char*name){return launch_app_root(name,0);}
-static void app_reap(uint32_t pid){Child*c=child(pid);if(!c)return;sf_ns_reap(&ns,pid);sf_sys(SYS_CAP_REVOKE,c->reply,0,0);if(c->lease)sfmod_release(&manager,runtime_slot,RES_LEASE);memset(c,0,sizeof(*c));}
+static void app_reap(uint32_t pid){Child*c=child(pid);if(!c)return;sf_ns_reap(ns,pid);sf_sys(SYS_CAP_REVOKE,c->reply,0,0);if(c->lease)sfmod_release(&manager,runtime_slot,RES_LEASE);memset(c,0,sizeof(*c));}
 static int serve_once(unsigned timeout_ms){
  /* sf-fs owns the disk format layer but never touches virtio-blk; while the
   * init waits for file RPC it also answers the module's block requests. */
  sf_storage_broker(1);
  SfMessage m;long sender=sf_recv(fs_ep,&m,sf_deadline(timeout_ms));if(sender<0)return sender;Child*c=child(sender);if(!c)return SF_INVALID;
  if(m.h.opcode==OP_HELLO)return m.status;
- sf_file_dispatch_as(&ns,sender,&c->root,&m,c->uid,c->gid);return sf_send(c->reply,&m);
+ sf_file_dispatch_as(ns,sender,&c->root,&m,c->uid,c->gid);return sf_send(c->reply,&m);
 }
 static int wait_app(uint32_t pid){uint64_t end=sf_ticks()+300;for(;;){long status=sf_sys(SYS_TASK_STATUS,pid,0,0);if(status!=SF_TASK_RUNNING){app_reap(pid);return status;}if(sf_ticks()>end){sf_sys(SYS_KILL,pid,SF_TIMEOUT,0);app_reap(pid);return SF_TIMEOUT;}serve_once(10);sf_yield();}}
 static int echo_call(uint32_t,uint32_t);
@@ -486,24 +486,24 @@ static long projection_read(unsigned id,uint64_t offset,void*out,size_t bytes){
  size_t available=projection_used-(size_t)offset;if(bytes>available)bytes=available;memcpy(out,projection_payload+offset,bytes);return(long)bytes;
 }
 static void projection_setup(void){
- sf_assert(!sf_ns_create(&ns,"/proc/self",NODE_DIR,0),"process projection directory");
- sf_assert(!sf_ns_project(&ns,"/proc/uptime",PROJECTION_UPTIME)&&!sf_ns_project(&ns,"/proc/ipc-stats",PROJECTION_IPC_STATS),"process projections");
- sf_assert(!sf_ns_project(&ns,"/proc/self/status",PROJECTION_SELF_STATUS)&&!sf_ns_project(&ns,"/proc/children",PROJECTION_CHILDREN),"process projections");
- sf_assert(!sf_ns_project(&ns,"/sys/modules",PROJECTION_MODULES)&&!sf_ns_project(&ns,"/sys/devices",PROJECTION_DEVICES)&&!sf_ns_project(&ns,"/sys/dma",PROJECTION_DMA),"system projections");
- sf_assert(!sf_ns_project(&ns,"/net/info",PROJECTION_NET_INFO)&&!sf_ns_project(&ns,"/net/connections",PROJECTION_NET_CONNECTIONS),"network projections");
- sf_ns_projection_backend(&ns,projection_read);
- sf_assert(!sf_ns_protect(&ns,"/proc")&&!sf_ns_protect(&ns,"/proc/self")&&!sf_ns_protect(&ns,"/sys")&&!sf_ns_protect(&ns,"/net"),"system projection directories are read-only");
+ sf_assert(!sf_ns_create(ns,"/proc/self",NODE_DIR,0),"process projection directory");
+ sf_assert(!sf_ns_project(ns,"/proc/uptime",PROJECTION_UPTIME)&&!sf_ns_project(ns,"/proc/ipc-stats",PROJECTION_IPC_STATS),"process projections");
+ sf_assert(!sf_ns_project(ns,"/proc/self/status",PROJECTION_SELF_STATUS)&&!sf_ns_project(ns,"/proc/children",PROJECTION_CHILDREN),"process projections");
+ sf_assert(!sf_ns_project(ns,"/sys/modules",PROJECTION_MODULES)&&!sf_ns_project(ns,"/sys/devices",PROJECTION_DEVICES)&&!sf_ns_project(ns,"/sys/dma",PROJECTION_DMA),"system projections");
+ sf_assert(!sf_ns_project(ns,"/net/info",PROJECTION_NET_INFO)&&!sf_ns_project(ns,"/net/connections",PROJECTION_NET_CONNECTIONS),"network projections");
+ sf_ns_projection_backend(ns,projection_read);
+ sf_assert(!sf_ns_protect(ns,"/proc")&&!sf_ns_protect(ns,"/proc/self")&&!sf_ns_protect(ns,"/sys")&&!sf_ns_protect(ns,"/net"),"system projection directories are read-only");
 }
 static void namespace_setup(void){
- sf_ns_init(&ns,console_write);const char*dirs[]={"/boot","/system","/modules","/bin","/dev","/proc","/sys","/net","/run","/etc","/home","/var","/tmp"};
- for(unsigned i=0;i<sizeof(dirs)/sizeof(*dirs);i++)sf_assert(!sf_ns_create(&ns,dirs[i],NODE_DIR,0),"namespace directory");
- sf_ns_create(&ns,"/dev/console",NODE_CONSOLE,0);sf_ns_create(&ns,"/tmp/notes",NODE_FILE,0);sf_ns_create(&ns,"/run/pipe",NODE_PIPE,0);
+ ns=sf_ns_default();sf_ns_init(ns,console_write);const char*dirs[]={"/boot","/system","/modules","/bin","/dev","/proc","/sys","/net","/run","/etc","/home","/var","/tmp"};
+ for(unsigned i=0;i<sizeof(dirs)/sizeof(*dirs);i++)sf_assert(!sf_ns_create(ns,dirs[i],NODE_DIR,0),"namespace directory");
+ sf_ns_create(ns,"/dev/console",NODE_CONSOLE,0);sf_ns_create(ns,"/tmp/notes",NODE_FILE,0);sf_ns_create(ns,"/run/pipe",NODE_PIPE,0);
  /* Shared endpoints stay usable by every account: the console and pipe are
   * host-facing devices, and /tmp has no sticky bit in this bounded model. */
- sf_assert(!sf_ns_assign(&ns,"/tmp",0,0,0777),"shared temporary directory is writable");
- sf_assert(!sf_ns_assign(&ns,"/dev/console",0,0,0666),"console is readable and writable by accounts");
- sf_assert(!sf_ns_assign(&ns,"/run/pipe",0,0,0666),"pipe is readable and writable by accounts");
- int h=sf_ns_open(&ns,1,"/","/tmp/notes",3);sf_ns_write(&ns,1,h,"SpiritFoxOS ramfs\n",18);sf_ns_close(&ns,1,h);
+ sf_assert(!sf_ns_assign(ns,"/tmp",0,0,0777),"shared temporary directory is writable");
+ sf_assert(!sf_ns_assign(ns,"/dev/console",0,0,0666),"console is readable and writable by accounts");
+ sf_assert(!sf_ns_assign(ns,"/run/pipe",0,0,0666),"pipe is readable and writable by accounts");
+ int h=sf_ns_open(ns,1,"/","/tmp/notes",3);sf_ns_write(ns,1,h,"SpiritFoxOS ramfs\n",18);sf_ns_close(ns,1,h);
  projection_setup();
 }
 static void identity_setup(void){
@@ -514,20 +514,20 @@ static void identity_setup(void){
  for(unsigned i=0;i<accounts.count;i++){
   const SfAccount*a=&accounts.accounts[i];char home[SF_ACCOUNT_HOME_MAX+1];
   sf_assert(!sf_account_home(a,home,sizeof(home)),"account home path is bounded");
-  sf_assert(!sf_ns_create(&ns,home,NODE_DIR,0),"account home exists");
-  sf_assert(!sf_ns_assign(&ns,home,a->uid,a->gid,0700),"account home is private to its owner");
+  sf_assert(!sf_ns_create(ns,home,NODE_DIR,0),"account home exists");
+  sf_assert(!sf_ns_assign(ns,home,a->uid,a->gid,0700),"account home is private to its owner");
  }
  sf_assert(!sf_session_boot(&sessions,root),"console boot session is authenticated root");
 }
 static void object_tests(void){
- int a=sf_ns_open(&ns,1,"/","/tmp/notes",3),b=sf_ns_open(&ns,1,"/","/tmp/notes",1);char text[32];
- sf_assert(sf_ns_read(&ns,1,a,text,6)==6&&sf_ns_read(&ns,1,b,text,6)==6&&!memcmp(text,"Spirit",6),"independent open offsets");
- int d=sf_ns_dup(&ns,1,a);sf_ns_read(&ns,1,d,text,3);sf_assert(sf_ns_seek(&ns,1,a,0)==0&&sf_ns_read(&ns,1,d,text,6)==6&&!memcmp(text,"Spirit",6),"duplicate descriptions share offset");
- sf_assert(sf_ns_read(&ns,2,a,text,1)==SF_STALE_HANDLE,"file handles bound to process");sf_ns_close(&ns,1,a);sf_ns_close(&ns,1,d);sf_ns_close(&ns,1,b);
- sf_assert(sf_ns_open(&ns,1,"/home","/tmp/notes",1)==SF_DENIED&&sf_ns_open(&ns,1,"/","/home/../tmp/notes",1)==SF_INVALID,"namespace root and traversal bounds");
- int rd=sf_ns_open(&ns,1,"/","/run/pipe",1),wr=sf_ns_open(&ns,1,"/","/run/pipe",2);
- sf_assert(sf_ns_seek(&ns,1,rd,0)==SF_NOT_SEEKABLE&&sf_ns_read(&ns,1,rd,text,1)==SF_WOULD_BLOCK,"pipe seek and WOULD_BLOCK");
- sf_ns_write(&ns,1,wr,"abc",3);sf_assert((sf_ns_poll(&ns,1,rd)&1)&&sf_ns_read(&ns,1,rd,text,8)==3,"pipe poll and partial read");sf_ns_close(&ns,1,wr);sf_assert(sf_ns_read(&ns,1,rd,text,8)==0,"pipe EOF after final writer");sf_ns_close(&ns,1,rd);
+ int a=sf_ns_open(ns,1,"/","/tmp/notes",3),b=sf_ns_open(ns,1,"/","/tmp/notes",1);char text[32];
+ sf_assert(sf_ns_read(ns,1,a,text,6)==6&&sf_ns_read(ns,1,b,text,6)==6&&!memcmp(text,"Spirit",6),"independent open offsets");
+ int d=sf_ns_dup(ns,1,a);sf_ns_read(ns,1,d,text,3);sf_assert(sf_ns_seek(ns,1,a,0)==0&&sf_ns_read(ns,1,d,text,6)==6&&!memcmp(text,"Spirit",6),"duplicate descriptions share offset");
+ sf_assert(sf_ns_read(ns,2,a,text,1)==SF_STALE_HANDLE,"file handles bound to process");sf_ns_close(ns,1,a);sf_ns_close(ns,1,d);sf_ns_close(ns,1,b);
+ sf_assert(sf_ns_open(ns,1,"/home","/tmp/notes",1)==SF_DENIED&&sf_ns_open(ns,1,"/","/home/../tmp/notes",1)==SF_INVALID,"namespace root and traversal bounds");
+ int rd=sf_ns_open(ns,1,"/","/run/pipe",1),wr=sf_ns_open(ns,1,"/","/run/pipe",2);
+ sf_assert(sf_ns_seek(ns,1,rd,0)==SF_NOT_SEEKABLE&&sf_ns_read(ns,1,rd,text,1)==SF_WOULD_BLOCK,"pipe seek and WOULD_BLOCK");
+ sf_ns_write(ns,1,wr,"abc",3);sf_assert((sf_ns_poll(ns,1,rd)&1)&&sf_ns_read(ns,1,rd,text,8)==3,"pipe poll and partial read");sf_ns_close(ns,1,wr);sf_assert(sf_ns_read(ns,1,rd,text,8)==0,"pipe EOF after final writer");sf_ns_close(ns,1,rd);
 }
 static void dependency_generation_tests(void){
  SfManager m={0};int p=sfmod_add(&m,"provider",0,0);sf_assert(p>=0&&!sfmod_start(&m,p),"dependency fixture provider active");
@@ -594,7 +594,7 @@ static int installed_preflight(const char*root){
 static void run_command(const char*name,const char*root,const SfArguments*arguments){
  int installed=!strcmp(name,"installed")||!strcmp(name,"/installed.sfk"),status=0;uint32_t uid,gid,owner;
  int ir=session_identity(&uid,&gid,&owner);if(ir)status=ir;
- else if(root){int h=shell_open(root,OPEN_READ|OPEN_DIRECTORY);if(h<0)status=h;else sf_ns_close(&ns,owner,h);}
+ else if(root){int h=shell_open(root,OPEN_READ|OPEN_DIRECTORY);if(h<0)status=h;else sf_ns_close(ns,owner,h);}
  if(!status&&installed&&!sf_session_is_root(&sessions))status=SF_DENIED;
  if(!status&&installed)status=installed_preflight(root);
  if(!status){int trial=installed?sf_persist_begin():0;status=trial;
@@ -624,11 +624,11 @@ static void namespace_mutate_line(char*line,int directory){
  char*words[1];int count=sf_arguments_split(line,words,1),r=SF_INVALID;uint32_t uid,gid,owner;
  if(session_identity(&uid,&gid,&owner))r=SF_DENIED;
  else if(count==1&&words[0][0]=='/'&&strlen(words[0])<=95){
-  char*path=words[0];if(directory==1)r=sf_ns_create_owned(&ns,path,NODE_DIR,0,uid,gid,0755);
+  char*path=words[0];if(directory==1)r=sf_ns_create_owned(ns,path,NODE_DIR,0,uid,gid,0755);
   else{size_t cut=strlen(path);while(cut&&path[cut-1]!='/')cut--;
    if(cut&&path[cut]){char parent[96];size_t length=cut==1?1:cut-1;memcpy(parent,path,length);parent[length]=0;
-    int h=sf_ns_open_as(&ns,owner,"/",parent,OPEN_WRITE|OPEN_DIRECTORY,uid,gid);
-    r=h<0?h:directory==2?sf_ns_rmdir_as(&ns,owner,h,path+cut,uid,gid):sf_ns_unlink_as(&ns,owner,h,path+cut,uid,gid);if(h>=0)sf_ns_close(&ns,owner,h);
+    int h=sf_ns_open_as(ns,owner,"/",parent,OPEN_WRITE|OPEN_DIRECTORY,uid,gid);
+    r=h<0?h:directory==2?sf_ns_rmdir_as(ns,owner,h,path+cut,uid,gid):sf_ns_unlink_as(ns,owner,h,path+cut,uid,gid);if(h>=0)sf_ns_close(ns,owner,h);
    }
   }
  }
@@ -638,7 +638,7 @@ static void namespace_stat_line(char*line){
  char*words[1];int count=sf_arguments_split(line,words,1),r=SF_INVALID;SfFileStat info;uint32_t uid,gid,owner;
  if(session_identity(&uid,&gid,&owner))r=SF_DENIED;
  else if(count==1&&words[0][0]=='/'&&strlen(words[0])<=95){
-  int h=shell_open(words[0],OPEN_READ);r=h<0?h:sf_ns_stat(&ns,owner,h,&info);if(h>=0)sf_ns_close(&ns,owner,h);
+  int h=shell_open(words[0],OPEN_READ);r=h<0?h:sf_ns_stat(ns,owner,h,&info);if(h>=0)sf_ns_close(ns,owner,h);
  }
  if(r){sf_log("stat: failed code=");sf_number(-r);sf_log("\n");return;}
  sf_log("stat: type=");sf_number(info.type);sf_log(" size=");sf_number(info.size);
@@ -834,7 +834,7 @@ static void login_line(char*args){
 static void logout_line(void){
  uint32_t ended=0;int r=sf_session_logout(&sessions,&ended);
  if(r){sf_log("logout: no active session\n");return;}
- sf_ns_reap(&ns,sf_session_owner(ended));
+ sf_ns_reap(ns,sf_session_owner(ended));
  sf_log("logout: session ");sf_number(ended);sf_log(" closed\n");
 }
 static void whoami_line(void){
@@ -980,10 +980,10 @@ static void command(char*line){
  else if(!memcmp(line,"runenvat ",9))run_environment_line(line+9,1);
  else if(!memcmp(line,"truncate ",9)){char*path=line+9,*text=path;while(*text&&*text!=' ')text++;uint64_t bytes=0;int r=SF_INVALID;uint32_t uid,gid,owner;
   if(session_identity(&uid,&gid,&owner))r=SF_DENIED;
-  else if(*text){*text++=0;r=parse_size(text,&bytes);if(!r){int h=shell_open(path,OPEN_WRITE);r=h<0?h:sf_ns_truncate(&ns,owner,h,bytes);if(h>=0)sf_ns_close(&ns,owner,h);}}
+  else if(*text){*text++=0;r=parse_size(text,&bytes);if(!r){int h=shell_open(path,OPEN_WRITE);r=h<0?h:sf_ns_truncate(ns,owner,h,bytes);if(h>=0)sf_ns_close(ns,owner,h);}}
   if(!r)sf_log("truncate: OK\n");else{sf_log("truncate: failed code=");sf_number(-r);sf_log("\n");}}
  else if(!strcmp(line,"unmount /disk")){int r=sf_storage_unmount();sf_log(!r?"disk: UNMOUNTED\n":"disk: unmount refused\n");}
- else if(!strcmp(line,"mount /disk")){int r=sf_storage_mount();if(!r&&sf_storage_writable()){sf_persist_attach();r=sf_persist_mount(&ns);}sf_log(!r?"disk: MOUNTED\n":"disk: mount refused\n");}
+ else if(!strcmp(line,"mount /disk")){int r=sf_storage_mount();if(!r&&sf_storage_writable()){sf_persist_attach();r=sf_persist_mount(ns);}sf_log(!r?"disk: MOUNTED\n":"disk: mount refused\n");}
  else if(!strcmp(line,"stop disk")){int r=sf_storage_stop();sf_log(!r?"disk: STOPPED\n":"disk: stop refused\n");}
  else if(!strcmp(line,"start disk")){int r=sf_storage_start();if(!r)sf_persist_attach();sf_log(!r?"disk: ACTIVE\n":"disk: start refused\n");}
  else if(!strcmp(line,"channel-test")){channel_test(0);}
@@ -1013,11 +1013,11 @@ static void command(char*line){
  else if(!strcmp(line,"echo-crash")){int r=echo_pid&&echo_peer(echo_pid)?sf_sys(SYS_KILL,echo_pid,SF_DEVICE_GONE,0):SF_STALE_HANDLE;sf_log(!r?"echo: crash injected\n":"echo: crash refused\n");}
  else if(!strcmp(line,"stop echo")){int r=manager.modules[echo_slot].state==MOD_STOPPED?0:echo_stop_service();if(!r)sf_supervisor_disable(&echo_watch);sf_log(!r?"echo: STOPPED\n":"echo: BUSY\n");}
  else if(!strcmp(line,"start echo")){int r=echo_start_service();if(!r){uint64_t now=sf_ticks();sf_supervisor_enable(&echo_watch,now,1);echo_health_at=echo_after(now,100);}else if(r!=SF_INVALID)sf_supervisor_disable(&echo_watch);sf_log(!r?"echo: ACTIVE\n":r==SF_INVALID?"echo: already active\n":"echo: spawn failed\n");}
- else if(!strcmp(line,"ls")||!memcmp(line,"ls ",3)){const char*p=line[2]?line+3:"/";uint32_t uid,gid,owner;int h=session_identity(&uid,&gid,&owner)?SF_DENIED:shell_open(p,1);char out[256];long n=h<0?h:sf_ns_enumerate(&ns,owner,h,out,sizeof(out));if(n>=0)console_write(out,n);else sf_log("ls: error\n");if(h>=0)sf_ns_close(&ns,owner,h);}
+ else if(!strcmp(line,"ls")||!memcmp(line,"ls ",3)){const char*p=line[2]?line+3:"/";uint32_t uid,gid,owner;int h=session_identity(&uid,&gid,&owner)?SF_DENIED:shell_open(p,1);char out[256];long n=h<0?h:sf_ns_enumerate(ns,owner,h,out,sizeof(out));if(n>=0)console_write(out,n);else sf_log("ls: error\n");if(h>=0)sf_ns_close(ns,owner,h);}
  else if(!memcmp(line,"cat ",4)){uint32_t uid,gid,owner;int h=session_identity(&uid,&gid,&owner)?SF_DENIED:shell_open(line+4,1);char out[256];
-  if(h<0)sf_log("cat: error\n");else{for(unsigned page=0;page<16;page++){long n=sf_ns_read(&ns,owner,h,out,sizeof(out));if(n<0){sf_log("cat: error\n");break;}if(!n)break;console_write(out,n);}sf_ns_close(&ns,owner,h);}}
+  if(h<0)sf_log("cat: error\n");else{for(unsigned page=0;page<16;page++){long n=sf_ns_read(ns,owner,h,out,sizeof(out));if(n<0){sf_log("cat: error\n");break;}if(!n)break;console_write(out,n);}sf_ns_close(ns,owner,h);}}
  else if(!memcmp(line,"write ",6)){char*p=line+6,*text=p;while(*text&&*text!=' ')text++;uint32_t uid,gid,owner;int ir=session_identity(&uid,&gid,&owner);
-  if(ir)sf_log("write: error\n");else if(*text){*text++=0;int h=shell_open(p,2);if(h==SF_NOT_FOUND){sf_ns_create_owned(&ns,p,NODE_FILE,0,uid,gid,0644);h=shell_open(p,2);}long n=h<0?h:sf_ns_write(&ns,owner,h,text,strlen(text));sf_log(n>=0?"write: OK\n":"write: error\n");if(h>=0)sf_ns_close(&ns,owner,h);}else sf_log("write: expected path and text\n");}
+  if(ir)sf_log("write: error\n");else if(*text){*text++=0;int h=shell_open(p,2);if(h==SF_NOT_FOUND){sf_ns_create_owned(ns,p,NODE_FILE,0,uid,gid,0644);h=shell_open(p,2);}long n=h<0?h:sf_ns_write(ns,owner,h,text,strlen(text));sf_log(n>=0?"write: OK\n":"write: error\n");if(h>=0)sf_ns_close(ns,owner,h);}else sf_log("write: expected path and text\n");}
  else if(!strcmp(line,"gui")){gui_line();}
  else if(!strcmp(line,"selftest")){object_tests();sf_assert(!echo_call(echo_ep,echo_pid),"shell echo health");sf_log("SELFTEST OK\n");}
  else if(!strcmp(line,"shutdown")){sf_log("SHUTDOWN OK\n");sf_sys(SYS_SHUTDOWN,0,0,0);}
@@ -1057,9 +1057,9 @@ long sf_main(const SfBootArgs*a,size_t size){
  echo_slot=sfmod_add(&manager,"org.spiritfox.echo",0,0);sfmod_start(&manager,echo_slot);echo_ep=sf_sys(SYS_EP_CREATE,0,0,0);echo_pid=spawn_echo("echo.sfmod",echo_ep,RIGHT_RECV);sf_assert((int)echo_pid>0,"verified echo.sfmod staged in private address space");
  lifecycle_rpc_test();
  lifecycle_tests();namespace_setup();identity_setup();object_tests();sf_assert(!native_start_service(),"native runtime module active");sf_assert((int)runtime_reply>0,"runtime replies have an isolated endpoint");runtime_tests();
- sf_storage_init(&manager,&ns,spawn_storage_package);int storage=sf_storage_start();if(!storage)storage=sf_storage_mount();
+ sf_storage_init(&manager,ns,spawn_storage_package);int storage=sf_storage_start();if(!storage)storage=sf_storage_mount();
  if(storage){sf_log("STORAGE UNAVAILABLE code=");sf_number(-storage);sf_log("\n");}
- else{sf_storage_tests();if(sf_storage_writable()){int r=sf_persist_start(spawn_storage_package);if(r){sf_log("PERSIST SPAWN FAILED code=");sf_number(-r);sf_log("\n");}r=sf_persist_mount(&ns);if(r){sf_log("PERSIST UNAVAILABLE code=");sf_number(-r);sf_log("\n");}else sf_storage_write_tests();}int ep=sf_sys(SYS_EP_CREATE,0,0,0);int disk_module=spawn_echo("/disk/modules/disk-echo.sfmod",ep,RIGHT_RECV);
+ else{sf_storage_tests();if(sf_storage_writable()){int r=sf_persist_start(spawn_storage_package);if(r){sf_log("PERSIST SPAWN FAILED code=");sf_number(-r);sf_log("\n");}r=sf_persist_mount(ns);if(r){sf_log("PERSIST UNAVAILABLE code=");sf_number(-r);sf_log("\n");}else sf_storage_write_tests();}int ep=sf_sys(SYS_EP_CREATE,0,0,0);int disk_module=spawn_echo("/disk/modules/disk-echo.sfmod",ep,RIGHT_RECV);
   if(disk_module>0){int slot=sfmod_add(&manager,"org.spiritfox.disk-echo",0,0);sf_assert(slot>=0&&!sfmod_start(&manager,slot)&&!echo_call(ep,disk_module),"signed sfmod loaded from disk without bundle fallback");sfmod_prepare(&manager,slot);sfmod_stop(&manager,slot);sf_sys(SYS_KILL,disk_module,0,0);echo_forget(disk_module);sfmod_unload(&manager,slot);}else{sf_log("DISK PACKAGE REJECTED module code=");sf_number(-disk_module);sf_log("\n");}sf_sys(SYS_CAP_REVOKE,ep,0,0);
   int app=launch_app("/disk/bin/diskhello.sfk");if(app>0)sf_assert(wait_app(app)==0,"signed disk application runs through native runtime");else{sf_log("DISK PACKAGE REJECTED app code=");sf_number(-app);sf_log("\n");}}
  {int net=net_start();if(!net)sf_log("net: READY\n");else if(net!=SF_NOT_FOUND){sf_log("NET UNAVAILABLE code=");sf_number(-net);sf_log("\n");}}

@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include "namespace.h"
+#include "../../services/namespace_state.h"
 static SfNamespace ns;static unsigned checks;
 static long console(const void*p,size_t n){(void)p;return (long)n;}
 #define CHECK(x) do{checks++;if(!(x)){printf("NS IDENTITY FAIL line %d: %s\n",__LINE__,#x);return 1;}}while(0)

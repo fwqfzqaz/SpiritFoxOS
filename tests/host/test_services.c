@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include "manager.h"
 #include "namespace.h"
+#include "../../services/namespace_state.h"
 static SfNamespace ns;static SfManager manager;static unsigned count;
 #define CHECK(x) do{count++;if(!(x)){printf("FAIL line %d: %s\n",__LINE__,#x);return 1;}}while(0)
 int main(void){

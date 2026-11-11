@@ -1,4 +1,6 @@
-#include "namespace.h"
+#include "namespace_state.h"
+static SfNamespace service_namespace;
+SfNamespace*sf_ns_default(void){return &service_namespace;}
 static int path_utf8(const uint8_t*p){while(*p){uint32_t c=*p++;if(c<32)return 0;if(c<128)continue;unsigned k;uint32_t min;if(c>=0xc2&&c<=0xdf){k=1;c&=31;min=128;}else if(c>=0xe0&&c<=0xef){k=2;c&=15;min=2048;}else if(c>=0xf0&&c<=0xf4){k=3;c&=7;min=65536;}else return 0;while(k--){if((*p&192)!=128)return 0;c=(c<<6)|(*p++&63);}if(c<min||c>0x10ffff||(c>=0xd800&&c<=0xdfff))return 0;}return 1;}
 static int path_ok(const char*p){size_t len=strlen(p);if(*p!='/'||len>95||(len>1&&p[len-1]=='/')||!path_utf8((const uint8_t*)p))return 0;for(const char*s=p;*s;){if(*s++=='/'){const char*b=s;while(*s&&*s!='/')s++;size_t n=s-b;if((!n&&*s)||(n==1&&*b=='.')||(n==2&&b[0]=='.'&&b[1]=='.'))return 0;}}return 1;}
 static int node_find(SfNamespace*n,const char*path){for(unsigned i=0;i<SF_NS_NODE_MAX;i++)if(n->nodes[i].type&&!strcmp(n->nodes[i].path,path))return i;return SF_NOT_FOUND;}
