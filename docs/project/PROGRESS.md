@@ -2,6 +2,26 @@
 
 更新日期：2026-11-12（Asia/Shanghai）。
 
+## P0 迁移前置：持久化元数据与无恢复副作用重投影（本地完整通过）
+
+从已推送 `7c2e520` 接续。新增只读 OP_PERSIST_NOTES_SIZE=103，查询已在线卷的笔记大小；
+真实接收发送者和完整回复格式独立校验。空命名空间重投影不重复 MOUNT、不同步信任或提交
+回退；`persist` 原管理诊断额外显示 RPC 元数据。当前仍未把目录/RAMFS 迁到独立 Fs。
+
+13847 项实际事务/持久化与客户端/服务端宿主检查已过：用签名包进入真实 TRYING，验证卷、
+银行字节、generation、暂存/导出缓存与撤销集合保持，旧 MOUNT 的对照确实回退 TRYING；
+一千次空树发布、占用拒绝和坏头部/发送者/能力/长度拒绝保留状态。含初始构建专项已通过
+（92.39 秒）：9 组 ABI、legacy/modern 两次真实访客，覆盖 PENDING/STABLE 长度、撤销、
+离线与重挂载，逐字节比较只读查询不改盘；TRYING 仍是宿主证据。含初始构建的完整
+`tools/test.py` 已通过（4373.12 秒、退出码 0）；全部既有回归保留。ABI 只审阅新增
+常量 103，前 601 项无删改，当前 602 项，参考/采集摘要均为 f6e706886e944bed60057327b2d0a849f29fb652c7b40944ac7b6b9f59c93ca0。
+
+冻结证明 `.cache/persist-metadata-full-proof-20261112.json`，结果
+`build/persist-metadata-verified-test-results-20261112.json`，日志
+`build/persist-metadata-full-20261112.log`；七项产物逐一相符、默认三密钥保持。发布门与
+实际 ZIP 的证明保存到 `.cache/persist-metadata-release-proof-20261112.json`；新 head 的
+托管检查单独核对，不能沿用 7c2e520 的四项绿色。独立 Fs/Root 生命周期仍未接入。
+
 ## P0 迁移前置修复：投影 SDK 与返回宽度（本地完整通过）
 
 从已推送 `6b627d6` 接续。复现 Windows 宿主将合法 UINT32_MAX seek 返回为 -1，以及 SDK 将服务端已有类型 6 判为坏回复的两处问题；基线证明 `.cache/projection-width-baseline-20261112.json`。命名空间/分发器状态改为显式 int64_t，SDK 命名并接受 SF_TYPE_PROJECTION=6，保留其他类型、32 字节元数据、原操作号和目录只读授权。
@@ -12,7 +32,7 @@
 
 发布门、实际 ZIP 的 CRC/42 项条目/七项产物摘要和 14 项解压离线工具检查通过；文档定稿后重新打包复核最终副本。后续 Linux workflow/docs 的单独修正不改变运行时代码，完整证明和 CI 来源差异审计分别保留。
 
-前一 6b627d6 的两项 Windows 托管已成功，Linux 两项因依赖仓库 DNS 失败在测试开始前耗尽 30 分钟后取消，不能称四项全绿。Linux workflow 修正单独提交并核对最新实际检查，不以本地 Windows 验证替代 Linux。恢复状态见 `.cache/progress-live.json`。
+前一 6b627d6 的两项 Windows 托管已成功，Linux 两项因依赖仓库 DNS 失败在测试开始前耗尽 30 分钟后取消。运行时 4b6835a 与单独的 Linux workflow/docs 修正 7c2e520 均已正常推送 PR #16；7c2e520 的四项 Windows/Linux push/PR 托管检查现已逐项核对成功，证明 `.cache/projection-hosted-proof-20261112.json`。此结果不代替后续元数据草稿的新 head 检查。恢复状态见 `.cache/progress-live.json`。
 
 此修复不表示命名空间已迁入独立 Fs。后续 RPC 控制器/客户端和 Root 后端代理仍是未接入运行时的单独草稿，不沿用任何旧完整证明。
 

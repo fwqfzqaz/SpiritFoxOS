@@ -321,7 +321,7 @@ def main(policy_path=None):
     image = link_elf('sf-virtio-net', shared + objects('virtio-net', ['services/virtio_net.c']), 'services/user.ld')
     packages.append(('sf-virtio-net.sfmod', pack({'module_id': 'org.spiritfox.virtio.net', 'version': '0.1.0', 'category': 'driver', 'requested_caps': ['device.virtio-net.trusted'], 'resource_limits': {'memory': 131072}}, image, 1, seed)))
     # sf-persist：事务卷 + 更新状态机 + 块客户端，独立地址空间（约 296 KiB 常驻）。
-    image = link_elf('sf-persist', shared + objects('persist', ['services/persist.c', 'services/persistence.c', 'services/txn.c', 'services/update.c', 'services/version.c', *CRYPTO], extra=USER_SECTIONS), 'services/user.ld')
+    image = link_elf('sf-persist', shared + objects('persist', ['services/persist.c', 'services/persist_metadata.c', 'services/persistence.c', 'services/txn.c', 'services/update.c', 'services/version.c', *CRYPTO], extra=USER_SECTIONS), 'services/user.ld')
     packages.append(('sf-persist.sfmod', pack({'module_id': 'org.spiritfox.persist', 'version': '0.1.0', 'category': 'service', 'requested_caps': [], 'resource_limits': {'memory': 524288}}, image, 1, seed)))
     # sf-fs：通用磁盘格式层（SFRFS1/SFRFS2 探测与解析）+ 文件读取服务。
     # 块请求由 sf-init 的 broker 转发，模块自身不持有 virtio-blk 端点。

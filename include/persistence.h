@@ -9,6 +9,10 @@ void sf_persist_attach(void);
 int sf_persist_ready(void);
 void sf_persist_driver_down(void);
 int sf_persist_mount(SfNamespace*);
+/* Existing mounted volume only. Neither operation mounts, recovers a trial,
+ * synchronizes trust, nor writes storage. Reprojection needs an empty target. */
+int sf_persist_notes_size(uint64_t*);
+int sf_persist_reproject(SfNamespace*);
 /* 0 stages an update; 1 means the exact confirmed package is already present. */
 int sf_persist_install(const char*);
 int sf_persist_begin(void);

@@ -84,7 +84,12 @@ long sf_main(const SfBootArgs*a,size_t size){
  sf_log("[PERSIST] transactional volume service in ring 3\n");
  for(;;){
   SfMessage m;long from=sf_recv(a->service,&m,0);if(from<0)return from;
-  m.status=from==1?dispatch(&m):SF_DENIED;
+  if(m.h.opcode==OP_PERSIST_NOTES_SIZE){
+   /* A metadata request never consumes a transferred capability. Close the
+    * installed handle even when its sender or request is refused. */
+   if(m.h.cap_count==1)sf_cap_close(m.handle);
+   m.status=persist_metadata_dispatch(from,&m);
+  }else m.status=from==1?dispatch(&m):SF_DENIED;
   /* The received message reports cap_count=1 while the newly installed handle
    * stays in m.handle. Replying with the same header would delegate that
    * driver capability back to the manager on every attach. */

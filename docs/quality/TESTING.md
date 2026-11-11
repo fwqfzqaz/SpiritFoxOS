@@ -477,3 +477,16 @@ IPC计量发布门与实际ZIP验证通过：CRC/全部摘要、七项产物相�
 `tests/qemu/qemu_user_test.py` 在 legacy 与 VT-d/modern 各启动一次真实产品镜像：启动即验证 root 自动会话与 `fox> ` 提示；`users/whoami/sessions` 输出；内联口令失败与隐藏口令输入（确认 `topsecret` 不回显）；`login alice` 后的 uid=1000/会话 2；alice 写读 `/home/alice/private`，而列举/读取/写入/创建/删除 `/home/bob` 全部被拒；非 root 的 `persist/install/shutdown` 返回 `denied: root session required`；bob 登录为会话 3 且不能读 alice 文件；`logout` 逐级重附着并使 root 可读全部主目录；四个槽位占满后登录返回 `login: no free session slot`；root 登出后 `login> ` 控制台只接受会话命令；最后重新登录 root 并以真实 `shutdown` 关闭。整个会话与 RAM 主目录操作期间持久盘字节保持不变。
 
 本轮 `python3 tools/build.py`、`python3 tools/test.py --skip-build --host-only` 与完整 QEMU 清单逐项执行：`qemu_test.py` 三种内存与六种存储故障、persist、net、net --disk、iommu、smp、security、openat、user、truncate、trust、txn_compat 全部通过。连续 TCG 负载下，`qemu_environment_test.py` 曾一次出现首次 install 的 `SF_COMMIT_UNCERTAIN`，`qemu_persist_test.py` 的 interrupted-recovery 与 `qemu_net_test.py --disk` 各出现一次 45 秒等待超时；三者单独重跑均通过，且 network/interrupt 与 flush 路径未改动，判断为 TCG 计时敏感抖动，不是身份改动引入的回归。因新增 help 行，`qemu_test.py` 的 help 标记由 `help | ls` 更新为 `help | login`；托管 CI 需按当前提交另行核对。
+
+## 已挂载持久化元数据与空树重投影（2026-11-12）
+
+13847 项宿主联合生产事务、签名策略、更新、持久化、服务端校验和客户端编解码：真实
+TRYING 与 MOUNT 回退对照，卷/银行/generation/暂存/导出/撤销不变，一千次新树发布和
+占用拒绝，认证发送者、头部、状态、长度、附加能力、请求编号耗尽和错误输出保护。
+专项含初始构建 92.39 秒、9 组 ABI、legacy/modern 两 VM 通过；真实访客验证
+PENDING/STABLE、长度变化、持久撤销、离线与重挂载，查询不写盘。TRYING 的真实
+访客恢复不在本轮证据范围，独立 Fs 生命周期仍待实现。
+
+完整 `tools/test.py` 含初始构建通过（4373.12 秒），保留全部旧宿主/集成/访客门禁；
+602 项 ABI 与七项产物相符。完整冻结、发布/实际 ZIP、托管结果分别核对，证明见
+PROGRESS 和动态恢复文件，不把本地结果称为新提交托管通过。

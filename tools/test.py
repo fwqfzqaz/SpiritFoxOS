@@ -25,7 +25,7 @@ def host_test(name,*sources,no_unused=False):
     if no_unused: flags.append('-Wno-unused-parameter')
     # 追加 Rust 宿主静态库：argparse/net_proto/sha256/sched_policy 已迁入
     # rust/sfcore，链接器只拉取本测试实际引用的成员。
-    build.run([*flags,'-Iinclude','-Ivendor/monocypher',*sources,build.rust_lib('host'),'-o','build/'+name+build.EXE])
+    build.run([*flags,'-Iinclude','-Ibuild','-Ivendor/monocypher',*sources,build.rust_lib('host'),'-o','build/'+name+build.EXE])
     subprocess.run([str(ROOT/('build/'+name+build.EXE))],check=True)
 
 # 参数打包与拆分：services/argparse.c → rust/sfcore/src/argparse.rs
@@ -71,6 +71,7 @@ host_test('test_storage','tests/host/test_storage.c','services/namespace.c',no_u
 host_test('test_txn','tests/host/test_txn.c','services/txn.c',no_unused=True)
 host_test('test_txn_compat','tests/host/test_txn_compat.c','services/txn.c',no_unused=True)
 host_test('test_update','tests/host/test_update.c','services/update.c','services/txn.c',no_unused=True)
+host_test('test_persist_metadata','tests/host/test_persist_metadata.c','tests/host/persist_volume_fixture.c','services/persist_metadata.c','services/namespace.c','services/txn.c','services/update.c','services/version.c',*build.CRYPTO,no_unused=True)
 host_test('test_version','tests/host/test_version.c','services/version.c')
 # 网络帧逻辑：services/net_proto.c → rust/sfcore/src/net.rs
 host_test('test_net','tests/host/test_net.c')
@@ -128,6 +129,7 @@ if not args.host_only:
     for case in ['missing', 'badheader', 'badhash', 'badsignature', 'writable', 'ioerror']:
         subprocess.run([sys.executable, 'tests/qemu/qemu_test.py', '--storage', case], check=True)
     subprocess.run([sys.executable, 'tests/qemu/qemu_persist_test.py'], check=True)
+    subprocess.run([sys.executable, 'tests/qemu/qemu_persist_metadata_test.py'], check=True)
     subprocess.run([sys.executable, 'tests/qemu/qemu_net_test.py'], check=True)
     subprocess.run([sys.executable, 'tests/qemu/qemu_net_test.py', '--disk'], check=True)
     # 类 niri 合成器：framebuffer 映射、布局与串口输入转发。
@@ -161,7 +163,7 @@ result['manifest_source_profile'] = 'native-source-v1'
 result['manifest_profile_host_tests'] = 12
 result['manifest_schema_sha256'] = manifest_schema_sha256
 result['abi_snapshot_host_tests'] = 9
-result['abi_snapshot_entries'] = 601
+result['abi_snapshot_entries'] = 602
 result['abi_reference_sha256'] = abi_reference_sha256
 result['abi_capture_sha256'] = abi_capture_sha256
 result['posix_qemu'] = not args.host_only
@@ -175,6 +177,9 @@ result['namespace_opaque_host_assertions'] = 22
 result['namespace_boundary_host_groups'] = 7
 result['namespace_handle_map_host_assertions'] = 502975
 result['namespace_restart_host_assertions'] = 24996
+result['persist_metadata_host_assertions'] = 13847
+result['persist_metadata_qemu'] = not args.host_only
+result['persist_metadata_qemu_boots'] = 0 if args.host_only else 2
 result['projection_width_host_assertions'] = 9130
 result['projection_sdk_qemu'] = not args.host_only
 result['projection_sdk_qemu_boots'] = 0 if args.host_only else 2

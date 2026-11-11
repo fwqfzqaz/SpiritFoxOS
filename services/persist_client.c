@@ -13,10 +13,18 @@ static int ready(void){return persist_ep&&persist_reply&&persist_pid;}
 static void hooks(SfNamespace*ns);
 static int pf_call(SfMessage*m){
  if(!ready())return SF_DEVICE_GONE;
- uint64_t id=++requests;m->h.request_id=id;
+ int metadata=m->h.opcode==OP_PERSIST_NOTES_SIZE;
+ if(metadata&&requests==UINT64_MAX)return SF_NO_SPACE;
+ uint64_t id=++requests,deadline=m->h.deadline_ns;m->h.request_id=id;
  int r=sf_send(persist_ep,m);if(r)return r;
  long from=sf_recv(persist_reply,m,sf_deadline(10000));if(from<0)return(int)from;
+ if(metadata&&m->h.cap_count==1)sf_cap_close(m->handle);
  if(from!=(long)persist_pid||m->h.request_id!=id)return SF_STALE_HANDLE;
+ if(metadata&&(m->h.size!=sizeof(SfIpcHeader)||m->h.protocol_major!=1||m->h.protocol_minor||
+    m->h.flags!=persist_pid||m->h.opcode!=OP_PERSIST_NOTES_SIZE||m->h.cap_count||
+    m->h.payload_bytes!=sizeof(*m)-sizeof(SfIpcHeader)||m->h.deadline_ns!=deadline||
+    m->offset||m->length||m->mode||m->status>0||m->status<SF_VERSION_REJECTED||
+    (m->status?m->handle!=0:m->handle>SF_TXN_FILE_BYTES)))return SF_BAD_FORMAT;
  return(int)m->status;
 }
 static int pf_send_cap(uint64_t opcode,uint32_t cap,uint64_t offset,uint32_t mode){
@@ -59,20 +67,32 @@ static void trust_sync(void){
   offset+=m.length;if(offset>=(uint64_t)total)break;
  }
 }
-int sf_persist_mount(SfNamespace*ns){
- if(!ready())return SF_DEVICE_GONE;
- if(!sf_storage_writable())return SF_READ_ONLY;
- SfMessage m;sf_message(&m,OP_PERSIST_MOUNT,0);int r=pf_call(&m);if(r)return r;
- uint64_t notes=m.handle;
+static int project_notes(SfNamespace*ns,uint64_t notes){
  if(notes>UINT32_MAX)return SF_BAD_FORMAT;
  const SfMountEntry entries[]={
   {"/persist",NODE_DIR,1,0,0},
   {"/persist/notes",NODE_DISK,0,UINT32_MAX,(uint32_t)notes}
  };
- r=sf_ns_mount_publish(ns,entries,2,1);if(r)return r;
+ int r=sf_ns_mount_publish(ns,entries,2,1);if(r)return r;
  hooks(ns);
- trust_sync();
  return 0;
+}
+int sf_persist_mount(SfNamespace*ns){
+ if(!ns)return SF_INVALID;
+ if(!ready())return SF_DEVICE_GONE;
+ if(!sf_storage_writable())return SF_READ_ONLY;
+ SfMessage m;sf_message(&m,OP_PERSIST_MOUNT,0);int r=pf_call(&m);if(r)return r;
+ r=project_notes(ns,m.handle);if(!r)trust_sync();return r;
+}
+int sf_persist_notes_size(uint64_t*out){
+ if(!out)return SF_INVALID;
+ SfMessage m;sf_message(&m,OP_PERSIST_NOTES_SIZE,0);int r=pf_call(&m);if(r)return r;
+ *out=m.handle;return 0;
+}
+int sf_persist_reproject(SfNamespace*ns){
+ if(!ns)return SF_INVALID;
+ if(!sf_storage_writable())return SF_DEVICE_GONE;
+ uint64_t notes=0;int r=sf_persist_notes_size(&notes);return r?r:project_notes(ns,notes);
 }
 static long ext_read(uint64_t offset,void*out,size_t bytes){
  const uint32_t chunk=sizeof(((SfMessage*)0)->data);
@@ -166,6 +186,9 @@ long sf_persist_preview(void*out,size_t capacity){return export(out,capacity,1);
 void sf_persist_status(void){
  if(!ready()){sf_log("persist: UNAVAILABLE\n");return;}
  SfMessage m;sf_message(&m,OP_PERSIST_STATUS,0);pf_call(&m);
+ uint64_t notes=0;int r=sf_persist_notes_size(&notes);
+ if(!r){sf_log("persist: notes-bytes=");sf_number(notes);sf_log("\n");}
+ else{sf_log("persist: notes-unavailable code=");sf_number(-r);sf_log("\n");}
 }
 void sf_persist_trust_status(void){
  trust_sync();
