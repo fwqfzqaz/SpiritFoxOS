@@ -2,6 +2,20 @@
 
 更新日期：2026-11-11（Asia/Shanghai）。
 
+## P0 后续：重启句柄映射（本地完整验证通过）
+
+已核对 `518470d` / [PR #16](https://github.com/fwqfzqaz/SpiritFoxOS/pull/16) 最新四项 Windows/Linux 托管检查均成功，证明 `.cache/ns-state-hosted-proof-20261111.json`。作者 main 仍为 `03ba91e`，没有覆盖作者的新提交。
+
+本轮新增管理器私有的 128 槽客户端句柄映射，服务代次变化时丢弃绑定并保留客户端 generation，阻止重启后的同整数服务端句柄被旧引用命中。502975 项映射检查与 24996 项真实 namespace 状态重建检查已通过，含一千次重启、同整数复用、双端交接和 dup 共享偏移；已加入统一宿主驱动及发布门。
+
+恢复后的完整 `tools/test.py` 含初始构建全部通过（4020.54 秒、退出码 0），日志 `build/ns-handles-full-20261111.log`，结果 `build/ns-handles-verified-test-results-20261111.json`，冻结源码证明 `.cache/ns-handles-full-proof-20261111.json`。600 项 ABI 与七项运行产物保持 `518470d` 的摘要，默认三密钥策略保持；测试监督进程已退出并释放保持运行请求。发布门/实际 ZIP 结果记录于 `.cache/ns-handles-release-proof-20261111.json`，新提交的托管 Windows/Linux 检查须独立核对，不沿用旧 head。进程与下一恢复点见 `.cache/progress-live.json`。
+
+发布门及实际 ZIP 的 CRC、42 项条目/七项产物摘要和 14 项解压离线工具检查已通过；文档定稿后重新打包复核最终副本。当前原型仍使用进程内命名空间，不能把这些结果写成独立服务恢复或真实硬件证明。
+
+北京时间 22:29 实际账户额度已刷新，短期 99%、长期 100%，满足恢复门槛，quota_paused=false；已恢复五分钟自动续做。此前因额度接口不可用而中断的日志保留为 `build/ns-handles-interrupted-quota-20261111.log`，不计通过；新一轮从初始构建重新执行。下方历史暂停段落仅记录当时状态。
+
+映射尚未接入运行中的 sf-init，也没有新 IPC/共享 ABI、包格式或盘格式；600 项目录保持。目录/RAMFS/路径解析仍在 sf-init。下一步仍是认证 RPC、后端回调与独立于磁盘挂载的 Fs 生命周期；必须补真实进程死亡、重启、排空和旧引用失效验证后才可宣称完成 P0。恢复时不可用 `persist_mount` 重建持久化节点，因为它会回退未确认试运行；需先实现只读元数据/投影恢复路径。
+
 ## P0 命名空间写入边界（2026-11-10 至 11，本地完整通过）
 
 ### 后续验证通过：命名空间状态表示边界
@@ -477,3 +491,9 @@ virtio-net 驱动取得 INTx 后把 avail ring `flags` 从 1（抑制中断）�
 `qemu_net_test.py --disk` 同时挂载 `build/storage.img` 与网卡：日志出现磁盘 `[DEV] bdf=0x28`、网卡 `[DEV] bdf=0x30` 两次授权，`STORAGE READY` 后磁盘应用在网络激活期间仍可运行，证明两个设备槽、DMA arena、IOMMU 窗口与中断线不再互斥。
 
 回归：`tools/test.py --skip-build --host-only`（ABI 600 项）、`qemu_test.py --memory 256`、`qemu_iommu_test.py`、`qemu_smp_test.py`、`qemu_net_test.py` 与 `--disk` 全部通过。ABI 只追加 3 个常量，无既有条目删改。
+
+## P0 额度保存点（2026-11-11T16:29:45.989192+08:00）
+
+quota_paused=true，user_paused=false。已保存本轮代码、验证状态与下一步到 `.cache/progress-live.json`；本聊天本地测试树已停止（`.cache/ns-handles-quota-stop-20261111.json`）。完整回归尚未通过，额度中断不计为通过；不提交推送未验证实现。 两窗口均高于 20% 且 ordinaryUsageAllowed=true 后恢复，等待实际阻碍窗口重置后的检查。
+
+暂停原因补充：周期额度接口短暂返回不可解析数据，按“额度缺失即保存暂停”规则停止本聊天测试树；不是客户机断言失败。随后接口恢复，短期剩余 37%、长期 18%，未达到暂停后的两项均高于 20% 恢复门槛。下次复查按实际长期 resetsAt 后一分钟：2026-11-11T22:27:38+08:00（Asia/Shanghai）。已有 `518470d` 四项托管通过证明保持，本轮未完成回归的修改没有提交推送。

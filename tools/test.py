@@ -52,6 +52,8 @@ host_test('test_openat','tests/host/test_openat.c','services/namespace.c')
 host_test('test_ns_identity','tests/host/test_ns_identity.c','services/namespace.c')
 host_test('test_ns_default','tests/host/test_ns_default.c','services/namespace.c')
 host_test('test_ns_mount','tests/host/test_ns_mount.c','services/namespace.c')
+host_test('test_namespace_handles','tests/host/test_namespace_handles.c','services/namespace_handles.c')
+host_test('test_namespace_restart','tests/host/test_namespace_restart.c','services/namespace_handles.c','services/namespace.c')
 host_test('test_accounts','tests/host/test_accounts.c','services/accounts.c')
 host_test('test_sessions','tests/host/test_sessions.c','services/session.c','services/accounts.c')
 host_test('test_file_client','tests/host/test_file_client.c','services/namespace.c','services/file_rpc.c')
@@ -170,6 +172,8 @@ result['openat_host_assertions'] = 108
 result['namespace_mount_host_assertions'] = 256
 result['namespace_opaque_host_assertions'] = 22
 result['namespace_boundary_host_groups'] = 7
+result['namespace_handle_map_host_assertions'] = 502975
+result['namespace_restart_host_assertions'] = 24996
 result['host_poll_deadline_host_tests'] = 8
 result['openat_qemu'] = not args.host_only
 result['truncate_host_assertions'] = 83
