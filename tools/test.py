@@ -88,6 +88,7 @@ subprocess.run([sys.executable,'tests/integration/test_manifest_profile.py'],che
 manifest_schema_sha256 = hashlib.sha256((ROOT/'schemas/native-source-v1.schema.json').read_bytes()).hexdigest()
 subprocess.run([sys.executable,'tests/integration/test_abi_snapshot.py'],check=True)
 subprocess.run([sys.executable,'tests/integration/test_rust_archive.py'],check=True)
+subprocess.run([sys.executable,'tests/integration/test_poll_deadline.py'],check=True)
 abi_reference_sha256 = hashlib.sha256((ROOT/'abi/x86_64-current.json').read_bytes()).hexdigest()
 abi_capture_sha256 = hashlib.sha256((ROOT/'build/abi-current.json').read_bytes()).hexdigest()
 if not args.host_only:
@@ -163,6 +164,7 @@ result['net_qemu'] = not args.host_only
 result['net_qemu_boots'] = 0 if args.host_only else 2
 result['memory_host_assertions'] = 42
 result['openat_host_assertions'] = 108
+result['host_poll_deadline_host_tests'] = 8
 result['openat_qemu'] = not args.host_only
 result['truncate_host_assertions'] = 83
 result['resize_fault_scenarios'] = 4*261*3

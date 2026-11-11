@@ -10,6 +10,7 @@ import subprocess
 import sys
 import threading
 import time
+from poll_deadline import PollDeadline
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / 'tools/package'))
@@ -103,9 +104,9 @@ def run(memory=256, interactive=False, storage='normal', persistent=False, iommu
     output = bytearray()
     log = ROOT / 'build' / ('qemu-'+str(memory)+('' if storage=='normal' else '-'+storage)+('-iommu' if iommu else '')+'.log')
     def expect(text, timeout=60):
-        until = time.monotonic()+timeout
+        deadline = PollDeadline(timeout)
         while text.encode() not in output:
-            if time.monotonic() > until:
+            if deadline.expired():
                 raise RuntimeError('Timed out waiting for '+text)
             if process.poll() is not None and chunks.empty():
                 raise RuntimeError('QEMU exited before '+text)
