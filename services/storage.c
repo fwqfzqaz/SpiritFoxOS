@@ -146,13 +146,13 @@ static long external_read(unsigned index,uint64_t offset,void*out,size_t bytes){
  }
  return total;
 }
-static int namespace_node(const char*path,unsigned type,unsigned external,uint32_t size){
- int r=sf_ns_create(ns,path,type,type==NODE_DISK);if(r&&r!=SF_BUSY)return r;
- for(unsigned i=0;i<SF_NS_NODE_MAX;i++)if(ns->nodes[i].type&&!strcmp(ns->nodes[i].path,path)){
-  SfNode*n=&ns->nodes[i];if(n->type!=type||(r==SF_BUSY&&strcmp(path,"/disk")&&n->mount_tag!=1))return SF_BUSY;n->external=external;n->size=size;n->mount_tag=1;return 0;}
- return SF_NO_SPACE;
+static int mount_entry(SfMountEntry*entries,unsigned*count,const char*path,unsigned type,unsigned external,uint32_t size){
+ for(unsigned i=0;i<*count;i++)if(!strcmp(entries[i].path,path))return entries[i].type==NODE_DIR&&type==NODE_DIR?0:SF_BUSY;
+ if(*count==SF_NS_NODE_MAX||strlen(path)>=sizeof(entries[0].path))return SF_NO_SPACE;
+ SfMountEntry*e=&entries[(*count)++];memset(e,0,sizeof(*e));memcpy(e->path,path,strlen(path)+1);
+ e->type=type;e->readonly=1;e->external=external;e->size=size;return 0;
 }
-void sf_storage_init(SfManager*m,SfNamespace*n,SfModuleSpawn callback){manager=m;ns=n;spawn=callback;ns->external_read=external_read;ns->mount_open=mount_open;ns->mount_close=mount_close;}
+void sf_storage_init(SfManager*m,SfNamespace*n,SfModuleSpawn callback){manager=m;ns=n;spawn=callback;sf_ns_external(ns,external_read,0,0);sf_ns_mount_hooks(ns,mount_open,mount_close);}
 static int start_driver(unsigned rights){
  if(driver_pid&&sf_sys(SYS_TASK_STATUS,driver_pid,0,0)==SF_TASK_RUNNING)return SF_BUSY;
  uint32_t device=0;for(unsigned d=0;d<32&&!device;d++)for(unsigned f=0;f<8;f++){uint32_t bdf=d*8+f;long id=sf_sys(SYS_PCI_READ,bdf,0,0);if(id==0x10011af4u||id==0x10421af4u){device=bdf+1;break;}}
@@ -170,9 +170,8 @@ fail:
 int sf_storage_start(void){int r=start_driver(0);return r==SF_READ_ONLY?start_driver(SF_DEVICE_WRITE):r;}
 int sf_storage_mount(void){
  if(mounted)return SF_BUSY;if(!driver_pid)return SF_DEVICE_GONE;
- for(unsigned i=0;i<SF_NS_NODE_MAX;i++)if(ns->nodes[i].type&&strlen(ns->nodes[i].path)>5&&!memcmp(ns->nodes[i].path,"/disk/",6))return SF_BUSY;
- for(unsigned i=0;i<SF_NS_DESCRIPTION_MAX;i++)if(ns->descriptions[i].refs){const char*p=ns->nodes[ns->descriptions[i].node].path;if(!strcmp(p,"/disk")||(strlen(p)>5&&!memcmp(p,"/disk/",6)))return SF_BUSY;}
- int r=fs_start();if(r)return r;
+ int r=sf_ns_mount_check(ns,"/disk");if(r)return r;
+ r=fs_start();if(r)return r;
  if(fs_slot<0){fs_slot=sfmod_add(manager,"org.spiritfox.fs.disk",1u<<driver_slot,0);if(fs_slot<0){r=fs_slot;goto fail;}}
  r=sfmod_start(manager,fs_slot);if(r)goto fail;
  SfMessage m;sf_message(&m,OP_FS_MOUNT,0);r=fs_call(&m);if(r)goto fail;
@@ -182,19 +181,20 @@ int sf_storage_mount(void){
   if(capacity!=SF_TXN_SECTORS*512ull||memcmp(header,"SFTXN1\0",8)||sf_u32(header+8)!=1||sf_u32(header+12)!=SF_TXN_SECTORS||memcmp(hash,header+480,32)){r=SF_BAD_FORMAT;goto fail;}
   for(unsigned i=0;i<count;i++){FsEntry e;r=fs_entry(i,&e);if(r)goto fail;if(e.offset+e.bytes>SF_TXN_HEADER*512ull){r=SF_BAD_FORMAT;goto fail;}}
  }
- r=namespace_node("/disk",NODE_DIR,0,0);if(r)goto fail;
+ SfMountEntry entries[SF_NS_NODE_MAX];unsigned entry_count=0;
+ r=mount_entry(entries,&entry_count,"/disk",NODE_DIR,0,0);if(r)goto fail;
  for(unsigned i=0;i<count;i++){
   FsEntry e;r=fs_entry(i,&e);if(r)goto fail;
   char path[96]="/disk";memcpy(path+5,e.path,strlen(e.path)+1);
-  for(char*p=path+6;*p;p++)if(*p=='/'){*p=0;r=namespace_node(path,NODE_DIR,0,0);*p='/';if(r)goto fail;}
-  r=namespace_node(path,NODE_DISK,i,(uint32_t)e.bytes);if(r)goto fail;
+  for(char*p=path+6;*p;p++)if(*p=='/'){*p=0;r=mount_entry(entries,&entry_count,path,NODE_DIR,0,0);*p='/';if(r)goto fail;}
+  r=mount_entry(entries,&entry_count,path,NODE_DISK,i,(uint32_t)e.bytes);if(r)goto fail;
  }
- for(unsigned i=0;i<SF_NS_NODE_MAX;i++)if(ns->nodes[i].mount_tag==1)ns->nodes[i].readonly=1;
+ r=sf_ns_mount_publish(ns,entries,entry_count,1);if(r)goto fail;
  writable=write_grant;mounted=1;
  sf_log("[STORAGE] format ");sf_number((uint64_t)fs_format_id);sf_log("\n");
  return 0;
 fail:
- sf_ns_unmount(ns,1);fs_shutdown();if(fs_slot>=0){sfmod_prepare(manager,fs_slot);sfmod_stop(manager,fs_slot);}mounted=0;writable=0;return r;
+ fs_shutdown();if(fs_slot>=0){sfmod_prepare(manager,fs_slot);sfmod_stop(manager,fs_slot);}mounted=0;writable=0;return r;
 }
 int sf_storage_unmount(void){
  if(!mounted||fs_slot<0)return SF_NOT_FOUND;int r=sfmod_prepare(manager,fs_slot);if(r)return r;

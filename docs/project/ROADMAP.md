@@ -29,6 +29,8 @@
 
 ### P0：完成 sf-init 拆分（模块化收尾）
 
+2026-11-10 接续：先收拢命名空间写入边界，挂载改为最多 128 项声明的原子发布，管理器交接目录句柄改为验证所有者/generation 的内部函数。目录/RAMFS/句柄表仍驻留 sf-init，P0 的跨进程迁移及 RW 收缩验收尚未完成；当前验证状态见 [PROGRESS](PROGRESS.md)。
+
 当前 `sf-fs.sfmod` 已接管磁盘格式探测、SFRFS1/SFRFS2 解析与文件服务，`sf-persist.sfmod` 已接管事务卷与更新状态机；命名空间目录、RAMFS、`/disk` 节点投影与持久化客户端仍在 `sf-init`。
 
 工作项：

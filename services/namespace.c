@@ -29,6 +29,53 @@ static int parent_write_ok(SfNamespace*n,const char*path,uint32_t uid,uint32_t g
  return access_ok(&n->nodes[i],uid,gid,3)?0:SF_DENIED;
 }
 void sf_ns_init(SfNamespace*n,long(*console)(const void*,size_t)){memset(n,0,sizeof(*n));n->console=console;sf_ns_create(n,"/",NODE_DIR,0);}
+SfNsRead sf_ns_external(SfNamespace*n,SfNsRead read,long(*write)(unsigned,uint64_t,const void*,size_t),int(*truncate)(unsigned,uint64_t)){
+ SfNsRead previous=n->external_read;n->external_read=read;n->external_write=write;n->external_truncate=truncate;return previous;
+}
+void sf_ns_mount_hooks(SfNamespace*n,int(*open)(unsigned),void(*close)(unsigned)){n->mount_open=open;n->mount_close=close;}
+void sf_ns_projection_backend(SfNamespace*n,SfNsRead read){n->projection_read=read;}
+static int beneath(const char*root,const char*path){size_t len=strlen(root);return strlen(path)>=len&&!memcmp(root,path,len)&&(!path[len]||path[len]=='/');}
+int sf_ns_mount_check(SfNamespace*n,const char*root){
+ if(!root||!path_ok(root)||!strcmp(root,"/"))return SF_INVALID;
+ int base=node_find(n,root);if(base>=0&&(n->nodes[base].type!=NODE_DIR||n->nodes[base].mount_tag))return SF_BUSY;
+ for(unsigned i=0;i<SF_NS_NODE_MAX;i++)if(n->nodes[i].type&&beneath(root,n->nodes[i].path)&&strcmp(root,n->nodes[i].path))return SF_BUSY;
+ for(unsigned i=0;i<SF_NS_DESCRIPTION_MAX;i++)if(n->descriptions[i].refs&&beneath(root,n->nodes[n->descriptions[i].node].path))return SF_BUSY;
+ if(base<0){char parent[96];parent_path(root,parent);int i=node_find(n,parent);if(i<0||n->nodes[i].type!=NODE_DIR)return SF_NOT_FOUND;if(n->nodes[i].readonly)return SF_READ_ONLY;}
+ return 0;
+}
+int sf_ns_mount_publish(SfNamespace*n,const SfMountEntry*entries,unsigned count,unsigned tag){
+ if(!entries||!count||count>SF_NS_NODE_MAX||!tag)return SF_INVALID;
+ /* Validate fixed arrays before using any C-string helper. No callbacks or
+  * mutations occur until every path, parent and destination slot is known. */
+ for(unsigned i=0;i<count;i++){
+  unsigned end=0;while(end<sizeof(entries[i].path)&&entries[i].path[end])end++;
+  if(end==sizeof(entries[i].path)||!path_ok(entries[i].path)||entries[i].readonly>1||
+     (entries[i].type!=NODE_DIR&&entries[i].type!=NODE_DISK))return SF_INVALID;
+ }
+ if(entries[0].type!=NODE_DIR)return SF_INVALID;
+ const char*root=entries[0].path;int r=sf_ns_mount_check(n,root);if(r)return r;
+ unsigned slots[SF_NS_NODE_MAX],free_slots[SF_NS_NODE_MAX],free_count=0,used=0;
+ int base=node_find(n,root);
+ for(unsigned i=0;i<SF_NS_NODE_MAX;i++)if(!n->nodes[i].type)free_slots[free_count++]=i;
+ if(count-(base>=0?1u:0u)>free_count)return SF_NO_SPACE;
+ for(unsigned i=0;i<count;i++){
+  const SfMountEntry*e=&entries[i];
+  if(!beneath(root,e->path))return SF_DENIED;
+  for(unsigned j=0;j<i;j++)if(!strcmp(entries[j].path,e->path))return SF_BUSY;
+  if(i){char parent[96];parent_path(e->path,parent);unsigned j=0;
+   for(;j<i;j++)if(!strcmp(entries[j].path,parent))break;
+   if(j==i||entries[j].type!=NODE_DIR)return SF_NOT_FOUND;
+  }
+  slots[i]=!i&&base>=0?(unsigned)base:free_slots[used++];
+ }
+ for(unsigned i=0;i<count;i++){
+  const SfMountEntry*e=&entries[i];SfNode*x=&n->nodes[slots[i]];
+  /* Preserve an existing empty root's ownership and permission bits. */
+  if(i||base<0){memset(x,0,sizeof(*x));memcpy(x->path,e->path,strlen(e->path)+1);x->type=(uint8_t)e->type;x->mode=(uint16_t)default_mode(e->type);}
+  x->readonly=(uint8_t)e->readonly;x->external=e->external;x->size=e->size;x->mount_tag=tag;
+ }
+ return 0;
+}
 int sf_ns_create(SfNamespace*n,const char*p,unsigned type,int ro){return sf_ns_create_owned(n,p,type,ro,0,0,default_mode(type));}
 int sf_ns_create_owned(SfNamespace*n,const char*p,unsigned type,int ro,uint32_t uid,uint32_t gid,unsigned mode){
  if(!path_ok(p)||type<1||type>NODE_PROJECTION||mode>0777)return SF_INVALID;if(node_find(n,p)>=0)return SF_BUSY;
@@ -49,6 +96,10 @@ int sf_ns_project(SfNamespace*n,const char*p,unsigned id){if(!id)return SF_INVAL
 }
 int sf_ns_protect(SfNamespace*n,const char*p){int i=node_find(n,p);if(i<0)return i;if(n->nodes[i].type!=NODE_DIR)return SF_INVALID;n->nodes[i].readonly=1;return 0;}
 static SfDescription*description(SfNamespace*n,uint32_t owner,uint32_t h){unsigned i=h&255;if(!i||i>SF_NS_HANDLE_MAX)return 0;SfFileHandle*x=&n->handles[i-1];if(x->owner!=owner||x->generation!=(h>>8)||!x->description)return 0;return&n->descriptions[x->description-1];}
+int sf_ns_handoff(SfNamespace*n,uint32_t owner,uint32_t h,uint32_t next){
+ if(!owner||!next)return SF_INVALID;if(!description(n,owner,h))return SF_STALE_HANDLE;
+ n->handles[(h&255)-1].owner=next;return 0;
+}
 int sf_ns_stat(SfNamespace*n,uint32_t owner,uint32_t h,SfFileStat*out){
  if(!out)return SF_INVALID;SfDescription*d=description(n,owner,h);if(!d)return SF_STALE_HANDLE;SfNode*x=&n->nodes[d->node];
  /* Cached object metadata only: no backend I/O or new access authority. */

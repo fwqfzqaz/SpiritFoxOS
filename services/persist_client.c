@@ -64,13 +64,12 @@ int sf_persist_mount(SfNamespace*ns){
  if(!sf_storage_writable())return SF_READ_ONLY;
  SfMessage m;sf_message(&m,OP_PERSIST_MOUNT,0);int r=pf_call(&m);if(r)return r;
  uint64_t notes=m.handle;
- r=sf_ns_create(ns,"/persist",NODE_DIR,0);if(r)return r;
- unsigned directory=0;for(unsigned i=0;i<SF_NS_NODE_MAX;i++)if(!strcmp(ns->nodes[i].path,"/persist"))directory=i;
- r=sf_ns_create(ns,"/persist/notes",NODE_DISK,0);
- if(r){memset(&ns->nodes[directory],0,sizeof(SfNode));return r;}
- for(unsigned i=0;i<SF_NS_NODE_MAX;i++)if(!strcmp(ns->nodes[i].path,"/persist/notes")){
-  ns->nodes[i].external=UINT32_MAX;ns->nodes[i].mount_tag=1;ns->nodes[i].size=notes;}
- ns->nodes[directory].readonly=1;ns->nodes[directory].mount_tag=1;
+ if(notes>UINT32_MAX)return SF_BAD_FORMAT;
+ const SfMountEntry entries[]={
+  {"/persist",NODE_DIR,1,0,0},
+  {"/persist/notes",NODE_DISK,0,UINT32_MAX,(uint32_t)notes}
+ };
+ r=sf_ns_mount_publish(ns,entries,2,1);if(r)return r;
  hooks(ns);
  trust_sync();
  return 0;
@@ -116,8 +115,8 @@ static int notes_truncate(unsigned index,uint64_t bytes){
 /* Capture the previous external hook (readfs disk access) once, then keep the
  * persistence projection installed across unmount/mount cycles. */
 static void hooks(SfNamespace*ns){
- if(ns->external_read!=notes_read)disk_read=ns->external_read;
- ns->external_read=notes_read;ns->external_write=notes_write;ns->external_truncate=notes_truncate;
+ SfNsRead previous=sf_ns_external(ns,notes_read,notes_write,notes_truncate);
+ if(previous!=notes_read)disk_read=previous;
 }
 static int stage(const uint8_t*bytes,size_t n){
  const uint64_t chunk=sizeof(((SfMessage*)0)->data);

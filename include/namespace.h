@@ -13,8 +13,21 @@ enum { OPEN_READ=1,OPEN_WRITE=2,OPEN_NONBLOCK=4,OPEN_DIRECTORY=8 };
 typedef struct {char path[96];uint8_t type,readonly,reserved;uint16_t mode,writers;uint32_t size,head,external,mount_tag,owner_uid,owner_gid;uint8_t data[1024];} SfNode;
 typedef struct {uint32_t node,offset,mode,refs;} SfDescription;
 typedef struct {uint32_t owner,generation,description;} SfFileHandle;
+
+/* Trusted in-process mount declarations, not a wire ABI. Parents precede
+ * children; the first entry is the mount directory. Publication is atomic. */
+typedef struct {char path[96];uint32_t type,readonly,external,size;} SfMountEntry;
+typedef long(*SfNsRead)(unsigned,uint64_t,void*,size_t);
 typedef struct {SfNode nodes[SF_NS_NODE_MAX];SfDescription descriptions[SF_NS_DESCRIPTION_MAX];SfFileHandle handles[SF_NS_HANDLE_MAX];long(*console)(const void*,size_t);long(*external_read)(unsigned,uint64_t,void*,size_t);long(*external_write)(unsigned,uint64_t,const void*,size_t);int(*external_truncate)(unsigned,uint64_t);int(*mount_open)(unsigned);void(*mount_close)(unsigned);long(*projection_read)(unsigned,uint64_t,void*,size_t);} SfNamespace;
 void sf_ns_init(SfNamespace*,long(*)(const void*,size_t));
+int sf_ns_mount_check(SfNamespace*,const char*);
+int sf_ns_mount_publish(SfNamespace*,const SfMountEntry*,unsigned,unsigned);
+SfNsRead sf_ns_external(SfNamespace*,SfNsRead,long(*)(unsigned,uint64_t,const void*,size_t),int(*)(unsigned,uint64_t));
+void sf_ns_mount_hooks(SfNamespace*,int(*)(unsigned),void(*)(unsigned));
+void sf_ns_projection_backend(SfNamespace*,SfNsRead);
+/* Manager-only handoff: move one handle, retaining its description and lease.
+ * This is deliberately absent from the untrusted file RPC dispatcher. */
+int sf_ns_handoff(SfNamespace*,uint32_t,uint32_t,uint32_t);
 int sf_ns_create(SfNamespace*,const char*,unsigned,int);
 int sf_ns_create_owned(SfNamespace*,const char*,unsigned,int,uint32_t,uint32_t,unsigned);
 int sf_ns_assign(SfNamespace*,const char*,uint32_t,uint32_t,unsigned);

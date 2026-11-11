@@ -303,13 +303,13 @@ static int launch_app_root_args(const char*name,const char*root,const SfArgument
  if(!strcmp(name,"installed"))name="/installed.sfk";
  int slot=-1;for(unsigned i=0;i<16;i++)if(!children[i].pid){slot=i;break;}if(slot<0)return SF_NO_SPACE;
  uint32_t uid,gid,owner;int ir=session_identity(&uid,&gid,&owner);if(ir)return ir;
- /* Reserve and pin the directory before creating a child. No failure after
-  * spawn can leave an unregistered child's RPC in the manager queue. */
+ /* Reserve and pin the directory before creating a child. The trusted
+  * handoff retains its lease; a failed handoff kills the unregistered child. */
  int directory=root?sf_ns_open_as(&ns,owner,"/",root,OPEN_READ|OPEN_DIRECTORY,uid,gid):0;if(directory<0)return directory;
  int ep=0,r=sfmod_acquire(&manager,runtime_slot,RES_LEASE);if(r)goto fail_root;
  ep=sf_sys(SYS_EP_CREATE,0,0,0);if(ep<0){r=ep;goto fail_lease;}
  int pid=spawn_package_policy(name,ep,RIGHT_RECV,0,0,directory!=0,arguments,0,2);if(pid<0){r=pid;goto fail_lease;}
- if(directory)ns.handles[(directory&255)-1].owner=pid;
+ if(directory){r=sf_ns_handoff(&ns,owner,directory,(uint32_t)pid);if(r){sf_sys(SYS_KILL,pid,r,0);goto fail_lease;}}
  children[slot]=(Child){pid,ep,directory,1,uid,gid};return pid;
 fail_lease:if(ep>0)sf_sys(SYS_CAP_REVOKE,ep,0,0);sfmod_release(&manager,runtime_slot,RES_LEASE);
 fail_root:if(directory)sf_ns_close(&ns,owner,directory);return r;
@@ -491,7 +491,7 @@ static void projection_setup(void){
  sf_assert(!sf_ns_project(&ns,"/proc/self/status",PROJECTION_SELF_STATUS)&&!sf_ns_project(&ns,"/proc/children",PROJECTION_CHILDREN),"process projections");
  sf_assert(!sf_ns_project(&ns,"/sys/modules",PROJECTION_MODULES)&&!sf_ns_project(&ns,"/sys/devices",PROJECTION_DEVICES)&&!sf_ns_project(&ns,"/sys/dma",PROJECTION_DMA),"system projections");
  sf_assert(!sf_ns_project(&ns,"/net/info",PROJECTION_NET_INFO)&&!sf_ns_project(&ns,"/net/connections",PROJECTION_NET_CONNECTIONS),"network projections");
- ns.projection_read=projection_read;
+ sf_ns_projection_backend(&ns,projection_read);
  sf_assert(!sf_ns_protect(&ns,"/proc")&&!sf_ns_protect(&ns,"/proc/self")&&!sf_ns_protect(&ns,"/sys")&&!sf_ns_protect(&ns,"/net"),"system projection directories are read-only");
 }
 static void namespace_setup(void){

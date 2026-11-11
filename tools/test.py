@@ -50,6 +50,7 @@ host_test('test_lifecycle_rpc','tests/host/test_lifecycle_rpc.c','services/manag
 host_test('test_services','tests/host/test_services.c','services/manager.c','services/namespace.c')
 host_test('test_openat','tests/host/test_openat.c','services/namespace.c')
 host_test('test_ns_identity','tests/host/test_ns_identity.c','services/namespace.c')
+host_test('test_ns_mount','tests/host/test_ns_mount.c','services/namespace.c')
 host_test('test_accounts','tests/host/test_accounts.c','services/accounts.c')
 host_test('test_sessions','tests/host/test_sessions.c','services/session.c','services/accounts.c')
 host_test('test_file_client','tests/host/test_file_client.c','services/namespace.c','services/file_rpc.c')
@@ -164,6 +165,7 @@ result['net_qemu'] = not args.host_only
 result['net_qemu_boots'] = 0 if args.host_only else 2
 result['memory_host_assertions'] = 42
 result['openat_host_assertions'] = 108
+result['namespace_mount_host_assertions'] = 256
 result['host_poll_deadline_host_tests'] = 8
 result['openat_qemu'] = not args.host_only
 result['truncate_host_assertions'] = 83

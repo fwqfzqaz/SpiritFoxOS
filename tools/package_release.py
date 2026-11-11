@@ -20,6 +20,8 @@ if result.get('ipc_cancel_host_checks') != 25776 or result.get('ipc_cancel_qemu'
     raise SystemExit('Run authenticated pending send withdrawal, FIFO/width/delivery bounds and production queue VM regressions before packaging')
 if result.get('openat_host_assertions') != 108 or result.get('openat_qemu') is not True:
     raise SystemExit('Run the directory capability host and VM regressions before packaging')
+if result.get('namespace_mount_host_assertions') != 256:
+    raise SystemExit('Run atomic namespace mount publication and trusted handle handoff regressions before packaging')
 if result.get('host_poll_deadline_host_tests') != 8:
     raise SystemExit('Run paused-host polling budgets and silent-guest rejection regressions before packaging')
 if result.get('truncate_host_assertions') != 83 or result.get('resize_fault_scenarios') != 3132 or result.get('truncate_qemu') is not True:
