@@ -52,7 +52,9 @@ static void raw(uint64_t handle,unsigned length,unsigned mode,uint64_t offset,lo
 }
 int main(void){
  setup();SfFileClient c=client();int file=sf_file_openat(&c,root,"item",OPEN_READ),alias=sf_file_dup(&c,file);CHECK(file>0&&alias>0);
- CHECK(sf_file_seek(&c,file,37)==37);uint8_t out[258];memset(out,0xa5,sizeof(out));saved=ns;
+ /* Requests below may copy more than the former 256-byte IPC payload. Keep
+  * independent guard bytes around a full current payload, not an old size. */
+ CHECK(sf_file_seek(&c,file,37)==37);uint8_t out[SF_MSG_BYTES+2];memset(out,0xa5,sizeof(out));saved=ns;
  CHECK(sf_file_pread(&c,alias,out+1,8,100)==8&&!memcmp(out+1,expected+100,8));CHECK(out[0]==0xa5&&out[9]==0xa5&&!memcmp(&saved,&ns,sizeof(ns)));
  SfFileStat info;CHECK(!sf_file_stat(&c,file,&info)&&info.offset==37);CHECK(sf_file_read(&c,file,out,1)==1&&out[0]==expected[37]);
  CHECK(!sf_file_close(&c,file));CHECK(sf_file_pread(&c,alias,out,1,0)==1&&out[0]==expected[0]);
