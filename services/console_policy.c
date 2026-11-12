@@ -27,6 +27,7 @@ int sf_console_identity(const SfConsolePolicy *p,uint32_t *uid,uint32_t *gid,uin
  if(uid)*uid=s->uid;if(gid)*gid=s->gid;if(owner)*owner=sf_session_owner(sf_session_active(&p->sessions));return 0;
 }
 static int administrative(const char *line){
+ if(!strcmp(line,"file-peer-test"))return 1;
  static const char *const names[]={"namespace-recovery-test","namespace-status","namespace-crash","namespace-recover","persist","dma-test ","disk-crash","install ","trust","priority-test","priority ","ipc-stats-test","threads-test","threads ","page-quota-test","cap-limit-test","ipc-cancel-test","page-limit ","cap-limit ","cpu-budget ","cpu-state-test","revoke-key ","channel-test","echo-channel-test","echo-capacity-test","native-capacity-test","native-drain-test","native-crash","native-hang","native-bad-reply","native-bad-op","start native","stop native","echo-crash","echo-hang","echo-bad-reply","echo-bad-op","start echo","stop echo","mount /disk","unmount /disk","start disk","stop disk","dhcp","gui","selftest","shutdown"};
  for(unsigned i=0;i<sizeof(names)/sizeof(*names);i++){size_t n=strlen(names[i]);if(!strcmp(line,names[i])||(names[i][n-1]==' '&&!strncmp(line,names[i],n)))return 1;}
  return 0;

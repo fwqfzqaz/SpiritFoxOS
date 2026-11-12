@@ -249,6 +249,8 @@ def main(policy_path=None):
     image = link_elf('sf-init', init, 'services/user.ld')
     manifest = {'module_id': 'org.spiritfox.init', 'version': '0.1.0', 'category': 'bootstrap', 'requested_caps': ['bootstrap'], 'resource_limits': {'memory': 2097152}}
     packages.append(('sf-init.sfmod', pack(manifest, image, 1, seed)))
+    peer_probe = link_elf('foreigncap', shared + objects('foreigncap', ['services/foreigncap_probe.c'], extra=USER_SECTIONS), 'services/user.ld')
+    packages.append(('foreigncap.sfmod', pack({'module_id': 'org.spiritfox.test.foreigncap', 'version': '0.1.0', 'category': 'service', 'requested_caps': [], 'resource_limits': {'memory': 131072}}, peer_probe, 1, seed)))
     disk_files = {'/etc/readme.txt': b'SpiritFoxOS read-only disk mounted through user-space virtio-blk.\n'}
     for name, role, kind in [('echo', 1, 1), ('sf-native', 2, 1), ('hello', 3, 2), ('fault', 4, 2), ('illegal', 5, 2), ('spinner', 6, 2), ('nx', 7, 2), ('probe', 8, 2), ('mmio', 10, 2), ('exitbusy', 12, 2), ('badrsp', 13, 2), ('fileprobe', 14, 2), ('readprobe', 15, 2), ('argprobe', 16, 2), ('captree', 17, 2), ('threadprobe', 18, 2), ('disk-echo', 1, 1), ('diskhello', 9, 2), ('diskupdate', 9, 2), ('disknext', 9, 2), ('diskfault', 4, 2), ('diskexit', 11, 2), ('diskspin', 6, 2), ('diskother', 9, 2)]:
         native_crypto = objects('native-crypto', CRYPTO, extra=USER_SECTIONS) if role == 2 else []

@@ -379,13 +379,40 @@ static int serve_once(unsigned timeout_ms){
  /* sf-fs owns the disk format layer but never touches virtio-blk; while the
   * init waits for file RPC it also answers the module's block requests. */
  sf_storage_broker(1);
- SfMessage m;long sender=sf_recv(fs_ep,&m,sf_deadline(timeout_ms));if(sender<0)return sender;Child*c=child(sender);if(!c)return SF_INVALID;
- if(m.h.cap_count){if(m.h.cap_count==1)sf_cap_close(m.handle);m.h.cap_count=0;m.status=SF_INVALID;m.length=0;return sf_send(c->reply,&m);}
+ SfMessage m;long sender=sf_recv(fs_ep,&m,sf_deadline(timeout_ms));if(sender<0)return sender;
+ /* RECV has already installed this capability, including for peers outside
+  * the application table. A cap_count=0 file handle must never be closed. */
+ if(m.h.cap_count==1)sf_cap_close(m.handle);
+ Child*c=child(sender);if(!c)return SF_INVALID;
+ if(m.h.cap_count){m.h.cap_count=0;m.status=SF_INVALID;m.length=0;return sf_send(c->reply,&m);}
  if(m.h.opcode==OP_HELLO)return m.status;
  if(!sf_ns_client_healthy()||(c->emergency.handle&&m.handle==c->emergency.handle))
   sf_emergency_console(&c->emergency,&emergency_generation,(uint32_t)sender,&m,console_write);
  else sf_file_dispatch_as(ns,sender,&c->root,&m,c->uid,c->gid);
  return sf_send(c->reply,&m);
+}
+static void file_peer_test(void){
+ long before=sf_task_cap_usage(1),during=-1,after=-1;int control=0,pid=0,r=0;unsigned completed=0;
+ if(before<0||before>SF_CAP_LIMIT_MAX-2){r=SF_NO_SPACE;goto done;}
+ control=sf_ep_create();if(control<0){r=control;control=0;goto done;}
+ pid=spawn_package("foreigncap.sfmod",(uint32_t)control,RIGHT_RECV);if(pid<0){r=pid;pid=0;goto done;}
+ long admitted=sf_task_cap_usage(1);if(admitted!=before+1){r=SF_BAD_FORMAT;goto done;}
+ for(unsigned i=1;i<=64;i++){
+  SfMessage gate;sf_message(&gate,OP_ECHO,i);r=sf_send((uint32_t)control,&gate);if(r)goto done;
+  r=serve_once(1000);if(r!=SF_INVALID){if(!r)r=SF_BAD_FORMAT;goto done;}
+  during=sf_task_cap_usage(1);if(during!=admitted){r=SF_BAD_FORMAT;goto done;}completed++;
+ }
+ {SfMessage gate;sf_message(&gate,OP_ECHO,65);gate.mode=1;r=sf_send((uint32_t)control,&gate);if(r)goto done;}
+ {uint64_t end=sf_ticks()+100;long status;
+  while((status=sf_sys(SYS_TASK_STATUS,(uint32_t)pid,0,0))==SF_TASK_RUNNING&&sf_ticks()<end)sf_yield();
+  if(status==SF_TASK_RUNNING){r=SF_TIMEOUT;goto done;}if(status){r=(int)status;goto done;}}
+done:
+ if(pid>0&&sf_sys(SYS_TASK_STATUS,(uint32_t)pid,0,0)==SF_TASK_RUNNING)sf_sys(SYS_KILL,(uint32_t)pid,0,0);
+ if(control>0)sf_cap_revoke((uint32_t)control);
+ after=sf_task_cap_usage(1);if(before>=0&&after!=before)r=SF_BAD_FORMAT;
+ sf_log(r?"FILE PEER TEST FAILED code=":"FILE PEER TEST PASSED code=");sf_number(r<0?-(int64_t)r:r);
+ sf_log(" rounds=");sf_number(completed);sf_log(" before=");sf_number(before<0?0:(uint64_t)before);
+ sf_log(" during=");sf_number(during<0?0:(uint64_t)during);sf_log(" after=");sf_number(after<0?0:(uint64_t)after);sf_log("\n");
 }
 static int wait_app_for(uint32_t pid,uint64_t limit){uint64_t end=sf_ticks()+limit;for(;;){long status=sf_sys(SYS_TASK_STATUS,pid,0,0);if(status!=SF_TASK_RUNNING){app_reap(pid);return status;}if(sf_ticks()>end){sf_sys(SYS_KILL,pid,SF_TIMEOUT,0);app_reap(pid);return SF_TIMEOUT;}serve_once(10);sf_yield();}}
 static int wait_app(uint32_t pid){return wait_app_for(pid,300);}
@@ -1073,6 +1100,7 @@ static void command(char*line){
  else if(!strcmp(line,"rmdir")||!memcmp(line,"rmdir ",6))namespace_mutate_line(line+5,2);
  else if(!strcmp(line,"stat")||!memcmp(line,"stat ",5))namespace_stat_line(line+4);
  else if(!strcmp(line,"namespace-recovery-test"))namespace_recovery_test();
+ else if(!strcmp(line,"file-peer-test"))file_peer_test();
  else if(!strcmp(line,"namespace-status"))namespace_status();
  else if(!strcmp(line,"namespace-crash")){int r=sf_storage_namespace_crash();sf_log(r?"namespace: crash refused\n":"namespace: crash injected\n");}
  else if(!strcmp(line,"namespace-recover")){int r=namespace_recover();if(!r)sf_log("namespace: RECOVERED\n");else{sf_log("namespace: recovery refused code=");sf_number(-r);sf_log("\n");}}
