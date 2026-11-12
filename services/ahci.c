@@ -11,11 +11,11 @@
 #define DATA_OFF 0x2000u
 
 static const SfBootArgs*boot;
+static SfBlockBridge bridge;
 static uint32_t port;
-static uint64_t capacity,last_sector=UINT64_MAX;
+static uint64_t sectors,capacity;
 static int online,writable;
-static uint64_t write_first,write_end,pending_sector=UINT64_MAX;
-static uint8_t cache[512],pending[512];
+static uint64_t write_first,write_end;
 
 static void barrier(void){__atomic_thread_fence(__ATOMIC_SEQ_CST);}
 static uint32_t reg(uint32_t off){return *(volatile uint32_t*)((uint64_t)boot->device_io+off);}
@@ -42,7 +42,9 @@ static int command(uint8_t op,uint64_t lba,uint16_t count,uint64_t bus_data,int 
  barrier();return 0;
 }
 
-static int stop(void){online=0;last_sector=UINT64_MAX;return sf_sys(SYS_DEVICE_RELEASE,0,0,0);}
+static int stop(void){online=0;sf_bridge_flush(&bridge);return sf_sys(SYS_DEVICE_RELEASE,0,0,0);}
+
+static int drive_io(void*context,int write,uint64_t lba);
 
 static int start(void){
  if(!boot->device_io||boot->device_io!=SF_DEVICE_MMIO||boot->dma_virtual!=SF_DMA||!boot->dma_physical||(boot->dma_physical&4095))return SF_DENIED;
@@ -69,34 +71,31 @@ static int start(void){
  prw(0x18,pr(0x18)|1u);deadline=sf_ticks()+100;
  while(!(pr(0x18)&(1u<<15))){if(sf_ticks()>=deadline){sf_log("[AHCI] ST timeout\n");return SF_TIMEOUT;}sf_yield();}
  if(command(0xEC,0,0,boot->dma_physical+IDENT_OFF,0,512)){sf_log("[AHCI] identify failed\n");return SF_DEVICE_GONE;}
- uint16_t*id=(void*)(SF_DMA+IDENT_OFF);uint64_t sectors=0;
+ uint16_t*id=(void*)(SF_DMA+IDENT_OFF);uint32_t lba_bytes=512;sectors=0;
  if(id[83]&(1u<<10)){uint64_t max=*(uint64_t*)((uint8_t*)id+400);if(max)sectors=max+1;} /* words 200..203 = byte 400 */
  if(!sectors)sectors=((uint64_t)id[61]<<16)|id[60];
- if(!sectors||sectors>UINT64_MAX/512){sf_log("[AHCI] bad capacity lbas=");sf_number(sectors);sf_log(" w83=");sf_number(id[83]);sf_log(" w60=");sf_number(id[60]);sf_log(" w61=");sf_number(id[61]);sf_log("\n");return SF_BAD_FORMAT;}
+ if(!sectors||sf_ata_logical_bytes(id,&lba_bytes)||sectors>UINT64_MAX/(lba_bytes/512)){sf_log("[AHCI] bad capacity lbas=");sf_number(sectors);sf_log(" w83=");sf_number(id[83]);sf_log(" w60=");sf_number(id[60]);sf_log(" w61=");sf_number(id[61]);sf_log(" w106=");sf_number(id[106]);sf_log(" w117=");sf_number(id[117]);sf_log("\n");return SF_BAD_FORMAT;}
+ capacity=sectors*(lba_bytes/512);sf_bridge_init(&bridge,&bridge,drive_io,lba_bytes);
  int media_ro=(id[87]&(1u<<5))!=0;
  writable=(boot->device_rights&SF_DEVICE_WRITE)!=0;
  if(writable&&media_ro){sf_log("[AHCI] media read-only\n");return SF_READ_ONLY;}
  if(!writable&&!media_ro)return SF_READ_ONLY; /* 让 sf-init 升级为写授权 */
- capacity=sectors;online=1;
- sf_log(writable?"[AHCI] SATA disk online, read-write\n":"[AHCI] SATA disk online, read-only\n");
+ online=1;
+ sf_log(writable?"[AHCI] SATA disk online, read-write, ":"[AHCI] SATA disk online, read-only, ");sf_number(lba_bytes);sf_log("-byte logical sectors\n");
  return 0;
 }
 
-static int io_sector(int write,uint64_t sector){
- if(sector>=capacity)return SF_INVALID;
+static int drive_io(void*context,int write,uint64_t lba){
+ SfBlockBridge*b=context;
+ if(lba>=sectors)return SF_INVALID;
  uint8_t*data=(void*)(SF_DMA+DATA_OFF);
- if(write)memcpy(data,pending,512);else memset(data,0,512);
- int r=command(write?0x35:0x25,sector,1,boot->dma_physical+DATA_OFF,write,512);
- if(!r&&!write)memcpy(cache,data,512);
+ if(write)memcpy(data,b->cache,b->lba_bytes);else memset(data,0,b->lba_bytes);
+ int r=command(write?0x35:0x25,lba,1,boot->dma_physical+DATA_OFF,write,b->lba_bytes);
+ if(!r&&!write)memcpy(b->cache,data,b->lba_bytes);
  return r;
 }
 
-static int read_block(uint64_t sector){
- if(last_sector==sector)return 0;
- int r=io_sector(0,sector);if(!r)last_sector=sector;return r;
-}
-
-static int flush(void){return command(0xEA,0,0,0,0,0);}
+static int flush(void){sf_bridge_flush(&bridge);return command(0xEA,0,0,0,0,0);}
 
 long sf_main(const SfBootArgs*a,size_t size){
  boot=a;if(size!=sizeof(*a)||a->abi_major!=1)return SF_ABI_MISMATCH;
@@ -108,16 +107,13 @@ long sf_main(const SfBootArgs*a,size_t size){
   else if(m.h.opcode==OP_BLOCK_INFO){SfBlockInfo info={capacity,512,!writable};memcpy(m.data,&info,sizeof(info));m.length=sizeof(info);}
   else if(m.h.opcode==OP_BLOCK_DMA_PROBE)result=SF_DENIED;
   else if(m.h.opcode==OP_BLOCK_WRITE_RANGE){if(!writable)result=SF_READ_ONLY;else if((write_end&&(write_first!=m.offset||write_end!=m.handle))||m.offset>=m.handle||m.handle>capacity)result=SF_INVALID;else{write_first=m.offset;write_end=m.handle;}}
-  else if(m.h.opcode==OP_BLOCK_FLUSH){pending_sector=UINT64_MAX;result=writable&&write_end?flush():SF_READ_ONLY;}
+  else if(m.h.opcode==OP_BLOCK_FLUSH){result=writable&&write_end?flush():SF_READ_ONLY;}
   else if(m.h.opcode==OP_BLOCK_WRITE){
    if(!writable||!write_end)result=SF_READ_ONLY;
-   else if(!sf_block_range(capacity,m.offset,m.mode,m.length)||m.offset/512<write_first||m.offset/512>=write_end){pending_sector=UINT64_MAX;result=SF_INVALID;}
-   else if(!m.mode){memcpy(pending,m.data,256);pending_sector=m.offset/512;}
-   else if(pending_sector!=m.offset/512){pending_sector=UINT64_MAX;result=SF_INVALID;}
-   else{memcpy(pending+256,m.data,256);pending_sector=UINT64_MAX;result=io_sector(1,m.offset/512);if(!result)last_sector=UINT64_MAX;}
+   else if(!sf_block_range(capacity,m.offset,m.mode,m.length)||m.offset/512<write_first||m.offset/512>=write_end){sf_bridge_flush(&bridge);result=SF_INVALID;}
+   else result=sf_bridge_write(&bridge,m.offset,capacity,m.mode,m.data);
   }
-  else if(m.h.opcode==OP_BLOCK_READ){if(!sf_block_range(capacity,m.offset,m.mode,m.length))result=SF_INVALID;else{result=read_block(m.offset/512);if(!result)memcpy(m.data,cache+m.mode,256);}}
-  else result=SF_INVALID;
+  else if(m.h.opcode==OP_BLOCK_READ)result=sf_block_range(capacity,m.offset,m.mode,m.length)?sf_bridge_read(&bridge,m.offset,capacity,m.mode,m.data):SF_INVALID;
   m.status=result;if(result)m.length=0;sf_send(a->manager,&m);
  }
 }

@@ -14,6 +14,32 @@ sf-init 枚举 PCI 总线 0，Core 0 再核对设备身份和 BAR。legacy 驱�
 
 没有 DMAR 的默认配置是可信驱动模式，固定缓冲区和端口权限不能阻止任意 DMA。可选 Q35 VT-d 模式使用 modern ACCESS_PLATFORM 和仅覆盖 arena 的设备页表；真实越界 DMA 读写触发故障、保持 canary 不变并终止隔离驱动。完整范围与失败策略见 [IOMMU.md](IOMMU.md)。真实复位失败、带在途 DMA 的物理拔出和断电仍未验证。
 
+## AHCI 与 NVMe
+
+2026-11-12：`sf-init` 在 PCI 总线 0 上按 class code 收集存储候选：virtio-blk
+（`1af4:1001`/`1042`）优先，其次 AHCI（01/06/01），最后 NVMe（01/08/02），最多 64 项。
+每个候选都在 ring-3 `sf-ahci.sfmod`/`sf-nvme.sfmod` 中启动并尝试挂载；挂载失败后
+`sf_storage_restart_next` 释放该实例并转向下一个候选。驱动仍只获得已核实的 BAR 映射
+和固定 64 KiB DMA 区，不直接访问 PCI 配置空间；AHCI 轮询端口命令，NVMe 使用单一
+admin/IO 队列，均完成 IDENTIFY、READ、WRITE 与 FLUSH，不开放设备 IRQ。
+
+块协议始终以 512 字节扇区计数：`SfBlockInfo.sector_bytes` 固定为 512。驱动读取 ATA
+IDENTIFY word 117 或 NVMe `LBADS`，接受 512、1024、2048、4096 字节的设备逻辑
+扇区；`sf_lba_split` 把协议字节偏移映射为设备 LBA 与块内偏移。逻辑扇区大于 512 字节
+时，驱动缓存一个完整逻辑块；收到完整的 512 字节请求后执行读-改-写：先读入所在逻辑
+块、只覆盖该扇区、再写回，从而保留同块内其他七个扇区的原有内容。该状态机集中实现在
+`sf_bridge_*`，AHCI 与 NVMe 共用；半块顺序不配对、未对齐、越界或容量不能整除逻辑块
+时返回 `SF_INVALID`，读失败会丢弃尚未完成的半块并允许重试。BLOCK_FLUSH 在三个驱动上
+语义相同：丢弃未完成的半块后向设备发出真实 FLUSH，不把部分扇区当作已写入。
+
+验证：宿主 `test_storage` 覆盖 IDENTIFY 解析、偏移映射、共享桥的 512/4096 字节行为、
+写后缓存读取、未覆盖字节保持、失败重试、半块配对与 FLUSH 后的重新配对；
+`qemu_hardware_test.py` 以
+`ide-hd` 和 `nvme` 各验证一次 512 字节设备，并在 `nvme,logical_block_size=4096,
+physical_block_size=4096` 下写入 512 字节持久笔记、关机重启后读回，确认实际读-改-写
+与 FLUSH 路径。QEMU 的 IDE/AHCI 模型只接受 512 字节逻辑扇区，因此 AHCI 的 4096 字节
+路径仅由共享状态机的宿主断言覆盖，仍需真实硬件确认。
+
 ## 块协议
 
 通过 ABI 1 的端点消息传输，消息数据区为 4096 字节；块传输内部仍按 256 字节半块分帧：

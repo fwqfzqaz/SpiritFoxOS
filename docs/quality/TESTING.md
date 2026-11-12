@@ -71,6 +71,14 @@ M5 回归为 151 条 C 断言、14 组 Python 测试中的包/只读格式部分
 
 测试原始 `persistent.img` 与只读底区保持不变，只写副本的事务区域。机器结果附带 EFI、两种存储镜像和公钥摘要；打包工具拒绝与已验证摘要不符的镜像。`build/qemu-persist-*.log` 保留九次持久化启动的串口记录。
 
+2026-11-12 磁盘逻辑扇区：`tests/host/test_storage.c` 追加 ATA IDENTIFY 逻辑扇区解析、
+512 字节偏移映射与共享块桥断言，覆盖 4096 字节逻辑块中 512 字节写入的读-改-写、未覆盖
+字节保持、写后缓存读取、失败重试、半块配对和 FLUSH 丢弃未完成半块后的重新配对。
+`tests/qemu/qemu_hardware_test.py` 以 `ide-hd`、`nvme` 各启动一次 512 字节设备，并新增
+`nvme,logical_block_size=4096,physical_block_size=4096` 场景：写入持久笔记、关机重启后
+读回标记，确认实际读-改-写与 FLUSH 路径。QEMU 的 IDE/AHCI 模型只接受 512 字节逻辑扇区，
+AHCI 的 4096 字节路径未在 QEMU 覆盖，需真实硬件确认。
+
 ## VT-d 与 modern DMA 端到端
 
 另增加十五次 VM 启动，与前述十八次合计三十三次：

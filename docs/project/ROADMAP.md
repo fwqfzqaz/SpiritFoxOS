@@ -15,7 +15,7 @@
 | M2 | 依赖代次固定、状态机、原子租约与资源账本、拒绝忙卸载、受控重启、新旧代并存与死亡/健康期限有界恢复、完整生命周期 RPC、按认证发送者/编号撤回未投递 IPC | 一般健康/挂起监督、在途取消/确认排空、并发事务和状态迁移 |
 | M3 | 用户态目录、RAMFS、管道、偏移、poll、控制台、openat、句柄复制/共享偏移/最后引用回收、定位读取、RAM 文件删除、空目录回收、固定句柄元数据、只读委派、受控磁盘挂载、只读 `/proc` `/sys` 投影、截断与补零扩展 | 通用文件授权与跨进程能力传递/撤销、按进程挂载视图、符号链接策略、事件队列、可写 proc/sys 策略 |
 | M4 | 独立 sf-native、验证装载计划、运行时租约、有界 argv/显式环境与只读 BootArgs/SDK、relative-v1 PI、libc 纯函数 SDK、文件 RPC 客户端 SDK、单一认证运行时库 `sf-libsf.sfmod` 的有界导入与 15 项 POSIX 子集 | 更完整 PI 配置、多库依赖与符号版本、TLS、完整 SDK/完整 POSIX、独立 sfexec/sf-process |
-| M5 | legacy 与受限 modern PCI virtio-blk、SFRFS1/SFRFS2 自动探测、独立 `sf-fs.sfmod` 文件系统服务、从盘验证并运行包、挂载租约、存储失败恢复 | 通用 modern/virtio MMIO、更多设备/传输、可写通用磁盘格式（当前两种格式均只读） |
+| M5 | legacy 与受限 modern PCI virtio-blk、ring-3 AHCI/NVMe（512–4096 字节逻辑扇区，共享部分写读-改-写）、SFRFS1/SFRFS2 自动探测、独立 `sf-fs.sfmod` 文件系统服务、从盘验证并运行包、挂载租约、存储失败恢复 | 通用 modern/virtio MMIO、更多设备/传输、可写通用磁盘格式（当前两种格式均只读）、AHCI 4096 字节真机验证 |
 | M6 | 显式写权、OUT/FLUSH、双银行事务、笔记读写/截断、包 A/B、试运行确认与失败/中断回退、身份及摘要绑定、版本下限与精确重装幂等、Q35 VT-d RAM DMA 隔离、故障恢复、构建时公钥用途/撤销与重叠轮换、默认模块/应用密钥分离、运行期密钥撤销、旧事务几何兼容 | IRQ/通用设备隔离、ACS/多单元、真实硬件断电、通用持久文件系统、长期服务健康策略、运行期撤销扩展、独立生产根与可信防回滚 |
 | M7 | 独立故障域与服务协议基础；ring-3 legacy virtio-net、IOAPIC INTx、DHCP、有界 ARP/IPv4/ICMP、一次性 UDP/TCP、8 个连接对象与 `/net` 投影、磁盘与网络并行授权；构建期账户、四个有界会话、uid/gid 权限与管理员命令门；ring-3 有界图形合成、滚动平铺与串口回退 | 选定服务状态迁移；图形后续仍限 P2 和 GRAPHICS 的既定边界 |
 
@@ -67,7 +67,7 @@ TRYING 保持与降级控制台；发布和新提交托管结果仍独立核对�
 
 在「单一认证 POSIX 运行时库、最多 32 项导入/64 项导出、最多 8 个映射段」约束内扩展能力：
 
-- 补齐常用只读/只写文件语义：`stat` 类元数据、目录遍历游标、`getcwd`/路径规范化、错误码一致性。
+- 补齐常用只读/只写文件语义：`stat` 类元数据、目录遍历游标（2026-11-12 完成）、`getcwd`/路径规范化、错误码一致性。
 - 为导入/导出表增加宿主编译期检查与缺失导出的 QEMU 负例；ABI 快照只允许追加并显式审阅。
 - 评估 `malloc` 之外的替代方案：如需动态内存，优先在应用内提供有界 arena SDK，而不是让运行时库持有全局状态。
 - 不引入多库依赖、符号版本、TLS、惰性绑定或完整 POSIX；确需突破时必须先更新设计说明。
@@ -131,5 +131,15 @@ TRYING 保持与降级控制台；发布和新提交托管结果仍独立核对�
 2026-11-07：构建期账户表、四个有界控制台会话与 uid/gid 所有者权限完成，说明见 [SESSIONS](../architecture/SESSIONS.md)。
 
 2026-11-07：SMP、线程与配额完成；MADT/LAPIC、IPI 抢占、共享 CR3 线程、线程上限与 100 tick CPU 时间预算已实现；ABI 只追加 14 项至 597。x2APIC、CPU 热插拔与线程 join 仍未实现，真实硬件多核待独立验证。
+
+2026-11-12：磁盘系统完善。AHCI 读取 ATA IDENTIFY word 117，NVMe 读取 `LBADS`，接受
+512、1024、2048、4096 字节设备逻辑扇区；块协议仍固定 512 字节。共享 `sf_lba_split`
+把协议偏移映射到设备 LBA 与块内偏移，`sf_bridge_*` 缓存一个完整逻辑块，并在 512 字节
+写入落盘前执行读-改-写，保留同块其他扇区；未配对半块、未对齐/越界和不可整除几何返回
+`SF_INVALID`。宿主 `test_storage` 新增解析、映射与桥接断言；`qemu_hardware_test.py`
+新增 NVMe 4096 字节写入笔记、关机重启读回。QEMU 的 IDE/AHCI 模型只接受 512 字节逻辑
+扇区，AHCI 4096 字节路径仍需真实硬件验证；完整回归结果见 PROGRESS。
+
+2026-11-12：P1 有界应用接口完成目录遍历游标。应用文件 RPC 追加 `OP_ENUMERATE_AT=27`，Fs 私有命名空间协议追加 `OP_NS_ENUMERATE_AT=228`；请求 `offset` 为零基子项序号、`length` 为输出容量，成功返回单个 NUL 结尾名称，0 表示结束，容量不足为 `SF_NO_SPACE`。游标无服务端状态，越界序号、非目录句柄和陈旧句柄分别拒绝。SDK 增加 `sf_file_enumerate_at`；ABI 快照只追加两项至 660。宿主 `test_file_rpc`（364 项）与 `test_file_client`、`qemu_file_client_test.py`（legacy/modern 两次启动）均通过；同时修正 Fs 进程把 `OP_NS_UNMOUNT` 之后的新操作码误判为磁盘消息的范围检查。
 
 2026-11-08：M7 的有界图形切片完成。内核追加 `SF_FB=0x70000000`、`SfFbInfo`、`SYS_FB_GRANT=32` 与 `SYS_FB_MAP=33`：仅 PID 1 可把固件 framebuffer 授权给单一进程，目标进程经 `space_map_fb` 逐页建立 RW+NX+缓存禁用映射（不占私有数据页）。新增 `sf-wm.sfmod`（`org.spiritfox.wm`）与纯 C 布局核心 `services/tiling.c`：4 工作区 × 16 列 × 8 窗口、列内纵向堆叠、列宽/窗口高度千分比、水平滚动、consume/expel、焦点夹紧与容量无副作用。`sf-init` 新增 root `gui` 命令，经模块生命周期启动合成器、串口字节以 `OP_WM_INPUT` 转发、`Ctrl-]` 退出并恢复 shell；期间继续驱动既有服务监督。宿主 `test_tiling` 与 QEMU `qemu_gui_test.py`（`-display none -vga std`）验证布局状态与不同 framebuffer 校验和。真实输入驱动、GUI 客户端协议、多显示器与 GPU 仍未实现，详见 [GRAPHICS](../architecture/GRAPHICS.md)。

@@ -16,13 +16,12 @@
 
 static const SfBootArgs*boot;
 static uint32_t stride,dstrd;
-static uint32_t lba_bytes,ratio,total_halves;
-static uint64_t capacity,last_lba=UINT64_MAX,pending_lba=UINT64_MAX;
-static uint32_t admin_tail,admin_head,io_tail,io_head,pending_mask;
+static uint64_t capacity;
+static uint32_t admin_tail,admin_head,io_tail,io_head;
 static uint16_t admin_phase=1,io_phase=1,next_cid=1;
 static int online,writable;
 static uint64_t write_first,write_end;
-static uint8_t cache[4096],pending[4096];
+static SfBlockBridge bridge;
 
 static void barrier(void){__atomic_thread_fence(__ATOMIC_SEQ_CST);}
 static uint32_t r32(uint32_t off){return *(volatile uint32_t*)((uint64_t)boot->device_io+off);}
@@ -75,16 +74,15 @@ static int io(uint8_t op,uint64_t lba,int write){
  uint32_t ignored;return completion(IO_CQ,&io_head,&io_phase,cid,&ignored,1,1);
 }
 
-static int read_block(uint64_t lba){
- if(last_lba==lba)return 0;
- int r=io(0x02,lba,0);if(!r){memcpy(cache,(void*)(SF_DMA+DATA_OFF),lba_bytes);last_lba=lba;}return r;
+static int nvme_io(void*context,int write,uint64_t lba){
+ SfBlockBridge*b=context;uint8_t*data=(void*)(SF_DMA+DATA_OFF);
+ if(write)memcpy(data,b->cache,b->lba_bytes);else memset(data,0,b->lba_bytes);
+ int r=io(write?0x01:0x02,lba,write);
+ if(!r&&!write)memcpy(b->cache,data,b->lba_bytes);
+ return r;
 }
 
-static int write_block(uint64_t lba){
- memcpy((void*)(SF_DMA+DATA_OFF),pending,lba_bytes);int r=io(0x01,lba,1);if(!r)last_lba=UINT64_MAX;return r;
-}
-
-static int stop(void){online=0;last_lba=UINT64_MAX;w32(0x14,r32(0x14)&~1u);return sf_sys(SYS_DEVICE_RELEASE,0,0,0);}
+static int stop(void){online=0;sf_bridge_flush(&bridge);w32(0x14,r32(0x14)&~1u);return sf_sys(SYS_DEVICE_RELEASE,0,0,0);}
 
 static int start(void){
  if(!boot->device_io||boot->device_io!=SF_DEVICE_MMIO||boot->dma_virtual!=SF_DMA||!boot->dma_physical||(boot->dma_physical&4095))return SF_DENIED;
@@ -101,15 +99,15 @@ static int start(void){
  if(flbas>=nlba){sf_log("[NVME] bad flbas\n");return SF_BAD_FORMAT;}
  uint32_t lf=*(uint32_t*)(SF_DMA+IDENT_OFF+128+4*flbas);uint32_t lbads=(lf>>16)&0xffu;
  if(lbads<9||lbads>12||!nsze){sf_log("[NVME] bad lba format lbads=");sf_number(lbads);sf_log(" nsze=");sf_number(nsze);sf_log("\n");return SF_BAD_FORMAT;}
- lba_bytes=1u<<lbads;ratio=lba_bytes/512;total_halves=lba_bytes/256;
- if(nsze>UINT64_MAX/ratio)return SF_BAD_FORMAT;capacity=nsze*ratio;
+ uint32_t lba_bytes=1u<<lbads,ratio=lba_bytes/512;
+ if(nsze>UINT64_MAX/ratio)return SF_BAD_FORMAT;capacity=nsze*ratio;sf_bridge_init(&bridge,&bridge,nvme_io,lba_bytes);
  /* CDW10: QID 在低 16 位，QSIZE 在高 16 位；CDW11: PC/IEN/IV。 */
  r=admin(0x05,0,1u|((QDEPTH-1)<<16),1u,boot->dma_physical+IO_CQ,&result);if(r){sf_log("[NVME] create cq failed code=");sf_number(-r);sf_log("\n");return r;}
  r=admin(0x01,0,1u|((QDEPTH-1)<<16),1u|(1u<<16),boot->dma_physical+IO_SQ,&result);if(r){sf_log("[NVME] create sq failed code=");sf_number(-r);sf_log("\n");return r;}
  writable=(boot->device_rights&SF_DEVICE_WRITE)!=0;
  if(!writable)return SF_READ_ONLY; /* 让 sf-init 使用写授权重试 */
  online=1;
- sf_log("[NVME] disk online, read-write\n");
+ sf_log("[NVME] disk online, read-write, ");sf_number(lba_bytes);sf_log("-byte logical sectors\n");
  return 0;
 }
 
@@ -123,19 +121,13 @@ long sf_main(const SfBootArgs*a,size_t size){
   else if(m.h.opcode==OP_BLOCK_INFO){SfBlockInfo info={capacity,512,!writable};memcpy(m.data,&info,sizeof(info));m.length=sizeof(info);}
   else if(m.h.opcode==OP_BLOCK_DMA_PROBE)result=SF_DENIED;
   else if(m.h.opcode==OP_BLOCK_WRITE_RANGE){if(!writable)result=SF_READ_ONLY;else if((write_end&&(write_first!=m.offset||write_end!=m.handle))||m.offset>=m.handle||m.handle>capacity)result=SF_INVALID;else{write_first=m.offset;write_end=m.handle;}}
-  else if(m.h.opcode==OP_BLOCK_FLUSH){if(!writable||!write_end)result=SF_READ_ONLY;else if(pending_mask&&pending_mask!=((1u<<total_halves)-1))result=SF_INVALID;else{pending_mask=0;pending_lba=UINT64_MAX;result=io(0x00,0,0);}}
+  else if(m.h.opcode==OP_BLOCK_FLUSH){if(!writable||!write_end)result=SF_READ_ONLY;else{sf_bridge_flush(&bridge);result=io(0x00,0,0);}}
   else if(m.h.opcode==OP_BLOCK_WRITE){
    if(!writable||!write_end)result=SF_READ_ONLY;
-   else if(!sf_block_range(capacity,m.offset,m.mode,m.length)||m.offset/512<write_first||m.offset/512>=write_end){pending_mask=0;pending_lba=UINT64_MAX;result=SF_INVALID;}
-   else{
-    uint64_t sector=m.offset/512,lba=sector/ratio;uint32_t off=(uint32_t)(sector%ratio)*512+m.mode;
-    if(pending_lba!=lba){if(pending_mask){result=SF_INVALID;}else{pending_lba=lba;pending_mask=0;}}
-    if(!result&&(off>>8)!=(uint32_t)__builtin_popcount(pending_mask)){pending_mask=0;pending_lba=UINT64_MAX;result=SF_INVALID;}
-    if(!result){memcpy(pending+off,m.data,256);pending_mask|=1u<<(off>>8);
-     if(pending_mask==((1u<<total_halves)-1)){result=write_block(lba);pending_mask=0;pending_lba=UINT64_MAX;}}
-   }
+   else if(!sf_block_range(capacity,m.offset,m.mode,m.length)||m.offset/512<write_first||m.offset/512>=write_end){sf_bridge_flush(&bridge);result=SF_INVALID;}
+   else result=sf_bridge_write(&bridge,m.offset,capacity,m.mode,m.data);
   }
-  else if(m.h.opcode==OP_BLOCK_READ){if(!sf_block_range(capacity,m.offset,m.mode,m.length))result=SF_INVALID;else if(pending_mask)result=SF_INVALID;else{uint64_t sector=m.offset/512,lba=sector/ratio;result=read_block(lba);if(!result)memcpy(m.data,cache+(uint32_t)(sector%ratio)*512+m.mode,256);}}
+  else if(m.h.opcode==OP_BLOCK_READ)result=sf_block_range(capacity,m.offset,m.mode,m.length)?sf_bridge_read(&bridge,m.offset,capacity,m.mode,m.data):SF_INVALID;
   else result=SF_INVALID;
   m.status=result;if(result)m.length=0;sf_send(a->manager,&m);
  }

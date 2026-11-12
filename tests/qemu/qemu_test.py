@@ -41,17 +41,18 @@ else:
     VARS_SRC = ROOT / '.tools/qemu/share/edk2-i386-vars.fd'
 
 
-def command(memory=256, disk=None, writable=False, ioerror=False, iommu=False, model='virtio'):
+def command(memory=256, disk=None, writable=False, ioerror=False, iommu=False, model='virtio', logical_block_size=0):
     args = [str(QEMU), '-machine', 'q35', '-accel', 'tcg', '-cpu', 'qemu64,+nx', '-m', str(memory), '-smp', '1', '-drive', 'if=pflash,format=raw,readonly=on,file='+str(FIRMWARE), '-drive', 'if=pflash,format=raw,file='+str(ROOT / 'build/OVMF_VARS.fd'), '-drive', 'format=raw,file=fat:rw:'+str(ROOT / 'build/esp'), '-net', 'none', '-display', 'none', '-serial', 'stdio', '-monitor', 'none', '-no-reboot', '-device', 'isa-debug-exit,iobase=0xf4,iosize=0x04']
     if iommu:
         args += ['-device','intel-iommu,intremap=off,caching-mode=on,device-iotlb=off,aw-bits=39']
     if disk:
         image = 'blkdebug:build/storage-blkdebug.conf:build/storage.img' if ioerror else str(disk)
         drive = ['-drive', 'if=none,id=sf-storage,format=raw,readonly='+('off' if writable else 'on')+',file='+image]
+        lbs = (',logical_block_size=' + str(logical_block_size) + ',physical_block_size=' + str(logical_block_size)) if logical_block_size else ''
         if model == 'ahci':
-            args += drive + ['-device', 'ich9-ahci,id=hwa', '-device', 'ide-hd,drive=sf-storage,bus=hwa.0,unit=0,rotation_rate=1']
+            args += drive + ['-device', 'ich9-ahci,id=hwa', '-device', 'ide-hd,drive=sf-storage,bus=hwa.0,unit=0,rotation_rate=1'+lbs]
         elif model == 'nvme':
-            args += drive + ['-device', 'nvme,drive=sf-storage,serial=spiritfox']
+            args += drive + ['-device', 'nvme,drive=sf-storage,serial=spiritfox'+lbs]
         else:
             args += drive + ['-device', 'virtio-blk-pci,drive=sf-storage,disable-modern=on,disable-legacy=off,vectors=0,addr=0x5']
         if iommu and model == 'virtio':

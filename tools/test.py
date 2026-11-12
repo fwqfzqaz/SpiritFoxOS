@@ -155,7 +155,7 @@ if not args.host_only:
     subprocess.run([sys.executable, 'tests/qemu/qemu_truncate_test.py'], check=True)
     subprocess.run([sys.executable, 'tests/qemu/qemu_trust_test.py'], check=True)
     subprocess.run([sys.executable, 'tests/qemu/qemu_txn_compat_test.py'], check=True)
-result = {'passed': True, 'elapsed_seconds': round(time.time()-started, 2), 'service_assertions': 116, 'storage_assertions': 35, 'package_tests': 'passed (11 groups, including 1500 seeded mutations)', 'readfs_tests': 'passed (5 groups, including 500 seeded metadata mutations)', 'qemu_memory_mib': [] if args.host_only else [128, 256, 512], 'storage_failure_cases': [] if args.host_only else ['missing', 'badheader', 'badhash', 'badsignature', 'writable', 'ioerror']}
+result = {'passed': True, 'elapsed_seconds': round(time.time()-started, 2), 'service_assertions': 116, 'storage_assertions': 84, 'package_tests': 'passed (11 groups, including 1500 seeded mutations)', 'readfs_tests': 'passed (5 groups, including 500 seeded metadata mutations)', 'qemu_memory_mib': [] if args.host_only else [128, 256, 512], 'storage_failure_cases': [] if args.host_only else ['missing', 'badheader', 'badhash', 'badsignature', 'writable', 'ioerror']}
 result['txn_fault_boundaries'] = 261
 result['txn_fault_modes'] = 3
 result['persistence_qemu'] = not args.host_only
@@ -174,7 +174,7 @@ result['manifest_source_profile'] = 'native-source-v1'
 result['manifest_profile_host_tests'] = 12
 result['manifest_schema_sha256'] = manifest_schema_sha256
 result['abi_snapshot_host_tests'] = 9
-result['abi_snapshot_entries'] = 658
+result['abi_snapshot_entries'] = 660
 result['abi_reference_sha256'] = abi_reference_sha256
 result['abi_capture_sha256'] = abi_capture_sha256
 result['posix_qemu'] = not args.host_only
