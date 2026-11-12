@@ -62,7 +62,16 @@ long sf_main(const SfBootArgs*a,size_t bytes){
  if(sf_file_pread(&c,file_copy,second,1,1)!=(n>1?1:0)||(n>1&&second[0]!=data[1])||sf_file_stat(&c,file,&info)||info.offset!=(uint64_t)n)return 31;
  if(sf_file_read(&c,file,0,0)||sf_file_write(&c,file,0,0)!=SF_DENIED)return 15;
  if(sf_file_seek(&c,file_copy,0)||sf_file_stat(&c,file,&info)||info.offset||sf_file_read(&c,file_copy,second,sizeof(second))!=n||memcmp(data,second,n))return 16;
- if(sf_file_enumerate(&c,root,(char*)second,sizeof(second))<=0)return 17;
+ int64_t listed=sf_file_enumerate(&c,root,(char*)second,sizeof(second));if(listed<=0)return 17;
+ unsigned expected=0;for(int64_t i=0;i<listed;i++)if(second[i]=='\n')expected++;
+ char entry[96];unsigned seen=0;int64_t e;
+ while((e=sf_file_enumerate_at(&c,root,seen,entry,sizeof(entry)))>0){if((size_t)e>sizeof(entry)||entry[e-1])return 45;seen++;}
+ if(e<0)return 46;
+ if(listed<(int64_t)sizeof(second)&&seen!=expected)return 47;
+ if(sf_file_enumerate_at(&c,root,0,entry,1)!=SF_NO_SPACE||sf_file_enumerate_at(&c,root,UINT32_MAX,entry,sizeof(entry))!=SF_INVALID||
+    sf_file_enumerate_at(&c,root,129,entry,sizeof(entry))!=SF_INVALID)return 48; /* SF_NS_NODE_MAX+1 */
+ if(sf_file_enumerate_at(&c,file,0,entry,sizeof(entry))!=SF_INVALID)return 49;
+ int64_t first=sf_file_enumerate_at(&c,root,0,entry,sizeof(entry));if(first<=0||first>listed||memcmp(entry,second,(size_t)first-1))return 45;
  if(sf_file_openat(&c,root,path,SF_OPEN_WRITE)!=SF_DENIED||sf_file_truncate(&c,file,0)!=SF_DENIED)return 18;
  if(sf_file_unlink(&c,root,path)!=SF_DENIED||sf_file_rmdir(&c,root,path)!=SF_DENIED)return 19;
  if(sf_file_close(&c,root)||sf_file_root(&c)!=SF_DENIED||sf_file_stat(&c,file,&info))return 20;

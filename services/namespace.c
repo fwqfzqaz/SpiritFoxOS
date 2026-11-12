@@ -202,5 +202,21 @@ int sf_ns_truncate(SfNamespace*n,uint32_t owner,uint32_t h,uint64_t bytes){
 int64_t sf_ns_seek(SfNamespace*n,uint32_t owner,uint32_t h,uint64_t off){SfDescription*d=description(n,owner,h);if(!d)return SF_STALE_HANDLE;SfNode*x=&n->nodes[d->node];if(x->type==NODE_PIPE||x->type==NODE_CONSOLE)return SF_NOT_SEEKABLE;if(x->type==NODE_PROJECTION){if(off>UINT32_MAX)return SF_INVALID;d->offset=off;return off;}if((x->type!=NODE_FILE&&x->type!=NODE_DISK)||off>(x->type==NODE_DISK?x->size:sizeof(x->data)))return SF_INVALID;d->offset=off;return off;}
 long sf_ns_poll(SfNamespace*n,uint32_t owner,uint32_t h){SfDescription*d=description(n,owner,h);if(!d)return SF_STALE_HANDLE;SfNode*x=&n->nodes[d->node];unsigned mask=0;if(x->type==NODE_PIPE){if((d->mode&1)&&(x->size||!x->writers))mask|=1;if((d->mode&2)&&x->size<sizeof(x->data))mask|=2;if(!x->writers)mask|=4;}else{if(d->mode&1)mask|=1;if((d->mode&2)&&!x->readonly)mask|=2;}return mask;}
 long sf_ns_enumerate(SfNamespace*n,uint32_t owner,uint32_t h,char*out,size_t size){SfDescription*d=description(n,owner,h);if(!d)return SF_STALE_HANDLE;if(!(d->mode&1))return SF_DENIED;const char*p=n->nodes[d->node].path;if(n->nodes[d->node].type!=NODE_DIR)return SF_INVALID;size_t used=0,len=strlen(p);for(unsigned i=0;i<SF_NS_NODE_MAX;i++){const char*s=n->nodes[i].path;if(!n->nodes[i].type||!strcmp(p,s)||strlen(s)<=len)continue;const char*child;if(!strcmp(p,"/"))child=s+1;else{if(memcmp(p,s,len)||s[len]!='/')continue;child=s+len+1;}int nested=0;for(const char*c=child;*c;c++)if(*c=='/')nested=1;if(nested)continue;size_t k=strlen(child);if(k+1>size-used)return used? (long)used:SF_NO_SPACE;memcpy(out+used,child,k);out[used+k]='\n';used+=k+1;}return used;}
+/* Stateless directory cursor: callers pass the zero-based child index and get
+ * one NUL-terminated name (or 0 at the end). No server state is retained. */
+long sf_ns_enumerate_at(SfNamespace*n,uint32_t owner,uint32_t h,uint32_t index,char*out,size_t size){
+ SfDescription*d=description(n,owner,h);if(!d)return SF_STALE_HANDLE;if(!(d->mode&1))return SF_DENIED;
+ SfNode*self=&n->nodes[d->node];if(self->type!=NODE_DIR)return SF_INVALID;if(!out||!size)return SF_INVALID;
+ size_t len=strlen(self->path);unsigned seen=0;
+ for(unsigned i=0;i<SF_NS_NODE_MAX;i++){
+  const char*s=n->nodes[i].path;if(!n->nodes[i].type||!strcmp(self->path,s)||strlen(s)<=len)continue;
+  const char*child;if(!strcmp(self->path,"/"))child=s+1;else{if(memcmp(self->path,s,len)||s[len]!='/')continue;child=s+len+1;}
+  int nested=0;for(const char*c=child;*c;c++)if(*c=='/')nested=1;if(nested)continue;
+  if(seen++!=index)continue;
+  size_t k=strlen(child);if(k+1>size)return SF_NO_SPACE;
+  memcpy(out,child,k);out[k]=0;return(long)(k+1);
+ }
+ return 0;
+}
 void sf_ns_reap(SfNamespace*n,uint32_t owner){for(unsigned i=0;i<SF_NS_HANDLE_MAX;i++)if(n->handles[i].description&&n->handles[i].owner==owner)sf_ns_close(n,owner,(n->handles[i].generation<<8)|(i+1));}
 int sf_ns_unmount(SfNamespace*n,unsigned tag){if(!tag)return SF_INVALID;for(unsigned i=0;i<SF_NS_DESCRIPTION_MAX;i++)if(n->descriptions[i].refs&&n->nodes[n->descriptions[i].node].mount_tag==tag)return SF_BUSY;for(unsigned i=0;i<SF_NS_NODE_MAX;i++)if(n->nodes[i].mount_tag==tag){if(!strcmp(n->nodes[i].path,"/disk")){n->nodes[i].mount_tag=0;n->nodes[i].readonly=0;}else memset(&n->nodes[i],0,sizeof(n->nodes[i]));}return 0;}

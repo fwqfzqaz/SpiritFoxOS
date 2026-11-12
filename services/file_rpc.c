@@ -7,10 +7,10 @@ int64_t sf_file_dispatch_as(SfNamespace*ns,uint32_t owner,uint32_t*root,SfMessag
   * Reject aliases before conversion, mutation or root-handle bookkeeping. */
  if(m->handle>UINT32_MAX)switch(op){
   case OP_READ:case OP_WRITE:case OP_CLOSE:case OP_SEEK:case OP_POLL:
-  case OP_ENUMERATE:case OP_OPENAT:case OP_TRUNCATE:case OP_UNLINK:case OP_RMDIR:case OP_STAT:case OP_DUP:case OP_PREAD:
+  case OP_ENUMERATE:case OP_ENUMERATE_AT:case OP_OPENAT:case OP_TRUNCATE:case OP_UNLINK:case OP_RMDIR:case OP_STAT:case OP_DUP:case OP_PREAD:
    m->length=0;m->status=SF_STALE_HANDLE;return SF_STALE_HANDLE;
  }
- if((op==OP_READ||op==OP_WRITE||op==OP_ENUMERATE||op==OP_PREAD)&&m->length>sizeof(m->data)){
+ if((op==OP_READ||op==OP_WRITE||op==OP_ENUMERATE||op==OP_ENUMERATE_AT||op==OP_PREAD)&&m->length>sizeof(m->data)){
   m->length=0;m->status=SF_INVALID;return SF_INVALID;
  }
  switch(op){
@@ -43,6 +43,9 @@ int64_t sf_file_dispatch_as(SfNamespace*ns,uint32_t owner,uint32_t*root,SfMessag
  case OP_SEEK:status=sf_ns_seek(ns,owner,m->handle,m->offset);break;
  case OP_POLL:status=sf_ns_poll(ns,owner,m->handle);break;
  case OP_ENUMERATE:status=sf_ns_enumerate(ns,owner,m->handle,(char*)m->data,m->length);if(status>=0)m->length=status;break;
+ case OP_ENUMERATE_AT:
+  if(m->mode||!m->length||m->offset>SF_NS_NODE_MAX)break;
+  status=sf_ns_enumerate_at(ns,owner,m->handle,(uint32_t)m->offset,(char*)m->data,m->length);if(status>=0)m->length=status;break;
  }
  m->status=status;return status;
 }

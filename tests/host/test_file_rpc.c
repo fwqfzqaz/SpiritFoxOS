@@ -31,6 +31,16 @@ int main(void){
  request(OP_ENUMERATE,root,256);CHECK(sf_file_dispatch(&ns,42,&root,&guarded.m)==5);CHECK(guarded.m.length==5&&!memcmp(guarded.m.data,"item\n",5)&&guards());
  for(unsigned i=0;i<8;i++){char path[80];snprintf(path,sizeof(path),"/data/long-entry-%02u-abcdefghijklmnopqrstuvwx",i);CHECK(!sf_ns_create(&ns,path,NODE_FILE,0));}
  request(OP_ENUMERATE,root,256);long listed=sf_file_dispatch(&ns,42,&root,&guarded.m);CHECK(listed>200&&listed<=256);CHECK(guarded.m.length==(unsigned)listed&&guards());
+ request(OP_ENUMERATE_AT,root,256);guarded.m.offset=0;CHECK(sf_file_dispatch(&ns,42,&root,&guarded.m)==5);CHECK(guarded.m.length==5&&!memcmp(guarded.m.data,"item",5)&&guards());
+ request(OP_ENUMERATE_AT,root,256);guarded.m.offset=1;long one=sf_file_dispatch(&ns,42,&root,&guarded.m);CHECK(one>0&&guarded.m.length==(unsigned)one&&guarded.m.data[one-1]==0&&!memcmp(guarded.m.data,"long-entry-00-",14)&&guards());
+ request(OP_ENUMERATE_AT,root,256);guarded.m.offset=9;CHECK(!sf_file_dispatch(&ns,42,&root,&guarded.m)&&guarded.m.length==0&&guards());
+ request(OP_ENUMERATE_AT,root,1);guarded.m.offset=0;CHECK(sf_file_dispatch(&ns,42,&root,&guarded.m)==SF_NO_SPACE&&guarded.m.length==1&&guards());
+ request(OP_ENUMERATE_AT,root,256);guarded.m.offset=0;guarded.m.mode=1;snapshot=ns;CHECK(sf_file_dispatch(&ns,42,&root,&guarded.m)==SF_INVALID&&!memcmp(&ns,&snapshot,sizeof(ns))&&guards());
+ request(OP_ENUMERATE_AT,file,256);guarded.m.offset=0;CHECK(sf_file_dispatch(&ns,42,&root,&guarded.m)==SF_INVALID&&guards());
+ request(OP_ENUMERATE_AT,root,0);CHECK(sf_file_dispatch(&ns,42,&root,&guarded.m)==SF_INVALID&&guards());
+ request(OP_ENUMERATE_AT,root,256);guarded.m.offset=129;CHECK(sf_file_dispatch(&ns,42,&root,&guarded.m)==SF_INVALID&&guards());
+ request(OP_ENUMERATE_AT,root,256);guarded.m.offset=0x100000000ull;CHECK(sf_file_dispatch(&ns,42,&root,&guarded.m)==SF_INVALID&&guards());
+ request(OP_ENUMERATE_AT,root,256);guarded.m.offset=0;CHECK(sf_file_dispatch(&ns,99,&root,&guarded.m)==SF_STALE_HANDLE&&guards());
  request(OP_ROOT,0,0);CHECK(!sf_file_dispatch(&ns,42,&root,&guarded.m)&&guarded.m.handle==root);
  request(OP_READ,file,1);CHECK(sf_file_dispatch(&ns,99,&root,&guarded.m)==SF_STALE_HANDLE&&guards());
  request(OP_OPENAT,root,5);memcpy(guarded.m.data,"item",5);guarded.m.mode=OPEN_READ;CHECK(!sf_file_dispatch(&ns,42,&root,&guarded.m));int child=guarded.m.handle;CHECK(child>0&&guards());

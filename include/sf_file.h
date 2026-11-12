@@ -14,6 +14,7 @@ int64_t sf_file_read(SfFileClient*,uint64_t,void*,size_t);
 int64_t sf_file_pread(SfFileClient*,uint64_t,void*,size_t,uint64_t);
 int64_t sf_file_write(SfFileClient*,uint64_t,const void*,size_t);
 int64_t sf_file_enumerate(SfFileClient*,uint64_t,char*,size_t);
+int64_t sf_file_enumerate_at(SfFileClient*,uint64_t,uint32_t,char*,size_t);
 int64_t sf_file_stat(SfFileClient*,uint64_t,SfFileStat*);
 int64_t sf_file_seek(SfFileClient*,uint64_t,uint64_t);
 int64_t sf_file_poll(SfFileClient*,uint64_t);

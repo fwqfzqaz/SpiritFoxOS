@@ -80,7 +80,7 @@ static int64_t process_request(int64_t from,SfMessage*m){
  if(from!=1)r=SF_DENIED;
  else if(m->h.size!=40||m->h.protocol_major!=1||m->h.protocol_minor||
          m->h.flags!=1||m->h.payload_bytes!=sizeof(*m)-40||m->h.cap_count>(unsigned)attach)r=SF_INVALID;
- else if(m->h.opcode>=OP_NS_INIT&&m->h.opcode<=OP_NS_UNMOUNT)r=sf_nsv_dispatch(1,m);
+ else if(m->h.opcode>=OP_NS_INIT&&m->h.opcode<=OP_NS_ENUMERATE_AT)r=sf_nsv_dispatch(1,m);
  else r=disk_dispatch(m);
  if(m->h.cap_count==1&&(!attach||r))sf_cap_close(m->handle);
  m->status=r;m->h.cap_count=0;m->h.deadline_ns=0;return r;

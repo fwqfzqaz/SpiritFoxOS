@@ -36,6 +36,7 @@ int sf_nsc_truncate(SfNsClient*,uint32_t,uint64_t,uint64_t);
 int64_t sf_nsc_seek(SfNsClient*,uint32_t,uint64_t,uint64_t);
 int64_t sf_nsc_poll(SfNsClient*,uint32_t,uint64_t);
 int64_t sf_nsc_enumerate(SfNsClient*,uint32_t,uint64_t,char*,size_t);
+int64_t sf_nsc_enumerate_at(SfNsClient*,uint32_t,uint64_t,uint32_t,char*,size_t);
 int sf_nsc_handoff(SfNsClient*,uint32_t,uint64_t,uint32_t);
 int sf_nsc_reap(SfNsClient*,uint32_t);
 int sf_nsc_unmount(SfNsClient*,unsigned);

@@ -13,7 +13,7 @@ int64_t sf_emergency_console(SfEmergencyConsole*c,uint32_t*generation,uint32_t o
   c->owner=owner;c->handle=(++*generation<<8)|255u;m->handle=c->handle;status=0;goto done;
  }
  if(m->handle>UINT32_MAX||!c->handle||c->owner!=owner||m->handle!=c->handle){status=SF_STALE_HANDLE;goto done;}
- if(m->mode||(m->offset&&m->h.opcode!=OP_SEEK&&m->h.opcode!=OP_PREAD&&m->h.opcode!=OP_TRUNCATE))goto done;
+ if(m->mode||(m->offset&&m->h.opcode!=OP_SEEK&&m->h.opcode!=OP_PREAD&&m->h.opcode!=OP_TRUNCATE&&m->h.opcode!=OP_ENUMERATE_AT))goto done;
  switch(m->h.opcode){
  case OP_WRITE:
   status=write(m->data,length);if(status>(int64_t)length)status=SF_BAD_FORMAT;if(status>=0)m->length=length;break;
@@ -23,7 +23,7 @@ int64_t sf_emergency_console(SfEmergencyConsole*c,uint32_t*generation,uint32_t o
   if(length)break;SfFileStat info={32,NODE_CONSOLE,OPEN_WRITE,0,0,0};memcpy(m->data,&info,sizeof(info));m->length=sizeof(info);status=0;break;
  }
  case OP_POLL:if(!length)status=2;break;
- case OP_READ:case OP_PREAD:case OP_ENUMERATE:status=SF_DENIED;break;
+ case OP_READ:case OP_PREAD:case OP_ENUMERATE:case OP_ENUMERATE_AT:status=SF_DENIED;break;
  case OP_SEEK:status=SF_NOT_SEEKABLE;break;
  case OP_DUP:if(!length)status=SF_NO_SPACE;break;
  }

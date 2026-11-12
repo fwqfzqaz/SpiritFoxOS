@@ -49,6 +49,7 @@ int sf_ns_truncate(SfNamespace*,uint32_t,uint32_t,uint64_t);
 int64_t sf_ns_seek(SfNamespace*,uint32_t,uint32_t,uint64_t);
 long sf_ns_poll(SfNamespace*,uint32_t,uint32_t);
 long sf_ns_enumerate(SfNamespace*,uint32_t,uint32_t,char*,size_t);
+long sf_ns_enumerate_at(SfNamespace*,uint32_t,uint32_t,uint32_t,char*,size_t);
 void sf_ns_reap(SfNamespace*,uint32_t);
 int sf_ns_unmount(SfNamespace*,unsigned);
 #endif

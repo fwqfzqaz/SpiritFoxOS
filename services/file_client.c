@@ -59,6 +59,12 @@ int64_t sf_file_pread(SfFileClient*c,uint64_t h,void*out,size_t bytes,uint64_t o
  if(r)memcpy(out,m.data,r);return r;
 }
 int64_t sf_file_enumerate(SfFileClient*c,uint64_t h,char*out,size_t bytes){return read_data(c,h,out,bytes,OP_ENUMERATE);}
+int64_t sf_file_enumerate_at(SfFileClient*c,uint64_t h,uint32_t index,char*out,size_t bytes){
+ SfMessage m={0};if(!out||!bytes)return SF_INVALID;size_t n=bytes>sizeof(m.data)?sizeof(m.data):bytes;m.handle=h;m.offset=index;m.length=n;
+ int64_t r=exchange(c,&m,OP_ENUMERATE_AT,1);if(r<0)return r;
+ if((uint64_t)r>n||m.length!=(uint64_t)r||m.handle!=h||m.offset!=index||m.mode)return bad_reply(c);
+ if(r&&out[r-1])return bad_reply(c);if(r)memcpy(out,m.data,r);return r;
+}
 int64_t sf_file_write(SfFileClient*c,uint64_t h,const void*data,size_t bytes){
  SfMessage m={0};if(bytes&&!data)return SF_INVALID;size_t n=bytes>sizeof(m.data)?sizeof(m.data):bytes;m.handle=h;m.length=n;if(n)memcpy(m.data,data,n);
  int64_t r=exchange(c,&m,OP_WRITE,1);if(r>=0&&(uint64_t)r>n)return bad_reply(c);return r;

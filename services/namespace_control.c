@@ -115,6 +115,10 @@ static int64_t dispatch(SfNsControl*s,SfMessage*m){
   else if(m->h.opcode==OP_NS_PREAD)n=sf_ns_pread(s->ns,owner,h,m->data,m->length,m->offset);
   else n=sf_ns_enumerate(s->ns,owner,h,(char*)m->data,m->length);
   if(n<0)return n;m->length=(uint32_t)n;return (int64_t)n;
+ case OP_NS_ENUMERATE_AT:
+  if(m->offset>SF_NS_NODE_MAX)return SF_INVALID;
+  n=sf_ns_enumerate_at(s->ns,owner,h,(uint32_t)m->offset,(char*)m->data,m->length);
+  if(n<0)return n;m->length=(uint32_t)n;return (int64_t)n;
  case OP_NS_WRITE:
   if(m->offset)return SF_INVALID;return (int64_t)sf_ns_write(s->ns,owner,h,m->data,m->length);
  case OP_NS_STAT:{
@@ -144,6 +148,6 @@ int64_t sf_nsr_dispatch(SfNsControl*s,uint32_t caller,SfMessage*m){
    m->h.payload_bytes!=sizeof(*m)-40||m->h.cap_count||!m->h.request_id||m->status||m->length>sizeof(m->data))r=SF_INVALID;
  else r=dispatch(s,m);
  unsigned op=m->h.opcode;
- if(r<0||(op!=OP_NS_READ&&op!=OP_NS_PREAD&&op!=OP_NS_ENUMERATE&&op!=OP_NS_STAT))m->length=0;
+ if(r<0||(op!=OP_NS_READ&&op!=OP_NS_PREAD&&op!=OP_NS_ENUMERATE&&op!=OP_NS_ENUMERATE_AT&&op!=OP_NS_STAT))m->length=0;
  m->status=r;return r;
 }

@@ -57,6 +57,7 @@ int sf_ns_truncate(SfNamespace*n,uint32_t owner,uint32_t h,uint64_t bytes){retur
 int64_t sf_ns_seek(SfNamespace*n,uint32_t owner,uint32_t h,uint64_t offset){return sf_nsc_seek(&n->client,owner,h,offset);}
 long sf_ns_poll(SfNamespace*n,uint32_t owner,uint32_t h){return(long)sf_nsc_poll(&n->client,owner,h);}
 long sf_ns_enumerate(SfNamespace*n,uint32_t owner,uint32_t h,char*out,size_t bytes){return(long)sf_nsc_enumerate(&n->client,owner,h,out,bytes);}
+long sf_ns_enumerate_at(SfNamespace*n,uint32_t owner,uint32_t h,uint32_t index,char*out,size_t bytes){return(long)sf_nsc_enumerate_at(&n->client,owner,h,index,out,bytes);}
 void sf_ns_reap(SfNamespace*n,uint32_t owner){sf_nsc_reap(&n->client,owner);}
 int sf_ns_handoff(SfNamespace*n,uint32_t owner,uint32_t h,uint32_t next){return sf_nsc_handoff(&n->client,owner,h,next);}
 int sf_ns_unmount(SfNamespace*n,unsigned tag){return sf_nsc_unmount(&n->client,tag);}

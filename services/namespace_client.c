@@ -19,7 +19,7 @@ static int64_t call(SfNsClient*c,SfMessage*m){
  if(op!=OP_NS_OPEN&&op!=OP_NS_OPENAT&&op!=OP_NS_DUP&&m->handle!=oldhandle)return bad(c);
  if(m->status<0){if(m->length||m->status<INT32_MIN)return bad(c);return m->status;}
  switch(op){
- case OP_NS_READ:case OP_NS_PREAD:case OP_NS_ENUMERATE:
+ case OP_NS_READ:case OP_NS_PREAD:case OP_NS_ENUMERATE:case OP_NS_ENUMERATE_AT:
   if((uint64_t)m->status>wanted||m->length!=(uint64_t)m->status)return bad(c);break;
  case OP_NS_WRITE:
   if((uint64_t)m->status>wanted||m->length)return bad(c);break;
@@ -109,6 +109,7 @@ int64_t sf_nsc_read(SfNsClient*c,uint32_t owner,uint64_t h,void*out,size_t bytes
  return read(c,positional?OP_NS_PREAD:OP_NS_READ,owner,h,out,bytes,positional?offset:0);
 }
 int64_t sf_nsc_enumerate(SfNsClient*c,uint32_t owner,uint64_t h,char*out,size_t bytes){return read(c,OP_NS_ENUMERATE,owner,h,out,bytes,0);}
+int64_t sf_nsc_enumerate_at(SfNsClient*c,uint32_t owner,uint64_t h,uint32_t index,char*out,size_t bytes){return read(c,OP_NS_ENUMERATE_AT,owner,h,out,bytes,index);}
 int64_t sf_nsc_write(SfNsClient*c,uint32_t owner,uint64_t h,const void*data,size_t bytes){
  if(!data||bytes>sizeof(((SfMessage*)0)->data))return SF_INVALID;
  SfMessage m;int r=handle_message(c,&m,OP_NS_WRITE,owner,h);if(r)return r;

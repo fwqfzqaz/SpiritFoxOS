@@ -120,6 +120,7 @@ sf-init 在创建进程前验证目录、保留打开描述和挂载引用；包
 | `OP_ROOT (20)` | 无额外字段 | status=0，handle 为显式授予的目录；未授予或已关闭返回 SF_DENIED |
 | `OP_OPENAT (19)` | handle=本进程目录；data=相对 UTF-8 路径；length 包含唯一末尾 NUL；mode=打开模式 | status=0，handle=新的进程内句柄 |
 | `OP_ENUMERATE (18)` | handle=可读目录；length=输出容量，最多 256 | status 与 length 为实际字节数，data 为直接子节点名称，每项以换行结束 |
+| `OP_ENUMERATE_AT (27)` | handle=可读目录；offset=零基子项序号；length=输出容量 | status 与 length 为单个名称字节数（含末尾 NUL），0 表示目录结束；容量不足返回 SF_NO_SPACE |
 | `OP_STAT (23)` | handle=本进程有效句柄；length=0 | status=0，length=32，data为下述固定元数据；handle不变，错误length=0 |
 | `OP_RMDIR (24)` | handle=可写目录；data=规范相对路径；length含唯一末尾NUL | status=0并保留目录handle；仅回收无引用、无后代的未挂载RAM目录 |
 | `OP_UNLINK (22)` | handle=可写目录；data=规范相对路径；length 包含唯一末尾 NUL | status=0，保留原目录 handle；仅删除无打开引用的 RAM 普通文件 |
@@ -157,11 +158,11 @@ sf-init 在创建进程前验证目录、保留打开描述和挂载引用；包
 
 ### 文件 RPC 的数据边界
 
-内核 SYS_SEND 原有检查已经拒绝 length>4096，消息不会进入服务队列。服务现在另用 sf_file_dispatch 独立检查 OP_READ、OP_WRITE、OP_ENUMERATE 的长度；超过 SfMessage.data 时返回 SF_INVALID、响应 length=0，且不调用后端，不改变文件偏移、节点、目录根或控制台状态。内部直接调用必须遵守同一边界。
+内核 SYS_SEND 原有检查已经拒绝 length>4096，消息不会进入服务队列。服务现在另用 sf_file_dispatch 独立检查 OP_READ、OP_WRITE、OP_ENUMERATE、OP_ENUMERATE_AT 的长度；超过 SfMessage.data 时返回 SF_INVALID、响应 length=0，且不调用后端，不改变文件偏移、节点、目录根或控制台状态。目录游标另限制 offset 不超过节点容量（128），越界序号返回 SF_INVALID。内部直接调用必须遵守同一边界。
 
 OP_OPEN/OP_OPENAT 保持有界完整 NUL 字符串规则；合法读写最多 4096 字节，枚举允许返回不超过请求容量的完整条目。关闭委派根不会撤销已独立打开的子文件，进程回收仍关闭所有引用。协议代码在 services/file_rpc.c，与消息接收、发送和 Child 身份查找分开；这没有新增能力转移或通用服务并发路由。
 
-353 项宿主检查直接调用产品分发器，包含跨消息数据区的保护字节、最大长度、失败前置拒绝、偏移与节点字节保持、只读授权和根关闭。旧分发器宿主基线绕过了内核传输约束，其失败只证明服务自身缺少独立检查。真实 rpcprobe.sfk 检查 SYS_SEND 拒绝四种超长尺寸，再完成正常读写，避免把已由内核阻断的请求描述成曾能到达服务的漏洞。
+364 项宿主检查直接调用产品分发器，包含跨消息数据区的保护字节、最大长度、失败前置拒绝、目录游标序号/容量/类型边界、偏移与节点字节保持、只读授权和根关闭。旧分发器宿主基线绕过了内核传输约束，其失败只证明服务自身缺少独立检查。真实 rpcprobe.sfk 检查 SYS_SEND 拒绝四种超长尺寸，再完成正常读写，避免把已由内核阻断的请求描述成曾能到达服务的漏洞。
 
 ### 当前请求与回复通道
 

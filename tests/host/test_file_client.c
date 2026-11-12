@@ -85,7 +85,14 @@ int main(void){
  CHECK(!sf_file_stat(&c,root,&info)&&info.type==SF_TYPE_DIRECTORY&&info.mode==(SF_OPEN_READ|SF_OPEN_DIRECTORY));
  int64_t file=sf_file_openat(&c,root,"notes",SF_OPEN_READ);CHECK(file>0);CHECK(sf_file_read(&c,file,buffer,sizeof(buffer))==5&&!memcmp(buffer,"hello",5));CHECK(!sf_file_stat(&c,file,&info)&&info.offset==5&&info.size==5);
  CHECK(sf_file_seek(&c,file,2)==2);CHECK(sf_file_read(&c,file,buffer,10)==3&&!memcmp(buffer,"llo",3));CHECK(sf_file_write(&c,file,0,0)==SF_DENIED);CHECK(sf_file_truncate(&c,file,0)==SF_DENIED);CHECK(sf_file_unlink(&c,root,"notes")==SF_DENIED);CHECK(sf_file_rmdir(&c,root,"empty")==SF_DENIED);CHECK(sf_file_openat(&c,root,"notes",SF_OPEN_WRITE)==SF_DENIED);
- CHECK(sf_file_enumerate(&c,root,(char*)buffer,sizeof(buffer))==6&&!memcmp(buffer,"notes\n",6));int64_t output=sf_file_console(&c);CHECK(output>0);console_bytes=0;CHECK(sf_file_write(&c,output,buffer,sizeof(buffer))==SF_MSG_BYTES&&console_bytes==SF_MSG_BYTES);CHECK(!sf_file_close(&c,output));
+ CHECK(sf_file_enumerate(&c,root,(char*)buffer,sizeof(buffer))==6&&!memcmp(buffer,"notes\n",6));
+ char name[16];CHECK(sf_file_enumerate_at(&c,root,0,name,sizeof(name))==6&&!memcmp(name,"notes",6));
+ CHECK(sf_file_enumerate_at(&c,root,1,name,sizeof(name))==0);
+ CHECK(sf_file_enumerate_at(&c,root,0,name,1)==SF_NO_SPACE);
+ CHECK(sf_file_enumerate_at(&c,root,0,name,0)==SF_INVALID);
+ CHECK(sf_file_enumerate_at(&c,root,UINT32_MAX,name,sizeof(name))==SF_INVALID);
+ CHECK(sf_file_enumerate_at(&c,file,0,name,sizeof(name))==SF_INVALID);
+ int64_t output=sf_file_console(&c);CHECK(output>0);console_bytes=0;CHECK(sf_file_write(&c,output,buffer,sizeof(buffer))==SF_MSG_BYTES&&console_bytes==SF_MSG_BYTES);CHECK(!sf_file_close(&c,output));
  CHECK(!sf_file_close(&c,root)&&!real_root);CHECK(sf_file_root(&c)==SF_DENIED);CHECK(!sf_file_stat(&c,file,&info)&&info.offset==5);CHECK(!sf_file_close(&c,file));memset(&info,0xa5,sizeof(info));info_copy=info;CHECK(sf_file_stat(&c,file,&info)==SF_STALE_HANDLE&&!memcmp(&info,&info_copy,sizeof(info)));
  real_root=sf_ns_open(&real_namespace,42,"/","/cap",OPEN_READ|OPEN_WRITE|OPEN_DIRECTORY);CHECK(real_root>0);CHECK(!sf_ns_create(&real_namespace,"/cap/empty",NODE_DIR,0));CHECK(!sf_file_rmdir(&c,real_root,"empty"));CHECK(sf_ns_open(&real_namespace,42,"/","/cap/empty",OPEN_READ)==SF_NOT_FOUND);CHECK(!sf_file_unlink(&c,real_root,"notes"));CHECK(sf_file_openat(&c,real_root,"notes",SF_OPEN_READ)==SF_NOT_FOUND);CHECK(!sf_file_close(&c,real_root));sf_ns_reap(&real_namespace,42);for(unsigned i=0;i<32;i++)CHECK(!real_namespace.descriptions[i].refs);
  reset();c=client();sf_file_sequence=UINT64_MAX-1;CHECK(sf_file_root(&c)==0x201&&sent.h.request_id==UINT64_MAX);before=calls;CHECK(sf_file_root(&c)==SF_NO_SPACE&&calls==before);CHECK(!sf_file_client_init(&c,0x101,0x102,3000));CHECK(sf_file_root(&c)==SF_NO_SPACE&&calls==before);
