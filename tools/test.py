@@ -20,12 +20,13 @@ if not args.skip_build:
     # Keep Crypto()/sfcrypto.dll out of this long-lived parent process: on
     # Windows a loaded DLL blocks the trust-policy tests from rebuilding it.
     subprocess.run([sys.executable, str(ROOT / 'tools' / 'build.py')], check=True)
-def host_test(name,*sources,no_unused=False):
+def host_test(name,*sources,no_unused=False,include_services=False):
     flags=['-target',build.HOST,'-g0','-O2','-Wall','-Wextra','-Werror','-DSF_HOST_TEST']
     if no_unused: flags.append('-Wno-unused-parameter')
+    if include_services: flags.append('-Iservices')
     # 追加 Rust 宿主静态库：argparse/net_proto/sha256/sched_policy 已迁入
     # rust/sfcore，链接器只拉取本测试实际引用的成员。
-    build.run([*flags,'-Iinclude','-Ivendor/monocypher',*sources,build.rust_lib('host'),'-o','build/'+name+build.EXE])
+    build.run([*flags,'-Iinclude','-Ibuild','-Ivendor/monocypher',*sources,build.rust_lib('host'),'-o','build/'+name+build.EXE])
     subprocess.run([str(ROOT/('build/'+name+build.EXE))],check=True)
 
 # 参数打包与拆分：services/argparse.c → rust/sfcore/src/argparse.rs
@@ -50,6 +51,16 @@ host_test('test_lifecycle_rpc','tests/host/test_lifecycle_rpc.c','services/manag
 host_test('test_services','tests/host/test_services.c','services/manager.c','services/namespace.c')
 host_test('test_openat','tests/host/test_openat.c','services/namespace.c')
 host_test('test_ns_identity','tests/host/test_ns_identity.c','services/namespace.c')
+host_test('test_ns_default','tests/host/test_ns_default.c','services/namespace.c')
+host_test('test_ns_mount','tests/host/test_ns_mount.c','services/namespace.c')
+host_test('test_namespace_handles','tests/host/test_namespace_handles.c','services/namespace_handles.c')
+host_test('test_namespace_restart','tests/host/test_namespace_restart.c','services/namespace_handles.c','services/namespace.c')
+host_test('test_namespace_control','tests/host/test_namespace_control.c','services/namespace_client.c','services/namespace_handles.c','services/namespace_control.c','services/namespace.c',include_services=True)
+host_test('test_namespace_frontend','tests/host/test_namespace_frontend.c','services/namespace_client.c','services/namespace_handles.c','services/namespace_frontend.c',include_services=True)
+host_test('test_namespace_runtime','tests/host/test_namespace_runtime.c','services/namespace_client.c','services/namespace_handles.c','services/namespace_runtime.c','services/namespace_control.c','services/namespace.c',include_services=True)
+host_test('test_namespace_process','tests/host/test_namespace_process.c','services/namespace_client.c','services/namespace_handles.c','services/namespace_runtime.c','services/namespace_control.c','services/namespace.c','services/fs_format.c','services/readfs.c',*build.CRYPTO,include_services=True)
+host_test('test_namespace_transport','tests/host/test_namespace_transport.c','services/namespace_transport.c',include_services=True)
+host_test('test_emergency_console','tests/host/test_emergency_console.c','services/emergency_console.c',include_services=True)
 host_test('test_accounts','tests/host/test_accounts.c','services/accounts.c')
 host_test('test_sessions','tests/host/test_sessions.c','services/session.c','services/accounts.c')
 host_test('test_file_client','tests/host/test_file_client.c','services/namespace.c','services/file_rpc.c')
@@ -60,12 +71,14 @@ host_test('test_rmdir','tests/host/test_rmdir.c','services/namespace.c','service
 host_test('test_unlink','tests/host/test_unlink.c','services/namespace.c','services/file_rpc.c')
 host_test('test_truncate','tests/host/test_truncate.c','services/namespace.c')
 host_test('test_projection','tests/host/test_projection.c','services/namespace.c')
+host_test('test_projection_width','tests/host/test_projection_width.c','services/namespace.c','services/file_rpc.c')
 # 事务与 SHA-256：services/sha256.c → rust/sfcore/src/sha256.rs
 host_test('test_resize_txn','tests/host/test_resize_txn.c','services/txn.c',no_unused=True)
 host_test('test_storage','tests/host/test_storage.c','services/namespace.c',no_unused=True)
 host_test('test_txn','tests/host/test_txn.c','services/txn.c',no_unused=True)
 host_test('test_txn_compat','tests/host/test_txn_compat.c','services/txn.c',no_unused=True)
 host_test('test_update','tests/host/test_update.c','services/update.c','services/txn.c',no_unused=True)
+host_test('test_persist_metadata','tests/host/test_persist_metadata.c','tests/host/persist_volume_fixture.c','services/persist_metadata.c','services/namespace.c','services/txn.c','services/update.c','services/version.c',*build.CRYPTO,no_unused=True)
 host_test('test_version','tests/host/test_version.c','services/version.c')
 # 网络帧逻辑：services/net_proto.c → rust/sfcore/src/net.rs
 host_test('test_net','tests/host/test_net.c')
@@ -88,6 +101,9 @@ subprocess.run([sys.executable,'tests/integration/test_manifest_profile.py'],che
 manifest_schema_sha256 = hashlib.sha256((ROOT/'schemas/native-source-v1.schema.json').read_bytes()).hexdigest()
 subprocess.run([sys.executable,'tests/integration/test_abi_snapshot.py'],check=True)
 subprocess.run([sys.executable,'tests/integration/test_rust_archive.py'],check=True)
+subprocess.run([sys.executable,'tests/integration/test_poll_deadline.py'],check=True)
+subprocess.run([sys.executable,'tests/integration/test_namespace_boundary.py'],check=True)
+subprocess.run([sys.executable,'tests/integration/test_namespace_ownership.py'],check=True)
 abi_reference_sha256 = hashlib.sha256((ROOT/'abi/x86_64-current.json').read_bytes()).hexdigest()
 abi_capture_sha256 = hashlib.sha256((ROOT/'build/abi-current.json').read_bytes()).hexdigest()
 if not args.host_only:
@@ -121,6 +137,8 @@ if not args.host_only:
     for case in ['missing', 'badheader', 'badhash', 'badsignature', 'writable', 'ioerror']:
         subprocess.run([sys.executable, 'tests/qemu/qemu_test.py', '--storage', case], check=True)
     subprocess.run([sys.executable, 'tests/qemu/qemu_persist_test.py'], check=True)
+    subprocess.run([sys.executable, 'tests/qemu/qemu_persist_metadata_test.py'], check=True)
+    subprocess.run([sys.executable, 'tests/qemu/qemu_namespace_recovery_test.py'], check=True)
     subprocess.run([sys.executable, 'tests/qemu/qemu_net_test.py'], check=True)
     subprocess.run([sys.executable, 'tests/qemu/qemu_net_test.py', '--disk'], check=True)
     # 类 niri 合成器：framebuffer 映射、布局与串口输入转发。
@@ -154,7 +172,7 @@ result['manifest_source_profile'] = 'native-source-v1'
 result['manifest_profile_host_tests'] = 12
 result['manifest_schema_sha256'] = manifest_schema_sha256
 result['abi_snapshot_host_tests'] = 9
-result['abi_snapshot_entries'] = 600
+result['abi_snapshot_entries'] = 646
 result['abi_reference_sha256'] = abi_reference_sha256
 result['abi_capture_sha256'] = abi_capture_sha256
 result['posix_qemu'] = not args.host_only
@@ -163,6 +181,26 @@ result['net_qemu'] = not args.host_only
 result['net_qemu_boots'] = 0 if args.host_only else 2
 result['memory_host_assertions'] = 42
 result['openat_host_assertions'] = 108
+result['namespace_mount_host_assertions'] = 256
+result['namespace_opaque_host_assertions'] = 22
+result['namespace_boundary_host_groups'] = 7
+result['namespace_handle_map_host_assertions'] = 502975
+result['namespace_restart_host_assertions'] = 24996
+result['namespace_rpc_host_assertions'] = [5506,30,29,2638,48065]
+result['namespace_rpc_host_groups'] = 5
+result['emergency_console_host_assertions'] = 33016
+result['namespace_ownership_host_tests'] = 4
+result['namespace_ownership'] = json.loads((ROOT/'build/namespace-ownership.json').read_text(encoding='utf-8'))
+result['namespace_recovery_qemu'] = not args.host_only
+result['namespace_recovery_qemu_boots'] = 0 if args.host_only else 2
+result['namespace_recovery_qemu_deaths'] = 0 if args.host_only else 6
+result['persist_metadata_host_assertions'] = 13867
+result['persist_metadata_qemu'] = not args.host_only
+result['persist_metadata_qemu_boots'] = 0 if args.host_only else 2
+result['projection_width_host_assertions'] = 9130
+result['projection_sdk_qemu'] = not args.host_only
+result['projection_sdk_qemu_boots'] = 0 if args.host_only else 2
+result['host_poll_deadline_host_tests'] = 8
 result['openat_qemu'] = not args.host_only
 result['truncate_host_assertions'] = 83
 result['resize_fault_scenarios'] = 4*261*3

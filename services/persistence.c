@@ -81,6 +81,16 @@ int persist_mount(uint64_t*notes){
  sf_log("PERSIST READY generation=");sf_number(volume.generation);sf_log("\n");return 0;
 }
 int persist_volume_ready(void){return volume.ready&&sf_storage_writable();}
+int persist_notes_size(uint64_t*out){
+ if(!out)return SF_INVALID;
+ if(!persist_volume_ready())return SF_DEVICE_GONE;
+ /* The verified mounted table is authoritative. Do not remount (which may
+  * roll back TRYING), touch export/staging caches, or issue block I/O. */
+ for(unsigned i=0;i<SF_TXN_FILES;i++)if(!strcmp(volume.files[i].path,"/notes/user")){
+  *out=volume.files[i].bytes;return 0;
+ }
+ *out=0;return 0;
+}
 int persist_stage(uint64_t offset,const void*data,size_t bytes){
  if(offset>sizeof(stage)||bytes>sizeof(stage)-offset)return SF_NO_SPACE;
  if(offset==0)stage_bytes=0;memcpy(stage+offset,data,bytes);

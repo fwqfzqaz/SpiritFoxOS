@@ -32,6 +32,8 @@ sf-init 枚举 PCI 总线 0，Core 0 再核对设备身份和 BAR。legacy 驱�
 
 ## 文件系统服务（sf-fs.sfmod）
 
+2026-11-10：`/disk` 投影先在有界声明数组中收集全部目录与文件，最后由命名空间一次发布。条目读取失败、路径冲突或容量不足时保留原命名空间，不再逐项创建后按共享 mount tag 清理。只读投影、挂载租约和 sf-fs 的进程归属保持，具体边界见 [NAMESPACE](NAMESPACE.md)。
+
 磁盘格式层与文件服务运行在独立 ring-3 地址空间 `org.spiritfox.fs.disk`。它不直接持有 virtio-blk 端点：`sf-init` 仍是驱动回复的唯一接收方，`sf-fs` 通过 `OP_FS_BLOCK_READ` 请求 256 字节半块，由 init 的 `serve_once` 与 `fs_wait_reply` 内的块代理执行。这样避免两个进程并发接收同一驱动端点，持久化拆分后的回复路由保持不变。
 
 | 操作 | 请求 | 成功回复 |

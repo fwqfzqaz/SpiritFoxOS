@@ -20,6 +20,25 @@ if result.get('ipc_cancel_host_checks') != 25776 or result.get('ipc_cancel_qemu'
     raise SystemExit('Run authenticated pending send withdrawal, FIFO/width/delivery bounds and production queue VM regressions before packaging')
 if result.get('openat_host_assertions') != 108 or result.get('openat_qemu') is not True:
     raise SystemExit('Run the directory capability host and VM regressions before packaging')
+if result.get('namespace_mount_host_assertions') != 256:
+    raise SystemExit('Run atomic namespace mount publication and trusted handle handoff regressions before packaging')
+if result.get('namespace_opaque_host_assertions') != 22 or result.get('namespace_boundary_host_groups') != 7:
+    raise SystemExit('Run opaque namespace client and real compile-boundary regressions before packaging')
+if result.get('namespace_handle_map_host_assertions') != 502975 or result.get('namespace_restart_host_assertions') != 24996:
+    raise SystemExit('Run namespace client-generation and actual namespace restart regressions before packaging')
+if result.get('namespace_rpc_host_assertions') != [5506,30,29,2638,48065] or result.get('namespace_rpc_host_groups') != 5 or not result.get('namespace_recovery_qemu') or result.get('namespace_recovery_qemu_boots') != 2 or result.get('namespace_recovery_qemu_deaths') != 6:
+    raise SystemExit('Run trusted namespace transport/control, real Fs incarnation loss, dirty drain, stale app/Root and TRYING preservation regressions before packaging')
+ownership=result.get('namespace_ownership',{})
+if result.get('emergency_console_host_assertions') != 33016:
+    raise SystemExit('Run bounded emergency console SDK/ownership/generation regressions before packaging')
+if result.get('namespace_ownership_host_tests') != 4 or ownership.get('passed') is not True or ownership.get('root_has_namespace_tables') is not False or ownership.get('root_has_transaction_state') is not False:
+    raise SystemExit('Verify actual linked ELF namespace/transaction state ownership before packaging')
+if result.get('persist_metadata_host_assertions') != 13867 or result.get('persist_metadata_qemu') is not True or result.get('persist_metadata_qemu_boots') != 2:
+    raise SystemExit('Run read-only TRYING metadata/reprojection and real persistence IPC regressions before packaging')
+if result.get('projection_width_host_assertions') != 9130 or result.get('projection_sdk_qemu') is not True or result.get('projection_sdk_qemu_boots') != 2:
+    raise SystemExit('Run projection metadata/full-width seek host and both transport SDK regressions before packaging')
+if result.get('host_poll_deadline_host_tests') != 8:
+    raise SystemExit('Run paused-host polling budgets and silent-guest rejection regressions before packaging')
 if result.get('truncate_host_assertions') != 83 or result.get('resize_fault_scenarios') != 3132 or result.get('truncate_qemu') is not True:
     raise SystemExit('Run truncate/zero-extension fault and VM regressions before packaging')
 if result.get('trust_policy_host') is not True or result.get('trust_policy_host_groups') != 7 or result.get('separate_signing_keys') is not True or result.get('trust_policy_qemu') is not True or result.get('trust_policy_qemu_boots') != 14:
@@ -79,7 +98,7 @@ if result.get('manifest_schema_sha256') != hashlib.sha256(schema_path.read_bytes
     raise SystemExit('Manifest schema changed since source validation')
 abi_reference = ROOT/'abi/x86_64-current.json'
 abi_capture = BUILD/'abi-current.json'
-if result.get('abi_snapshot_host_tests') != 9 or result.get('abi_snapshot_entries') != 600:
+if result.get('abi_snapshot_host_tests') != 9 or result.get('abi_snapshot_entries') != 646:
     raise SystemExit('Run compiled ABI capture, offline comparison and header-drift regressions before packaging')
 if result.get('ipc_copy_host_checks') != 10041 or result.get('ipc_stats_control_host_checks') != 6001 or result.get('ipc_copy_profile') != 'successful-user-copy-bytes-v1' or not result.get('ipc_stats_qemu') or result.get('ipc_stats_qemu_boots') != 2:
     raise SystemExit('Run actual IPC copy event/control oracles and both production stats VM transports before packaging')

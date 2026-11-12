@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include "namespace.h"
 #include "virtio.h"
+#include "../../services/namespace_state.h"
 static SfNamespace ns;static unsigned leases,count;static int admission=1;
 #define CHECK(x) do{count++;if(!(x)){printf("FAIL storage line %d: %s\n",__LINE__,#x);return 1;}}while(0)
 static int mount_open(unsigned tag){if(tag!=1)return SF_INVALID;if(!admission)return SF_DRAINING;leases++;return 0;}

@@ -1,8 +1,8 @@
 #include "file_rpc.h"
-long sf_file_dispatch(SfNamespace*ns,uint32_t owner,uint32_t*root,SfMessage*m){return sf_file_dispatch_as(ns,owner,root,m,0,0);}
-long sf_file_dispatch_as(SfNamespace*ns,uint32_t owner,uint32_t*root,SfMessage*m,uint32_t uid,uint32_t gid){
+int64_t sf_file_dispatch(SfNamespace*ns,uint32_t owner,uint32_t*root,SfMessage*m){return sf_file_dispatch_as(ns,owner,root,m,0,0);}
+int64_t sf_file_dispatch_as(SfNamespace*ns,uint32_t owner,uint32_t*root,SfMessage*m,uint32_t uid,uint32_t gid){
  if(!ns||!root||!m)return SF_INVALID;
- unsigned op=m->h.opcode;long status=SF_INVALID;
+ unsigned op=m->h.opcode;int64_t status=SF_INVALID;
  /* Wire storage is 64-bit, namespace handles are canonical 32-bit values.
   * Reject aliases before conversion, mutation or root-handle bookkeeping. */
  if(m->handle>UINT32_MAX)switch(op){

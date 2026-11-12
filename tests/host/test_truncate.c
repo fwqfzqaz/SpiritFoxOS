@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include "namespace.h"
+#include "../../services/namespace_state.h"
 static SfNamespace ns;static unsigned checks,calls;static int failure;static uint8_t disk[16384];static unsigned disk_size;
 #define CHECK(x) do{checks++;if(!(x)){printf("TRUNCATE FAIL line %d: %s\n",__LINE__,#x);return 1;}}while(0)
 static int resize(unsigned index,uint64_t size){calls++;if(index!=7)return SF_INVALID;if(failure)return failure;if(size>sizeof(disk))return SF_NO_SPACE;unsigned start=size<disk_size?size:disk_size;memset(disk+start,0,sizeof(disk)-start);disk_size=size;return 0;}

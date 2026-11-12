@@ -1,6 +1,104 @@
 # SpiritFoxOS 实施进度
 
-更新日期：2026-11-08（Asia/Shanghai）。
+更新日期：2026-11-12（Asia/Shanghai）。
+
+## P0 跨进程命名空间与显式恢复（本地完整通过）
+
+目录、RAMFS、路径解析、服务端句柄与磁盘投影现驻留独立 Fs。Root 通过认证、有界的
+控制通道、128 槽 generation 映射与后端回调访问；事务卷与更新状态机继续只在 Persist。
+磁盘卸载保留 Fs 与 RAM/管道，显式恢复先确认旧进程死亡，再清理已记账描述并重建易失树。
+账户、会话、信任与持久化 TRYING 保持；易失 RAM 内容不跨 Fs 死亡保留，应用旧引用失效。
+
+Root 持久化客户端包围实际 DIRTY 事务，未知完成保留 DIRTY 并失败关闭，不能自动重试
+写入或重新运行包。一般持久化服务恢复仍属 P1。Fs 离线时 shell 保持，bundle 的
+`/dev/console` 可使用绑定实际 PID、单个只写句柄和有界输出的 Root 应急控制台；它不授予
+目录、读取或复制能力，普通账户管理门保持。
+
+含初始构建、源码冻结的完整 `tools/test.py` 通过（3400.97 秒、退出码 0），保留全部
+既有宿主、集成与真实访客门禁。新五组生产宿主分别为 5506/30/29/2638/48065 项，
+持久化与 DIRTY 13867 项、应急控制台实际 SDK 33016 项，ABI 九组与 ELF 归属四组通过。
+专项 293.79 秒、8 VM；完整套件同样覆盖两种传输、六次真实 Fs 死亡，旧 Root/应用引用、
+DIRTY 排空拒绝、TRYING 全事务区/包/撤销字节保持、账户/会话、降级 shell/bundle 和恢复。
+
+ABI 只明确新增 44 个私有控制/回调常量，旧 602 项无删改，当前 646 项；参考与采集摘要
+均为 8524e87e35c9c5e3c29ae9b0b652a75333bafeb7dd0508d164b5754ea7cfba74。
+ABI 三种真实编译漂移负例保留。七项运行产物与结果逐一相符，默认三密钥保持。
+实际 ELF：Root RW 1454200 字节（迁移前 1602928），Fs RW 1222640，Fs 页对齐装载
+1257472，低于 1280 KiB 暂存上限；Root 不包含命名空间表、磁盘解析或事务引擎。
+
+完整证明 `.cache/namespace-rpc-full-proof-20261112.json`，结果
+`build/namespace-rpc-verified-test-results-20261112.json`，日志
+`build/namespace-rpc-full-20261112.log`。发布门与实际 ZIP 离线检查另存
+`.cache/namespace-rpc-release-proof-20261112.json`；新 head 的 Windows/Linux 托管检查
+独立核对，不能沿用 4ce3c44 的四项绿色。该切片不代表 P0 或整个操作系统完成；后续继续
+账户/会话与应用装载策略分层、P1 可靠性和路线图剩余项，保留作者 M7。
+
+## P0 迁移前置：持久化元数据与无恢复副作用重投影（本地完整通过）
+
+从已推送 `7c2e520` 接续。新增只读 OP_PERSIST_NOTES_SIZE=103，查询已在线卷的笔记大小；
+真实接收发送者和完整回复格式独立校验。空命名空间重投影不重复 MOUNT、不同步信任或提交
+回退；`persist` 原管理诊断额外显示 RPC 元数据。当前仍未把目录/RAMFS 迁到独立 Fs。
+
+13847 项实际事务/持久化与客户端/服务端宿主检查已过：用签名包进入真实 TRYING，验证卷、
+银行字节、generation、暂存/导出缓存与撤销集合保持，旧 MOUNT 的对照确实回退 TRYING；
+一千次空树发布、占用拒绝和坏头部/发送者/能力/长度拒绝保留状态。含初始构建专项已通过
+（92.39 秒）：9 组 ABI、legacy/modern 两次真实访客，覆盖 PENDING/STABLE 长度、撤销、
+离线与重挂载，逐字节比较只读查询不改盘；TRYING 仍是宿主证据。含初始构建的完整
+`tools/test.py` 已通过（4373.12 秒、退出码 0）；全部既有回归保留。ABI 只审阅新增
+常量 103，前 601 项无删改，当前 602 项，参考/采集摘要均为 f6e706886e944bed60057327b2d0a849f29fb652c7b40944ac7b6b9f59c93ca0。
+
+冻结证明 `.cache/persist-metadata-full-proof-20261112.json`，结果
+`build/persist-metadata-verified-test-results-20261112.json`，日志
+`build/persist-metadata-full-20261112.log`；七项产物逐一相符、默认三密钥保持。发布门与
+实际 ZIP 的证明保存到 `.cache/persist-metadata-release-proof-20261112.json`；新 head 的
+托管检查单独核对，不能沿用 7c2e520 的四项绿色。独立 Fs/Root 生命周期仍未接入。
+
+## P0 迁移前置修复：投影 SDK 与返回宽度（本地完整通过）
+
+从已推送 `6b627d6` 接续。复现 Windows 宿主将合法 UINT32_MAX seek 返回为 -1，以及 SDK 将服务端已有类型 6 判为坏回复的两处问题；基线证明 `.cache/projection-width-baseline-20261112.json`。命名空间/分发器状态改为显式 int64_t，SDK 命名并接受 SF_TYPE_PROJECTION=6，保留其他类型、32 字节元数据、原操作号和目录只读授权。
+
+9130 项边界/一千个独立 32 位位置检查通过；7 组相关宿主与含初始构建的 legacy/modern 两 VM 专项通过（80.28 秒）。真实应用验证 stat、完整位置返回、dup 共享偏移、EOF、越界拒绝后状态保持和无环境根，磁盘字节保持；证明 `.cache/projection-focused-proof-20261112.json`。ABI 明确审阅只增加 constant.SF_TYPE_PROJECTION=6，旧 600 项无删改，当前 601 项；审阅证明 `.cache/projection-abi-review-20261112.json`。
+
+冻结源码的完整 `tools/test.py` 含初始构建通过（4308.43 秒、退出码 0），结果 `build/projection-verified-test-results-20261112.json`，日志 `build/projection-full-20261112.log`，证明 `.cache/projection-full-proof-20261112.json`。601 项参考/采集摘要均为 c12490bbacbfa2e976c7f5d30d2c3a27cf7e0ba2356d6370fb912312b1806781，七项产物一致、默认三密钥恢复，测试进程已退出。发布门/最终 ZIP 证明见 `.cache/projection-release-proof-20261112.json`；新 head 托管检查独立核对。
+
+发布门、实际 ZIP 的 CRC/42 项条目/七项产物摘要和 14 项解压离线工具检查通过；文档定稿后重新打包复核最终副本。后续 Linux workflow/docs 的单独修正不改变运行时代码，完整证明和 CI 来源差异审计分别保留。
+
+前一 6b627d6 的两项 Windows 托管已成功，Linux 两项因依赖仓库 DNS 失败在测试开始前耗尽 30 分钟后取消。运行时 4b6835a 与单独的 Linux workflow/docs 修正 7c2e520 均已正常推送 PR #16；7c2e520 的四项 Windows/Linux push/PR 托管检查现已逐项核对成功，证明 `.cache/projection-hosted-proof-20261112.json`。此结果不代替后续元数据草稿的新 head 检查。恢复状态见 `.cache/progress-live.json`。
+
+此修复不表示命名空间已迁入独立 Fs。后续 RPC 控制器/客户端和 Root 后端代理仍是未接入运行时的单独草稿，不沿用任何旧完整证明。
+
+## P0 后续：重启句柄映射（本地完整验证通过）
+
+已核对 `518470d` / [PR #16](https://github.com/fwqfzqaz/SpiritFoxOS/pull/16) 最新四项 Windows/Linux 托管检查均成功，证明 `.cache/ns-state-hosted-proof-20261111.json`。作者 main 仍为 `03ba91e`，没有覆盖作者的新提交。
+
+本轮新增管理器私有的 128 槽客户端句柄映射，服务代次变化时丢弃绑定并保留客户端 generation，阻止重启后的同整数服务端句柄被旧引用命中。502975 项映射检查与 24996 项真实 namespace 状态重建检查已通过，含一千次重启、同整数复用、双端交接和 dup 共享偏移；已加入统一宿主驱动及发布门。
+
+恢复后的完整 `tools/test.py` 含初始构建全部通过（4020.54 秒、退出码 0），日志 `build/ns-handles-full-20261111.log`，结果 `build/ns-handles-verified-test-results-20261111.json`，冻结源码证明 `.cache/ns-handles-full-proof-20261111.json`。600 项 ABI 与七项运行产物保持 `518470d` 的摘要，默认三密钥策略保持；测试监督进程已退出并释放保持运行请求。发布门/实际 ZIP 结果记录于 `.cache/ns-handles-release-proof-20261111.json`，新提交的托管 Windows/Linux 检查须独立核对，不沿用旧 head。进程与下一恢复点见 `.cache/progress-live.json`。
+
+发布门及实际 ZIP 的 CRC、42 项条目/七项产物摘要和 14 项解压离线工具检查已通过；文档定稿后重新打包复核最终副本。当前原型仍使用进程内命名空间，不能把这些结果写成独立服务恢复或真实硬件证明。
+
+北京时间 22:29 实际账户额度已刷新，短期 99%、长期 100%，满足恢复门槛，quota_paused=false；已恢复五分钟自动续做。此前因额度接口不可用而中断的日志保留为 `build/ns-handles-interrupted-quota-20261111.log`，不计通过；新一轮从初始构建重新执行。下方历史暂停段落仅记录当时状态。
+
+映射尚未接入运行中的 sf-init，也没有新 IPC/共享 ABI、包格式或盘格式；600 项目录保持。目录/RAMFS/路径解析仍在 sf-init。下一步仍是认证 RPC、后端回调与独立于磁盘挂载的 Fs 生命周期；必须补真实进程死亡、重启、排空和旧引用失效验证后才可宣称完成 P0。恢复时不可用 `persist_mount` 重建持久化节点，因为它会回退未确认试运行；需先实现只读元数据/投影恢复路径。
+
+## P0 命名空间写入边界（2026-11-10 至 11，本地完整通过）
+
+### 后续验证通过：命名空间状态表示边界
+
+当前基于已推送的 `98159ed` / [PR #16](https://github.com/fwqfzqaz/SpiritFoxOS/pull/16) 继续。该 head 的四项 Windows/Linux 托管检查均已成功，证明 `.cache/ns-pr16-hosted-proof-20261111.json`；新提交仍独立核对。前轮 ZIP、完整证明和七项产物已保存在 `.cache/checkpoints/namespace-pr16-local-98159ed-20261111.zip`，不作为新草稿的通过证明。
+
+节点/描述/句柄布局已移到服务私有头文件；sf-init 使用稳定实例指针、公有头不暴露对象大小，14 个白盒宿主夹具显式包含私有布局。22 项公有 API 检查、7 组真实编译边界检查和全部 15 组命名空间专项已通过（22.12 秒）。冻结源码的完整含初始构建回归通过（4237.72 秒、退出码 0），日志 `build/ns-state-full-20261111.log`，结果 `build/ns-state-verified-test-results-20261111.json`，证明 `.cache/ns-state-full-proof-20261111.json`；600 项 ABI 不变，七项产物相符。sf-init RW 为 1,602,928 B / 2 MiB（剩余 23.6%），服务状态仍在同一地址空间，未宣称进程迁移或显著 RW 收缩完成。测试进程已退出并释放保持运行请求；现场 `.cache/progress-live.json`。本次发布门、真实 ZIP 的 CRC/42 项条目/七项产物摘要与 14 项解压离线检查已通过，证明 .cache/ns-state-release-proof-20261111.json；文档定稿后重新打包复核。新提交的托管结果不沿用 98159ed。
+
+### 首个写入边界切片（98159ed）
+
+- 用户明确恢复剩余开发；工作区 `E:\SpiritFoxOS`，分支 `codex/namespace-service-20261110`，作者基线 `main 03ba91e`。PR #15 已合并，该 main 的 Windows/Linux 托管检查均成功；保留作者 M7、GUI、网络和后续修复。下方 CI 修复及历史暂停仅描述此前轮次，已由本次继续指示撤销；额度监测 `spiritfoxos-2` 已恢复 ACTIVE。
+- 接续 v0.3 P0：将 `/disk` 和 `/persist` 节点发布收拢到命名空间内部，最多 128 项声明预检后原子发布，失败保留完整旧状态；管理器目录句柄交接验证所有者、generation 和目标身份，保持共享描述/偏移/租约。init、storage 与 persist 客户端不再直接读写命名空间节点/句柄/描述表或后端字段。
+- 本切片仍在 sf-init 的地址空间运行，尚未完成目录、RAMFS 与路径解析迁入 sf-fs，也未宣称 RW 显著收缩。下一步是认证有界客户端及后端代理，再补服务死亡、重启和旧引用失效回归。详见 [NAMESPACE](../architecture/NAMESPACE.md)。共享消息/ABI、包格式和盘格式保持；新增 C 接口仅用于受信任服务内部。
+- 第一次完整回归在通过网络、图形和普通持久化后，因 E 盘仅剩 8 MiB、QEMU 无法创建临时磁盘而在 IOMMU 启动前失败（2678.41 秒），不计为通过。仅清理本工作区两个可重新生成的 Zig 缓存目录，保留源码、工具链、密钥、产物与验证日志后重新执行完整套件；清理证明 `.cache/ns-cache-cleanup-20261110.json`，原失败日志 `build/ns-full-20261110-diskfull.log`。
+- 本轮冻结源码的 `tools/test.py` 完整回归通过（含初始构建，3130.52 秒、退出码 0），日志 `build/ns-full-20261110.log`，结果 `build/ns-verified-test-results-20261110.json`，证明 `.cache/ns-full-proof-20261110.json`。新增 256 项挂载/交接检查、8 组宿主计时检查全部通过；14 组命名空间专项和 3 个 VM 专项保留。600 项 ABI 与作者基线一致，摘要 `f782093543486057b7cfa6567049a27723c72bdf65405bf01551a7e80b7d4b02`；七项运行产物逐项相符。sf-init RW 仍为 1,604,408 B / 2 MiB（剩余 23.5%），未宣称进程迁移或 RW 收缩完成。
+- 后续两轮分别在持久化 VM 启动和 modern 文件探针等待时超时，均保留为失败；宿主工具出现长时间中断，日志中的客户机后续仍有输出，不能据此认定客户机断言通过或确证休眠原因。通用串口轮询新增显式宿主调度间隔预算，保留客户机无应答拒绝；8 组确定性测试已通过，细则见 [CI](../quality/CI.md)。本地测试监督进程只在当前验证期间请求系统保持运行，退出后释放，电源方案保持原值。以上失败均不计为通过；修正宿主轮询预算后的新完整证明已生成，全部原客户机断言保留。测试监督进程退出后，保持运行请求已释放（`.cache/ns-awake-release-20261111.json`）。
+
+首个写入边界切片的发布门和真实 ZIP 的 CRC、42 项条目/七项产物摘要及 14 项解压离线检查已通过，证明 `.cache/ns-release-proof-20261111.json`。文档定稿后重新打包核对最终副本；新提交 Windows/Linux 托管 CI 独立核对。可恢复现场 `.cache/progress-live.json`；本地测试树已退出。额度允许时继续 P0 下一有界事项，不以本轮完成代替整个目标完成。
 
 ## Windows/Linux CI 修复（2026-11-08）
 
@@ -458,3 +556,9 @@ virtio-net 驱动取得 INTx 后把 avail ring `flags` 从 1（抑制中断）�
 `qemu_net_test.py --disk` 同时挂载 `build/storage.img` 与网卡：日志出现磁盘 `[DEV] bdf=0x28`、网卡 `[DEV] bdf=0x30` 两次授权，`STORAGE READY` 后磁盘应用在网络激活期间仍可运行，证明两个设备槽、DMA arena、IOMMU 窗口与中断线不再互斥。
 
 回归：`tools/test.py --skip-build --host-only`（ABI 600 项）、`qemu_test.py --memory 256`、`qemu_iommu_test.py`、`qemu_smp_test.py`、`qemu_net_test.py` 与 `--disk` 全部通过。ABI 只追加 3 个常量，无既有条目删改。
+
+## P0 额度保存点（2026-11-11T16:29:45.989192+08:00）
+
+quota_paused=true，user_paused=false。已保存本轮代码、验证状态与下一步到 `.cache/progress-live.json`；本聊天本地测试树已停止（`.cache/ns-handles-quota-stop-20261111.json`）。完整回归尚未通过，额度中断不计为通过；不提交推送未验证实现。 两窗口均高于 20% 且 ordinaryUsageAllowed=true 后恢复，等待实际阻碍窗口重置后的检查。
+
+暂停原因补充：周期额度接口短暂返回不可解析数据，按“额度缺失即保存暂停”规则停止本聊天测试树；不是客户机断言失败。随后接口恢复，短期剩余 37%、长期 18%，未达到暂停后的两项均高于 20% 恢复门槛。下次复查按实际长期 resetsAt 后一分钟：2026-11-11T22:27:38+08:00（Asia/Shanghai）。已有 `518470d` 四项托管通过证明保持，本轮未完成回归的修改没有提交推送。

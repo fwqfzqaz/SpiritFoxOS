@@ -65,7 +65,7 @@ int64_t sf_file_write(SfFileClient*c,uint64_t h,const void*data,size_t bytes){
 }
 int64_t sf_file_stat(SfFileClient*c,uint64_t h,SfFileStat*out){
  if(!out)return SF_INVALID;SfMessage m={0};m.handle=h;int64_t r=exchange(c,&m,OP_STAT,1);if(r<0)return r;if(r||m.length!=sizeof(*out))return bad_reply(c);
- SfFileStat value;memcpy(&value,m.data,sizeof(value));if(value.bytes!=sizeof(value)||value.type<SF_TYPE_DIRECTORY||value.type>SF_TYPE_DISK||!(value.mode&3)||(value.mode&~15u)||(value.flags&~7u))return bad_reply(c);
+ SfFileStat value;memcpy(&value,m.data,sizeof(value));if(value.bytes!=sizeof(value)||value.type<SF_TYPE_DIRECTORY||value.type>SF_TYPE_PROJECTION||!(value.mode&3)||(value.mode&~15u)||(value.flags&~7u))return bad_reply(c);
  memcpy(out,&value,sizeof(value));return 0;
 }
 int64_t sf_file_seek(SfFileClient*c,uint64_t h,uint64_t offset){

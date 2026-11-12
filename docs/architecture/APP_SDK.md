@@ -92,7 +92,11 @@ return count < 0 ? count : 0;
 | sf_file_poll | 当前协议的0..7事件掩码 |
 | sf_file_close / truncate / unlink / rmdir | 0 |
 
-所有RPC函数返回显式int64_t，避免宿主LLP64的long窄化；错误为既有负值。句柄参数接收uint64_t并在窄化前拒绝非零高32位。OPEN权限为SF_OPEN_READ/WRITE/NONBLOCK/DIRECTORY，对应既有协议位；SF_TYPE_*对应五种元数据类型，其他语义见NAMESPACE.md。缓存metadata/poll不能作为设备健康证明。
+所有RPC函数返回显式int64_t，避免宿主LLP64的long窄化；错误为既有负值。句柄参数接收uint64_t并在窄化前拒绝非零高32位。OPEN权限为SF_OPEN_READ/WRITE/NONBLOCK/DIRECTORY，对应既有协议位；SF_TYPE_*对应目录、文件、管道、控制台、磁盘与只读投影六类元数据，其他语义见NAMESPACE.md。缓存metadata/poll不能作为设备健康证明。
+
+`SF_TYPE_PROJECTION=6` 命名并接受服务端已有的投影类型，不新增节点类型或消息布局。取得显式只读目录后，应用可对 `/proc` 或 `/sys` 投影执行 stat/read/pread/seek；普通 run 仍没有目录根。投影 `size=0` 表示不提供固定内容长度，不能用它代替 read 的结果判断 EOF。当前 flags 保持只读值 1，内容由每次读取时的后端生成。
+
+命名空间 seek 和文件分发器也使用显式 int64_t 状态，保证 Windows 宿主不会把合法的 0x80000000–0xffffffff 偏移返回成负数。投影允许绝对偏移 0–UINT32_MAX；更大偏移返回 INVALID，保持原共享偏移，普通权限/陈旧句柄检查保持。可用 `runat /proc fileclient.sfk --projection` 与 `runat /sys fileclient.sfk --projection modules` 检查 SDK 元数据、dup 共享偏移、边界 seek 和只读拒绝。
 
 read/write/enumerate请求超过256时只发送一段，允许部分结果，不自动组合多次操作。零字节调用仍由服务检查句柄与权限；只读文件的零字节write也返回DENIED。路径有界编码并包含唯一末尾NUL，规范UTF-8/相对路径与实际权限继续由服务检查。输出是字节流，没有自动字符串终止符；错误不会把响应数据复制到调用者缓冲或元数据记录。
 

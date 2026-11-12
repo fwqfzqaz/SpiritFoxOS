@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include "file_rpc.h"
+#include "../../services/namespace_state.h"
 static SfNamespace ns,saved;static unsigned checks;
 #define CHECK(x) do{checks++;if(!(x)){printf("UNLINK FAIL line %d: %s\n",__LINE__,#x);return 1;}}while(0)
 #define REJECT(expr,error) do{saved=ns;CHECK((expr)==(error));CHECK(!memcmp(&ns,&saved,sizeof(ns)));}while(0)

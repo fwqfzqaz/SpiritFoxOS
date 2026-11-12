@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include "namespace.h"
+#include "../../services/namespace_state.h"
 static SfNamespace ns;static unsigned checks,leases,admission=1;
 #define CHECK(x) do{checks++;if(!(x)){printf("OPENAT FAIL line %d: %s\n",__LINE__,#x);return 1;}}while(0)
 static int mount_open(unsigned tag){if(tag!=7)return SF_INVALID;if(!admission)return SF_DRAINING;leases++;return 0;}

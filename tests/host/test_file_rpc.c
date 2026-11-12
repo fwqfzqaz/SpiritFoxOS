@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include "file_rpc.h"
+#include "../../services/namespace_state.h"
 static SfNamespace ns,snapshot;static unsigned checks,console_calls;static size_t console_bytes;
 static long console(const void*p,size_t n){(void)p;console_calls++;console_bytes=n;return n;}
 static struct {uint8_t before[64];SfMessage m;uint8_t after[2048];} guarded;

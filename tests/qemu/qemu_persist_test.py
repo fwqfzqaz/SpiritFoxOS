@@ -11,6 +11,7 @@ import sys
 import threading
 import time
 import qemu_test
+from poll_deadline import PollDeadline
 ROOT = qemu_test.ROOT
 sys.path.insert(0, str(ROOT / 'tools/package'))
 from mkreadfs import create as create_readfs
@@ -71,9 +72,9 @@ class VM:
                 return message['return']
 
     def expect(self, text, start=0, timeout=45):
-        end = time.monotonic()+timeout
+        deadline = PollDeadline(timeout)
         while text.encode() not in self.output[start:]:
-            if time.monotonic()>end or (self.process.poll() is not None and self.queue.empty()):
+            if deadline.expired() or (self.process.poll() is not None and self.queue.empty()):
                 raise RuntimeError(self.name+': missing '+text+'\n'+self.output[-2500:].decode(errors='replace'))
             try:
                 self.output.extend(self.queue.get(timeout=.1))

@@ -3,6 +3,10 @@
 #include "persistence.h"
 #include "virtio.h"
 #include "txn.h"
+#include "namespace_frontend.h"
+#include "namespace_transport.h"
+#include "namespace_protocol.h"
+#include "fs_format.h"
 /* sf-init side of the disk filesystem split: format dispatch and file reads live
  * in sf-fs.sfmod. sf-init remains the sole receiver of virtio-blk replies and
  * answers the service's bounded OP_FS_BLOCK_READ requests through a broker. */
@@ -15,6 +19,9 @@ static int driver_slot=-1,fs_slot=-1,mounted,fs_format_id;
 static uint64_t capacity,sequence=0x100000000ull,fs_requests=0x400000000ull;
 /* 与 sf-init 的包快照共用一块 128 KiB 只读装载缓冲。服务单线程处理，
  * 两条路径不会嵌套；每次借出前作废模块侧缓存状态。 */
+static SfNsTransport fs_transport;
+static uint32_t namespace_descriptions;
+static int mount_admission,mount_driver_lease;
 static uint8_t load_scratch[SF_STORAGE_SNAPSHOT_BYTES];
 uint8_t* sf_storage_scratch(void){return load_scratch;}
 int sf_storage_driver(uint32_t*ep,uint32_t*reply,uint32_t*pid,uint64_t*bytes,int*writable){
@@ -40,38 +47,45 @@ int sf_storage_broker(unsigned timeout_ms){
  if(sf_sys(SYS_TASK_STATUS,fs_pid,0,0)!=SF_TASK_RUNNING)return 0;
  SfMessage m;long from=sf_recv(fs_broker_ep,&m,sf_deadline(timeout_ms));
  if(from<0)return from==SF_TIMEOUT?0:(int)from;
+ if(m.h.cap_count==1)sf_cap_close(m.handle);
  if(from!=(long)fs_pid)return SF_DENIED;
- if(m.h.opcode!=OP_FS_BLOCK_READ||m.length!=256||(m.mode!=0&&m.mode!=256)||(m.offset&511))m.status=SF_INVALID;
+ if(m.h.opcode>=OP_NS_CB_CONSOLE&&m.h.opcode<=OP_NS_CB_STORAGE_LIVE)sf_ns_client_callback((uint32_t)from,&m);
+ else if(m.h.flags!=fs_pid||m.h.size!=40||m.h.protocol_major!=1||m.h.protocol_minor||m.h.payload_bytes!=sizeof(m)-40||m.h.cap_count||
+         m.h.opcode!=OP_FS_BLOCK_READ||m.length!=256||(m.mode!=0&&m.mode!=256)||(m.offset&511)){m.status=SF_INVALID;m.length=0;}
  else{
-  uint8_t block[512];int r=sector(0,m.offset/512,block);
-  m.status=r;if(!r){memcpy(m.data,block+m.mode,256);m.length=256;}
+  uint8_t data[512];int r=sector(0,m.offset/512,data);m.status=r;
+  if(!r){memcpy(m.data,data+m.mode,256);m.length=256;}else m.length=0;
  }
- m.h.cap_count=0;m.h.deadline_ns=0;sf_send(fs_broker_reply,&m);return 1;
+ m.h.cap_count=0;m.h.deadline_ns=0;
+ int r=sf_send(fs_broker_reply,&m);return r?r:1;
 }
-static int fs_wait_reply(SfMessage*m,uint64_t id){
- for(unsigned spin=0;spin<20000;spin++){
-  long from=sf_recv(fs_service_reply,m,sf_deadline(1));
-  if(from>=0){
-   if(from!=(long)fs_pid||m->h.request_id!=id)return SF_STALE_HANDLE;
-   return(int)m->status;
-  }
-  if(from!=SF_TIMEOUT)return(int)from;
-  if(!fs_pid||sf_sys(SYS_TASK_STATUS,fs_pid,0,0)!=SF_TASK_RUNNING)return SF_DEVICE_GONE;
-  int r=sf_storage_broker(1);if(r<0)return r;
- }
- return SF_TIMEOUT;
+static int64_t transport_send(void*c,uint32_t cap,SfMessage*m){(void)c;return sf_send(cap,m);}
+static int64_t transport_receive(void*c,uint32_t cap,SfMessage*m,unsigned ms){(void)c;return sf_recv(cap,m,sf_deadline(ms));}
+static uint64_t transport_ticks(void*c){(void)c;return sf_ticks();}
+static int transport_alive(void*c,uint32_t pid){(void)c;return sf_sys(SYS_TASK_STATUS,pid,0,0)==SF_TASK_RUNNING;}
+static int transport_pump(void*c,unsigned ms){(void)c;return sf_storage_broker(ms);}
+static void transport_close(void*c,uint64_t cap){(void)c;sf_cap_close(cap);}
+int64_t sf_storage_namespace_exchange(void*context,SfMessage*m){
+ (void)context;
+ fs_transport.ops=(SfNsTransportOps){transport_send,transport_receive,transport_ticks,transport_alive,transport_pump,transport_close};
+ fs_transport.service=fs_service_ep;fs_transport.reply=fs_service_reply;fs_transport.peer=fs_pid;
+ return sf_nst_exchange(&fs_transport,m);
+}
+static int fs_status_call(SfMessage*m){
+ int64_t from=sf_storage_namespace_exchange(0,m);
+ if(from<0){sf_ns_peer_lost();return(int)from;}
+ if(m->length>sizeof(m->data)||m->status>0||m->status<SF_VERSION_REJECTED){sf_ns_peer_lost();return SF_BAD_FORMAT;}
+ return(int)m->status;
 }
 static int fs_call(SfMessage*m){
  if(!fs_pid||!fs_service_ep||!fs_service_reply)return SF_DEVICE_GONE;
- uint64_t id=++fs_requests;m->h.request_id=id;m->h.cap_count=0;
- int r=sf_send(fs_service_ep,m);if(r)return r;
- return fs_wait_reply(m,id);
+ if(fs_requests==UINT64_MAX)return SF_NO_SPACE;
+ m->h.request_id=++fs_requests;m->h.cap_count=0;return fs_status_call(m);
 }
 static int fs_send_cap(SfMessage*m,uint32_t cap){
  if(!fs_pid||!fs_service_ep||!fs_service_reply)return SF_DEVICE_GONE;
- uint64_t id=++fs_requests;m->h.request_id=id;m->h.cap_count=1;m->handle=cap;
- int r=sf_send(fs_service_ep,m);if(r)return r;
- return fs_wait_reply(m,id);
+ if(fs_requests==UINT64_MAX)return SF_NO_SPACE;
+ m->h.request_id=++fs_requests;m->h.cap_count=1;m->handle=cap;return fs_status_call(m);
 }
 static int create_ep(uint32_t*out){long h=sf_sys(SYS_EP_CREATE,0,0,0);if(h<0)return(int)h;*out=(uint32_t)h;return 0;}
 static int fs_endpoints(void){
@@ -82,12 +96,18 @@ static int fs_endpoints(void){
  if(!fs_service_ep&&(r=create_ep(&fs_service_ep)))return r;
  return 0;
 }
-static void fs_shutdown(void){
- if(fs_pid){sf_sys(SYS_KILL,fs_pid,0,0);fs_pid=0;}
+static int fs_shutdown(void){
+ if(fs_pid){
+  if(sf_sys(SYS_TASK_STATUS,fs_pid,0,0)==SF_TASK_RUNNING)sf_sys(SYS_KILL,fs_pid,SF_DEVICE_GONE,0);
+  uint64_t start=sf_ticks();
+  while(sf_sys(SYS_TASK_STATUS,fs_pid,0,0)==SF_TASK_RUNNING){if(sf_ticks()-start>=100)return SF_BUSY;sf_yield();}
+  fs_pid=0;
+ }
  if(fs_service_ep){sf_sys(SYS_CAP_REVOKE,fs_service_ep,0,0);fs_service_ep=0;}
  if(fs_service_reply){sf_sys(SYS_CAP_REVOKE,fs_service_reply,0,0);fs_service_reply=0;}
  if(fs_broker_ep){sf_sys(SYS_CAP_REVOKE,fs_broker_ep,0,0);fs_broker_ep=0;}
  if(fs_broker_reply){sf_sys(SYS_CAP_REVOKE,fs_broker_reply,0,0);fs_broker_reply=0;}
+ return 0;
 }
 static int fs_attach(void){
  int cap=(int)sf_cap_derive(fs_broker_ep,RIGHT_SEND|RIGHT_DELEGATE);if(cap<0)return cap;
@@ -98,12 +118,41 @@ static int fs_attach(void){
  r=fs_send_cap(&m,(uint32_t)cap);sf_cap_close(cap);return r;
 }
 static int fs_start(void){
- if(fs_pid&&sf_sys(SYS_TASK_STATUS,fs_pid,0,0)==SF_TASK_RUNNING)return SF_BUSY;
- int r=fs_endpoints();if(r)return r;
+ if(fs_pid)return sf_sys(SYS_TASK_STATUS,fs_pid,0,0)==SF_TASK_RUNNING?0:SF_RESTART_REQUIRED;
+ if(!manager||!spawn)return SF_INVALID;
+ if(fs_slot<0){fs_slot=sfmod_add(manager,"org.spiritfox.fs.disk",0,0);if(fs_slot<0)return fs_slot;}
+ int r=sfmod_start(manager,fs_slot);if(r)return r;
+ r=fs_endpoints();if(r)goto fail;
  int pid=spawn("sf-fs.sfmod",fs_service_ep,RIGHT_RECV,0,0,fs_service_reply);
- if(pid<0){fs_shutdown();return pid;}
- fs_pid=(uint32_t)pid;r=fs_attach();if(r){fs_shutdown();return r;}
+ if(pid<0){r=pid;goto fail;}
+ fs_pid=(uint32_t)pid;r=fs_attach();if(r)goto fail;
  return 0;
+fail:
+ if(fs_shutdown())return SF_BUSY;
+ sfmod_prepare(manager,fs_slot);sfmod_stop(manager,fs_slot);return r;
+}
+int sf_storage_namespace_start(void){int r=fs_start();return r?r:(int)fs_pid;}
+uint32_t sf_storage_namespace_pid(void){return fs_pid;}
+int sf_storage_namespace_disk_live(void){return mounted&&driver_pid&&sf_sys(SYS_TASK_STATUS,driver_pid,0,0)==SF_TASK_RUNNING?0:SF_DEVICE_GONE;}
+int sf_storage_namespace_reset(void){
+ if(fs_transport.inflight||fs_slot<0)return SF_BUSY;
+ SfModule*book=&manager->modules[fs_slot];
+ if(book->resources[RES_DIRTY]||book->resources[RES_OPEN]!=namespace_descriptions)return SF_BUSY;
+ for(unsigned i=0;i<RES_COUNT;i++)if(i!=RES_OPEN&&book->resources[i])return SF_BUSY;
+ int r=fs_shutdown();if(r)return r;
+ /* Only confirmed-dead namespace descriptions are reconciled. The unrelated
+  * Root load lease and dirty transaction must already have drained. */
+ while(namespace_descriptions){r=sfmod_release(manager,fs_slot,RES_OPEN);if(r)return r;namespace_descriptions--;}
+ if(book->state==MOD_ACTIVE){r=sfmod_prepare(manager,fs_slot);if(r)return r;}
+ if(book->state==MOD_DRAINING){r=sfmod_stop(manager,fs_slot);if(r)return r;}
+ if(book->state!=MOD_STOPPED)return SF_STALE_HANDLE;
+ r=sfmod_unload(manager,fs_slot);if(r)return r;fs_slot=-1;
+ return 0;
+}
+int sf_storage_namespace_crash(void){
+ if(!fs_pid)return SF_NOT_FOUND;
+ int r=sf_sys(SYS_KILL,fs_pid,SF_DEVICE_GONE,0);if(r)return r;
+ sf_ns_peer_lost();return 0;
 }
 int sf_storage_sector_read(void*c,uint64_t lba,uint8_t out[512]){return sector(c,lba,out);}
 int sf_storage_writable(void){return writable&&mounted&&driver_pid&&sf_sys(SYS_TASK_STATUS,driver_pid,0,0)==SF_TASK_RUNNING;}
@@ -121,15 +170,15 @@ int sf_storage_transaction(int begin){
  if(!sf_storage_writable())return SF_READ_ONLY;
  return sfmod_acquire(manager,fs_slot,RES_DIRTY);
 }
-static int mount_open(unsigned tag){return tag==1&&fs_slot>=0?sfmod_acquire(manager,fs_slot,RES_OPEN):SF_STALE_HANDLE;}
-static void mount_close(unsigned tag){if(tag==1&&fs_slot>=0)sfmod_release(manager,fs_slot,RES_OPEN);}
-typedef struct {char path[64];uint64_t offset,bytes;} FsEntry;
-static int fs_entry(unsigned index,FsEntry*e){
- SfMessage m;sf_message(&m,OP_FS_ENTRY,0);m.offset=index;
- int r=fs_call(&m);if(r)return r;
- if(m.length>=sizeof(e->path))return SF_BAD_FORMAT;
- memcpy(e->path,m.data,m.length);e->path[m.length]=0;e->offset=m.offset;e->bytes=m.handle;
- return 0;
+static int mount_open(unsigned tag){
+ if(tag!=1||fs_slot<0)return SF_STALE_HANDLE;
+ if(!mounted||!mount_admission)return SF_DRAINING;
+ if(namespace_descriptions==UINT32_MAX)return SF_NO_SPACE;
+ int r=sfmod_acquire(manager,fs_slot,RES_OPEN);if(!r)namespace_descriptions++;return r;
+}
+static void mount_close(unsigned tag){
+ if(tag!=1||fs_slot<0||!namespace_descriptions||sfmod_release(manager,fs_slot,RES_OPEN)){sf_ns_peer_lost();return;}
+ namespace_descriptions--;
 }
 static long external_read(unsigned index,uint64_t offset,void*out,size_t bytes){
  if(!mounted||!fs_pid||sf_sys(SYS_TASK_STATUS,driver_pid,0,0)!=SF_TASK_RUNNING)return SF_DEVICE_GONE;
@@ -146,13 +195,23 @@ static long external_read(unsigned index,uint64_t offset,void*out,size_t bytes){
  }
  return total;
 }
-static int namespace_node(const char*path,unsigned type,unsigned external,uint32_t size){
- int r=sf_ns_create(ns,path,type,type==NODE_DISK);if(r&&r!=SF_BUSY)return r;
- for(unsigned i=0;i<SF_NS_NODE_MAX;i++)if(ns->nodes[i].type&&!strcmp(ns->nodes[i].path,path)){
-  SfNode*n=&ns->nodes[i];if(n->type!=type||(r==SF_BUSY&&strcmp(path,"/disk")&&n->mount_tag!=1))return SF_BUSY;n->external=external;n->size=size;n->mount_tag=1;return 0;}
- return SF_NO_SPACE;
+void sf_storage_init(SfManager*m,SfNamespace*n,SfModuleSpawn callback){manager=m;ns=n;spawn=callback;}
+void sf_storage_namespace_bind(SfNamespace*n){sf_ns_external(n,external_read,0,0);sf_ns_mount_hooks(n,mount_open,mount_close);}
+static int mount_disk_view(void){
+ int r=fs_start();if(r)return r;r=fs_attach();if(r)return r;
+ if(write_grant){
+  uint8_t header[512],hash[32];r=sector(0,SF_TXN_HEADER,header);if(r)return r;sf_sha256(hash,header,480);
+  if(capacity!=SF_TXN_SECTORS*512ull||memcmp(header,"SFTXN1\0",8)||sf_u32(header+8)!=1||sf_u32(header+12)!=SF_TXN_SECTORS||memcmp(hash,header+480,32))return SF_BAD_FORMAT;
+ }
+ SfMessage m;sf_message(&m,OP_FS_MOUNT,0);m.offset=write_grant?SF_TXN_HEADER*512ull:0;r=fs_call(&m);if(r)return r;
+ if(m.mode<SF_FS_FORMAT_SFRFS1||m.mode>SF_FS_FORMAT_SFRFS2||m.handle>SF_READFS_MAX_ENTRIES){sf_ns_peer_lost();return SF_BAD_FORMAT;}
+ fs_format_id=(int)m.mode;return 0;
 }
-void sf_storage_init(SfManager*m,SfNamespace*n,SfModuleSpawn callback){manager=m;ns=n;spawn=callback;ns->external_read=external_read;ns->mount_open=mount_open;ns->mount_close=mount_close;}
+int sf_storage_namespace_restore(void){
+ if(!mounted)return 0;
+ int r=mount_disk_view();if(r)return r;
+ mount_admission=1;return 0;
+}
 static int start_driver(unsigned rights){
  if(driver_pid&&sf_sys(SYS_TASK_STATUS,driver_pid,0,0)==SF_TASK_RUNNING)return SF_BUSY;
  uint32_t device=0;for(unsigned d=0;d<32&&!device;d++)for(unsigned f=0;f<8;f++){uint32_t bdf=d*8+f;long id=sf_sys(SYS_PCI_READ,bdf,0,0);if(id==0x10011af4u||id==0x10421af4u){device=bdf+1;break;}}
@@ -170,37 +229,19 @@ fail:
 int sf_storage_start(void){int r=start_driver(0);return r==SF_READ_ONLY?start_driver(SF_DEVICE_WRITE):r;}
 int sf_storage_mount(void){
  if(mounted)return SF_BUSY;if(!driver_pid)return SF_DEVICE_GONE;
- for(unsigned i=0;i<SF_NS_NODE_MAX;i++)if(ns->nodes[i].type&&strlen(ns->nodes[i].path)>5&&!memcmp(ns->nodes[i].path,"/disk/",6))return SF_BUSY;
- for(unsigned i=0;i<SF_NS_DESCRIPTION_MAX;i++)if(ns->descriptions[i].refs){const char*p=ns->nodes[ns->descriptions[i].node].path;if(!strcmp(p,"/disk")||(strlen(p)>5&&!memcmp(p,"/disk/",6)))return SF_BUSY;}
- int r=fs_start();if(r)return r;
- if(fs_slot<0){fs_slot=sfmod_add(manager,"org.spiritfox.fs.disk",1u<<driver_slot,0);if(fs_slot<0){r=fs_slot;goto fail;}}
- r=sfmod_start(manager,fs_slot);if(r)goto fail;
- SfMessage m;sf_message(&m,OP_FS_MOUNT,0);r=fs_call(&m);if(r)goto fail;
- fs_format_id=(int)m.mode;uint32_t count=(uint32_t)m.handle;
- if(write_grant){
-  uint8_t header[512],hash[32];r=sector(0,SF_TXN_HEADER,header);if(r)goto fail;sf_sha256(hash,header,480);
-  if(capacity!=SF_TXN_SECTORS*512ull||memcmp(header,"SFTXN1\0",8)||sf_u32(header+8)!=1||sf_u32(header+12)!=SF_TXN_SECTORS||memcmp(hash,header+480,32)){r=SF_BAD_FORMAT;goto fail;}
-  for(unsigned i=0;i<count;i++){FsEntry e;r=fs_entry(i,&e);if(r)goto fail;if(e.offset+e.bytes>SF_TXN_HEADER*512ull){r=SF_BAD_FORMAT;goto fail;}}
- }
- r=namespace_node("/disk",NODE_DIR,0,0);if(r)goto fail;
- for(unsigned i=0;i<count;i++){
-  FsEntry e;r=fs_entry(i,&e);if(r)goto fail;
-  char path[96]="/disk";memcpy(path+5,e.path,strlen(e.path)+1);
-  for(char*p=path+6;*p;p++)if(*p=='/'){*p=0;r=namespace_node(path,NODE_DIR,0,0);*p='/';if(r)goto fail;}
-  r=namespace_node(path,NODE_DISK,i,(uint32_t)e.bytes);if(r)goto fail;
- }
- for(unsigned i=0;i<SF_NS_NODE_MAX;i++)if(ns->nodes[i].mount_tag==1)ns->nodes[i].readonly=1;
- writable=write_grant;mounted=1;
- sf_log("[STORAGE] format ");sf_number((uint64_t)fs_format_id);sf_log("\n");
- return 0;
-fail:
- sf_ns_unmount(ns,1);fs_shutdown();if(fs_slot>=0){sfmod_prepare(manager,fs_slot);sfmod_stop(manager,fs_slot);}mounted=0;writable=0;return r;
+ int r=sf_ns_mount_check(ns,"/disk");if(r)return r;
+ r=sfmod_acquire(manager,driver_slot,RES_LEASE);if(r)return r;mount_driver_lease=1;
+ r=mount_disk_view();if(r){sfmod_release(manager,driver_slot,RES_LEASE);mount_driver_lease=0;return r;}
+ writable=write_grant;mounted=1;mount_admission=1;
+ sf_log("[STORAGE] format ");sf_number((uint64_t)fs_format_id);sf_log("\n");return 0;
 }
 int sf_storage_unmount(void){
- if(!mounted||fs_slot<0)return SF_NOT_FOUND;int r=sfmod_prepare(manager,fs_slot);if(r)return r;
- if(manager->modules[fs_slot].resources[RES_OPEN]||manager->modules[fs_slot].resources[RES_DIRTY]){sfmod_cancel(manager,fs_slot);return SF_BUSY;}
- r=sf_ns_unmount(ns,1);if(r){sfmod_cancel(manager,fs_slot);return r;}r=sfmod_stop(manager,fs_slot);if(r)return r;
- fs_shutdown();mounted=0;writable=0;sf_persist_driver_down();return 0;
+ if(!mounted||fs_slot<0)return SF_NOT_FOUND;mount_admission=0;
+ if(manager->modules[fs_slot].resources[RES_OPEN]||manager->modules[fs_slot].resources[RES_DIRTY]){mount_admission=1;return SF_BUSY;}
+ int r=sf_ns_unmount(ns,1);if(r){mount_admission=1;return r;}
+ SfMessage m;sf_message(&m,OP_FS_STOP,0);r=fs_call(&m);if(r){sf_ns_peer_lost();return r;}
+ if(mount_driver_lease){r=sfmod_release(manager,driver_slot,RES_LEASE);if(r)return r;mount_driver_lease=0;}
+ mounted=0;writable=0;sf_persist_driver_down();return 0;
 }
 int sf_storage_stop(void){
  if(driver_slot<0||!driver_pid)return SF_NOT_FOUND;int r=sfmod_prepare(manager,driver_slot);if(r)return r;
@@ -211,10 +252,10 @@ int sf_storage_stop(void){
   * device cleanup before recycling that slot; its quarantine still gates grants. */
  if(r==SF_NOT_FOUND)r=0;
  if(r){manager->modules[driver_slot].state=MOD_QUARANTINED;return r;}
- sfmod_release(manager,driver_slot,RES_DMA);r=sfmod_stop(manager,driver_slot);if(r)return r;sf_sys(SYS_KILL,driver_pid,0,0);sf_sys(SYS_CAP_REVOKE,driver_ep,0,0);sf_sys(SYS_CAP_REVOKE,driver_reply,0,0);driver_pid=driver_ep=driver_reply=0;fs_shutdown();mounted=0;writable=0;sf_persist_driver_down();return 0;
+ sfmod_release(manager,driver_slot,RES_DMA);r=sfmod_stop(manager,driver_slot);if(r)return r;sf_sys(SYS_KILL,driver_pid,0,0);sf_sys(SYS_CAP_REVOKE,driver_ep,0,0);sf_sys(SYS_CAP_REVOKE,driver_reply,0,0);driver_pid=driver_ep=driver_reply=0;mounted=0;writable=0;sf_persist_driver_down();return 0;
 }
 long sf_storage_load(const char*path,void*out,size_t capacity_bytes){
- if(strlen(path)<7||memcmp(path,"/disk/",6))return SF_INVALID;if(!mounted||fs_slot<0)return SF_DEVICE_GONE;
+ if(strlen(path)<7||memcmp(path,"/disk/",6))return SF_INVALID;if(fs_slot<0||sf_storage_namespace_disk_live())return SF_DEVICE_GONE;
  int r=sfmod_acquire(manager,fs_slot,RES_OPEN);if(r)return r;
  SfMessage m;sf_message(&m,OP_FS_FIND,0);size_t n=strlen(path+5)+1;if(n>sizeof(m.data)){sfmod_release(manager,fs_slot,RES_OPEN);return SF_INVALID;}
  memcpy(m.data,path+5,n);m.length=(uint32_t)n;r=fs_call(&m);

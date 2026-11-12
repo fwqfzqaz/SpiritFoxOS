@@ -2,6 +2,11 @@
 
 仓库有两个工作流，配置文件必须位于 `.github/workflows/`，使用 UTF-8、空格缩进的 YAML。以下配置与本轮修复后的文件一致；修改工作流时同步更新本页。它们是 GitHub Actions，不是本地 Codex 的额度监测任务。
 
+2026-11-11：通用串口 VM 等待使用 `tests/qemu/poll_deadline.py` 的轮询预算。正常每 0.1 秒轮询时，原 45/60 秒预算保持；单次宿主未获调度超过 2 秒时只扣 2 秒，避免电脑暂停后尚未消费已排队输出就直接超时。这只识别调度间隔，不据此断言系统发生了休眠，也不是性能测量。持续无应答仍会耗尽有效轮询预算，客户机故障/退出/响应内容检查保留；Windows CI 的 90 分钟绝对作业时限保持。8 组确定性宿主测试覆盖正常预算、长间隔、重复间隔仍超时、坏时钟，以及真实 VM 等待方法的排队响应和静默客户机拒绝路径；并入宿主套件和发布门。
+
+
+2026-11-12：6b627d6 的两项 Linux 检查在安装系统包时持续出现 Ubuntu 仓库 DNS 解析失败，耗尽 30 分钟后取消，代码测试尚未运行。runner 固定为官方支持的 [Ubuntu 24.04 标签](https://github.com/actions/runner-images#available-images)，避免 latest 迁移时基础系统变化；安装阶段单独限时、失败不继续构建，保留原测试与 30 分钟作业门禁。APT 选项见 [apt-get](https://manpages.ubuntu.com/manpages/noble/man8/apt-get.8.html)、[apt.conf](https://manpages.ubuntu.com/manpages/noble/man5/apt.conf.5.html) 与 [HTTP 传输](https://manpages.ubuntu.com/manpages/noble/man1/apt-transport-http.1.html)。这些措施限制依赖失败的影响，实际 Linux 成功仍须看新提交的托管结果；Windows 本地通过不能代替它。
+
 ## 工具链与目标
 
 Python 3.13、Zig 0.13.0（`tools/bootstrap.py` 下载/校验）、rustup/Cargo 和对应 Rust 标准库目标都必须可用。GitHub 托管 runner 已有 Rust；自建 runner 需要先安装 rustup。`bootstrap.py` 负责 Zig/QEMU/Monocypher，不会安装 Rust。
@@ -52,7 +57,7 @@ jobs:
 
 ## Linux host tests
 
-源文件：[linux.yml](../../.github/workflows/linux.yml)。同样在 push/PR 触发，30 分钟上限；安装系统 QEMU/OVMF 并缓存 Zig，执行含初始构建的宿主/集成测试，**不执行 QEMU，也不生成发布 ZIP**。
+源文件：[linux.yml](../../.github/workflows/linux.yml)。固定 `ubuntu-24.04`，同样在 push/PR 触发，作业上限仍为 30 分钟。安装 QEMU/OVMF 单独限时 5 分钟；APT 每个传输请求设 20 秒连接/数据等待与两次重试，`--error-on=any` 让索引更新的临时错误也失败。依赖成功后执行含初始构建的宿主/集成测试，**不执行 QEMU，也不生成发布 ZIP**。
 
 ```yaml
 name: Linux host tests
@@ -61,7 +66,7 @@ on: [push, pull_request]
 
 jobs:
   host:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
@@ -74,7 +79,10 @@ jobs:
           path: .tools
           key: zig-0.13.0-${{ runner.os }}
       - name: Install QEMU and OVMF
-        run: sudo apt-get update && sudo apt-get install -y qemu-system-x86 ovmf
+        timeout-minutes: 5
+        run: |
+          sudo env DEBIAN_FRONTEND=noninteractive apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20 --error-on=any update
+          sudo env DEBIAN_FRONTEND=noninteractive apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20 install -y --no-install-recommends qemu-system-x86 ovmf
       - name: Bootstrap workspace toolchain
         run: python3 tools/bootstrap.py
       - name: Install Rust targets
