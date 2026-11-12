@@ -64,6 +64,8 @@ host_test('test_namespace_transport','tests/host/test_namespace_transport.c','se
 host_test('test_emergency_console','tests/host/test_emergency_console.c','services/emergency_console.c',include_services=True)
 host_test('test_accounts','tests/host/test_accounts.c','services/accounts.c')
 host_test('test_sessions','tests/host/test_sessions.c','services/session.c','services/accounts.c')
+host_test('test_console_policy','tests/host/test_console_policy.c','services/console_policy.c','services/session.c','services/accounts.c',include_services=True)
+host_test('test_launch_policy','tests/host/test_launch_policy.c','services/launch_policy.c',*build.CRYPTO,include_services=True)
 host_test('test_file_client','tests/host/test_file_client.c','services/namespace.c','services/file_rpc.c')
 host_test('test_file_dup','tests/host/test_file_dup.c','services/namespace.c','services/file_rpc.c')
 host_test('test_file_pread','tests/host/test_file_pread.c','services/namespace.c','services/file_rpc.c')
@@ -105,6 +107,7 @@ subprocess.run([sys.executable,'tests/integration/test_rust_archive.py'],check=T
 subprocess.run([sys.executable,'tests/integration/test_poll_deadline.py'],check=True)
 subprocess.run([sys.executable,'tests/integration/test_namespace_boundary.py'],check=True)
 subprocess.run([sys.executable,'tests/integration/test_namespace_ownership.py'],check=True)
+subprocess.run([sys.executable,'tests/integration/test_policy_boundary.py'],check=True)
 abi_reference_sha256 = hashlib.sha256((ROOT/'abi/x86_64-current.json').read_bytes()).hexdigest()
 abi_capture_sha256 = hashlib.sha256((ROOT/'build/abi-current.json').read_bytes()).hexdigest()
 if not args.host_only:
@@ -196,6 +199,9 @@ result['namespace_ownership'] = json.loads((ROOT/'build/namespace-ownership.json
 result['namespace_recovery_qemu'] = not args.host_only
 result['namespace_recovery_qemu_boots'] = 0 if args.host_only else 2
 result['namespace_recovery_qemu_deaths'] = 0 if args.host_only else 6
+result['console_policy_host_assertions'] = 663
+result['launch_policy_host_assertions'] = 2152
+result['policy_compile_boundary_tests'] = 7
 result['persist_metadata_host_assertions'] = 13867
 result['persist_metadata_qemu'] = not args.host_only
 result['persist_metadata_qemu_boots'] = 0 if args.host_only else 2
