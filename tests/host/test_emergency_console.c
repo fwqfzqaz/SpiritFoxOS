@@ -38,7 +38,7 @@ int main(void){
  for(unsigned bad=0;bad<12;bad++){
   m=request(OP_WRITE,active);m.length=1;
   switch(bad){case 0:m.h.size--;break;case 1:m.h.protocol_major++;break;case 2:m.h.protocol_minor++;break;case 3:m.h.flags++;break;
-  case 4:m.h.payload_bytes--;break;case 5:m.h.cap_count=1;break;case 6:m.status=1;break;case 7:m.length=257;break;
+  case 4:m.h.payload_bytes--;break;case 5:m.h.cap_count=1;break;case 6:m.status=1;break;case 7:m.length=sizeof(m.data)+1;break;
   case 8:m.mode=1;break;case 9:m.offset=1;break;case 10:m.handle|=1ull<<32;break;case 11:m.handle=0;break;}
   SfEmergencyConsole saved=console;uint32_t sequence=generation;unsigned before=bytes_written;
   CHECK(sf_emergency_console(&console,&generation,42,&m,output)<0&&console.handle==saved.handle&&console.owner==saved.owner&&generation==sequence&&bytes_written==before);

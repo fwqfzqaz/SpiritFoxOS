@@ -57,7 +57,7 @@ int main(void){
   request(&m,OP_NS_CB_READ);m.mode=UINT32_MAX;m.length=1;uint32_t sender=77;
   switch(bad){case 0:sender=78;break;case 1:m.h.flags=1;break;case 2:m.h.size--;break;
    case 3:m.h.protocol_major++;break;case 4:m.h.protocol_minor++;break;case 5:m.h.payload_bytes--;
-   break;case 6:m.h.cap_count=1;break;case 7:m.h.request_id=0;break;case 8:m.status=1;break;case 9:m.length=257;break;}
+   break;case 6:m.h.cap_count=1;break;case 7:m.h.request_id=0;break;case 8:m.status=1;break;case 9:m.length=sizeof(m.data)+1;break;}
   unsigned previous=reads;CHECK(sf_ns_client_callback(sender,&m)<0&&m.length==0&&reads==previous);
  }
  fail_close=1;request(&m,OP_NS_CB_MOUNT_CLOSE);m.handle=1;CHECK(sf_ns_client_callback(77,&m)==SF_DEVICE_GONE&&losses==1&&!sf_ns_client_healthy());

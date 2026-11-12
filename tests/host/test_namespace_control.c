@@ -60,7 +60,7 @@ int main(void){
  CHECK(sf_nsc_read(&client,7,(uint32_t)duplicate,out,2,0,0)==2&&!memcmp(out,data+3,2));
  CHECK(sf_nsc_read(&client,7,(uint32_t)duplicate,out,2,0,1)==2&&!memcmp(out,data,2));
  SfFileStat stat;CHECK(!sf_nsc_stat(&client,7,(uint32_t)h,&stat)&&stat.offset==5&&stat.size==5);
- unsigned calls=exchanges;CHECK(sf_nsc_read(&client,7,(uint32_t)h,out,257,0,0)==SF_INVALID);
+ unsigned calls=exchanges;CHECK(sf_nsc_read(&client,7,(uint32_t)h,out,sizeof(((SfMessage*)0)->data)+1,0,0)==SF_INVALID);
  CHECK(sf_nsc_read(&client,7,(uint32_t)h|(1ull<<32),out,1,0,0)==SF_STALE_HANDLE&&exchanges==calls);
  CHECK(!sf_nsc_handoff(&client,7,(uint32_t)duplicate,8));
  CHECK(sf_nsc_read(&client,7,(uint32_t)duplicate,out,1,0,0)==SF_STALE_HANDLE);
@@ -91,7 +91,7 @@ int main(void){
   SfMessage m;request(&m,OP_NS_UNMOUNT);m.mode=1;uint32_t caller=1;
   switch(bad){case 0:caller=2;m.h.flags=2;break;case 1:m.h.flags=2;break;case 2:m.h.size=39;break;
    case 3:m.h.protocol_major=2;break;case 4:m.h.protocol_minor=1;break;case 5:m.h.payload_bytes--;
-   break;case 6:m.h.cap_count=1;break;case 7:m.status=1;break;case 8:m.length=257;break;}
+   break;case 6:m.h.cap_count=1;break;case 7:m.status=1;break;case 8:m.length=sizeof(m.data)+1;break;}
   before=*server.ns;CHECK(sf_nsr_dispatch(&server,caller,&m)<0);CHECK(!memcmp(&before,server.ns,sizeof(before))&&m.length==0);
  }
  /* Zero is never a real actor. Reject it before allocating a description,
