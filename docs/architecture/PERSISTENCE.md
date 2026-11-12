@@ -39,7 +39,7 @@
   能力模型本身的语义。
 - 协议是同步、有界的：ATTACH_SEND / ATTACH_REPLY / MOUNT / READ / WRITE / TRUNCATE / STAGE /
   INSTALL / BEGIN / FINISH / REVOKE / STATUS / PACKAGE / PREVIEW / REVOKED / DRIVER_DOWN。
-  数据每消息最多 256 字节，`READ`/`WRITE` 由客户端分块循环；`PACKAGE`/`PREVIEW`/`REVOKED`
+  数据每消息最多 4096 字节（`SF_MSG_BYTES`），`READ`/`WRITE` 由客户端分块循环；`PACKAGE`/`PREVIEW`/`REVOKED`
   以 `handle` 返回总长、`length` 返回本块。`ATTACH_REPLY` 的 `handle` 被内核占用为能力字段，
   因而容量走 `offset`。
 - dirty 租约由 Root 的持久化 RPC 客户端明确持有，覆盖 MOUNT（可能回退 TRYING）、

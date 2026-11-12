@@ -34,27 +34,27 @@ int main(void){
   CHECK(n->frame->cs==0x1b&&n->frame->ss==0x23&&n->frame->rflags==0x202);
   CHECK(!n->caps[0].endpoint&&n->cap_limit==0&&n->page_limit==0&&n->page_count==0);
  }
- CHECK(tasks[0].thread_count==SF_THREAD_LIMIT_MAX&&tasks[0].thread_slots==255u&&tasks[0].next_tid==8);
+ CHECK(tasks[0].thread_count==SF_THREAD_LIMIT_MAX&&tasks[0].thread_slots==0xffffffffu&&tasks[0].next_tid==SF_THREAD_LIMIT_MAX);
  CHECK(tasks[0].page_count==(SF_THREAD_LIMIT_MAX-1)*16&&allocation_calls==(SF_THREAD_LIMIT_MAX-1)*16);
  CHECK(create(0,entry,0)==SF_NO_SPACE);
  tasks[0].caps[0].endpoint=5;CHECK(task_caps_used(&tasks[1])==1&&task_caps_used(&tasks[0])==1);
  /* 同级线程退出只回收自身栈与槽位；主线程与其他线程继续 READY。 */
  current=1;unsigned before=core_unmap_calls;CHECK(invoke(1,SYS_EXIT,7,0,0)==0);
- CHECK(tasks[0].state==T_READY&&tasks[0].thread_count==SF_THREAD_LIMIT_MAX-1&&tasks[0].thread_slots==253u);
+ CHECK(tasks[0].state==T_READY&&tasks[0].thread_count==SF_THREAD_LIMIT_MAX-1&&tasks[0].thread_slots==0xfffffffdu);
  CHECK(tasks[1].state==T_DEAD&&tasks[1].exit_status==7&&core_unmap_calls==before+1&&core_unmap_bytes==SF_THREAD_STACK_BYTES);
  CHECK(tasks[2].state==T_READY&&tasks[7].state==T_READY);
- current=0;long reused=create(0,entry,0x200);CHECK(reused==9&&tasks[1].state==T_READY&&tasks[1].thread_slot==1);
- CHECK(tasks[1].frame->rip==entry&&tasks[1].frame->rdi==0x200&&tasks[0].thread_count==SF_THREAD_LIMIT_MAX&&tasks[0].thread_slots==255u);
+ current=0;long reused=create(0,entry,0x200);CHECK(reused==SF_THREAD_LIMIT_MAX+1&&tasks[1].state==T_READY&&tasks[1].thread_slot==1);
+ CHECK(tasks[1].frame->rip==entry&&tasks[1].frame->rdi==0x200&&tasks[0].thread_count==SF_THREAD_LIMIT_MAX&&tasks[0].thread_slots==0xffffffffu);
  /* 线程配额 query/set/used、边界、低于已用与权限。 */
  CHECK(invoke(0,SYS_THREAD_LIMIT,1,0,SF_LIMIT_QUERY)==SF_THREAD_LIMIT_MAX);
  CHECK(invoke(0,SYS_THREAD_LIMIT,1,0,SF_LIMIT_USED)==SF_THREAD_LIMIT_MAX);
  CHECK(invoke(0,SYS_THREAD_LIMIT,1,4,SF_LIMIT_SET)==SF_BUSY);
- CHECK(invoke(0,SYS_THREAD_LIMIT,1,7,SF_LIMIT_SET)==SF_BUSY);
- CHECK(invoke(0,SYS_THREAD_LIMIT,1,8,SF_LIMIT_SET)==8&&tasks[0].thread_limit==8);
+ CHECK(invoke(0,SYS_THREAD_LIMIT,1,SF_THREAD_LIMIT_MAX-1,SF_LIMIT_SET)==SF_BUSY);
+ CHECK(invoke(0,SYS_THREAD_LIMIT,1,SF_THREAD_LIMIT_MAX,SF_LIMIT_SET)==SF_THREAD_LIMIT_MAX&&tasks[0].thread_limit==SF_THREAD_LIMIT_MAX);
  current=2;CHECK(invoke(2,SYS_EXIT,0,0,0)==0);current=0;
- CHECK(invoke(0,SYS_THREAD_LIMIT,1,7,SF_LIMIT_SET)==7&&tasks[0].thread_limit==7);
+ CHECK(invoke(0,SYS_THREAD_LIMIT,1,SF_THREAD_LIMIT_MAX-1,SF_LIMIT_SET)==SF_THREAD_LIMIT_MAX-1&&tasks[0].thread_limit==SF_THREAD_LIMIT_MAX-1);
  CHECK(invoke(0,SYS_THREAD_LIMIT,1,0,3)==SF_INVALID&&invoke(0,SYS_THREAD_LIMIT,1,1,SF_LIMIT_QUERY)==SF_INVALID);
- CHECK(invoke(0,SYS_THREAD_LIMIT,1,0,SF_LIMIT_SET)==SF_INVALID&&invoke(0,SYS_THREAD_LIMIT,1,9,SF_LIMIT_SET)==SF_INVALID);
+ CHECK(invoke(0,SYS_THREAD_LIMIT,1,0,SF_LIMIT_SET)==SF_INVALID&&invoke(0,SYS_THREAD_LIMIT,1,SF_THREAD_LIMIT_MAX+1,SF_LIMIT_SET)==SF_INVALID);
  CHECK(invoke(0,SYS_THREAD_LIMIT,0,0,SF_LIMIT_QUERY)==SF_INVALID&&invoke(0,SYS_THREAD_LIMIT,1ull<<32|1,0,SF_LIMIT_QUERY)==SF_INVALID);
  CHECK(invoke(0,SYS_THREAD_LIMIT,99,0,SF_LIMIT_QUERY)==SF_NOT_FOUND);
  process(1,2);current=1;CHECK(invoke(1,SYS_THREAD_LIMIT,1,0,SF_LIMIT_QUERY)==SF_DENIED);current=0;

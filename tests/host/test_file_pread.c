@@ -62,7 +62,7 @@ int main(void){
  for(unsigned i=0;i<1000;i++){
   seed=seed*1664525u+1013904223u;unsigned cursor=seed%1025;CHECK(sf_file_seek(&c,alias,cursor)==cursor);
   uint64_t offset=i%7==0?UINT64_MAX:i%7==1?UINT32_MAX+1ull:(seed>>7)%700;
-  size_t requested=(seed>>17)%400,n=requested>256?256:requested;
+  size_t requested=(seed>>17)%400,n=requested>SF_MSG_BYTES?SF_MSG_BYTES:requested;
   if(offset>=sizeof(expected))n=0;else if(n>sizeof(expected)-offset)n=sizeof(expected)-offset;
   memset(out,0xa5,sizeof(out));saved=ns;CHECK(sf_file_pread(&c,alias,out+1,requested,offset)==(int64_t)n);
   CHECK(!memcmp(&saved,&ns,sizeof(ns))&&out[0]==0xa5);
@@ -79,7 +79,7 @@ int main(void){
   int special=sf_file_openat(&c,root,i?"console":"pipe",OPEN_READ);CHECK(special>0);
   CHECK(sf_file_pread(&c,special,out,1,0)==SF_NOT_SEEKABLE&&sf_file_pread(&c,special,0,0,0)==SF_NOT_SEEKABLE);CHECK(!sf_file_close(&c,special));
  }
- raw((1ull<<32)|alias,1,0,0,SF_STALE_HANDLE);raw(alias,257,0,0,SF_INVALID);raw(alias,UINT32_MAX,0,0,SF_INVALID);raw(alias,1,1,0,SF_INVALID);
+ raw((1ull<<32)|alias,1,0,0,SF_STALE_HANDLE);raw(alias,SF_MSG_BYTES+1,0,0,SF_INVALID);raw(alias,UINT32_MAX,0,0,SF_INVALID);raw(alias,1,1,0,SF_INVALID);
  /* Actual backend sees the full 64-bit offset, even at EOF; no stale cache shortcut. */
  int disk=sf_file_openat(&c,root,"disk",OPEN_READ);CHECK(disk>0&&sf_file_seek(&c,disk,7)==7);saved=ns;
  CHECK(sf_file_pread(&c,disk,out,5,20)==5&&!memcmp(out,expected+20,5)&&backend_calls==1&&backend_offset==20&&!memcmp(&saved,&ns,sizeof(ns)));

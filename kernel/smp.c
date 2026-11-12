@@ -88,7 +88,7 @@ static uint64_t tsc(void){uint32_t lo,hi;__asm__ volatile("rdtsc":"=a"(lo),"=d"(
 static void delay_us(uint64_t us){uint64_t end=tsc()+us*1000;while(tsc()<end)__asm__ volatile("pause");}
 static void decimal(unsigned v){char b[12];unsigned n=0;do{b[n++]='0'+(v%10);v/=10;}while(v);for(unsigned i=0;i<n/2;i++){char t=b[i];b[i]=b[n-1-i];b[n-1-i]=t;}b[n]=0;serial(b);}
 static int firmware_read(void*c,uint64_t address,void*dst,size_t bytes){
- if(address>=0x40000000ull||bytes>0x40000000ull-address)return 1;
+ if(address>=0x100000000ull||bytes>0x100000000ull-address)return 1;
  SfBootInfo*b=c;BootMemory*map=(void*)b->memory_map;
  for(uint64_t i=0;i<b->memory_map_entry_count;i++){BootMemory*m=&map[i];if((m->type!=9&&m->type!=10)||m->pages>UINT64_MAX/4096)continue;uint64_t n=m->pages*4096;if(address>=m->physical&&address-m->physical<n&&bytes<=n-(address-m->physical)){memcpy(dst,(void*)(uintptr_t)address,bytes);return 0;}}
  return 1;

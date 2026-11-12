@@ -25,9 +25,9 @@ Core 0 校验 BootInfo 大小、版本、内存映射边界、引导对象的 Lo
 - 进程内端点能力、32 个能力槽、权利衰减、句柄 generation、端点整体撤销、8 条有界队列、复制消息和接收截止时间。
 - 保留可裁剪的串口日志和恢复控制台。串口 IRQ 输入队列 256 字节，溢出显式报告。
 
-任务槽上限为 12，端点上限为 64。启动管理器持有原型根权限；普通应用不能创建其他地址空间、杀进程、读取控制台、读取 PCI 配置或关闭系统。没有开放通用物理页/MMIO/DMA 映射接口，`SYS_MAP_TEST` 一律拒绝；另有真实恶意装载计划测试覆盖内核映射校验。M5 新增 root 专用 PCI 只读查询、由 root 指定设备的单一拥有者授权、受限端口 I/O 和设备撤销机制；virtqueue 与块协议不在内核中。
+任务槽上限为 32（线程上限 64），端点上限为 64。启动管理器持有原型根权限；普通应用不能创建其他地址空间、杀进程、读取控制台、读取 PCI 配置或关闭系统。没有开放通用物理页/MMIO/DMA 映射接口，`SYS_MAP_TEST` 一律拒绝；另有真实恶意装载计划测试覆盖内核映射校验。M5 新增 root 专用 PCI 只读查询、由 root 指定设备的单一拥有者授权、受限端口 I/O 和设备撤销机制；virtqueue 与块协议不在内核中。
 
-能力可随 IPC 转移一条：`cap_count=1` 时发送方 `handle` 指定能力，内核要求发送方持有 `RIGHT_DELEGATE`，接收方在 RECV 时得到同权新句柄；队列交付与阻塞直递走同一安装路径，发送后被撤销或端点重生则交付消息时按 `SF_REVOKED` 清空能力。每个能力记录父能力的 PID、槽位和 generation；`SYS_CAP_REVOKE` 由端点所有者调用时仍回收整条端点，其他持有者只撤销自己这一支及其后代，父能力与同层兄弟保持。进程退出不级联撤销已授出的子能力，仍按最后引用回收端点。IPC 消息上限为固定 `SfMessage`（328 字节，其中正文数据 256 字节），采用 ABI 1 的 40 字节头；拒绝 cap_count>1。当前不提供通用共享内存、调用优先级继承或大消息零拷贝。
+能力可随 IPC 转移一条：`cap_count=1` 时发送方 `handle` 指定能力，内核要求发送方持有 `RIGHT_DELEGATE`，接收方在 RECV 时得到同权新句柄；队列交付与阻塞直递走同一安装路径，发送后被撤销或端点重生则交付消息时按 `SF_REVOKED` 清空能力。每个能力记录父能力的 PID、槽位和 generation；`SYS_CAP_REVOKE` 由端点所有者调用时仍回收整条端点，其他持有者只撤销自己这一支及其后代，父能力与同层兄弟保持。进程退出不级联撤销已授出的子能力，仍按最后引用回收端点。IPC 消息上限为固定 `SfMessage`（4168 字节，其中正文数据 4096 字节），采用 ABI 1 的 40 字节头；拒绝 cap_count>1。匿名映射由 `SYS_MMAP`/`SYS_MUNMAP` 提供 `[0x74000000, 0x78000000)` 窗口，共享内存由 `SYS_SHM_CREATE/MAP/GRANT/CLOSE` 提供固定 8 槽，创建者可写、被授权者只读，页归创建者 PID 记账。调用优先级继承仍不提供；大消息以共享内存取代复制路径。
 
 关闭最后一个能力引用会回收端点；存在派生或跨任务引用时保持有效，拥有者退出仍整体撤销。设备 MMIO 页可由获授驱动直接访问，但不能作为系统调用复制缓冲区；普通 DMA RAM 不受该限制。返回用户态之前检查 RSP canonical 性。`SYS_TASK_STATUS` 对活任务返回 64 位 `SF_TASK_RUNNING (0x100000000)`，死亡任务返回有符号 int32 退出码；这是未冻结 ABI 的语义修订，所有当前服务已同步重建。修复及回归见 `../quality/SECURITY.md`。
 
@@ -37,15 +37,15 @@ sf-init 在一个用户态二进制中组合模块管理、sf-process、sfexec�
 
 块设备回复使用每个驱动实例独立的端点，开始失败或停止完成后撤销；应用 namespace 请求不会被同步块 RPC 等待消费，冷缓存并发读和反复重启验证见 SECURITY.md。
 
-sf-native 接收 `OP_NATIVE_PREPARE`，验证应用签名、类型、运行时身份与段布局，返回有界的 native 装载计划。来源可以是只读 bundle，也可以是 sf-init 从磁盘固定并通过 `OP_NATIVE_STAGE` 按序复制的 128 KiB 有界快照。sf-init 将计划与同一包核对，准备映像，再由 Core 0 独立校验映射与复制数据。native 回复有独立端点，重启时撤销重建，已有应用请求不会被装载等待消费。应用持有运行时租约，退出和失败时释放；运行时死亡返回可诊断状态并允许受控重启。
+sf-native 接收 `OP_NATIVE_PREPARE`，验证应用签名、类型、运行时身份与段布局，返回有界的 native 装载计划。来源可以是只读 bundle，也可以是 sf-init 从磁盘经按需增长的匿名映射载入、再通过 `SYS_SHM_*` 共享内存只读映射交给运行时的有界包体；装载容量只受页配额约束，不再有固定快照上限。sf-init 将计划与同一包核对，准备映像，再由 Core 0 独立校验映射与复制数据。native 回复有独立端点，重启时撤销重建，已有应用请求不会被装载等待消费。应用持有运行时租约，退出和失败时释放；运行时死亡返回可诊断状态并允许受控重启。
 
 管理器有生命周期状态、依赖 DAG 检查、唯一 generation、准入门和资源账本。忙停止返回阻塞，取消后恢复 ACTIVE；替换采用新旧实例并存。M5 将挂载依赖、打开对象和 DMA 账本接入实际驱动生命周期；M6 将实际同步磁盘事务接入 dirty 资源和卸载门。早期 timer、mapping、IRQ 等资源注入测试仍仅验证回收门控。生命周期 RPC 由 `services/lifecycle_rpc.c` 分发在 manager_ep/manager_reply 上：内核提供的真实发送者必须为根，操作覆盖状态、列表、启动、准备、取消、停止、卸载和资源租约；分发层只做身份检查与状态机调用，不复制状态转换，非根请求按 SF_DENIED 拒绝且不泄露槽位信息。跨服务通用健康协议、在途取消/确认排空、并发事务、在线迁移与状态迁移仍需后续实现。
 
-应用文件 RPC 使用独立的 fs_ep 通道；manager_ep 保留给生命周期 RPC，普通应用没有该端点。文件分发仍由 sf_file_dispatch 处理，并在内核已有 length<=256 检查之外，独立拒绝超长读写与列举；原调用权限和回收语义不变。命名空间包含目录、1 KiB 内存文件、管道、控制台和最大 128 KiB 的只读磁盘文件。open 有独立偏移，dup 共享 open-description，并保留挂载租约至最后一个引用关闭。支持 `/disk` 的受控挂载/卸载；文件和目录的活跃句柄都会阻止卸载，磁盘条目由 sf-fs 的 `OP_FS_ENTRY/FIND/READ` 投影而来。namespace 路径为 UTF-8，拒绝 `.`/`..`、重复与尾随斜线；SFRFS1/SFRFS2 磁盘路径额外限制为可打印 ASCII。新增目录句柄 openat 和读写权限衰减；`runat` 按签名 namespace.read 请求与显式目录选择授予只读目录，应用经真实 IPC 相对打开、列举和读取，退出/故障/超时回收引用。普通 run 仍只授予控制台写入。没有符号链接、动态挂载视图或完整身份策略，协议和边界见 `NAMESPACE.md`。
+应用文件 RPC 使用独立的 fs_ep 通道；manager_ep 保留给生命周期 RPC，普通应用没有该端点。文件分发仍由 sf_file_dispatch 处理，并在内核已有 length<=4096 检查之外，独立拒绝超长读写与列举；原调用权限和回收语义不变。命名空间包含目录、1 KiB 内存文件、管道、控制台和最大 128 KiB 的只读磁盘文件。open 有独立偏移，dup 共享 open-description，并保留挂载租约至最后一个引用关闭。支持 `/disk` 的受控挂载/卸载；文件和目录的活跃句柄都会阻止卸载，磁盘条目由 sf-fs 的 `OP_FS_ENTRY/FIND/READ` 投影而来。namespace 路径为 UTF-8，拒绝 `.`/`..`、重复与尾随斜线；SFRFS1/SFRFS2 磁盘路径额外限制为可打印 ASCII。新增目录句柄 openat 和读写权限衰减；`runat` 按签名 namespace.read 请求与显式目录选择授予只读目录，应用经真实 IPC 相对打开、列举和读取，退出/故障/超时回收引用。普通 run 仍只授予控制台写入。没有符号链接、动态挂载视图或完整身份策略，协议和边界见 `NAMESPACE.md`。
 
 多用户身份位于用户态：`config/accounts.txt` 在构建期生成加盐摘要账户表并嵌入签名 sf-init；`services/session.c` 维护四个有界控制台会话，启动时自动建立 uid 0 会话，`login/logout/whoami/users/sessions` 管理当前附着身份。命名空间节点新增所有者 uid/gid 与九位模式，非 root 打开需目标权限并逐层通过目录 execute，创建/删除还要求父目录 write+execute；`/home/<name>` 为 0700，`/tmp` 为 0777，无 sticky 位。应用与 shell 的文件 RPC 由真实发送者 PID 映射到 `Child.uid/gid`，服务端 `sf_file_dispatch_as` 强制检查；会话 owner 使用高位标签，避免与 PID 句柄空间混淆。管理命令与 `run installed` 仅 root 会话可用。账户/权限/会话的格式、边界与限制见 `SESSIONS.md`。
 
-M6 新增 `/persist/notes` 的 16 KiB 有界读写适配器，每次成功 write 完成双银行事务与设备 flush。卷、安装与更新状态机运行在 `sf-persist.sfmod`：sf-init 用 `SYS_CAP_DERIVE` 派生并转移块端点能力，再通过 256 字节分块的持久化 RPC 读写、暂存和安装；`/persist` 投影、`RES_DIRTY` 租约与驱动重启流程仍由 sf-init 负责。卷最多五个 16 KiB 文件，余下槽位用于签名应用 A/B 包、选择器与密钥撤销记录。安装先验证类型、ABI、运行时与签名，将备用包与 PENDING 记录一起提交；运行时再次验证固定快照。试运行前持久记录 TRYING，按时退出 0 后确认，失败或中断回退已确认槽，应用身份与包摘要绑定。已确认包的签名数字版本形成软件下限，拒绝降级与同版本换包，精确重装不写盘；候选执行时再次验证版本策略。写/flush 失败停止准入，重挂载或重启后恢复。格式、错误模型与限制见 `PERSISTENCE.md` 和 `PERSISTENCE.md`；它不是完整 POSIX 文件系统或全局更新系统。
+M6 新增 `/persist/notes` 的 16 KiB 有界读写适配器，每次成功 write 完成双银行事务与设备 flush。卷、安装与更新状态机运行在 `sf-persist.sfmod`：sf-init 用 `SYS_CAP_DERIVE` 派生并转移块端点能力，再通过 4096 字节分块的持久化 RPC 读写、暂存和安装；`/persist` 投影、`RES_DIRTY` 租约与驱动重启流程仍由 sf-init 负责。卷最多五个 16 KiB 文件，余下槽位用于签名应用 A/B 包、选择器与密钥撤销记录。安装先验证类型、ABI、运行时与签名，将备用包与 PENDING 记录一起提交；运行时再次验证固定快照。试运行前持久记录 TRYING，按时退出 0 后确认，失败或中断回退已确认槽，应用身份与包摘要绑定。已确认包的签名数字版本形成软件下限，拒绝降级与同版本换包，精确重装不写盘；候选执行时再次验证版本策略。写/flush 失败停止准入，重挂载或重启后恢复。格式、错误模型与限制见 `PERSISTENCE.md` 和 `PERSISTENCE.md`；它不是完整 POSIX 文件系统或全局更新系统。
 
 包验证使用构建时生成的双锚点信任集合（`services/trust.c`），boot bundle、磁盘包与持久化安装统一经过信任存储；运行期撤销把签名者 key_id 持久化到事务键 `/boot/revoked`，挂载时在任何包重新验证之前加载。被撤销签名者的有效签名按 `SF_REVOKED` 拒绝，与 `SF_BAD_SIGNATURE` 区分。`revoke-key` 要求目标包当前仍有有效锚点签名，重复撤销幂等。撤销上限 4 个 key_id；语义与限制见 `PERSISTENCE.md`。
 
@@ -55,7 +55,7 @@ M6 新增 `/persist/notes` 的 16 KiB 有界读写适配器，每次成功 write
 
 公开容器字段、签名消息和 CBOR 限制遵守设计说明 v0.2。包解析上限 32 MiB、64 个段、64 KiB 清单和 16 层 CBOR。入口必须在 RX 文件内容内。映射段页粒度不重叠；间隙必须全零；尾随字节拒绝。校验与装载使用同一只读 bundle 或由受信任进程服务固定的私有磁盘快照。
 
-静态包仍在 `0x40000000` 运行；新增 relative-v1 APP 使用位置无关代码和至多 256 个有界相对修正，交替在 `0x44000000`/`0x46000000` 执行。目标完整位于 RW 段，加数指向映像内实际段，拒绝代码写、重复、越界、负加数和未声明子表。sf-native 验证并返回计划，sf-init 对照同一包后准备映像，Core 0 独立检查基址与段并复制私有页；没有 ELF/重定位解析器进入内核。映像仍限制 2 MiB、暂存 1280 KiB（即单个映像按页对齐累计的实际上限）、应用自身计划五段。带 `native_imports` 的应用只绑定一个认证运行时库 `sf-libsf.sfmod`：`sf_native_link` 把库段追加到 `page_up(应用页对齐总长)`，合并计划最多八段，按（名称, ABI）填充 RW 槽为 `image_base+库偏移+导出RVA`。当前 POSIX 子集提供 `open/read/write/close/lseek/fstat/stat/getpid/_exit/sleep/printf/puts/getenv/errno/strerror`，能力模型保持只读；多库依赖、TLS、惰性绑定和完整 POSIX/libc 尚未实现，完整格式见 `NATIVE.md`。
+静态包仍在 `0x40000000` 运行；新增 relative-v1 APP 使用位置无关代码和至多 256 个有界相对修正，交替在 `0x44000000`/`0x46000000` 执行。目标完整位于 RW 段，加数指向映像内实际段，拒绝代码写、重复、越界、负加数和未声明子表。sf-native 验证并返回计划，sf-init 对照同一包后准备映像，Core 0 独立检查基址与段并复制私有页；没有 ELF/重定位解析器进入内核。映像上限 8 MiB，暂存区改由 `SYS_MMAP` 按各映射段页对齐总长按需增长、装载后 `SYS_MUNMAP`，不再有固定 1280 KiB 上限；应用自身计划五段。带 `native_imports` 的应用只绑定一个认证运行时库 `sf-libsf.sfmod`：`sf_native_link` 把库段追加到 `page_up(应用页对齐总长)`，合并计划最多八段，按（名称, ABI）填充 RW 槽为 `image_base+库偏移+导出RVA`。当前 POSIX 子集提供 19 个导出：`open/read/write/close/lseek/fstat/stat/getpid/_exit/sleep/printf/puts/getenv/__errno_location/strerror/malloc/free/calloc/realloc`，能力模型保持只读；多库依赖、TLS、惰性绑定和完整 POSIX/libc 尚未实现，完整格式见 `NATIVE.md`。
 
 用户栈顶 `0x41010000`，大小 64 KiB；只读 BootArgs 在 `0x42000000`，显式调用支持最多八个 argv 和八条环境，头保持 96 字节，规范偏移表和字符串使对象总长最多 608；无显式调用数据保留旧 argc=envc=0/96 字节布局，不继承宿主或上次进程环境。Core 0 独立校验和复制载荷，SDK 与词法规则见 `APP_SDK.md`。只读启动包在 `0x60000000`，仅授予初始任务和 native 运行时。BootArgs 原 24 字节保留区现用于可选设备授权信息；驱动的 64 KiB 固定 DMA 区位于 `0x50000000`，普通应用没有该映射。普通应用通过 `_sf_start` 进入 main，并通过退出系统调用回收。
 

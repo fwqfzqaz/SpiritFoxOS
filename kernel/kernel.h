@@ -13,7 +13,7 @@ typedef struct {
  uint32_t pid,state,wait_endpoint;int32_t exit_status;
  uint64_t cr3,recv_buffer,wait_deadline;Frame *frame;
  uint32_t device_io,device_bdf,device_fault;
- uint32_t device_modern,device_slot,irq_waiting;
+ uint32_t device_modern,device_kind,device_slot,irq_waiting;
  uint32_t priority,cap_limit,page_limit,page_count;uint64_t ready_since;
  uint32_t tid,main,main_slot,thread_slot;int32_t cpu;
  uint32_t thread_limit,thread_count,thread_slots,next_tid,cpu_budget;uint64_t cpu_used;
@@ -52,6 +52,7 @@ static inline void kernel_lock_release(void){__atomic_fetch_add(&kernel_lock.ser
 static inline unsigned task_caps_used(const Task*t){const Task*m=task_main_c(t);unsigned count=0;for(unsigned i=0;i<SF_CAP_LIMIT_MAX;i++)if(m->caps[i].endpoint)count++;return count;}
 void serial(const char*);void hex(uint64_t);void panic(const char*);
 void console_irq(void);long console_read(void);
+void console_fb_init(uint64_t,uint64_t,uint32_t,uint32_t,uint32_t,uint32_t);
 void ps2_mouse_init(uint32_t,uint32_t);long ps2_mouse_read(int);void ps2_irq(void);
 void arch_init(void);void arch_cpu_init(unsigned);void arch_load_idt(void);void arch_task(Task*);void arch_save(Task*);void arch_enter(Frame*) __attribute__((noreturn));
 /* 空闲等待：enter_idle 切换到每 CPU 独立栈并释放全局锁，idle_loop 在
@@ -62,7 +63,11 @@ void *page_alloc(uint32_t);void page_free_phys(uint32_t,uint64_t);void pages_fre
 int space_map(Task*,uint64_t,uint64_t,uint32_t);int user_range(Task*,uint64_t,uint64_t,int);
 void *user_phys(Task*,uint64_t);int copy_in(Task*,void*,uint64_t,size_t);int copy_out(Task*,uint64_t,const void*,size_t);
 int space_unmap_range(Task*,uint64_t,uint64_t);int user_exec(Task*,uint64_t);
+long space_map_anon(Task*,uint64_t,uint64_t);
+/* 共享内存机制：内核只维护槽位/页/授权，策略由 PID1 与模块决定。 */
+long shm_syscall(uint64_t,uint64_t,uint64_t,uint64_t);void shm_release_pid(uint32_t);
 void space_apic_init(void);uint64_t space_ap_cr3(void);int space_ioapic_init(void);
+int space_fb_init(uint64_t,uint64_t);
 int task_new(const SfLoadPlan*,int);int task_new_limited(const SfLoadPlan*,int,uint32_t);void task_dead(Task*,int);Frame *schedule(void);
 int task_schedulable(const Task*);void task_wake(Task*);void task_kill(uint32_t,int);void cpu_account(void);void cpu_window_reset(void);
 long ipc_syscall(uint64_t,uint64_t,uint64_t,uint64_t);void ipc_cleanup(Task*);

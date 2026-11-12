@@ -48,7 +48,7 @@ int task_new_limited(const SfLoadPlan*p,int bootstrap,uint32_t pages){
  int slot=-1;for(unsigned i=0;i<SF_MAX_THREADS;i++)if(tasks[i].state==T_EMPTY||tasks[i].state==T_DEAD){slot=i;break;}if(slot<0)return SF_NO_SPACE;
  long pid=sf_pid_take(&next_pid);if(pid<0)return (int)pid;
  Task*t=&tasks[slot];/* Preserve capability generations across slot reuse. */
- for(unsigned i=0;i<32;i++)t->caps[i].endpoint=0;t->pid=(uint32_t)pid;t->state=T_EMPTY;t->device_io=0;t->device_bdf=0;t->device_fault=0;t->device_modern=0;t->device_slot=UINT32_MAX;t->irq_waiting=0;
+ for(unsigned i=0;i<32;i++)t->caps[i].endpoint=0;t->pid=(uint32_t)pid;t->state=T_EMPTY;t->device_io=0;t->device_bdf=0;t->device_fault=0;t->device_modern=0;t->device_kind=0;t->device_slot=UINT32_MAX;t->irq_waiting=0;
  t->priority=SF_PRIORITY_DEFAULT;t->cap_limit=SF_CAP_LIMIT_MAX;t->page_limit=pages;t->page_count=0;t->ready_since=ticks;
  t->tid=1;t->main=1;t->main_slot=(uint32_t)slot;t->thread_slot=0;t->cpu=-1;
  t->thread_limit=SF_THREAD_LIMIT_MAX;t->thread_count=1;t->thread_slots=1;t->next_tid=1;t->cpu_budget=0;t->cpu_used=0;
@@ -75,7 +75,8 @@ fail: device_release(t);ipc_cleanup(t);pages_free(t->pid);device_forget(t);t->st
 int task_new(const SfLoadPlan*p,int bootstrap){return task_new_limited(p,bootstrap,SF_PAGE_LIMIT_MAX);}
 /* 任务终结：释放设备与 IPC，若终结的是当前任务则先切回内核页表再归还其页，
  * 最后遗忘设备绑定；exit_status 供父任务通过 SYS_TASK_STATUS 观测。 */
-void task_dead(Task*t,int status){device_release(t);ipc_cleanup(t);t->state=T_DEAD;t->exit_status=status;t->cpu=-1;
+void task_dead(Task*t,int status){/* 先撤销共享内存引用，再归还页池，避免他进程 PTE 指向已回收页。 */
+ shm_release_pid(t->pid);device_release(t);ipc_cleanup(t);t->state=T_DEAD;t->exit_status=status;t->cpu=-1;
 #ifndef SF_HOST_TEST
  int ci=(int)cpu_index();if(cpu_currents[ci]>=0&&tasks[cpu_currents[ci]].pid==t->pid)__asm__ volatile("mov %0,%%cr3"::"r"(boot_cr3):"memory");
 #endif
@@ -221,7 +222,7 @@ static long syscall(Frame*f){Task*t=&tasks[current];uint64_t a=f->rdi,b=f->rsi,c
   if(!user_exec(m,r.entry))return SF_DENIED;
   int slot=-1;for(unsigned i=0;i<SF_MAX_THREADS;i++)if(tasks[i].state==T_EMPTY||tasks[i].state==T_DEAD){slot=i;break;}if(slot<0)return SF_NO_SPACE;
   Task*n=&tasks[slot];for(unsigned i=0;i<32;i++)n->caps[i].endpoint=0;
-  n->pid=m->pid;n->cr3=m->cr3;n->state=T_EMPTY;n->wait_endpoint=0;n->recv_buffer=0;n->wait_deadline=0;n->frame=0;n->exit_status=0;n->device_io=0;n->device_bdf=0;n->device_fault=0;n->device_modern=0;n->device_slot=UINT32_MAX;n->irq_waiting=0;
+  n->pid=m->pid;n->cr3=m->cr3;n->state=T_EMPTY;n->wait_endpoint=0;n->recv_buffer=0;n->wait_deadline=0;n->frame=0;n->exit_status=0;n->device_io=0;n->device_bdf=0;n->device_fault=0;n->device_modern=0;n->device_kind=0;n->device_slot=UINT32_MAX;n->irq_waiting=0;
   n->priority=m->priority;n->cap_limit=0;n->page_limit=0;n->page_count=0;
   n->tid=++m->next_tid;n->main=0;n->main_slot=m->main_slot;n->thread_slot=ts;n->cpu=-1;
   n->thread_limit=n->thread_count=n->thread_slots=n->next_tid=n->cpu_budget=0;n->cpu_used=0;n->ready_since=ticks;
@@ -261,7 +262,10 @@ static long syscall(Frame*f){Task*t=&tasks[current];uint64_t a=f->rdi,b=f->rsi,c
   if(t->pid!=1||b!=0||c!=0)return SF_DENIED;
   if(!a||a>INT32_MAX)return SF_INVALID;
   Task*x=pid_main(a,1);if(!x)return SF_NOT_FOUND;
-  fb_grant_pid=(uint32_t)a;return SF_OK;
+  fb_grant_pid=(uint32_t)a;
+  /* 合成器接管屏幕后停掉内核文本控制台，避免启动日志覆盖图形界面。 */
+  console_fb_init(0,0,0,0,0,0);
+  return SF_OK;
  }
  /* 被授权进程把显示内存映射到 SF_FB，并取得 SfFbInfo。 */
  case SYS_FB_MAP:{
@@ -274,6 +278,13 @@ static long syscall(Frame*f){Task*t=&tasks[current];uint64_t a=f->rdi,b=f->rsi,c
   SfFbInfo info={sizeof(info),(uint32_t)fb_width,(uint32_t)fb_height,(uint32_t)fb_pitch,fb_bpp,0,fb_bytes};
   return copy_out(t,a,&info,sizeof(info));
  }
+ case SYS_MMAP:return space_map_anon(task_main(t),a,b);
+ case SYS_MUNMAP:{
+  uint64_t bytes=b;if((a&4095)||(bytes&4095)||!bytes||bytes>SF_HEAP_BYTES||a<SF_HEAP||a>SF_HEAP+SF_HEAP_BYTES-bytes)return SF_INVALID;
+  return space_unmap_range(task_main(t),a,bytes);
+ }
+ case SYS_SHM_CREATE:case SYS_SHM_MAP:case SYS_SHM_GRANT:case SYS_SHM_CLOSE:
+  return shm_syscall(f->rax,a,b,c);
  default:return ipc_syscall(f->rax,a,b,c);
  }
 }
@@ -312,6 +323,9 @@ Frame *interrupt_dispatch(Frame*f){
 void kernel_main(SfBootInfo*b){
  __asm__ volatile("mov %%cr3,%0":"=r"(boot_cr3));
  for(unsigned i=0;i<SF_MAX_CPUS;i++)cpu_currents[i]=-1;
+ /* 真机通常没有串口：先把固件 framebuffer 接成文本控制台，后续所有
+  * serial()/panic 输出会同时显示在屏幕上。 */
+ if((uint64_t)b<0x40000000ull&&b->magic==0x5f1f0f05)console_fb_init(b->framebuffer_base,b->framebuffer_size,b->width,b->height,b->pitch,b->bpp);
  serial("\nSpiritFoxOS Core 0 / ABI 1\n");
  if((uint64_t)b>=0x40000000ull||b->magic!=0x5f1f0f05||b->boot_type!=1||b->size!=sizeof(*b)||b->version!=1||!b->init_segment_count||b->init_segment_count>8)panic("BootInfo rejected");
  if((b->bundle&4095)||!b->bundle_bytes||b->bundle_bytes>4*1024*1024||b->bundle>=0x40000000ull||b->bundle_bytes>0x40000000ull-b->bundle)panic("bundle bounds");
@@ -325,7 +339,8 @@ void kernel_main(SfBootInfo*b){
     (uint64_t)b->pitch*b->height<=b->framebuffer_size){
   fb_physical=b->framebuffer_base;fb_bytes=b->framebuffer_size;
   fb_width=b->width;fb_height=b->height;fb_pitch=b->pitch;fb_bpp=b->bpp;
- }
+  if(space_fb_init(fb_physical,fb_bytes))console_fb_init(0,0,0,0,0,0);
+ }else console_fb_init(0,0,0,0,0,0);
  bundle_phys=b->bundle;bundle_bytes=b->bundle_bytes;arch_init();ps2_mouse_init((uint32_t)fb_width,(uint32_t)fb_height);device_init(b);smp_init(b);device_irq_init();SfLoadPlan p={0};p.size=sizeof(p);p.count=b->init_segment_count;p.entry=b->init_entry;
  for(unsigned i=0;i<p.count;i++){SfBootSegment*s=&b->init_segments[i];if(s->reserved||s->file_bytes>s->memory_bytes||(s->physical&4095)||!boot_memory(b,s->physical,(s->memory_bytes+4095)&~4095ull))panic("boot segment");if(s->physical<b->bundle+b->bundle_bytes&&b->bundle<s->physical+s->memory_bytes)panic("boot segment overlaps bundle");for(unsigned j=0;j<i;j++){SfBootSegment*t=&b->init_segments[j];if(s->physical<t->physical+t->memory_bytes&&t->physical<s->physical+s->memory_bytes)panic("overlapping boot segments");}p.segments[i]=(SfLoadSegment){s->rva,s->memory_bytes,s->physical,s->flags,0};}
  if(task_new(&p,1)!=1)panic("bootstrap plan rejected");serial("[CORE] entering isolated sf-init.sfmod, timer=100Hz\n");

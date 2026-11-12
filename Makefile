@@ -12,12 +12,13 @@ THIS_MAKEFILE := $(lastword $(MAKEFILE_LIST))
 BUILD_DIR ?= build
 TRUST_POLICY ?=
 PACKAGE ?= build/hello.sfk
+IMAGE ?= $(BUILD_DIR)/spiritfoxos.img
 TEST_ARGS ?=
 QEMU_ARGS ?=
 
 BUILD_ARGS := $(if $(strip $(TRUST_POLICY)),--trust-policy "$(TRUST_POLICY)")
 
-.PHONY: help all bootstrap setup build test test-host test-reuse \
+.PHONY: help all bootstrap setup build image test test-host test-reuse \
         run run-persist run-iommu qemu-test qemu-list \
         release dist inspect show-trust \
         check-build check-toolchain clean distclean clean-tools
@@ -34,6 +35,9 @@ setup: bootstrap ## bootstrap 的别名
 
 build: check-toolchain ## 构建内核、UEFI 镜像、签名包与测试盘
 	$(PYTHON) tools/build.py $(BUILD_ARGS)
+
+image: build ## 构建并生成可启动系统镜像 $(IMAGE)
+	$(PYTHON) tools/package/mkimage.py --source $(BUILD_DIR)/esp --out $(IMAGE)
 
 check-toolchain:
 	@$(PYTHON) -c "import os,sys,shutil; paths=(['.tools/zig/zig.exe'] if os.name == 'nt' else ['.tools/zig/zig'])+['vendor/monocypher/monocypher.c']; missing=[p for p in paths if not os.path.exists(p)]; missing.append('cargo') if not (shutil.which('cargo') or os.path.exists(os.path.expanduser('~/.cargo/bin/cargo.exe' if os.name=='nt' else '~/.cargo/bin/cargo'))) else None; sys.exit('missing '+', '.join(missing)+'; run make bootstrap first (cargo: install rustup with targets x86_64-unknown-none and x86_64-pc-windows-gnu)') if missing else None"

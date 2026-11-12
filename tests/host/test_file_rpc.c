@@ -15,17 +15,17 @@ int main(void){
   * assertion without exercising an unsafe overflowing read in the host.
   * The host bypasses SYS_SEND: the existing kernel already refuses these
   * sizes, so baseline failure shows missing local defense, not reachability. */
- unsigned ops[]={OP_ENUMERATE,OP_READ,OP_WRITE};uint32_t lengths[]={257,512,0x80000000u,UINT32_MAX};
+ unsigned ops[]={OP_ENUMERATE,OP_READ,OP_WRITE};uint32_t lengths[]={4097,8192,0x80000000u,UINT32_MAX};
  for(unsigned i=0;i<3;i++)for(unsigned j=0;j<4;j++){
   request(ops[i],i==0?root:i==1?(uint32_t)file:(uint32_t)output,lengths[j]);snapshot=ns;uint32_t saved_root=root;
   CHECK(sf_file_dispatch(&ns,42,&root,&guarded.m)==SF_INVALID);CHECK(guarded.m.status==SF_INVALID&&guarded.m.length==0);CHECK(!memcmp(&ns,&snapshot,sizeof(ns))&&root==saved_root);CHECK(!console_calls&&guards());
  }
  request(OP_READ,file,256);CHECK(sf_file_dispatch(&ns,42,&root,&guarded.m)==256);CHECK(guarded.m.length==256&&guards());for(unsigned i=0;i<256;i++)CHECK(guarded.m.data[i]=='A');
- request(OP_READ,file,257);CHECK(sf_file_dispatch(&ns,42,&root,&guarded.m)==SF_INVALID);
+ request(OP_READ,file,4097);CHECK(sf_file_dispatch(&ns,42,&root,&guarded.m)==SF_INVALID);
  request(OP_READ,file,1);CHECK(sf_file_dispatch(&ns,42,&root,&guarded.m)==1&&guarded.m.data[0]=='B'&&guards());
  request(OP_READ,file,0);CHECK(!sf_file_dispatch(&ns,42,&root,&guarded.m));CHECK(sf_ns_seek(&ns,42,file,0)==0);
  request(OP_WRITE,file,256);memset(guarded.m.data,'W',256);CHECK(sf_file_dispatch(&ns,42,&root,&guarded.m)==256&&guards());
- request(OP_WRITE,file,257);snapshot=ns;CHECK(sf_file_dispatch(&ns,42,&root,&guarded.m)==SF_INVALID);CHECK(!memcmp(&ns,&snapshot,sizeof(ns))&&guards());
+ request(OP_WRITE,file,4097);snapshot=ns;CHECK(sf_file_dispatch(&ns,42,&root,&guarded.m)==SF_INVALID);CHECK(!memcmp(&ns,&snapshot,sizeof(ns))&&guards());
  request(OP_WRITE,output,256);CHECK(sf_file_dispatch(&ns,42,&root,&guarded.m)==256);CHECK(console_calls==1&&console_bytes==256&&guards());
  request(OP_WRITE,output,0);CHECK(!sf_file_dispatch(&ns,42,&root,&guarded.m)&&console_calls==1);
  request(OP_ENUMERATE,root,256);CHECK(sf_file_dispatch(&ns,42,&root,&guarded.m)==5);CHECK(guarded.m.length==5&&!memcmp(guarded.m.data,"item\n",5)&&guards());

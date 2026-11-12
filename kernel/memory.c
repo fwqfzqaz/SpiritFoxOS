@@ -16,6 +16,26 @@ static int mmio_ready,device_ready;
 static uint64_t device_pt[512] __attribute__((aligned(4096)));
 static uint64_t*boot_mmio_pd;
 static uint64_t ap_p4[512] __attribute__((aligned(4096))),ap_p3[512] __attribute__((aligned(4096)));
+/* 固件 framebuffer 所在 1 GiB 区域的共享 PD：内核在任务 CR3 下处理
+ * SYS_LOG 时会写屏幕，若任务地址空间缺少该区域就会触发页错误。 */
+static uint64_t fb_pd[512] __attribute__((aligned(4096)));
+static unsigned fb_group;
+static int fb_ready;
+int space_fb_init(uint64_t base,uint64_t bytes){
+ if(!base||!bytes||base>0x100000000ull||bytes>0x100000000ull-base)return SF_DENIED;
+ unsigned group=(unsigned)(base>>30);if(group>3)return SF_DENIED;
+ if(group==3){
+  uint64_t first=(base>>21)&511u,last=((base+bytes-1)>>21)&511u;
+  for(uint64_t i=first;i<=last;i++)mmio_pd[i]=(0xc0000000ull+i*0x200000ull)|0x9b|NX;
+  mmio_ready=1;return 0;
+ }
+ if(!group)return 0; /* 0..1 GiB 已由 kernel_pd 直映 */
+ if(group!=2)return SF_DENIED; /* 1..2 GiB 是用户窗口，不能整段占用 */
+ for(unsigned i=0;i<512;i++)fb_pd[i]=0;
+ uint64_t first=(base>>21)&511u,last=((base+bytes-1)>>21)&511u;
+ for(uint64_t i=first;i<=last;i++)fb_pd[i]=((uint64_t)group*0x40000000ull+i*0x200000ull)|0x9b|NX;
+ fb_group=group;fb_ready=1;return 0;
+}
 /* 把 VT-d 寄存器窗口挂进内核页表：引导页表中的 2 MiB 段改写为 RW+NX，
  * 并在 mmio_pd/mmio_pt 中建立等价的用户侧只读映射结构（供设备窗口复用）。 */
 int space_mmio_init(uint64_t address){
@@ -52,6 +72,7 @@ int space_ioapic_init(void){
 uint64_t space_ap_cr3(void){
  if(!kernel_pd[0])for(unsigned i=0;i<512;i++)kernel_pd[i]=i*0x200000ull|0x83;
  ap_p4[0]=(uint64_t)ap_p3|7;ap_p3[0]=(uint64_t)kernel_pd|3;if(mmio_ready)ap_p3[3]=(uint64_t)mmio_pd|3;
+ if(fb_ready)ap_p3[fb_group]=(uint64_t)fb_pd|3;
  return(uint64_t)ap_p4;
 }
 /* 为设备授予 MMIO 窗口：把物理页挂到 device_pt 并映射进所有地址空间的
@@ -90,7 +111,8 @@ void pages_free(uint32_t pid){
 uint64_t space_new(uint32_t pid){
  if(!kernel_pd[0])for(unsigned i=0;i<512;i++)kernel_pd[i]=i*0x200000ull|0x83;
  uint64_t*p4=page_alloc(pid),*p3=page_alloc(pid);if(!p4||!p3)return 0;
- p4[0]=(uint64_t)p3|7;p3[0]=(uint64_t)kernel_pd|3;if(mmio_ready)p3[3]=(uint64_t)mmio_pd|3;return(uint64_t)p4;
+ p4[0]=(uint64_t)p3|7;p3[0]=(uint64_t)kernel_pd|3;if(mmio_ready)p3[3]=(uint64_t)mmio_pd|3;
+ if(fb_ready)p3[fb_group]=(uint64_t)fb_pd|3;return(uint64_t)p4;
 }
 /* 查找/按需创建三级页表项路径；v 必须位于用户窗口 [SF_BASE,0x80000000)。 */
 static uint64_t *pte(Task*t,uint64_t v,int create){
@@ -152,6 +174,30 @@ int space_unmap_range(Task*t,uint64_t v,uint64_t bytes){
  }
  if(freed&&smp_online()>1)smp_tlb_flush_all();
  return SF_OK;
+}
+/* 匿名映射：只在堆窗口内建立 RW+NX 页；addr==0 时自底寻找连续空洞。
+ * 分配失败按已建立的部分回滚，保证要么整段可用、要么完全不留痕迹。 */
+long space_map_anon(Task*t,uint64_t addr,uint64_t bytes){
+ if((addr&4095)||(bytes&4095)||!bytes||bytes>SF_HEAP_BYTES)return SF_INVALID;
+ if(!addr){
+  for(uint64_t a=SF_HEAP;a<=SF_HEAP+SF_HEAP_BYTES-bytes;a+=4096){
+   int free=1;
+   for(uint64_t b=a;b<a+bytes;b+=4096){uint64_t*p=pte(t,b,0);if(p&&(*p&1)){free=0;break;}}
+   if(free){addr=a;break;}
+  }
+  if(!addr)return SF_NO_SPACE;
+ }else if(addr<SF_HEAP||addr>SF_HEAP+SF_HEAP_BYTES-bytes)return SF_INVALID;
+ for(uint64_t off=0;off<bytes;off+=4096){
+  uint64_t*p=pte(t,addr+off,0);
+  if(p&&(*p&1)){space_unmap_range(t,addr,off);return SF_INVALID;}
+ }
+ for(uint64_t off=0;off<bytes;off+=4096){
+  void*page=page_alloc(t->pid);
+  if(!page){space_unmap_range(t,addr,off);return SF_NO_SPACE;}
+  int r=space_map(t,addr+off,(uint64_t)page,3);
+  if(r){page_free_phys(t->pid,(uint64_t)page);space_unmap_range(t,addr,off);return r;}
+ }
+ return(long)addr;
 }
 /* 跨页复制：先整段 user_range 校验，再按页边界分段经内核直映搬运。 */
 int copy_in(Task*t,void*dst,uint64_t src,size_t n){if(!user_range(t,src,n,0))return SF_DENIED;uint8_t*d=dst;while(n){size_t k=4096-(src&4095);if(k>n)k=n;memcpy(d,user_phys(t,src),k);d+=k;src+=k;n-=k;}return 0;}

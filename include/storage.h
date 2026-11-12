@@ -12,6 +12,7 @@ int sf_storage_namespace_reset(void);
 int sf_storage_namespace_restore(void);
 int sf_storage_namespace_crash(void);
 int sf_storage_start(void);
+int sf_storage_restart_next(void);
 int sf_storage_mount(void);
 int sf_storage_unmount(void);
 int sf_storage_stop(void);

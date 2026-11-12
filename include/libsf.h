@@ -24,6 +24,14 @@ static inline long sf_cap_revoke(uint64_t h){return sf_sys(SYS_CAP_REVOKE,h,0,0)
  * 接收方在 RECV 时得到同权的新句柄，也可改用 sf_send 保持 cap_count=0。 */
 static inline long sf_send_cap(uint32_t h,SfMessage*m,uint64_t cap){m->h.cap_count=1;m->handle=cap;return sf_sys(SYS_SEND,h,(uint64_t)m,0);}
 static inline uint64_t sf_deadline(unsigned ms){return sf_ticks()*10000000ull+(uint64_t)ms*1000000;}
+/* 匿名堆与共享内存：addr=0 时由内核在 SF_HEAP 窗口内选择基址。
+ * 共享内存固定映射到 SF_SHM 槽位；创建者可写，被授权者只读。 */
+static inline long sf_mmap(uint64_t addr,uint64_t bytes){return sf_sys(SYS_MMAP,addr,bytes,0);}
+static inline long sf_munmap(uint64_t addr,uint64_t bytes){return sf_sys(SYS_MUNMAP,addr,bytes,0);}
+static inline long sf_shm_create(uint64_t bytes){return sf_sys(SYS_SHM_CREATE,bytes,0,0);}
+static inline long sf_shm_map(uint64_t id){return sf_sys(SYS_SHM_MAP,id,0,0);}
+static inline long sf_shm_grant(uint64_t id,uint64_t pid){return sf_sys(SYS_SHM_GRANT,id,pid,0);}
+static inline long sf_shm_close(uint64_t id){return sf_sys(SYS_SHM_CLOSE,id,0,0);}
 static inline void sf_message(SfMessage*m,unsigned op,uint64_t id){memset(m,0,sizeof(*m));m->h.size=40;m->h.protocol_major=1;m->h.opcode=op;m->h.request_id=id;m->h.payload_bytes=sizeof(*m)-40;m->h.deadline_ns=sf_deadline(3000);}
 void sf_number(uint64_t);void sf_assert(int,const char*);
 #endif

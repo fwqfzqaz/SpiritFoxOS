@@ -19,6 +19,10 @@ int (*__sf_import_puts)(const char *);
 char *(*__sf_import_getenv)(const char *);
 int *(*__sf_import___errno_location)(void);
 const char *(*__sf_import_strerror)(int);
+void *(*__sf_import_malloc)(unsigned long);
+void (*__sf_import_free)(void *);
+void *(*__sf_import_calloc)(unsigned long,unsigned long);
+void *(*__sf_import_realloc)(void *,unsigned long);
 
 long sf_main(const SfBootArgs *a,size_t bytes){
  if(sf_boot_arguments_validate(a,bytes))return 1;

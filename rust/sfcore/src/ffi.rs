@@ -18,11 +18,11 @@ pub const SF_ENVIRONMENT_MAX: usize = 8;
 /// 参数字符串区总容量 512 字节（含偏移表与 NUL 终止符）。
 pub const SF_ARGUMENT_BYTES: usize = 512;
 /// 进程上限（`Task::main` 为 1 的槽位数量上限）。
-pub const SF_MAX_TASKS: c_int = 12;
+pub const SF_MAX_TASKS: c_int = 32;
 /// 线程槽总量（调度器遍历边界）。
-pub const SF_MAX_THREADS: c_int = 32;
+pub const SF_MAX_THREADS: c_int = 64;
 /// 单进程线程数上限。
-pub const SF_THREAD_LIMIT_MAX: u32 = 8;
+pub const SF_THREAD_LIMIT_MAX: u32 = 32;
 /// CPU 时间配额窗口（100 Hz 下 1 秒）。
 pub const SF_CPU_WINDOW_TICKS: u32 = 100;
 
@@ -44,7 +44,7 @@ pub const SF_NET_UDP: u8 = 17;
 pub const SF_NET_ICMP_ID: u16 = 0x5346;
 /// 单帧上限：以太网 MTU 内的有界缓冲。
 pub const SF_NET_FRAME_MAX: usize = 1536;
-/// UDP/TCP 载荷上限：受 IPC 消息 256 字节约束。
+/// UDP/TCP 载荷上限：受网络包固定 256 字节结构约束。
 pub const SF_NET_PAYLOAD_MAX: usize = 248;
 
 // ---------- 调度策略常量（kernel/sched_policy.h / sf.h） ----------

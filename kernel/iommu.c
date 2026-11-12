@@ -18,7 +18,7 @@ static int wait32(unsigned off,uint32_t mask,uint32_t value){for(unsigned i=0;i<
 static int wait64(unsigned off,uint64_t mask){for(unsigned i=0;i<1000000;i++){if(!(r64(off)&mask))return 0;__asm__ volatile("pause");}return SF_TIMEOUT;}
 typedef struct {uint64_t physical,virtual_address,pages,attribute;uint32_t type,reserved;} FirmwareMemory;
 static int firmware_read(void*context,uint64_t address,void*out,size_t bytes){
- SfBootInfo*b=context;if(address<4096||address>=0x40000000ull||bytes>0x40000000ull-address)return SF_BAD_FORMAT;
+ SfBootInfo*b=context;if(address<4096||address>=0x100000000ull||bytes>0x100000000ull-address)return SF_BAD_FORMAT;
  FirmwareMemory*map=(void*)b->memory_map;
  for(uint64_t i=0;i<b->memory_map_entry_count;i++){FirmwareMemory*m=&map[i];if((m->type!=9&&m->type!=10)||m->pages>UINT64_MAX/4096)continue;uint64_t size=m->pages*4096;if(address>=m->physical&&address-m->physical<=size&&bytes<=size-(address-m->physical)){memcpy(out,(void*)address,bytes);return 0;}}
  return SF_BAD_FORMAT;

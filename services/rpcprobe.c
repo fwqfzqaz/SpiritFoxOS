@@ -4,7 +4,7 @@
 static uint64_t sequence;
 static int rpc(const SfBootArgs*a,SfMessage*m){m->h.request_id=++sequence;int r=sf_send(a->manager,m);if(r)return r;long from=sf_recv(a->service,m,sf_deadline(3000));return from<0?from:m->h.request_id!=sequence?SF_INVALID:(int)m->status;}
 static int oversized(const SfBootArgs*a,unsigned op,uint32_t h){
- const uint32_t lengths[]={257,512,0x80000000u,UINT32_MAX};
+ const uint32_t lengths[]={SF_MSG_BYTES+1,SF_MSG_BYTES*2,0x80000000u,UINT32_MAX};
  for(unsigned i=0;i<4;i++){SfMessage m;sf_message(&m,op,0);m.handle=h;m.length=lengths[i];memset(m.data,'^',sizeof(m.data));if(sf_send(a->manager,&m)!=SF_INVALID||m.length!=lengths[i])return 1;}return 0;
 }
 long sf_main(const SfBootArgs*a,size_t bytes){

@@ -33,11 +33,11 @@ typedef struct {
  uint32_t rx_frames,tx_frames,link;
 } SfNetInfo;
 _Static_assert(sizeof(SfNetInfo)==32,"network info ABI");
-/* 单条有界数据报或一次性 TCP 交换；尺寸受 IPC 消息上限约束。 */
+/* 单条有界数据报或一次性 TCP 交换；固定 256 B，能放进任意 IPC 消息。 */
 typedef struct {
  uint32_t ip; uint16_t port; uint16_t bytes; uint8_t data[SF_NET_PAYLOAD_MAX];
 } SfNetPacket;
-_Static_assert(sizeof(SfNetPacket)==SF_MSG_BYTES,"net packet ABI");
+_Static_assert(sizeof(SfNetPacket)==256,"net packet ABI");
 /* 纯帧构造/解析辅助（Rust 实现：rust/sfcore/src/net.rs，符号同名）。
  * ring-3 驱动与宿主边界测试共用；全部多字节整数按网络序（大端）。 */
 /* Internet 校验和：以 sum 为初值累加大端 16 位字后折叠取反。 */

@@ -19,17 +19,31 @@
 static const SfBootArgs*boot;
 static uint32_t manager_ep,fs_ep,manager_reply;static SfManager manager;static SfNamespace*ns;
 static int runtime_slot,echo_slot;static uint32_t runtime_pid,runtime_ep,runtime_reply,echo_pid,echo_ep;
-/* 单应用映像的实际上限即此暂存区容量（1280 KiB）：sf-persist.sfmod 的
- * 事务卷常驻数据与 sf-fs.sfmod 的 SFRFS2 校验缓冲都经同一装载路径进入
- * 各自私有地址空间，整体仍受 2 MiB 可写段预算约束。 */
-static uint8_t staging[1280*1024] __attribute__((aligned(4096)));
+/* 装载与镜像构建使用按需增长的匿名映射区：不再有固定暂存上限。
+ * 包数据与镜像计划可能同时存活，故分成两个独立区域惰性扩容。 */
+static uint64_t pkg_stage,pkg_stage_bytes,lib_stage,lib_stage_bytes,img_stage,img_stage_bytes;
+static uint8_t tiny_image[4096] __attribute__((aligned(4096)));
+static void *stage_grow(uint64_t*base,uint64_t*have,uint64_t need){
+ uint64_t want=(need+4095)&~4095ull;if(!want)want=4096;
+ if(want<=*have)return(void*)*base;
+ if(*base)sf_munmap(*base,*have);
+ long a=sf_mmap(0,want);
+ if(a<0){*base=0;*have=0;return 0;}
+ *base=(uint64_t)a;*have=want;return(void*)a;
+}
+static uint64_t image_capacity(const SfPackage*p,const SfPackage*lib){
+ uint64_t n=0;
+ for(unsigned i=0;i<p->count;i++){const SfSection*s=&p->sections[i];if(s->type>3)continue;n+=(s->memory+4095)&~4095ull;}
+ if(lib)for(unsigned i=0;i<lib->count;i++){const SfSection*s=&lib->sections[i];if(s->type>3)continue;n+=(s->memory+4095)&~4095ull;}
+ return n;
+}
 static unsigned pie_sequence;
 typedef struct {uint32_t pid,reply,root;int lease;uint32_t uid,gid;SfEmergencyConsole emergency;} Child;
-static Child children[16];static uint64_t requests;
+static Child children[SF_MAX_TASKS];static uint64_t requests;
 static unsigned namespace_lost,loader_depth;
 static uint32_t emergency_generation;
 void sf_init_namespace_lost(void){
- namespace_lost=1;for(unsigned i=0;i<16;i++)children[i].root=0;
+ namespace_lost=1;for(unsigned i=0;i<SF_MAX_TASKS;i++)children[i].root=0;
 }
 /* Identity is user-space policy: the kernel only authenticates the sender pid,
  * so sf-init maps that pid to the session identity that launched it. */
@@ -40,17 +54,48 @@ static int net_slot=-1;static uint32_t net_pid,net_ep,net_reply;static int net_r
 /* 图形合成器：单实例、无特权模块，framebuffer 由 PID1 显式授权。
  * probe 用于演示应用注册：持有 WM service 端点发送权即可登记目录。 */
 static int wm_slot=-1;static uint32_t wm_pid,wm_ep,probe_pid;
-static EchoPeer echo_peers[16];static SfSupervisor echo_watch;static uint64_t echo_health_at;static SfSupervisor native_watch;static uint64_t native_health_at;static int native_draining;
+static EchoPeer echo_peers[SF_MAX_TASKS];static SfSupervisor echo_watch;static uint64_t echo_health_at;static SfSupervisor native_watch;static uint64_t native_health_at;static int native_draining;
 static int echo_request(uint32_t,uint32_t,unsigned);
 static uint64_t echo_after(uint64_t now,uint64_t delay){return delay>UINT64_MAX-now?UINT64_MAX:now+delay;}
 static long console_write(const void*p,size_t n){return sf_sys(SYS_LOG,(uint64_t)p,n,0);}
 #define SF_POSIX_LIBRARY_FILE "sf-libsf.sfmod"
 #define SF_POSIX_LIBRARY_ID "org.spiritfox.posix"
-static int package_get(const char*name,SfPackage*p){const uint8_t*d;uint64_t n;if(name[0]=='/'){uint8_t*snapshot=sf_storage_scratch();long r=!strcmp(name,"/installed.sfk")?sf_persist_package(snapshot,SF_STORAGE_SNAPSHOT_BYTES):sf_storage_load(name,snapshot,SF_STORAGE_SNAPSHOT_BYTES);return r<0?r:sf_trust_open(&sf_trust,p,snapshot,r);}int r=sf_bundle_find((void*)boot->bundle,boot->bundle_bytes,name,&d,&n);return r?r:sf_trust_open(&sf_trust,p,d,n);}
-static int native_upload(const SfPackage*p){for(uint64_t off=0;off<p->bytes;){SfMessage m;sf_message(&m,OP_NATIVE_STAGE,++requests);m.handle=p->bytes;m.offset=off;m.length=p->bytes-off;if(m.length>sizeof(m.data))m.length=sizeof(m.data);uint32_t sent=m.length;memcpy(m.data,p->data+off,sent);int rc=sf_send(runtime_ep,&m);if(rc)return rc;long from=sf_recv(runtime_reply,&m,sf_deadline(1000));if(from!=(long)runtime_pid||m.h.request_id!=requests)return from<0?from:SF_STALE_HANDLE;if(m.status)return m.status;off+=sent;if(m.offset!=off)return SF_BAD_FORMAT;}return 0;}
+static int package_get(const char*name,SfPackage*p,uint64_t*base,uint64_t*have){
+ const uint8_t*d;uint64_t n;
+ if(name[0]=='/'){
+  uint64_t cap=SF_STORAGE_SNAPSHOT_BYTES;
+  for(;;){
+   uint8_t*snapshot=stage_grow(base,have,cap);
+   if(!snapshot)return SF_NO_SPACE;
+   long r=!strcmp(name,"/installed.sfk")?sf_persist_package(snapshot,cap):sf_storage_load(name,snapshot,cap);
+   if(r==SF_NO_SPACE&&cap<SF_PACKAGE_MAX){cap*=2;if(cap>SF_PACKAGE_MAX)cap=SF_PACKAGE_MAX;continue;}
+   return r<0?r:sf_trust_open(&sf_trust,p,snapshot,r);
+  }
+ }
+ int r=sf_bundle_find((void*)boot->bundle,boot->bundle_bytes,name,&d,&n);
+ return r?r:sf_trust_open(&sf_trust,p,d,n);
+}
+/* 外部包体经共享内存交给 sf-native：一页对齐的只读映射，零拷贝。
+ * 装载完成后由 spawn_package_policy 关闭；失败路径在下一次装载时回收。 */
+static long pending_stage=-1;
+static void stage_release(void){if(pending_stage>=0){sf_shm_close(pending_stage);pending_stage=-1;}}
+static int native_upload(const SfPackage*p){
+ stage_release();
+ uint64_t bytes=(p->bytes+4095)&~4095ull;
+ long id=sf_shm_create(bytes);if(id<0)return(int)id;
+ long base=sf_shm_map(id);if(base<0){sf_shm_close(id);return(int)base;}
+ memcpy((void*)base,p->data,p->bytes);
+ int rc=sf_shm_grant(id,runtime_pid);if(rc){sf_shm_close(id);return rc;}
+ SfMessage m;sf_message(&m,OP_NATIVE_STAGE,++requests);m.handle=(uint64_t)id;m.offset=p->bytes;
+ rc=sf_send(runtime_ep,&m);if(rc){sf_shm_close(id);return rc;}
+ long from=sf_recv(runtime_reply,&m,sf_deadline(1000));
+ if(from!=(long)runtime_pid||m.h.request_id!=requests||m.status){sf_shm_close(id);return from<0?(int)from:m.status?m.status:SF_STALE_HANDLE;}
+ pending_stage=id;return 0;
+}
 static int spawn_package_policy_inner(const char*name,uint32_t service,uint32_t rights,uint32_t device,uint32_t device_rights,int directory,const SfArguments*arguments,uint32_t reply,uint16_t expected_kind){
+ stage_release();
  if(sf_persist_uncertain())return SF_COMMIT_UNCERTAIN;
- SfPackage p;int r=package_get(name,&p);if(r)return r;if(p.kind!=expected_kind)return SF_DENIED;
+ SfPackage p;int r=package_get(name,&p,&pkg_stage,&pkg_stage_bytes);if(r)return r;if(p.kind!=expected_kind)return SF_DENIED;
  int native_module=p.kind==1&&!strcmp(name,"sf-native.sfmod");
  if(arguments&&(arguments->count||arguments->env_count)&&p.kind!=2)return SF_DENIED;
  uint64_t image_base=p.native_profile?SF_PIE_MIN+((pie_sequence++&1)*0x2000000ull):SF_BASE;
@@ -67,12 +112,16 @@ static int spawn_package_policy_inner(const char*name,uint32_t service,uint32_t 
  SfPackage library;int linked=0;
  if(p.kind==2&&p.import_count){
   char id[96];if(sf_native_library(&p,id,sizeof(id))||strcmp(id,SF_POSIX_LIBRARY_ID))return SF_DEPENDENCY;
-  r=package_get(SF_POSIX_LIBRARY_FILE,&library);if(r)return r;
+  r=package_get(SF_POSIX_LIBRARY_FILE,&library,&lib_stage,&lib_stage_bytes);if(r)return r;
   if(library.kind!=1||library.native_profile!=SF_NATIVE_RELATIVE||library.native_role!=SF_NATIVE_ROLE_LIBRARY||!library.export_count||sf_manifest_text(&library,"module_id",id,sizeof(id))||strcmp(id,SF_POSIX_LIBRARY_ID))return SF_DEPENDENCY;
   linked=1;
  }
- r=linked?sf_native_link(&p,&library,image_base,staging,sizeof(staging),&plan):sf_native_image(&p,image_base,staging,sizeof(staging),&plan);if(r)return r;
- return sf_sys(SYS_SPAWN,(uint64_t)&plan,0,0);
+ void*image=stage_grow(&img_stage,&img_stage_bytes,image_capacity(&p,linked?&library:0));
+ if(!image)return SF_NO_SPACE;
+ r=linked?sf_native_link(&p,&library,image_base,image,img_stage_bytes,&plan):sf_native_image(&p,image_base,image,img_stage_bytes,&plan);if(r)return r;
+ long spawned=sf_sys(SYS_SPAWN,(uint64_t)&plan,0,0);
+ stage_release();
+ return spawned;
 }
 static int spawn_package_policy(const char*name,uint32_t service,uint32_t rights,uint32_t device,uint32_t device_rights,int directory,const SfArguments*arguments,uint32_t reply,uint16_t expected_kind){
  if(loader_depth)return SF_BUSY;loader_depth++;
@@ -235,9 +284,9 @@ static int native_stop_service(void){
  r=sfmod_stop(&manager,runtime_slot);if(r){if(prepared)sfmod_cancel(&manager,runtime_slot);return r;}
  native_forget();native_draining=0;return 0;
 }
-static EchoPeer*echo_peer(uint32_t pid){for(unsigned i=0;i<16;i++)if(echo_peers[i].pid==pid)return &echo_peers[i];return 0;}
+static EchoPeer*echo_peer(uint32_t pid){for(unsigned i=0;i<SF_MAX_TASKS;i++)if(echo_peers[i].pid==pid)return &echo_peers[i];return 0;}
 static int spawn_echo(const char*name,uint32_t service,uint32_t rights){
- unsigned slot;for(slot=0;slot<16;slot++)if(!echo_peers[slot].pid)break;if(slot==16)return SF_NO_SPACE;
+ unsigned slot;for(slot=0;slot<SF_MAX_TASKS;slot++)if(!echo_peers[slot].pid)break;if(slot==SF_MAX_TASKS)return SF_NO_SPACE;
  int reply=sf_sys(SYS_EP_CREATE,0,0,0);if(reply<0)return reply;int pid=spawn_package_policy(name,service,rights,0,0,0,0,reply,1);
  if(pid<0){sf_sys(SYS_CAP_REVOKE,reply,0,0);return pid;}echo_peers[slot]=(EchoPeer){pid,service,reply};return pid;
 }
@@ -307,7 +356,7 @@ static void native_status(void){
  sf_log(native_watch.state==SF_SUP_RUNNING&&now>=native_watch.running_since&&now-native_watch.running_since>=native_watch.stable_ticks?" stable=1":" stable=0");
  sf_log(" leases=");sf_number(manager.modules[runtime_slot].resources[RES_LEASE]);sf_log(manager.modules[runtime_slot].state==MOD_DRAINING?" draining=1\n":" draining=0\n");
 }
-static Child*child(uint32_t pid){for(unsigned i=0;i<16;i++)if(children[i].pid==pid)return&children[i];return 0;}
+static Child*child(uint32_t pid){for(unsigned i=0;i<SF_MAX_TASKS;i++)if(children[i].pid==pid)return&children[i];return 0;}
 static int session_identity(uint32_t*uid,uint32_t*gid,uint32_t*owner){
  const SfSession*s=sf_session_current(&sessions);if(!s)return SF_DENIED;
  if(uid)*uid=s->uid;if(gid)*gid=s->gid;if(owner)*owner=sf_session_owner(sf_session_active(&sessions));return 0;
@@ -315,7 +364,7 @@ static int session_identity(uint32_t*uid,uint32_t*gid,uint32_t*owner){
 static int shell_open(const char*path,unsigned mode){uint32_t uid,gid,owner;int r=session_identity(&uid,&gid,&owner);return r?r:sf_ns_open_as(ns,owner,"/",path,mode,uid,gid);}
 static int launch_app_root_args(const char*name,const char*root,const SfArguments*arguments){
  if(!strcmp(name,"installed"))name="/installed.sfk";
- int slot=-1;for(unsigned i=0;i<16;i++)if(!children[i].pid){slot=i;break;}if(slot<0)return SF_NO_SPACE;
+ int slot=-1;for(unsigned i=0;i<SF_MAX_TASKS;i++)if(!children[i].pid){slot=i;break;}if(slot<0)return SF_NO_SPACE;
  uint32_t uid,gid,owner;int ir=session_identity(&uid,&gid,&owner);if(ir)return ir;
  /* Reserve and pin the directory before creating a child. The trusted
   * handoff retains its lease; a failed handoff kills the unregistered child. */
@@ -343,7 +392,8 @@ static int serve_once(unsigned timeout_ms){
  else sf_file_dispatch_as(ns,sender,&c->root,&m,c->uid,c->gid);
  return sf_send(c->reply,&m);
 }
-static int wait_app(uint32_t pid){uint64_t end=sf_ticks()+300;for(;;){long status=sf_sys(SYS_TASK_STATUS,pid,0,0);if(status!=SF_TASK_RUNNING){app_reap(pid);return status;}if(sf_ticks()>end){sf_sys(SYS_KILL,pid,SF_TIMEOUT,0);app_reap(pid);return SF_TIMEOUT;}serve_once(10);sf_yield();}}
+static int wait_app_for(uint32_t pid,uint64_t limit){uint64_t end=sf_ticks()+limit;for(;;){long status=sf_sys(SYS_TASK_STATUS,pid,0,0);if(status!=SF_TASK_RUNNING){app_reap(pid);return status;}if(sf_ticks()>end){sf_sys(SYS_KILL,pid,SF_TIMEOUT,0);app_reap(pid);return SF_TIMEOUT;}serve_once(10);sf_yield();}}
+static int wait_app(uint32_t pid){return wait_app_for(pid,300);}
 static int echo_call(uint32_t,uint32_t);
 static int channel_test(int echo_check){
  int a=launch_app_root("readprobe.sfk","/disk/etc"),b=launch_app_root("readprobe.sfk","/disk/etc");int er=echo_check?echo_call(echo_ep,echo_pid):0;int ar=a>0?wait_app(a):a,br=b>0?wait_app(b):b;
@@ -369,8 +419,10 @@ static void native_capacity_test(void){
  sf_assert(!sf_sys(SYS_CAP_REVOKE,held[--used],0,0),"native capacity releases one root slot");
  sf_assert(native_start_service()==SF_NO_SPACE&&manager.modules[runtime_slot].state==MOD_STOPPED&&!runtime_reply&&!runtime_ep&&!runtime_pid,"native service allocation failure reclaims reply");
  while(used)sf_assert(!sf_sys(SYS_CAP_REVOKE,held[--used],0,0),"native capacity releases held endpoint");
- int shared=sf_sys(SYS_EP_CREATE,0,0,0);sf_assert(shared>0,"native capacity creates shared idle receiver");uint32_t pids[16];unsigned count=0;
- while(count<16&&(r=spawn_echo("echo.sfmod",shared,RIGHT_RECV))>0)pids[count++]=r;
+ int shared=sf_sys(SYS_EP_CREATE,0,0,0);sf_assert(shared>0,"native capacity creates shared idle receiver");uint32_t pids[SF_MAX_TASKS+8];unsigned count=0;
+ /* 每个实例的回复端点都只由它自己持有；关闭根句柄以腾出能力槽，
+  * 否则 32 个能力槽会先于 32 个进程槽耗尽，测不到真正的进程上限。 */
+ while(count<SF_MAX_TASKS+8&&(r=spawn_echo("echo.sfmod",shared,RIGHT_RECV))>0){pids[count++]=r;EchoPeer*p=echo_peer(r);if(p)sf_sys(SYS_CAP_CLOSE,p->reply,0,0);}
  sf_assert(r==SF_NO_SPACE&&count>0,"native capacity fills actual process resources");
  int first=sf_sys(SYS_EP_CREATE,0,0,0),second=sf_sys(SYS_EP_CREATE,0,0,0);sf_assert(first>0&&second>0,"native process capacity test still has both root endpoint slots");
  sf_sys(SYS_CAP_REVOKE,first,0,0);sf_sys(SYS_CAP_REVOKE,second,0,0);
@@ -408,7 +460,7 @@ static void projection_task(uint32_t pid){
  else{projection_put(" status=gone code=");projection_number((uint64_t)-status);projection_put("\n");}
 }
 static void projection_add_pid(uint32_t*pids,unsigned*count,uint32_t pid){
- if(!pid||pid==1||*count>=16)return;for(unsigned i=0;i<*count;i++)if(pids[i]==pid)return;pids[(*count)++]=pid;
+ if(!pid||pid==1||*count>=SF_MAX_TASKS)return;for(unsigned i=0;i<*count;i++)if(pids[i]==pid)return;pids[(*count)++]=pid;
 }
 static void projection_build_uptime(void){
  uint64_t ticks=sf_ticks();projection_put("ticks=");projection_number(ticks);projection_put("\nhz=100\nseconds=");projection_number(ticks/100);projection_char('.');uint64_t fraction=ticks%100;if(fraction<10)projection_char('0');projection_number(fraction);projection_put("\n");
@@ -430,7 +482,7 @@ static void projection_build_self(void){
  projection_put("\ncaps_limit=");projection_number(caps_limit<0?0:(uint64_t)caps_limit);projection_put("\n");
 }
 static void projection_build_children(void){
- uint32_t pids[16];unsigned count=0;projection_add_pid(pids,&count,echo_pid);projection_add_pid(pids,&count,runtime_pid);projection_add_pid(pids,&count,net_pid);
+ uint32_t pids[SF_MAX_TASKS];unsigned count=0;projection_add_pid(pids,&count,echo_pid);projection_add_pid(pids,&count,runtime_pid);projection_add_pid(pids,&count,net_pid);
  for(unsigned i=0;i<sizeof(children)/sizeof(*children);i++)projection_add_pid(pids,&count,children[i].pid);
  projection_put("pid=1 status=running\n");for(unsigned i=0;i<count;i++)projection_task(pids[i]);
 }
@@ -590,7 +642,7 @@ static void lifecycle_tests(void){
  sfmod_prepare(&manager,old_slot);sfmod_stop(&manager,old_slot);sf_sys(SYS_KILL,old_pid,0,0);echo_forget(old_pid);sf_sys(SYS_CAP_REVOKE,old_ep,0,0);sfmod_unload(&manager,old_slot);SfMessage m;sf_message(&m,OP_ECHO,1);sf_assert(sf_send(old_ep,&m)==SF_STALE_HANDLE,"unloaded endpoint cannot alias a new generation");
 }
 static void runtime_tests(void){
- SfLoadPlan bad={0};bad.size=sizeof(bad);bad.count=1;bad.segments[0]=(SfLoadSegment){0,4096,(uint64_t)staging,7,0};sf_assert(sf_sys(SYS_SPAWN,(uint64_t)&bad,0,0)==SF_INVALID,"process service rejects actual RWX load plan");
+ SfLoadPlan bad={0};bad.size=sizeof(bad);bad.count=1;bad.segments[0]=(SfLoadSegment){0,4096,(uint64_t)tiny_image,7,0};sf_assert(sf_sys(SYS_SPAWN,(uint64_t)&bad,0,0)==SF_INVALID,"process service rejects actual RWX load plan");
  bad.segments[0].flags=5;bad.device_rights=SF_DEVICE_WRITE;sf_assert(sf_sys(SYS_SPAWN,(uint64_t)&bad,0,0)==SF_INVALID,"process service rejects write right without device");bad.grant_device=1;bad.device_rights=2;sf_assert(sf_sys(SYS_SPAWN,(uint64_t)&bad,0,0)==SF_INVALID,"process service rejects unknown device rights");
  bad.grant_device=bad.device_rights=0;bad.arguments.count=SF_ARGUMENT_MAX+1;sf_assert(sf_sys(SYS_SPAWN,(uint64_t)&bad,0,0)==SF_INVALID,"kernel rejects argument count overflow");
  bad.arguments.count=1;bad.arguments.bytes=5;sf_assert(sf_sys(SYS_SPAWN,(uint64_t)&bad,0,0)==SF_INVALID,"kernel rejects argument offset into header");
@@ -735,8 +787,8 @@ static void page_limit_line(char*line){
 }
 static void page_quota_test(void){
  long root_used=sf_task_page_usage(1);sf_assert(root_used>0,"root pool-page ownership is counted");
- memset(staging,0,4096);staging[0]=0xeb;staging[1]=0xfe;
- SfLoadPlan p={0};p.size=sizeof(p);p.count=1;p.image_base=SF_BASE;p.segments[0]=(SfLoadSegment){0,4096,(uint64_t)staging,5,0};
+ memset(tiny_image,0,4096);tiny_image[0]=0xeb;tiny_image[1]=0xfe;
+ SfLoadPlan p={0};p.size=sizeof(p);p.count=1;p.image_base=SF_BASE;p.segments[0]=(SfLoadSegment){0,4096,(uint64_t)tiny_image,5,0};
  for(unsigned i=0;i<32;i++)sf_assert(sf_spawn_limited(&p,1)==SF_NO_SPACE&&sf_task_page_usage(1)==root_used,"tiny construction budgets roll back without charging parent");
  int pid=sf_spawn_limited(&p,64);sf_assert(pid>1,"explicit page budget admits isolated loop");
  long used=sf_task_page_usage(pid);sf_assert(used>0&&used<=64&&sf_task_page_limit(pid,0,SF_LIMIT_QUERY)==64,"page tables and private image fit configured budget");
@@ -864,7 +916,8 @@ static void trust_show(void){
 static void threads_test(void){
  int pid=launch_app("threadprobe.sfk");sf_assert(pid>0,"thread probe application launched");
  sf_assert(sf_thread_limit(pid,0,SF_LIMIT_USED)>=1,"root observes live thread usage");
- sf_assert(!wait_app(pid),"thread probe creates, limits and reuses thread slots");
+ /* 31 个线程与主线程同优先级轮转，回收全部槽位需要多于通用应用等待窗口。 */
+ sf_assert(!wait_app_for(pid,900),"thread probe creates, limits and reuses thread slots");
  sf_assert(sf_thread_limit(pid,0,SF_LIMIT_USED)==SF_NOT_FOUND,"retired thread budget is not configurable");
  sf_log("THREAD TEST PASSED\n");
 }
@@ -1146,7 +1199,7 @@ long sf_main(const SfBootArgs*a,size_t size){
  echo_slot=sfmod_add(&manager,"org.spiritfox.echo",0,0);sfmod_start(&manager,echo_slot);echo_ep=sf_sys(SYS_EP_CREATE,0,0,0);echo_pid=spawn_echo("echo.sfmod",echo_ep,RIGHT_RECV);sf_assert((int)echo_pid>0,"verified echo.sfmod staged in private address space");
  lifecycle_rpc_test();
  lifecycle_tests();sf_storage_init(&manager,sf_ns_default(),spawn_storage_package);sf_assert(!namespace_setup(),"namespace service and volatile tree initialized");identity_setup();object_tests();sf_assert(!native_start_service(),"native runtime module active");sf_assert((int)runtime_reply>0,"runtime replies have an isolated endpoint");runtime_tests();
- int storage=sf_storage_start();if(!storage)storage=sf_storage_mount();
+ int storage=sf_storage_start();if(!storage)for(;;){storage=sf_storage_mount();if(!storage)break;int next=sf_storage_restart_next();if(next){storage=next;break;}storage=0;}
  if(storage){sf_log("STORAGE UNAVAILABLE code=");sf_number(-storage);sf_log("\n");}
  else{sf_storage_tests();if(sf_storage_writable()){int r=sf_persist_start(spawn_storage_package);if(r){sf_log("PERSIST SPAWN FAILED code=");sf_number(-r);sf_log("\n");}r=sf_persist_mount(ns);if(r){sf_log("PERSIST UNAVAILABLE code=");sf_number(-r);sf_log("\n");}else sf_storage_write_tests();}int ep=sf_sys(SYS_EP_CREATE,0,0,0);int disk_module=spawn_echo("/disk/modules/disk-echo.sfmod",ep,RIGHT_RECV);
   if(disk_module>0){int slot=sfmod_add(&manager,"org.spiritfox.disk-echo",0,0);sf_assert(slot>=0&&!sfmod_start(&manager,slot)&&!echo_call(ep,disk_module),"signed sfmod loaded from disk without bundle fallback");sfmod_prepare(&manager,slot);sfmod_stop(&manager,slot);sf_sys(SYS_KILL,disk_module,0,0);echo_forget(disk_module);sfmod_unload(&manager,slot);}else{sf_log("DISK PACKAGE REJECTED module code=");sf_number(-disk_module);sf_log("\n");}sf_sys(SYS_CAP_REVOKE,ep,0,0);

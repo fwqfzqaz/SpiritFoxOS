@@ -7,17 +7,18 @@
 #pragma clang diagnostic ignored "-Wconstant-conversion"
 #include "../../kernel/core.c"
 #pragma clang diagnostic pop
-static uint8_t mock_pages[256][4096] __attribute__((aligned(4096))),segment[4096];
-static Task saved[SF_MAX_THREADS];static unsigned allocated,allocation_calls,space_calls,fail_after=256,freed,checks;
+#define MOCK_PAGES 1024
+static uint8_t mock_pages[MOCK_PAGES][4096] __attribute__((aligned(4096))),segment[4096];
+static Task saved[SF_MAX_THREADS];static unsigned allocated,allocation_calls,space_calls,fail_after=2048,freed,checks;
 static uint32_t freed_pid;
 static int core_allow_schedule;static Task*core_last_arch;static uint64_t core_map_tick_step;
 static int core_copy_out_denied;static unsigned core_copy_out_calls;
 static int core_map_deny;static unsigned core_unmap_calls;static uint64_t core_unmap_bytes;static unsigned core_page_free_calls;
 #define CHECK(x) do{checks++;if(!(x)){printf("FAIL line %d: %s (next=%u, slot1_pid=%u, state=%u, allocations=%u)\n",__LINE__,#x,next_pid,tasks[1].pid,tasks[1].state,allocation_calls);return 1;}}while(0)
 void serial(const char*s){(void)s;}void hex(uint64_t x){(void)x;}void panic(const char*s){fprintf(stderr,"Unexpected panic: %s\n",s);abort();}
-void console_irq(void){}long console_read(void){return SF_WOULD_BLOCK;}void ps2_mouse_init(uint32_t width,uint32_t height){(void)width;(void)height;}long ps2_mouse_read(int reset){(void)reset;return SF_WOULD_BLOCK;}void ps2_irq(void){}void arch_init(void){}void arch_task(Task*t){if(core_allow_schedule){core_last_arch=t;return;}abort();}void arch_save(Task*t){(void)t;abort();}void arch_enter(Frame*f){(void)f;abort();}
+void console_irq(void){}long console_read(void){return SF_WOULD_BLOCK;}void console_fb_init(uint64_t base,uint64_t bytes,uint32_t w,uint32_t h,uint32_t p,uint32_t b){(void)base;(void)bytes;(void)w;(void)h;(void)p;(void)b;}int space_fb_init(uint64_t base,uint64_t bytes){(void)base;(void)bytes;return 0;}void ps2_mouse_init(uint32_t width,uint32_t height){(void)width;(void)height;}long ps2_mouse_read(int reset){(void)reset;return SF_WOULD_BLOCK;}void ps2_irq(void){}void arch_init(void){}void arch_task(Task*t){if(core_allow_schedule){core_last_arch=t;return;}abort();}void arch_save(Task*t){(void)t;abort();}void arch_enter(Frame*f){(void)f;abort();}
 void*page_alloc(uint32_t owner){
- allocation_calls++;if(allocated>=fail_after||allocated>=256)return 0;Task*t=0;
+ allocation_calls++;if(allocated>=fail_after||allocated>=MOCK_PAGES)return 0;Task*t=0;
  for(unsigned i=0;i<SF_MAX_THREADS;i++)if(tasks[i].main&&tasks[i].pid==owner){t=&tasks[i];break;}
  if(!t||t->page_count>=t->page_limit)return 0;t->page_count++;
  void*p=mock_pages[allocated++];memset(p,0,4096);return p;
@@ -35,6 +36,9 @@ int space_map_fb(Task*t,uint64_t v,uint64_t physical,uint64_t bytes){(void)t;(vo
 int copy_in(Task*t,void*d,uint64_t s,size_t n){(void)t;memcpy(d,(void*)(uintptr_t)s,n);return 0;}
 int copy_out(Task*t,uint64_t d,const void*s,size_t n){(void)t;core_copy_out_calls++;if(core_copy_out_denied)return SF_DENIED;memcpy((void*)(uintptr_t)d,s,n);return 0;}
 long ipc_syscall(uint64_t a,uint64_t b,uint64_t c,uint64_t d){(void)a;(void)b;(void)c;(void)d;abort();}
+long space_map_anon(Task*t,uint64_t a,uint64_t b){(void)t;(void)a;(void)b;return SF_DENIED;}
+long shm_syscall(uint64_t nr,uint64_t a,uint64_t b,uint64_t c){(void)nr;(void)a;(void)b;(void)c;return SF_DENIED;}
+void shm_release_pid(uint32_t pid){(void)pid;}
 void ipc_stats_snapshot(SfIpcStats*s){*s=(SfIpcStats){sizeof(*s),SF_IPC_STATS_VERSION,0x100000001ull,UINT64_MAX-32};}
 void ipc_cleanup(Task*t){(void)t;}int ipc_grant(Task*a,Task*b,uint32_t c,uint32_t d){(void)a;(void)b;(void)c;(void)d;return 1;}void ipc_deadlines(void){}
 long pci_read(uint64_t a,uint64_t b){(void)a;(void)b;return SF_DENIED;}long device_io(Task*t,uint64_t a,uint64_t b,uint64_t c){(void)t;(void)a;(void)b;(void)c;return SF_DENIED;}
@@ -43,6 +47,6 @@ void device_init(SfBootInfo*b){(void)b;}void device_poll(void){}int device_statu
 void device_irq_init(void){}int device_irq_acquire(Task*t){(void)t;return SF_DENIED;}int device_irq_release(Task*t){(void)t;return SF_DENIED;}
 int device_irq_wait(Task*t,uint32_t n){(void)t;(void)n;return SF_DENIED;}void device_irq_vector(void){}
 uint8_t kernel_end[1];
-static void reset(uint32_t next){memset(tasks,0,sizeof(tasks));tasks[0].pid=1;tasks[0].state=T_READY;tasks[0].main=1;tasks[0].main_slot=0;tasks[0].tid=1;tasks[0].thread_limit=SF_THREAD_LIMIT_MAX;tasks[0].thread_count=1;tasks[0].thread_slots=1;tasks[0].next_tid=1;tasks[0].cpu=-1;tasks[0].cap_limit=SF_CAP_LIMIT_MAX;tasks[0].page_limit=SF_PAGE_LIMIT_MAX;current=0;next_pid=next;allocated=allocation_calls=space_calls=freed=0;freed_pid=0;fail_after=256;core_map_tick_step=0;core_allow_schedule=0;core_last_arch=0;core_copy_out_denied=0;core_copy_out_calls=0;core_map_deny=0;core_unmap_calls=0;core_unmap_bytes=0;core_page_free_calls=0;}
+static void reset(uint32_t next){memset(tasks,0,sizeof(tasks));tasks[0].pid=1;tasks[0].state=T_READY;tasks[0].main=1;tasks[0].main_slot=0;tasks[0].tid=1;tasks[0].thread_limit=SF_THREAD_LIMIT_MAX;tasks[0].thread_count=1;tasks[0].thread_slots=1;tasks[0].next_tid=1;tasks[0].cpu=-1;tasks[0].cap_limit=SF_CAP_LIMIT_MAX;tasks[0].page_limit=SF_PAGE_LIMIT_MAX;current=0;next_pid=next;allocated=allocation_calls=space_calls=freed=0;freed_pid=0;fail_after=2048;core_map_tick_step=0;core_allow_schedule=0;core_last_arch=0;core_copy_out_denied=0;core_copy_out_calls=0;core_map_deny=0;core_unmap_calls=0;core_unmap_bytes=0;core_page_free_calls=0;}
 static SfLoadPlan plan(void){SfLoadPlan p={0};p.size=sizeof(p);p.count=1;p.image_base=SF_BASE;p.segments[0]=(SfLoadSegment){0,4096,(uint64_t)(uintptr_t)segment,5,0};return p;}
 #endif

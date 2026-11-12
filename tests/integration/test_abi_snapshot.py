@@ -45,7 +45,7 @@ class AbiSnapshot(unittest.TestCase):
     def test_capture_and_independent_wire_sizes(self):
         self.assertEqual(self.current,self.reference)
         values=self.current['values']
-        self.assertEqual(len(values),646)
+        self.assertEqual(len(values),658)
         self.assertEqual(values['constant.OP_NS_INIT'],200)
         self.assertEqual(values['constant.OP_NS_UNMOUNT'],227)
         self.assertEqual(values['constant.OP_NS_CB_CONSOLE'],240)
@@ -70,9 +70,9 @@ class AbiSnapshot(unittest.TestCase):
         self.assertEqual(values['constant.SYS_IRQ_ACQUIRE'],29)
         self.assertEqual(values['constant.SYS_IRQ_RELEASE'],30)
         self.assertEqual(values['constant.SYS_IRQ_WAIT'],31)
-        self.assertEqual(values['constant.SF_MAX_THREADS'],32)
+        self.assertEqual(values['constant.SF_MAX_THREADS'],64)
         self.assertEqual(values['constant.SF_MAX_CPUS'],8)
-        self.assertEqual(values['constant.SF_THREAD_LIMIT_MAX'],8)
+        self.assertEqual(values['constant.SF_THREAD_LIMIT_MAX'],32)
         self.assertEqual(values['constant.SF_THREAD_STACK_BASE'],0x40300000)
         self.assertEqual(values['constant.SF_THREAD_STACK_BYTES'],65536)
         self.assertEqual(values['constant.SF_CPU_WINDOW_TICKS'],100)
@@ -82,7 +82,7 @@ class AbiSnapshot(unittest.TestCase):
         self.assertEqual(values['offset.SfThreadRequest.argument'],16)
         self.assertEqual(values['width.SfThreadRequest.argument'],8)
         # These fixed little-endian formats are independent of C sizeof/offsetof.
-        formats={'SfIpcStats':'<IIQQ','SfIpcHeader':'<IHHIIQIIQ','SfMessage':'<IHHIIQIIQqQQII256s',
+        formats={'SfIpcStats':'<IIQQ','SfIpcHeader':'<IHHIIQIIQ','SfMessage':'<IHHIIQIIQqQQII4096s',
                  'SfBootArgs':'<IHHQQ12IQQIHH','SfFileStat':'<IIIIQQ',
                  'SfNetInfo':'<6sH6I','SfNetPacket':'<IHH248s','SfTrustKey':'<32sII'}
         for name,fmt in formats.items():
@@ -90,7 +90,7 @@ class AbiSnapshot(unittest.TestCase):
         self.assertEqual(values['offset.SfIpcHeader.request_id'],16)
         self.assertEqual(values['offset.SfIpcHeader.deadline_ns'],32)
         self.assertEqual(values['offset.SfMessage.data'],72)
-        self.assertEqual(values['width.SfMessage.data'],256)
+        self.assertEqual(values['width.SfMessage.data'],4096)
         self.assertEqual(values['offset.SfBootArgs.pid'],24)
         self.assertEqual(values['kind.SfMessage.status'],8)
         self.assertEqual(values['kind.SfMessage.handle'],7)

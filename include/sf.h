@@ -5,7 +5,7 @@
 #define SF_ABI 1
 #define SF_PAGE 4096ull
 #define SF_BASE 0x40000000ull
-#define SF_IMAGE_MAX 0x200000ull
+#define SF_IMAGE_MAX 0x800000ull
 #define SF_PIE_MIN 0x44000000ull
 #define SF_NATIVE_STATIC 0u
 #define SF_NATIVE_RELATIVE 1u
@@ -17,17 +17,25 @@
 #define SF_DMA_BYTES 65536u
 /* 用户侧 framebuffer 映射基点：仅经 SYS_FB_MAP 授权后可见。 */
 #define SF_FB 0x70000000ull
-#define SF_FB_BYTES 0x2000000ull
+#define SF_FB_BYTES 0x4000000ull
+/* 匿名堆窗口：SYS_MMAP 只在该区间内建立映射（每进程独立页表）。 */
+#define SF_HEAP 0x74000000ull
+#define SF_HEAP_BYTES 0x4000000ull
+/* 共享内存窗口：固定槽位映射，8 槽 × 8 MiB。 */
+#define SF_SHM 0x78000000ull
+#define SF_SHM_BYTES 0x4000000ull
+#define SF_SHM_SLOTS 8u
+#define SF_SHM_SLOT_BYTES 0x800000ull
 /* Relocatable images occupy a separate, 2 MiB aligned arena below DMA. */
 static inline int sf_image_base_valid(uint64_t base){return !base||base==SF_BASE||(base>=SF_PIE_MIN&&base<=SF_DMA-SF_IMAGE_MAX&&!(base&(SF_IMAGE_MAX-1)));}
-#define SF_MAX_TASKS 12
-#define SF_MAX_THREADS 32
+#define SF_MAX_TASKS 32
+#define SF_MAX_THREADS 64
 #define SF_MAX_CPUS 8
-#define SF_THREAD_LIMIT_MAX 8
+#define SF_THREAD_LIMIT_MAX 32
 #define SF_THREAD_STACK_BASE 0x40300000ull
 #define SF_THREAD_STACK_BYTES 65536u
 #define SF_CPU_WINDOW_TICKS 100u
-#define SF_MSG_BYTES 256
+#define SF_MSG_BYTES 4096
 #define SF_ARGUMENT_MAX 8u
 #define SF_ENVIRONMENT_MAX 8u
 #define SF_ARGUMENT_BYTES 512u
@@ -63,6 +71,13 @@ enum { SYS_EXIT, SYS_YIELD, SYS_LOG, SYS_TICKS, SYS_EP_CREATE,
  * bit31 事件标记 | buttons[26..28] | y[13..25] | x[0..12]，
  * 无新事件返回 SF_WOULD_BLOCK。仅 PID1 可用。 */
 #define SYS_POINTER_READ 34
+/* 匿名映射与共享内存：内核只提供机制，策略由 sf-init/sf-native 决定。 */
+#define SYS_MMAP 35
+#define SYS_MUNMAP 36
+#define SYS_SHM_CREATE 37
+#define SYS_SHM_MAP 38
+#define SYS_SHM_GRANT 39
+#define SYS_SHM_CLOSE 40
 enum { SF_PRIORITY_MIN=0, SF_PRIORITY_DEFAULT=1, SF_PRIORITY_MAX=3, SF_PRIORITY_AGING_TICKS=4,
  SF_PRIORITY_QUERY=0, SF_PRIORITY_SET=1 };
 enum { SF_CAP_LIMIT_MAX=32, SF_LIMIT_QUERY=0, SF_LIMIT_SET=1, SF_LIMIT_USED=2 };

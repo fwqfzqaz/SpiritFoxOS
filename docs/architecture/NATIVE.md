@@ -24,15 +24,15 @@
 
 ## POSIX 子集
 
-`sf-libsf.sfmod` 导出有界 POSIX 兼容函数：`open`、`read`、`write`、`close`、`lseek`、`fstat`、`stat`、`getpid`、`_exit`、`sleep`、`printf`、`puts`、`getenv`、`__errno_location`、`strerror`。它复用现有文件 RPC、启动参数与 SDK，不引入 ELF 装载器、libc、malloc、线程、信号、fork/exec、管道或动态数据段。
+`sf-libsf.sfmod` 导出 19 个有界 POSIX 兼容函数：`open`、`read`、`write`、`close`、`lseek`、`fstat`、`stat`、`getpid`、`_exit`、`sleep`、`printf`、`puts`、`getenv`、`__errno_location`、`strerror`、`malloc`、`free`、`calloc`、`realloc`。它复用现有文件 RPC、启动参数与 SDK，不引入 ELF 装载器、完整 libc、线程、信号、fork/exec、管道或动态数据段。`malloc` 系列由库内基于 `SYS_MMAP` 的首次适配堆实现：块头加地址有序空闲链表、相邻合并，映射失败返回 NULL，不改变应用的段布局。
 
 能力模型不变：普通应用只读，`O_CREAT`/`O_TRUNC` 在导入层返回 `EACCES`；符号错误映射到 `ENOENT`/`EACCES`/`ENOSPC`/`EBADF`/`EINVAL`/`EIO`。`/dev/console` 的写打开映射到进程控制台通道（`OP_OPEN`），仍由服务端只允许该精确路径与写模式。相对路径基于 `runat` 授予的目录根，`stat` 读取同一文件描述符的固定元数据。
 
 ## 准备与隔离
 
-sf-native 独立认证相同包快照，返回至多五个段、profile、基址和重定位偏移/数量，240 字节计划装入一条复制消息。sf-init 将所有字段与同一认证快照比较，再由用户态 sf_native_image 清零暂存区、复制文件字节并应用修正。暂存区为 1280 KiB，映像 RVA 上限 2 MiB；因此单个映像的实际可用上限是 1280 KiB（按页对齐累计所有映射段，含绑定库），当前应用映像仅 8–20 KiB。用户映像按函数和只读数据分区并启用 `--gc-sections`，使含完整认证代码的 sf-native 保持在 168 KiB、其余模块不超过 13 KiB。带导入的应用由 `sf_native_link` 在同一暂存区追加库段并绑定槽，应用与库合计最多八个映射段。包原字节及签名不被修改。
+sf-native 独立认证相同包快照，返回至多五个段、profile、基址和重定位偏移/数量，240 字节计划装入一条复制消息。sf-init 将所有字段与同一认证快照比较，再由用户态 sf_native_image 清零暂存区、复制文件字节并应用修正。暂存区由 SYS_MMAP 按需增长（容量等于所有映射段按页对齐之和，含绑定库），映像 RVA 上限 8 MiB；不再有固定 1280 KiB 上限，实际容量仅受进程页配额与 16 MiB 页池约束。当前应用映像仅 8–20 KiB。用户映像按函数和只读数据分区并启用 `--gc-sections`，使含完整认证代码的 sf-native 保持在 168 KiB、其余模块不超过 13 KiB。带导入的应用由 `sf_native_link` 在同一暂存区追加库段并绑定槽，应用与库合计最多八个映射段。包原字节及签名不被修改。
 
-加载器为 relative-v1 应用交替选择 0x44000000 和 0x46000000，这是确定性装载策略，不提供安全随机化。Core 0 独立验证 image_base：静态基址，或 [0x44000000,0x4fe00000] 内 2 MiB 对齐的基址；整个最大映像位于 DMA 区之前，与栈、BootArgs、设备 MMIO、bundle 不重叠。引导任务只允许静态基址。Core 0 校验段、入口、权限与源内存后复制到子进程私有页；没有重定位解释器或共享可写代码别名。
+加载器为 relative-v1 应用交替选择 0x44000000 和 0x46000000，这是确定性装载策略，不提供安全随机化。Core 0 独立验证 image_base：静态基址，或 [0x44000000,0x4f800000] 内 8 MiB 对齐的基址；整个最大映像位于 DMA 区之前，与栈、BootArgs、设备 MMIO、bundle 不重叠。引导任务只允许静态基址。Core 0 校验段、入口、权限与源内存后复制到子进程私有页；没有重定位解释器或共享可写代码别名。
 
 SfLoadPlan 增加 image_base，零值为旧静态默认；SfNativePlan 扩为 240 字节。这两项属于尚未冻结的内部装载 ABI，所有服务已同步构建。96 字节 BootArgs 头和显式 argv/env 格式不变。
 
@@ -42,11 +42,11 @@ native 的 RPC 回复使用独立端点，普通应用没有其发送能力；�
 
 pieprobe.sfk 含三个真实重定位槽，分别指向 RW 数据、代码函数和 BSS；验证初值、零填充、函数指针调用及每个进程的独立修改。可运行 run pieprobe.sfk、runenv MODE=demo -- pieprobe.sfk --require-mode、run pieprobe.sfk --write-code，最后一个触发隔离页故障。
 
-posixprobe.sfk 有 15 个导入槽、无相对项，经 `runat /tmp posixprobe.sfk` 绑定 `sf-libsf.sfmod`：验证控制台写、文件描述符元数据、相对路径读取、缺失路径 `ENOENT`、`printf`/`puts` 与只读拒绝语义。`test_native.py` 另用宿主导出 `sf_image_link` 检查槽值等于 `image_base+库偏移+导出RVA`，并构造缺失导出返回 `SF_DEPENDENCY`。
+posixprobe.sfk 有 19 个导入槽、无相对项，经 `runat /tmp posixprobe.sfk` 绑定 `sf-libsf.sfmod`：验证控制台写、文件描述符元数据、相对路径读取、缺失路径 `ENOENT`、`printf`/`puts`、`malloc`/`free`/`calloc`/`realloc` 与只读拒绝语义。`test_native.py` 另用宿主导出 `sf_image_link` 检查槽值等于 `image_base+库偏移+导出RVA`，并构造缺失导出返回 `SF_DEPENDENCY`。
 
 tests/integration/test_native.py 六组宿主测试直接调用产品 C 验证器与映像准备器，检查精确页字节、三个合法基址、容量失败不改输出、0/1/256 项、签名有效的非法目标/加数/排序/子表、导入/导出表的槽与 RVA 约束及 500 次固定种子已签名记录变异。仍落在合法范围的变异按独立目标范围计算允许通过，不能把签名者有权更改的合法记录误称为攻击。
 
-tests/qemu/qemu_native_test.py 在 legacy 和 VT-d/modern 各执行初次启动与重启，共四次：并发两个私有映像、两个实际基址、代码页写拒绝、argv/env、非法签名包拒绝且磁盘不变、PI 应用安装健康确认、连续回收、重启后再次执行。`qemu_posix_test.py` 在真实访客中运行 posixprobe 并核对 15 个按名/ABI 绑定、控制台/元数据/errno 与退出 0。全套结果以 TESTING.md 和 build/test-results.json 为准；专项通过不代表整个路线图已完成。
+tests/qemu/qemu_native_test.py 在 legacy 和 VT-d/modern 各执行初次启动与重启，共四次：并发两个私有映像、两个实际基址、代码页写拒绝、argv/env、非法签名包拒绝且磁盘不变、PI 应用安装健康确认、连续回收、重启后再次执行。`qemu_posix_test.py` 在真实访客中运行 posixprobe 并核对 19 个按名/ABI 绑定、控制台/元数据/errno 与退出 0。全套结果以 TESTING.md 和 build/test-results.json 为准；专项通过不代表整个路线图已完成。
 
 ## 启动意图与认证类型
 

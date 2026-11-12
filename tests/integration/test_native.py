@@ -53,7 +53,7 @@ class Native(unittest.TestCase):
 
     def test_exact_fixture_and_preparation(self):
         self.assertEqual(self.make(),self.good)
-        for base in (0x44000000,0x46000000,0x4fe00000):
+        for base in (0x44000000,0x46000000,0x4f800000):
             output=C.create_string_buffer(16384)
             self.assertEqual(self.prepare(self.good,len(self.good),self.pub,base,output,16384),16384)
             expected=bytearray()

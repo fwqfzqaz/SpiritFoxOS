@@ -306,6 +306,8 @@ typedef struct {
     {0x8868E871, 0xE4F1, 0x11D3, {0xBC, 0x22, 0x00, 0x80, 0xC7, 0x3C, 0x88, 0x81}}
 
 /* AllocatePages 分配类型 */
+#define AllocateAnyPages 1
+#define AllocateMaxAddress 0
 #define AllocateAddress 2
 
 #endif /* EFI_BOOT_H */

@@ -298,9 +298,9 @@ def main(policy_path=None):
     disk_files['/bin/pieprobe.sfk'] = pie_package
     # sf-libsf：相对地址运行时库，导出有界 POSIX 子集，由导入表按名称/ABI 绑定。
     posix_shared = objects('posix-common', ['services/start.S','services/memory.c','services/file_client.c','services/arguments.c','services/sdk.c'], defines=['-fpie'])
-    posix_lib = posix_shared + objects('posix-lib',['services/posix.c'],defines=['-fpie'])
+    posix_lib = posix_shared + objects('posix-lib',['services/posix.c','services/heap.c'],defines=['-fpie'])
     run(['-target','x86_64-freestanding-none','-nostdlib','-fpie','-pie','-Wl,-Bsymbolic','-Wl,-e,_sf_start','-Wl,-T,services/user-pie.ld','-Wl,--build-id=none',*posix_lib,'-o','build/sf-libsf.elf'])
-    posix_exports = ['open','read','write','close','lseek','fstat','stat','getpid','_exit','sleep','printf','puts','getenv','__errno_location','strerror']
+    posix_exports = ['open','read','write','close','lseek','fstat','stat','getpid','_exit','sleep','printf','puts','getenv','__errno_location','strerror','malloc','free','calloc','realloc']
     posix_lib_manifest = {'module_id':'org.spiritfox.posix','version':'0.1.0','category':'runtime',
                           'native_profile':'relative-v1','native_role':'library',
                           'native_exports':[{'name':name,'abi':'libsf-posix-1'} for name in posix_exports],
@@ -317,6 +317,11 @@ def main(policy_path=None):
     packages.append(('posixprobe.sfk',posix_probe_package))
     image = link_elf('sf-virtio-blk', shared + objects('virtio-blk', ['services/virtio_blk.c']), 'services/user.ld')
     packages.append(('sf-virtio-blk.sfmod', pack({'module_id': 'org.spiritfox.virtio.blk', 'version': '0.1.0', 'category': 'driver', 'requested_caps': ['device.virtio-blk.trusted'], 'resource_limits': {'memory': 131072}}, image, 1, seed)))
+    # 真实硬件存储驱动：AHCI/SATA 与 NVMe，同样通过 sf-init 的块 broker 提供服务。
+    image = link_elf('sf-ahci', shared + objects('ahci', ['services/ahci.c']), 'services/user.ld')
+    packages.append(('sf-ahci.sfmod', pack({'module_id': 'org.spiritfox.ahci', 'version': '0.1.0', 'category': 'driver', 'requested_caps': ['device.ahci.trusted'], 'resource_limits': {'memory': 131072}}, image, 1, seed)))
+    image = link_elf('sf-nvme', shared + objects('nvme', ['services/nvme.c']), 'services/user.ld')
+    packages.append(('sf-nvme.sfmod', pack({'module_id': 'org.spiritfox.nvme', 'version': '0.1.0', 'category': 'driver', 'requested_caps': ['device.nvme.trusted'], 'resource_limits': {'memory': 131072}}, image, 1, seed)))
     # virtio-net：net_proto.c 帧逻辑已迁入 rust/sfcore。
     image = link_elf('sf-virtio-net', shared + objects('virtio-net', ['services/virtio_net.c']), 'services/user.ld')
     packages.append(('sf-virtio-net.sfmod', pack({'module_id': 'org.spiritfox.virtio.net', 'version': '0.1.0', 'category': 'driver', 'requested_caps': ['device.virtio-net.trusted'], 'resource_limits': {'memory': 131072}}, image, 1, seed)))
@@ -350,7 +355,7 @@ def main(policy_path=None):
     Path('build/interrupts.S').write_text('\n'.join(asm)+'\n')
     print('Building Core 0', flush=True)
     # 内核：sched_policy.c 策略函数已迁入 rust/sfcore（sf_sched_pick）。
-    kernel = objects('kernel', ['kernel/entry.S', 'kernel/arch.c', 'kernel/smp.c', 'kernel/core.c', 'kernel/pid.c', 'kernel/memory.c', 'kernel/ipc.c', 'kernel/device.c', 'kernel/ps2.c', 'kernel/acpi.c', 'kernel/vtd_tables.c', 'kernel/iommu.c', 'services/memory.c', 'services/arguments.c', 'build/interrupts.S'])
+    kernel = objects('kernel', ['kernel/entry.S', 'kernel/arch.c', 'kernel/smp.c', 'kernel/core.c', 'kernel/pid.c', 'kernel/memory.c', 'kernel/shm.c', 'kernel/ipc.c', 'kernel/device.c', 'kernel/ps2.c', 'kernel/acpi.c', 'kernel/vtd_tables.c', 'kernel/iommu.c', 'services/memory.c', 'services/arguments.c', 'build/interrupts.S'])
     link_elf('kernel', kernel, 'kernel/linker.ld')
     # Content-addressed incbin inputs prevent assembler caches reusing old bytes.
     embedded = {}

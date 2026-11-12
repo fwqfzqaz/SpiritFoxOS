@@ -55,6 +55,10 @@ const char *mode = sf_environment_value(boot, bytes, "MODE");
 
 `tests/qemu/qemu_environment_test.py` 再各启动一次，验证显式值/不展开/空值、双计数上限、runenvat、非法/重复名字不启动试运行、环境页只读、进程重用后无残留及环境不落盘。
 
+## 应用可用的内存接口
+
+native 应用经 `sf-libsf.sfmod` 绑定 `malloc`/`free`/`calloc`/`realloc`，由库内基于 `SYS_MMAP` 的首次适配堆提供；映射失败返回 NULL，不改变应用原有段布局。ring-3 服务与模块可直接使用 `include/libsf.h` 的 `sf_mmap`/`sf_munmap`，地址窗口为 `[0x74000000, 0x78000000)`、页粒度、独占且清零。`sf_shm_create/map/grant/close` 面向服务间只读数据传递（固定 8 槽 × 8 MiB），普通应用没有这些导入；共享页的记账归创建者 PID，进程退出时先撤引用再回收页。
+
 ## Native 文件客户端 SDK
 
 公开头为include/sf_file.h，实现位于services/file_client.c。它封装文件RPC，提供同一所有者内的句柄复制，保持原有权限。当前native进程单线程，一个私有回复端点只由一个客户端串行使用；不要混用自行构造的RPC、复制上下文后并发读取同一队列。
@@ -122,7 +126,7 @@ SDK包含write/truncate/unlink/rmdir编解码，但当前普通应用仍只能�
 
 ### 不改变共享偏移的读取
 
-`sf_file_pread(client, handle, output, bytes, offset)` 以完整 uint64_t 绝对字节偏移读取 RAM 文件、只读磁盘文件或持久笔记，一次最多 256 字节。`OP_PREAD=26` 沿用现有消息，handle 为规范句柄，offset 为绝对位置，length 为容量，mode 必须为 0；成功回复保留 handle/offset/mode，并以 status 和 length 返回实际字节数。SDK 独立检查这些字段，异常成功回复停止客户端，错误不交付输出。
+`sf_file_pread(client, handle, output, bytes, offset)` 以完整 uint64_t 绝对字节偏移读取 RAM 文件、只读磁盘文件或持久笔记，一次最多 4096 字节。`OP_PREAD=26` 沿用现有消息，handle 为规范句柄，offset 为绝对位置，length 为容量，mode 必须为 0；成功回复保留 handle/offset/mode，并以 status 和 length 返回实际字节数。SDK 独立检查这些字段，异常成功回复停止客户端，错误不交付输出。
 
 成功、EOF 或失败均不改变原描述及其所有副本的共享游标。完整 64 位偏移不窄化；超过末尾返回 0。非空磁盘请求即使在 EOF 也会进入原后端检查设备/卷健康，没有缓存元数据捷径。零字节调用仍验证句柄、读权限和对象类型，但不访问后端；管道/控制台返回 NOT_SEEKABLE，目录返回 INVALID。该接口不增加权限，不提供定位写入或并发/取消保证。
 

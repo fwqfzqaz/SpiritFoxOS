@@ -15,7 +15,27 @@ static SfNamespace*ns;
 static SfModuleSpawn spawn;
 static uint32_t driver_reply,driver_ep,driver_pid,granted_device;
 static uint32_t fs_service_ep,fs_service_reply,fs_broker_ep,fs_broker_reply,fs_pid;
-static int driver_slot=-1,fs_slot=-1,mounted,fs_format_id;
+static int driver_slot=-1,fs_slot=-1,mounted,fs_format_id,driver_kind=-1;
+/* 真实硬件：按 PCI class code 选择存储驱动。virtio 优先（开发/回归环境），
+ * 其次 SATA AHCI，最后 NVMe。启动时逐个候选控制器尝试，直到挂载成功。 */
+enum {DRV_VIRTIO,DRV_AHCI,DRV_NVME};
+static uint32_t candidate_bdf[64];static int candidate_kind[64];static unsigned candidate_count,candidate_next;
+static int classify(uint32_t bdf){
+ uint32_t id=(uint32_t)sf_sys(SYS_PCI_READ,bdf,0,0);
+ if(id==0x10011af4u||id==0x10421af4u)return DRV_VIRTIO;
+ uint32_t rev=(uint32_t)sf_sys(SYS_PCI_READ,bdf,8,0);
+ if((rev>>24)==1&&((rev>>16)&0xff)==6&&((rev>>8)&0xff)==1)return DRV_AHCI;
+ if((rev>>24)==1&&((rev>>16)&0xff)==8&&((rev>>8)&0xff)==2)return DRV_NVME;
+ return -1;
+}
+static void build_candidates(void){
+ candidate_count=candidate_next=0;
+ for(int kind=0;kind<=DRV_NVME;kind++)
+  for(unsigned bdf=0;bdf<256&&candidate_count<64;bdf++)
+   if(classify(bdf)==kind){candidate_kind[candidate_count]=kind;candidate_bdf[candidate_count++]=(uint32_t)bdf+1;}
+}
+static const char* driver_package(int kind){return kind==DRV_AHCI?"sf-ahci.sfmod":kind==DRV_NVME?"sf-nvme.sfmod":"sf-virtio-blk.sfmod";}
+static const char* driver_module(int kind){return kind==DRV_AHCI?"org.spiritfox.ahci":kind==DRV_NVME?"org.spiritfox.nvme":"org.spiritfox.virtio.blk";}
 static uint64_t capacity,sequence=0x100000000ull,fs_requests=0x400000000ull;
 /* 与 sf-init 的包快照共用一块 128 KiB 只读装载缓冲。服务单线程处理，
  * 两条路径不会嵌套；每次借出前作废模块侧缓存状态。 */
@@ -195,7 +215,7 @@ static long external_read(unsigned index,uint64_t offset,void*out,size_t bytes){
  }
  return total;
 }
-void sf_storage_init(SfManager*m,SfNamespace*n,SfModuleSpawn callback){manager=m;ns=n;spawn=callback;}
+void sf_storage_init(SfManager*m,SfNamespace*n,SfModuleSpawn callback){manager=m;ns=n;spawn=callback;build_candidates();}
 void sf_storage_namespace_bind(SfNamespace*n){sf_ns_external(n,external_read,0,0);sf_ns_mount_hooks(n,mount_open,mount_close);}
 static int mount_disk_view(void){
  int r=fs_start();if(r)return r;r=fs_attach();if(r)return r;
@@ -212,21 +232,40 @@ int sf_storage_namespace_restore(void){
  int r=mount_disk_view();if(r)return r;
  mount_admission=1;return 0;
 }
-static int start_driver(unsigned rights){
+static int start_candidate(unsigned index,unsigned rights){
  if(driver_pid&&sf_sys(SYS_TASK_STATUS,driver_pid,0,0)==SF_TASK_RUNNING)return SF_BUSY;
- uint32_t device=0;for(unsigned d=0;d<32&&!device;d++)for(unsigned f=0;f<8;f++){uint32_t bdf=d*8+f;long id=sf_sys(SYS_PCI_READ,bdf,0,0);if(id==0x10011af4u||id==0x10421af4u){device=bdf+1;break;}}
- if(!device)return SF_NOT_FOUND;
- if(driver_slot<0){driver_slot=sfmod_add(manager,"org.spiritfox.virtio.blk",0,0);if(driver_slot<0)return driver_slot;}
+ if(index>=candidate_count)return SF_NOT_FOUND;
+ int kind=candidate_kind[index];uint32_t device=candidate_bdf[index];
+ if(driver_slot<0||driver_kind!=kind){
+  if(driver_slot>=0){sfmod_prepare(manager,driver_slot);sfmod_stop(manager,driver_slot);}
+  driver_slot=sfmod_add(manager,driver_module(kind),0,0);if(driver_slot<0)return driver_slot;driver_kind=kind;
+ }
  int r=sfmod_start(manager,driver_slot);if(r)return r;driver_reply=sf_sys(SYS_EP_CREATE,0,0,0);if((int)driver_reply<0){r=(int)driver_reply;driver_reply=0;goto fail;}driver_ep=sf_sys(SYS_EP_CREATE,0,0,0);if((int)driver_ep<0){r=(int)driver_ep;goto fail;}
- int pid=spawn("sf-virtio-blk.sfmod",driver_ep,RIGHT_RECV,device,rights,driver_reply);if(pid<0){r=pid;goto fail;}driver_pid=pid;granted_device=device;
+ int pid=spawn(driver_package(kind),driver_ep,RIGHT_RECV,device,rights,driver_reply);if(pid<0){r=pid;goto fail;}driver_pid=pid;granted_device=device;
  SfMessage message;sf_message(&message,OP_BLOCK_INFO,0);r=call(&message);if(r)goto fail;
- if(message.length!=sizeof(SfBlockInfo)){r=SF_BAD_FORMAT;goto fail;}SfBlockInfo info;memcpy(&info,message.data,sizeof(info));if(info.sector_bytes!=512||info.readonly!=(rights?0u:1u)||!info.sectors||info.sectors>UINT64_MAX/512){r=SF_BAD_FORMAT;goto fail;}capacity=info.sectors*512;write_grant=rights!=0;writable=0;
+ if(message.length!=sizeof(SfBlockInfo)){sf_log("[STORAGE] info length=");sf_number(message.length);sf_log("\n");r=SF_BAD_FORMAT;goto fail;}SfBlockInfo info;memcpy(&info,message.data,sizeof(info));if(info.sector_bytes!=512||info.readonly!=(rights?0u:1u)||!info.sectors||info.sectors>UINT64_MAX/512){sf_log("[STORAGE] info sectors=");sf_number(info.sectors);sf_log(" bytes=");sf_number(info.sector_bytes);sf_log(" ro=");sf_number(info.readonly);sf_log(" rights=");sf_number(rights);sf_log("\n");r=SF_BAD_FORMAT;goto fail;}capacity=info.sectors*512;write_grant=rights!=0;writable=0;
  sfmod_acquire(manager,driver_slot,RES_DMA);return 0;
 fail:
  if(driver_pid)sf_sys(SYS_KILL,driver_pid,SF_DEVICE_GONE,0);driver_pid=0;if((int)driver_ep>0)sf_sys(SYS_CAP_REVOKE,driver_ep,0,0);driver_ep=0;if(driver_reply)sf_sys(SYS_CAP_REVOKE,driver_reply,0,0);driver_reply=0;
  sfmod_prepare(manager,driver_slot);sfmod_stop(manager,driver_slot);return r;
 }
-int sf_storage_start(void){int r=start_driver(0);return r==SF_READ_ONLY?start_driver(SF_DEVICE_WRITE):r;}
+int sf_storage_start(void){
+ if(!candidate_count)return SF_NOT_FOUND;
+ while(candidate_next<candidate_count){
+  int r=start_candidate(candidate_next,0);
+  if(r==SF_READ_ONLY)r=start_candidate(candidate_next,SF_DEVICE_WRITE);
+  if(!r)return 0;
+  if(r==SF_BUSY)return r;
+  sf_log("[STORAGE] candidate kind=");sf_number((uint64_t)candidate_kind[candidate_next]);sf_log(" code=");sf_number(r<0?-r:r);sf_log("\n");
+  candidate_next++;
+ }
+ candidate_next=0;return SF_NOT_FOUND;
+}
+int sf_storage_restart_next(void){
+ int r=sf_storage_stop();if(r){sf_log("[STORAGE] stop failed code=");sf_number(-r);sf_log("\n");return r;}
+ if(candidate_next+1>=candidate_count){candidate_next=0;return SF_NOT_FOUND;}
+ candidate_next++;return sf_storage_start();
+}
 int sf_storage_mount(void){
  if(mounted)return SF_BUSY;if(!driver_pid)return SF_DEVICE_GONE;
  int r=sf_ns_mount_check(ns,"/disk");if(r)return r;

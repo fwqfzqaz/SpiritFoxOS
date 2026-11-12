@@ -14,15 +14,15 @@
 
 | 能力 | 当前状态 |
 | --- | --- |
-| 启动与隔离 | UEFI 验证签名启动包，ExitBootServices 后进入独立页表的 CPL3 `sf-init` |
+| 启动与隔离 | UEFI 验证签名启动包，ExitBootServices 后进入独立页表的 CPL3 `sf-init`；启动日志同时写串口与固件 framebuffer，真机无串口也能看到进度 |
 | 调度 | SMP（MADT/LAPIC/IPI，最多 8 核）、同进程多线程、抢占、0–3 基础优先级、等待老化与 CPU 时间预算，PID 1 控制配置 |
 | 内核句柄配额 | PID 1 可配置每任务 0–32 个能力句柄，默认 32，保留既有引用 |
 | 私有池页面配额 | 根任务显式预算创建、上限/占用查询，默认4096页，计入私有页和新页表 |
 | 包格式 | 96 字节头 + 64 字节段描述符 + 确定性 CBOR + Ed25519 尾部，W^X 与段布局校验 |
 | 微内核边界 | 内核不解析路径、ELF、CBOR 或包格式；驱动与服务均为用户态模块 |
-| 存储 | legacy/modern `virtio-blk`、SFRFS1/SFRFS2 自动探测、独立 `sf-fs.sfmod`、双银行事务持久化、掉电故障恢复 |
+| 存储 | legacy/modern `virtio-blk`、AHCI/SATA、NVMe 自动探测与多控制器回退、SFRFS1/SFRFS2 自动探测、独立 `sf-fs.sfmod`、双银行事务持久化、掉电故障恢复 |
 | 更新与信任 | 应用 A/B 试运行、健康确认与回退、用途受限公钥、持久化密钥撤销、版本下限 |
-| DMA 隔离 | QEMU q35 Intel VT-d，按设备授予有界 IOVA，拒绝越界 DMA |
+| DMA 隔离 | Intel VT-d（单 DRHD，QEMU q35 与真机）按设备授予有界 IOVA，拒绝越界 DMA；无 IOMMU 时回退受保护的物理 DMA |
 | native 运行时 | static 与 `relative-v1` 位置无关装载、私有映像、有界 argv/env、单一认证运行时库的按名导入与有界 POSIX 子集 |
 | 文件 SDK | 有界 C 客户端封装文件 RPC，支持规范句柄、元数据、固定截止时间与只读目录委派 |
 | 网络切片 | ring-3 legacy `virtio-net`、IOAPIC INTx、DHCP、ARP/IPv4/ICMP、UDP/TCP、有界连接对象与 `/net` 投影 |
@@ -39,7 +39,7 @@ flowchart LR
     CORE <-->|能力 IPC| INIT[sf-init<br/>manager · session · process]
     INIT --> NATIVE[sf-native<br/>装载与运行]
     INIT <-->|文件/持久化 RPC| FS[sf-fs.sfmod<br/>命名空间 · RAMFS · SFRFS]
-    FS --> BLK[virtio-blk]
+    FS --> BLK[virtio-blk · AHCI · NVMe]
     INIT --> NET[virtio-net<br/>ARP · IPv4 · ICMP · UDP · TCP]
     INIT -->|framebuffer 授权 + 串口输入| WM[sf-wm.sfmod<br/>类 niri 平铺合成器]
     NATIVE --> APP[hello.sfk<br/>签名应用]
@@ -73,6 +73,7 @@ python3 tools/test.py --skip-build     # 复用已有镜像
 
 ```bash
 make build          # 构建 EFI、模块、应用与测试盘
+make image          # 构建并生成可启动系统镜像 build/spiritfoxos.img
 make test           # 完整测试
 make run            # 交互启动
 make run-persist    # 可写持久盘

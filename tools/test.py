@@ -44,6 +44,7 @@ host_test('test_ipc_budget','tests/host/test_ipc_budget.c')
 host_test('test_ipc_cancel','tests/host/test_ipc_cancel.c')
 host_test('test_ipc_stats','tests/host/test_ipc_stats.c')
 host_test('test_threads','tests/host/test_threads.c','kernel/pid.c','services/arguments.c',no_unused=True)
+host_test('test_shm','tests/host/test_shm.c','kernel/memory.c','kernel/shm.c',no_unused=True)
 host_test('test_ipc_stats_control','tests/host/test_ipc_stats_control.c','kernel/pid.c','services/arguments.c',no_unused=True)
 host_test('test_supervisor','tests/host/test_supervisor.c','services/supervisor.c')
 host_test('test_manager','tests/host/test_manager.c','services/manager.c')
@@ -139,6 +140,7 @@ if not args.host_only:
     subprocess.run([sys.executable, 'tests/qemu/qemu_persist_test.py'], check=True)
     subprocess.run([sys.executable, 'tests/qemu/qemu_persist_metadata_test.py'], check=True)
     subprocess.run([sys.executable, 'tests/qemu/qemu_namespace_recovery_test.py'], check=True)
+    subprocess.run([sys.executable, 'tests/qemu/qemu_hardware_test.py'], check=True)
     subprocess.run([sys.executable, 'tests/qemu/qemu_net_test.py'], check=True)
     subprocess.run([sys.executable, 'tests/qemu/qemu_net_test.py', '--disk'], check=True)
     # 类 niri 合成器：framebuffer 映射、布局与串口输入转发。
@@ -172,11 +174,11 @@ result['manifest_source_profile'] = 'native-source-v1'
 result['manifest_profile_host_tests'] = 12
 result['manifest_schema_sha256'] = manifest_schema_sha256
 result['abi_snapshot_host_tests'] = 9
-result['abi_snapshot_entries'] = 646
+result['abi_snapshot_entries'] = 658
 result['abi_reference_sha256'] = abi_reference_sha256
 result['abi_capture_sha256'] = abi_capture_sha256
 result['posix_qemu'] = not args.host_only
-result['posix_import_bindings'] = 15
+result['posix_import_bindings'] = 19
 result['net_qemu'] = not args.host_only
 result['net_qemu_boots'] = 0 if args.host_only else 2
 result['memory_host_assertions'] = 42

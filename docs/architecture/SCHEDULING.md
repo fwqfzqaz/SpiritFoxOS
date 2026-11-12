@@ -4,11 +4,11 @@
 
 ## 任务、线程与 SMP 调度
 
-内核同时支持多 CPU（MADT/LAPIC，`SF_MAX_CPUS=8`）与同进程多线程（`SF_MAX_THREADS=32`，进程上限仍为 `SF_MAX_TASKS=12`）。调度仍为 100 Hz 抢占、0–3 基础优先级与每四 tick 等待老化，但就绪集合、选中任务和 CPU 归属都带核索引：每个 CPU 在全局内核锁下独立扫描任务表并切换上下文。
+内核同时支持多 CPU（MADT/LAPIC，`SF_MAX_CPUS=8`）与同进程多线程（`SF_MAX_THREADS=64`，进程上限为 `SF_MAX_TASKS=32`）。调度仍为 100 Hz 抢占、0–3 基础优先级与每四 tick 等待老化，但就绪集合、选中任务和 CPU 归属都带核索引：每个 CPU 在全局内核锁下独立扫描任务表并切换上下文。
 
 ### 线程模型
 
-任务槽同时承载线程。创建任务时首线程 `tid=1` 且标记 `main=1`，承载进程级状态（CR3、PID、能力表、页/能力/线程/CPU 配额）；`SF_THREAD_CREATE` 创建的同进程线程共享主线程的 CR3 与 PID，各自拥有 16 KiB 内核栈和独立的 FXSAVE64 状态，用户栈固定映射在 `SF_THREAD_STACK_BASE(0x40300000)` 起每线程 64 KiB 的槽位。线程数上限为每进程 `SF_THREAD_LIMIT_MAX=8`（含主线程），槽位位图防止复用未回收的栈空间。线程独立参与优先级老化与 CPU 预算，但配额、能力和页计数始终记在主线程上。
+任务槽同时承载线程。创建任务时首线程 `tid=1` 且标记 `main=1`，承载进程级状态（CR3、PID、能力表、页/能力/线程/CPU 配额）；`SF_THREAD_CREATE` 创建的同进程线程共享主线程的 CR3 与 PID，各自拥有 16 KiB 内核栈和独立的 FXSAVE64 状态，用户栈固定映射在 `SF_THREAD_STACK_BASE(0x40300000)` 起每线程 64 KiB 的槽位。线程数上限为每进程 `SF_THREAD_LIMIT_MAX=32`（含主线程），槽位位图防止复用未回收的栈空间。线程独立参与优先级老化与 CPU 预算，但配额、能力和页计数始终记在主线程上。
 
 `smp_preempt_all()` 只在在线 CPU 数大于 1 时发送 LAPIC 广播 IPI（vector 33）；BSP 的 PIT 仍只在自己的核上推进 `ticks` 并调用预算窗口重置，AP 由 IPI 进入调度。所有 CPU 的调度、任务表修改、能力的授予/回收都在全局 ticket 自旋锁 `kernel_lock` 内完成；获取锁先 `cli`，因此临界区不可被同核中断重入。
 

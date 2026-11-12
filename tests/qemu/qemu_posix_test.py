@@ -16,7 +16,7 @@ def run():
         vm.command('run pieprobe.sfk', 'sfexec: exit 0')
     finally:
         vm.close()
-    print('POSIX QEMU PASS: sf-libsf loaded into the app address space, 15 imports '
+    print('POSIX QEMU PASS: sf-libsf loaded into the app address space, 19 imports '
           'bound by name/ABI, console/stat/missing-path errno, printf/puts, read-only app',
           flush=True)
 

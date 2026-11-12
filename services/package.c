@@ -307,7 +307,7 @@ int sf_package_open_set(SfPackage*p,const void*data,uint64_t bytes,const uint8_t
  SfTrustStore policy={entries,count};return sf_package_open_trusted(p,data,bytes,&policy);
 }
 int sf_bundle_find(const void*data,uint64_t bytes,const char*name,const uint8_t**out,uint64_t*length){
- const uint8_t*d=data;if(bytes<16||memcmp(d,"SFB1",4)||sf_u32(d+4)>32||sf_u64(d+8)!=bytes)return SF_BAD_FORMAT;uint32_t n=sf_u32(d+4);
+ const uint8_t*d=data;if(bytes<16||memcmp(d,"SFB1",4)||sf_u32(d+4)>64||sf_u64(d+8)!=bytes)return SF_BAD_FORMAT;uint32_t n=sf_u32(d+4);
  if(!span(16,(uint64_t)n*48,bytes))return SF_BAD_FORMAT;
  for(uint32_t i=0;i<n;i++){const uint8_t*e=d+16+i*48;size_t len=0;while(len<32&&e[len])len++;if(len==32)return SF_BAD_FORMAT;uint64_t off=sf_u64(e+32),size=sf_u64(e+40);
   if(off<16+n*48ull||!span(off,size,bytes))return SF_BAD_FORMAT;

@@ -13,7 +13,7 @@ def run():
             start=vm.send('ipc-stats');marker='ipc-stats: send-bytes='
             vm.expect(marker,start);field=vm.output.index(marker.encode(),start)+len(marker);vm.expect('\n',field)
             fields=re.search(rb'ipc-stats: send-bytes=(\d+) receive-bytes=(\d+)\r?\n',vm.output[start:])
-            assert fields and all(0<int(n)<2**64 and int(n)%328==0 for n in fields.groups())
+            assert fields and all(0<int(n)<2**64 and int(n)%4168==0 for n in fields.groups())
             for _ in range(4):vm.command('ipc-stats-test','IPC COPY TEST PASSED')
             vm.command('run probe.sfk','CAPABILITY WIDTH APP PASSED')
             vm.command('page-quota-test','PAGE QUOTA TEST PASSED');vm.command('ipc-cancel-test','IPC CANCEL TEST PASSED')

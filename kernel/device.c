@@ -15,8 +15,39 @@ static SfDmaStatus dma_status;
 static void outl(uint16_t port,uint32_t value){__asm__ volatile("outl %0,%1"::"a"(value),"Nd"(port));}
 static uint32_t inl(uint16_t port){uint32_t v;__asm__ volatile("inl %1,%0":"=a"(v):"Nd"(port));return v;}
 static uint32_t config_read(uint32_t bdf,uint32_t offset){outl(0xcf8,0x80000000u|(bdf<<8)|offset);return inl(0xcfc);}
+static void config_write32(uint32_t bdf,uint32_t offset,uint32_t value){outl(0xcf8,0x80000000u|(bdf<<8)|offset);outl(0xcfc,value);}
 static void config_write_command(uint32_t bdf,uint16_t command){outl(0xcf8,0x80000004u|(bdf<<8));__asm__ volatile("outw %0,%1"::"a"(command),"Nd"((uint16_t)0xcfc));}
 long pci_read(uint64_t bdf,uint64_t offset){if(bdf>65535||offset>252||(offset&3))return SF_INVALID;return config_read(bdf,offset);}
+/* 设备类别：virtio 之外，真实机器上的存储控制器按 PCI class code 识别。 */
+enum {DK_NONE,DK_VIRTIO_LEGACY_BLK,DK_VIRTIO_LEGACY_NET,DK_VIRTIO_MODERN,DK_AHCI,DK_NVME};
+static int device_kind(uint32_t bdf){
+ uint32_t identity=config_read(bdf,0);
+ if(identity==0x10011af4u)return DK_VIRTIO_LEGACY_BLK;
+ if(identity==0x10001af4u)return DK_VIRTIO_LEGACY_NET;
+ if(identity==0x10421af4u)return DK_VIRTIO_MODERN;
+ uint32_t rev=config_read(bdf,8);uint8_t class=(uint8_t)(rev>>24),sub=(uint8_t)(rev>>16),prog=(uint8_t)(rev>>8);
+ if(class==1&&sub==6&&prog==1)return DK_AHCI; /* 01/06/01: SATA AHCI */
+ if(class==1&&sub==8&&prog==2)return DK_NVME; /* 01/08/02: NVM Express */
+ return DK_NONE;
+}
+/* 读取内存 BAR 的基址与容量：PCI BAR 只读时无法探测，按拒绝处理。
+ * 仅接受 32/64 位内存空间，要求容量为 2 的幂且基址对齐。 */
+static int memory_bar(uint32_t bdf,uint32_t offset,uint64_t*base,uint64_t*bytes){
+ uint32_t low=config_read(bdf,offset);if(low&1)return SF_DENIED;
+ uint32_t type=(low>>1)&3;if(type!=0&&type!=2)return SF_DENIED;
+ uint32_t high=type==2?config_read(bdf,offset+4):0;
+ uint64_t address=((uint64_t)high<<32)|(low&~15u);
+ config_write32(bdf,offset,0xffffffffu);if(type==2)config_write32(bdf,offset+4,0xffffffffu);
+ uint32_t probe_low=config_read(bdf,offset),probe_high=type==2?config_read(bdf,offset+4):0;
+ config_write32(bdf,offset,low);if(type==2)config_write32(bdf,offset+4,high);
+ uint64_t mask=((uint64_t)probe_high<<32)|(probe_low&~15u);
+ /* 32 位 BAR 的可写位掩码只有低 32 位有效，容量必须按 32 位回绕计算。 */
+ uint64_t size=type==2?(~mask)+1ull:(uint64_t)(0u-(probe_low&~15u));
+ if(!mask||size<4096||size>0x10000000ull||!address||(address&(size-1))){
+  serial("[DEV] BAR rejected bdf=");hex(bdf);serial(" off=");hex(offset);serial(" low=");hex(low);serial(" mask=");hex(mask);serial(" size=");hex(size);serial(" addr=");hex(address);serial("\n");return SF_DENIED;
+ }
+ *base=address;*bytes=size;return 0;
+}
 /* 设备初始化：金丝雀页填充 0xa5（后续校验内核 DMA 区未被设备越界写穿），
  * 关闭固件遗留的总线主控 DMA，再初始化 IOMMU。 */
 void device_init(SfBootInfo*b){
@@ -39,10 +70,12 @@ int device_release(Task*t){
  t->irq_waiting=0;
  if(!t->device_io)return t->device_fault?SF_DEVICE_GONE:0;
  /* Keep DMA storage pinned even after successful reset. Never recycle it as RAM. */
- if(t->device_modern)*(volatile uint8_t*)0xffe00014ull=0;else outb(t->device_io+18,0);
+ int reset=1;
+ if(t->device_modern){*(volatile uint8_t*)0xffe00014ull=0;reset=0;}
+ else if(t->device_kind==DK_VIRTIO_LEGACY_BLK||t->device_kind==DK_VIRTIO_LEGACY_NET){outb(t->device_io+18,0);reset=0;}
  uint16_t command=config_read(t->device_bdf,4)&0xffff;
  config_write_command(t->device_bdf,command&~4u);
- int reset=0;for(unsigned i=0;i<10000;i++)if((t->device_modern?*(volatile uint8_t*)0xffe00014ull:inb(t->device_io+18))==0){reset=1;break;}
+ if(!reset)for(unsigned i=0;i<10000;i++)if((t->device_modern?*(volatile uint8_t*)0xffe00014ull:inb(t->device_io+18))==0){reset=1;break;}
  int invalidation=iommu_revoke(t->device_bdf);
  if((config_read(t->device_bdf,4)&4)||!reset||invalidation){quarantined=1;serial("[CORE] DMA device quarantined; pinned pages retained\n");}
  /* A released-but-live driver still maps its arena; the slot stays reserved
@@ -64,33 +97,43 @@ void device_poll(void){
   for(unsigned i=0;i<SF_MAX_THREADS;i++){Task*t=&tasks[i];if(!t->main||t->state==T_DEAD)continue;unsigned slot=SF_DEVICE_SLOTS;for(unsigned s=0;s<SF_DEVICE_SLOTS;s++)if(slot_owner[s]==t->pid&&slot_bdf[s]==source){slot=s;break;}if(slot==SF_DEVICE_SLOTS)continue;device_release(t);quarantined=1;t->device_fault=1;task_kill(t->pid,SF_DEVICE_GONE);serial("[IOMMU] offending driver terminated and quarantined\n");break;}
  }
 }
-/* 设备授予：校验 BDF、厂商/设备标识（仅 virtio-block 1.0/legacy-net/modern-net）、
- * modern 设备校验 BAR4 中的 common/device/notify 能力布局，映射 MMIO 与
- * 私有 DMA 区（SF_DMA），经 IOMMU 建立总线地址后开启设备。
+/* 设备授予：virtio 按厂商/设备标识校验；真实硬件上的 AHCI/NVMe 按 PCI
+ * class code 识别并映射存储控制器 BAR。所有设备均建立私有 DMA 区（SF_DMA），
+ * 经 IOMMU（可用时）建立总线地址后开启设备。
  * 成功时把启动参数（DMA 虚拟/物理地址、IO 端口、BDF、权限）写回 args。 */
 int device_grant(Task*t,uint32_t bdf_plus_one,uint32_t rights,SfBootArgs*args){
  if(!bdf_plus_one||bdf_plus_one>65536)return SF_INVALID;
  if(quarantined)return SF_BUSY;if(iommu_mode()==2)return SF_DEVICE_GONE;
  uint32_t bdf=bdf_plus_one-1;for(unsigned i=0;i<SF_DEVICE_SLOTS;i++)if(slot_bdf[i]==bdf)return SF_BUSY;
- uint32_t identity=config_read(bdf,0);int modern=identity==0x10421af4u;int legacy_net=identity==0x10001af4u;if(identity!=0x10011af4u&&!legacy_net&&!modern)return SF_DENIED;
- if(iommu_mode()==1&&!modern)return SF_DENIED; /* Legacy virtio bypasses platform DMA. */
- serial("[DEV] bdf=");hex(bdf);serial(" line=");hex(config_read(bdf,0x3c)&0xffu);serial("\n");
- uint32_t bar=config_read(bdf,modern?32:16);uint64_t physical=0;
- if(modern){
+ int kind=device_kind(bdf);if(kind==DK_NONE)return SF_DENIED;
+ int modern=kind==DK_VIRTIO_MODERN;
+ if(iommu_mode()==1&&(kind==DK_VIRTIO_LEGACY_BLK||kind==DK_VIRTIO_LEGACY_NET))return SF_DENIED; /* Legacy virtio bypasses platform DMA. */
+ serial("[DEV] bdf=");hex(bdf);serial(" kind=");hex((uint64_t)kind);serial(" line=");hex(config_read(bdf,0x3c)&0xffu);serial("\n");
+ uint64_t physical=0;uint32_t map_bytes=0;uint32_t io_port=0;t->device_modern=0;
+ if(kind==DK_AHCI||kind==DK_NVME){
+  uint64_t bar_bytes;int r=memory_bar(bdf,kind==DK_NVME?0x10:0x24,&physical,&bar_bytes);if(r)return r;
+  /* 只映射实际 BAR 容量，避免越过控制器寄存器窗口进入未分配 MMIO。
+   * AHCI 可能只有 4 KiB（端口数较少），NVMe 通常 16 KiB。 */
+  map_bytes=(uint32_t)(bar_bytes>16384ull?16384ull:bar_bytes);if(physical>=0x1000000000000ull-map_bytes)return SF_DENIED;
+  t->device_io=SF_DEVICE_MMIO;t->device_kind=kind;
+ }else if(modern){
+  uint32_t bar=config_read(bdf,32);
   if(iommu_mode()!=1||(bar&7)!=4)return SF_DENIED;physical=((uint64_t)config_read(bdf,36)<<32)|(bar&~15u);if((physical&16383)||physical<0xc0000000ull||physical>=0x1000000000000ull-16384)return SF_DENIED;
   /* The validated QEMU modern profile places common/device/notify in BAR4. */
-  unsigned cap=config_read(bdf,0x34)&255,found=0;for(unsigned step=0;cap&&step<48;step++){if(cap<0x40||cap>0xfc||(cap&3))return SF_BAD_FORMAT;uint32_t h=config_read(bdf,cap);if((h&255)==9){unsigned kind=h>>24,length=(h>>16)&255;if(length<16||cap>240)return SF_BAD_FORMAT;uint32_t id=config_read(bdf,cap+4)&255,off=config_read(bdf,cap+8),n=config_read(bdf,cap+12);if((kind==1||kind==2||kind==4)&&id!=4)return SF_DENIED;if(kind==1&&off==0&&n>=56)found|=1;if(kind==2&&off==0x3000&&n>=2&&length>=20&&cap<=236&&config_read(bdf,cap+16)==4)found|=2;if(kind==4&&off==0x2000&&n>=8)found|=4;}cap=(h>>8)&255;}
-  if(found!=7||cap||space_device_mmio(physical))return SF_DENIED;t->device_io=SF_DEVICE_MMIO;t->device_modern=1;
- }else{if(!(bar&1)||(bar&~3u)<0x1000||(bar&~3u)>0xffc0)return SF_DENIED;t->device_io=bar&~3u;}
+  unsigned cap=config_read(bdf,0x34)&255,found=0;for(unsigned step=0;cap&&step<48;step++){if(cap<0x40||cap>0xfc||(cap&3))return SF_BAD_FORMAT;uint32_t h=config_read(bdf,cap);if((h&255)==9){unsigned ck=h>>24,length=(h>>16)&255;if(length<16||cap>240)return SF_BAD_FORMAT;uint32_t id=config_read(bdf,cap+4)&255,off=config_read(bdf,cap+8),n=config_read(bdf,cap+12);if((ck==1||ck==2||ck==4)&&id!=4)return SF_DENIED;if(ck==1&&off==0&&n>=56)found|=1;if(ck==2&&off==0x3000&&n>=2&&length>=20&&cap<=236&&config_read(bdf,cap+16)==4)found|=2;if(ck==4&&off==0x2000&&n>=8)found|=4;}cap=(h>>8)&255;}
+  if(found!=7||cap||space_device_mmio(physical))return SF_DENIED;t->device_io=SF_DEVICE_MMIO;t->device_modern=1;t->device_kind=kind;map_bytes=16384;
+ }else{
+  uint32_t bar=config_read(bdf,16);if(!(bar&1)||(bar&~3u)<0x1000||(bar&~3u)>0xffc0)return SF_DENIED;io_port=bar&~3u;t->device_io=io_port;t->device_kind=kind;
+ }
  t->device_bdf=bdf;
  if(device_release(t))return SF_DEVICE_GONE;
  unsigned slot=SF_DEVICE_SLOTS;for(unsigned i=0;i<SF_DEVICE_SLOTS;i++)if(!slot_owner[i]){slot=i;break;}
  if(slot==SF_DEVICE_SLOTS)return SF_BUSY;
- t->device_io=modern?SF_DEVICE_MMIO:bar&~3u;t->device_slot=slot;slot_owner[slot]=t->pid;slot_bdf[slot]=bdf;memset(dma[slot],0,sizeof(dma[slot]));
- if(modern)for(unsigned off=0;off<16384;off+=4096)if(space_map_mmio(t,SF_DEVICE_MMIO+off,physical+off)){device_release(t);return SF_NO_SPACE;}
+ t->device_io=(map_bytes||t->device_modern)?SF_DEVICE_MMIO:io_port;t->device_slot=slot;slot_owner[slot]=t->pid;slot_bdf[slot]=bdf;memset(dma[slot],0,sizeof(dma[slot]));
+ if(map_bytes)for(unsigned off=0;off<map_bytes;off+=4096)if(space_map_mmio(t,SF_DEVICE_MMIO+off,physical+off)){device_release(t);return SF_NO_SPACE;}
  for(unsigned off=0;off<sizeof(dma[slot]);off+=4096)if(space_map(t,SF_DMA+off,(uint64_t)(dma[slot]+off),3)){device_release(t);return SF_NO_SPACE;}
  uint64_t bus_address;int mapped=iommu_grant(bdf,(uint64_t)dma[slot],&bus_address);if(mapped){device_release(t);return mapped;}
- uint16_t command=config_read(bdf,4)&0xffff,enable=modern?6:5;config_write_command(bdf,command|enable);
+ uint16_t command=config_read(bdf,4)&0xffff,enable=(kind!=DK_VIRTIO_LEGACY_BLK&&kind!=DK_VIRTIO_LEGACY_NET)?6:5;config_write_command(bdf,command|enable);
  if((config_read(bdf,4)&enable)!=enable){device_release(t);return SF_DEVICE_GONE;}
  args->dma_virtual=SF_DMA;args->dma_physical=bus_address;args->device_io=t->device_io;args->device_bdf=bdf;args->device_rights=rights|(iommu_mode()==1?SF_DEVICE_ISOLATED:0)|(modern?SF_DEVICE_MODERN:0);
  return 0;
@@ -170,7 +213,7 @@ void device_irq_vector(void){
  for(unsigned s=0;s<SF_DEVICE_SLOTS;s++){
   if(!slot_irq_enabled[s])continue;
   slot_irq_pending[s]=1;
-  if(slot_owner[s])for(unsigned i=0;i<SF_MAX_THREADS;i++)if(tasks[i].main&&tasks[i].pid==slot_owner[s]){if(!tasks[i].device_modern&&tasks[i].device_io)inb(tasks[i].device_io+19);break;}
+  if(slot_owner[s])for(unsigned i=0;i<SF_MAX_THREADS;i++)if(tasks[i].main&&tasks[i].pid==slot_owner[s]){if((tasks[i].device_kind==DK_VIRTIO_LEGACY_BLK||tasks[i].device_kind==DK_VIRTIO_LEGACY_NET)&&tasks[i].device_io)inb(tasks[i].device_io+19);break;}
  }
  for(unsigned i=0;i<SF_MAX_THREADS;i++){
   Task*t=&tasks[i];

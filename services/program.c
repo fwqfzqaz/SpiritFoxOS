@@ -4,8 +4,8 @@
 #if ROLE == 2
 #include "package.h"
 #include "trust.h"
-static uint8_t native_upload[128*1024];
-static uint32_t native_have,native_expected;
+/* 外部包体经共享内存只读映射直接解析，不再有固定上传缓冲上限。 */
+static const uint8_t*native_stage;static uint64_t native_len;
 #endif
 static __attribute__((unused)) int rpc(const SfBootArgs*a,SfMessage*m){long r=sf_send(a->manager,m);if(r)return r;r=sf_recv(a->service,m,sf_deadline(3000));return r<0?r:(int)m->status;}
 #if ROLE == 18
@@ -34,19 +34,20 @@ long sf_main(const SfBootArgs*a,size_t bytes){
  for(;;){SfMessage m;long status=sf_recv(a->service,&m,0);if(status<0)return status;if(status!=1){m.status=SF_DENIED;sf_send(a->manager,&m);continue;}
   if(m.h.opcode==OP_NATIVE_DIAGNOSTIC){if(m.mode==1)for(;;)__asm__ volatile("pause");if(m.mode==2||m.mode==3)bad_health=m.mode;continue;}
   if(m.h.opcode==OP_NATIVE_HEALTH){m.status=bad_health==2?SF_DENIED:0;if(bad_health==3)m.h.opcode=OP_HELLO;bad_health=0;m.length=0;sf_send(a->manager,&m);continue;}
-  if(m.h.opcode==OP_NATIVE_STAGE){status=0;if(!m.offset){native_have=0;native_expected=0;if(!m.handle||m.handle>sizeof(native_upload))status=SF_INVALID;else native_expected=m.handle;}
-   if(!status&&(!native_expected||m.handle!=native_expected||m.offset!=native_have||!m.length||m.length>sizeof(m.data)||m.length>native_expected-native_have))status=SF_INVALID;
-   if(!status){memcpy(native_upload+native_have,m.data,m.length);native_have+=m.length;}else native_have=native_expected=0;m.status=status;m.length=0;m.offset=native_have;sf_send(a->manager,&m);continue;}
+  if(m.h.opcode==OP_NATIVE_STAGE){status=0;native_stage=0;native_len=0;
+   if(!m.handle||m.handle>SF_SHM_SLOTS||!m.offset)status=SF_INVALID;
+   else{long base=sf_shm_map(m.handle);if(base<0)status=(int)base;else{native_stage=(const uint8_t*)base;native_len=m.offset;}}
+   m.status=status;m.length=0;m.offset=0;sf_send(a->manager,&m);continue;}
   if(m.h.opcode!=OP_NATIVE_PREPARE)continue;status=0;SfNativePlan plan={0};const uint8_t*d=0;uint64_t n=0;SfPackage p;char id[96];
   if(!m.length||m.length>sizeof(m.data)||m.data[m.length-1])status=SF_INVALID;
-  else if(m.mode==1){if(!native_expected||native_have!=native_expected)status=SF_BAD_FORMAT;else{d=native_upload;n=native_have;}}
+  else if(m.mode==1){if(!native_stage||!native_len)status=SF_BAD_FORMAT;else{d=native_stage;n=native_len;}}
   else if(m.mode)status=SF_INVALID;
   else status=sf_bundle_find((void*)a->bundle,a->bundle_bytes,(char*)m.data,&d,&n);
   if(!status)status=sf_package_open_trusted(&p,d,n,&sf_trust_store);
   if(!status&&(p.kind!=2||sf_manifest_text(&p,"runtime_id",id,sizeof(id))||strcmp(id,"org.spiritfox.native")))status=SF_BAD_FORMAT;
   if(!status&&(!sf_image_base_valid(m.offset)||!m.offset||(p.native_profile==SF_NATIVE_STATIC&&m.offset!=SF_BASE)||(p.native_profile==SF_NATIVE_RELATIVE&&m.offset<SF_PIE_MIN)))status=SF_INVALID;
   if(!status){plan.entry=p.entry;plan.image_base=m.offset;plan.profile=p.native_profile;plan.relocation_offset=p.relocation_offset;plan.relocation_count=p.relocation_count;for(unsigned i=0;i<p.count;i++){SfSection*s=&p.sections[i];if(s->type>3)continue;if(plan.count==5){status=SF_NO_SPACE;break;}plan.segments[plan.count++]=(SfNativeSegment){s->rva,s->memory,s->offset,s->bytes,s->flags,0};}}
-  native_have=native_expected=0;m.status=status;m.length=status?0:sizeof(plan);if(!status)memcpy(m.data,&plan,sizeof(plan));sf_send(a->manager,&m);
+  native_stage=0;native_len=0;m.status=status;m.length=status?0:sizeof(plan);if(!status)memcpy(m.data,&plan,sizeof(plan));sf_send(a->manager,&m);
  }
 #elif ROLE == 3 || ROLE == 9
  SfMessage m;sf_message(&m,OP_OPEN,1);memcpy(m.data,"/dev/console",13);m.length=13;m.mode=OPEN_WRITE;
@@ -115,8 +116,8 @@ long sf_main(const SfBootArgs*a,size_t bytes){
  if(sf_cap_close(inbox))return 22;
  sf_log("CAP TREE APP PASSED\n");return 0;
 #elif ROLE == 18
- /* 线程探针：同进程多执行流共享地址空间；默认上限 8（主线程+7），
-  * 第 8 个线程必须被拒绝；线程退出后槽位可复用。 */
+ /* 线程探针：同进程多执行流共享地址空间；默认上限 32（主线程+31），
+  * 第 32 个线程必须被拒绝；线程退出后槽位可复用。 */
  thread_started=0;thread_run=1;unsigned made=0;
  for(;made<SF_THREAD_LIMIT_MAX-1;made++)if(sf_thread_create((void*)thread_worker,0x1800+made)<=0)break;
  if(made!=SF_THREAD_LIMIT_MAX-1)return 20;
