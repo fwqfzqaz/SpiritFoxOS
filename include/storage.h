@@ -6,6 +6,11 @@
 typedef int (*SfModuleSpawn)(const char*,uint32_t,uint32_t,uint32_t,uint32_t,uint32_t);
 #define SF_STORAGE_SNAPSHOT_BYTES (128u*1024u)
 void sf_storage_init(SfManager*,SfNamespace*,SfModuleSpawn);
+void sf_storage_namespace_bind(SfNamespace*);
+uint32_t sf_storage_namespace_pid(void);
+int sf_storage_namespace_reset(void);
+int sf_storage_namespace_restore(void);
+int sf_storage_namespace_crash(void);
 int sf_storage_start(void);
 int sf_storage_mount(void);
 int sf_storage_unmount(void);

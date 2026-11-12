@@ -37,6 +37,7 @@ int persist_fixture_unchanged(void){
   reads==io_copy[0]&&writes==io_copy[1]&&flushes==io_copy[2]&&ranges==io_copy[3]&&brackets==io_copy[4];
 }
 void persist_fixture_device(int alive){device=alive;}
+unsigned persist_fixture_brackets(void){return brackets;}
 static size_t package(const char*name,uint8_t out[SF_TXN_FILE_BYTES]){
  FILE*f=fopen(name,"rb");CHECK(f);size_t n=fread(out,1,SF_TXN_FILE_BYTES,f);CHECK(n&&fgetc(f)==EOF);fclose(f);return n;
 }

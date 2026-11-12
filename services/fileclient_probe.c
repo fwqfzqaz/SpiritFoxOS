@@ -1,6 +1,17 @@
 #include "libsf.h"
 #include "arguments.h"
 #include "sf_file.h"
+static int recovery_case(const SfBootArgs*a,SfFileClient*c,int64_t console,int64_t root,int64_t root_copy){
+ int64_t file=sf_file_openat(c,(uint64_t)root,"notes",SF_OPEN_READ);if(file<=0)return 50;
+ SfMessage m;sf_message(&m,OP_HELLO,1);if(sf_send(a->manager,&m))return 51;
+ long from=sf_recv(a->service,&m,sf_deadline(30000));
+ if(from!=1||m.h.flags!=1||m.h.opcode!=OP_ECHO||m.h.request_id!=2||m.status)return 52;
+ SfFileStat info;memset(&info,0xa5,sizeof(info));SfFileStat saved=info;
+ if(sf_file_stat(c,(uint64_t)file,&info)!=SF_STALE_HANDLE||memcmp(&info,&saved,sizeof(info))||
+    sf_file_openat(c,(uint64_t)root_copy,"notes",SF_OPEN_READ)!=SF_STALE_HANDLE||
+    sf_file_root(c)!=SF_DENIED||sf_file_close(c,(uint64_t)console)!=SF_STALE_HANDLE||c->error)return 53;
+ sf_log("NAMESPACE APP STALE PASSED\n");return 0;
+}
 static int projection_case(SfFileClient*c,int64_t console,int64_t root,int64_t root_copy,const char*path){
  int64_t file=sf_file_openat(c,(uint64_t)root,path,SF_OPEN_READ);if(file<0)return 32;
  SfFileStat info;if(sf_file_stat(c,(uint64_t)file,&info)||info.type!=SF_TYPE_PROJECTION||info.size||info.offset||info.mode!=SF_OPEN_READ||info.flags!=SF_FILE_READ_ONLY)return 33;
@@ -34,6 +45,7 @@ long sf_main(const SfBootArgs*a,size_t bytes){
  if(sf_file_close(&c,(1ull<<32)|(uint64_t)root)!=SF_STALE_HANDLE||sf_file_stat(&c,root,&info))return 9;
  int64_t root_copy=sf_file_dup(&c,root);if(root_copy<=0||root_copy==root||sf_file_stat(&c,root_copy,&info)||info.mode!=(SF_OPEN_READ|SF_OPEN_DIRECTORY))return 24;
  const char*option=a->argc>1?sf_argument(a,bytes,1):0;
+ if(option&&!strcmp(option,"--namespace-recovery"))return recovery_case(a,&c,console,root,root_copy);
  if(option&&!strcmp(option,"--projection")){
   const char*target=a->argc>2?sf_argument(a,bytes,2):"uptime";if(!target)return 10;
   return projection_case(&c,console,root,root_copy,target);

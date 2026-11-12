@@ -7,6 +7,9 @@
 int sf_persist_start(SfModuleSpawn spawn);
 void sf_persist_attach(void);
 int sf_persist_ready(void);
+/* A mutating request with no authenticated completion keeps its dirty lease.
+ * New package execution and volume RPC fail closed until a fresh boot. */
+int sf_persist_uncertain(void);
 void sf_persist_driver_down(void);
 int sf_persist_mount(SfNamespace*);
 /* Existing mounted volume only. Neither operation mounts, recovers a trial,

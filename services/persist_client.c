@@ -8,18 +8,32 @@
  * inspection and the init keeps its own original handles for readfs. */
 static uint32_t persist_ep,persist_reply,persist_pid;
 static uint64_t requests=0x300000000ull;
+static int uncertain_commit;
 static long(*disk_read)(unsigned,uint64_t,void*,size_t);
 static int ready(void){return persist_ep&&persist_reply&&persist_pid;}
 static void hooks(SfNamespace*ns);
 static int pf_call(SfMessage*m){
  if(!ready())return SF_DEVICE_GONE;
- int metadata=m->h.opcode==OP_PERSIST_NOTES_SIZE;
- if(metadata&&requests==UINT64_MAX)return SF_NO_SPACE;
- uint64_t id=++requests,deadline=m->h.deadline_ns;m->h.request_id=id;
- int r=sf_send(persist_ep,m);if(r)return r;
- long from=sf_recv(persist_reply,m,sf_deadline(10000));if(from<0)return(int)from;
- if(metadata&&m->h.cap_count==1)sf_cap_close(m->handle);
- if(from!=(long)persist_pid||m->h.request_id!=id)return SF_STALE_HANDLE;
+ if(uncertain_commit)return SF_COMMIT_UNCERTAIN;
+ unsigned opcode=m->h.opcode;
+ int metadata=opcode==OP_PERSIST_NOTES_SIZE;
+ int dirty=opcode==OP_PERSIST_MOUNT||opcode==OP_PERSIST_WRITE||opcode==OP_PERSIST_TRUNCATE||
+           opcode==OP_PERSIST_INSTALL||opcode==OP_PERSIST_BEGIN||opcode==OP_PERSIST_FINISH||opcode==OP_PERSIST_REVOKE;
+ if(requests==UINT64_MAX)return SF_NO_SPACE;
+ if(dirty){int r=sf_storage_transaction(1);if(r)return r;}
+ uint64_t id=++requests,deadline=m->h.deadline_ns;uint32_t requested=m->length;m->h.request_id=id;
+ int r=sf_send(persist_ep,m);if(r){if(dirty&&(r>0||sf_storage_transaction(0)))uncertain_commit=1;return r>0?SF_BAD_FORMAT:r;}
+ long from=sf_recv(persist_reply,m,sf_deadline(10000));if(from<0){if(dirty)uncertain_commit=1;return(int)from;}
+ if((metadata||dirty)&&m->h.cap_count==1)sf_cap_close(m->handle);
+ if(from!=(long)persist_pid||m->h.request_id!=id){if(dirty)uncertain_commit=1;return SF_STALE_HANDLE;}
+ if(dirty){
+  unsigned maximum=opcode==OP_PERSIST_WRITE?sizeof(m->data):(opcode==OP_PERSIST_BEGIN||opcode==OP_PERSIST_INSTALL||opcode==OP_PERSIST_REVOKE)?1u:0u;
+  if(m->h.size!=40||m->h.protocol_major!=1||m->h.protocol_minor||m->h.opcode!=opcode||
+     m->h.flags!=persist_pid||m->h.cap_count||m->h.payload_bytes!=sizeof(*m)-40||m->h.deadline_ns!=deadline||
+     m->status<SF_VERSION_REJECTED||m->status>(int64_t)maximum||
+     (opcode==OP_PERSIST_WRITE&&m->status>=0&&m->status!=requested)){uncertain_commit=1;return SF_BAD_FORMAT;}
+  if(sf_storage_transaction(0)){uncertain_commit=1;return SF_BAD_FORMAT;}
+ }
  if(metadata&&(m->h.size!=sizeof(SfIpcHeader)||m->h.protocol_major!=1||m->h.protocol_minor||
     m->h.flags!=persist_pid||m->h.opcode!=OP_PERSIST_NOTES_SIZE||m->h.cap_count||
     m->h.payload_bytes!=sizeof(*m)-sizeof(SfIpcHeader)||m->h.deadline_ns!=deadline||
@@ -29,6 +43,7 @@ static int pf_call(SfMessage*m){
 }
 static int pf_send_cap(uint64_t opcode,uint32_t cap,uint64_t offset,uint32_t mode){
  if(!ready()){sf_cap_close(cap);return SF_DEVICE_GONE;}
+ if(uncertain_commit||requests==UINT64_MAX){sf_cap_close(cap);return uncertain_commit?SF_COMMIT_UNCERTAIN:SF_NO_SPACE;}
  SfMessage m;sf_message(&m,opcode,++requests);m.offset=offset;m.mode=mode;
  int r=sf_send_cap(persist_ep,&m,cap);sf_cap_close(cap);if(r)return r;
  long from=sf_recv(persist_reply,&m,sf_deadline(10000));if(from<0)return(int)from;
@@ -54,6 +69,7 @@ int sf_persist_start(SfModuleSpawn spawn){
 }
 void sf_persist_attach(void){attach();}
 int sf_persist_ready(void){return ready();}
+int sf_persist_uncertain(void){return uncertain_commit;}
 void sf_persist_driver_down(void){
  if(!ready())return;SfMessage m;sf_message(&m,OP_PERSIST_DRIVER_DOWN,0);pf_call(&m);
 }

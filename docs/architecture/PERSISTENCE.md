@@ -32,7 +32,7 @@
 
 - sf-init 创建 `persist_ep`（服务端 RECV）与 `persist_reply`（服务端发送回复），以
   `SYS_SPAWN` 启动服务；`sf-persist` 同时持有启动包内的签名锚点策略。
-- 块端点所有权：sf-init 保留自己创建的 `driver_ep` / `driver_reply` 原句柄供 readfs、写测试、
+- 块端点所有权：sf-init 保留自己创建的 `driver_ep` / `driver_reply` 原句柄供 Fs 块代理、写测试、
   `stop disk` 与 DMA 探测直接使用；另用 `SYS_CAP_DERIVE` 派生 `SEND|DELEGATE` 与
   `RECV|DELEGATE` 两枚子能力，随两条附加消息转移给 sf-persist，发送后立即关闭派生句柄。
 - `sf-virtio-blk` 不再以发送方 PID 作为授权依据，持有服务端点 SEND 能力即为授权；这正是
@@ -42,9 +42,12 @@
   数据每消息最多 256 字节，`READ`/`WRITE` 由客户端分块循环；`PACKAGE`/`PREVIEW`/`REVOKED`
   以 `handle` 返回总长、`length` 返回本块。`ATTACH_REPLY` 的 `handle` 被内核占用为能力字段，
   因而容量走 `offset`。
-- dirty 租约仍由 sf-init 的 `storage.c` 维护（`RES_DIRTY`）；sf-persist 的
-  `sf_storage_transaction` 是 no-op。两端单线程且 RPC 同步，sf-init 在等待回复期间不会并发
-  卸载或写测试，因此不需要跨进程租约。
+- dirty 租约由 Root 的持久化 RPC 客户端明确持有，覆盖 MOUNT（可能回退 TRYING）、
+  WRITE/TRUNCATE/INSTALL/BEGIN/FINISH/REVOKE；sf-persist 内部的 transaction 回调仍是 no-op。
+  SEND 被内核拒绝或收到认证完成回复后释放。已认证的 COMMIT_UNCERTAIN 表示服务已完成
+  但磁盘结果不确定：关闭卷、释放账本，按原盘重挂载恢复。没有认证完成的超时/坏回复则
+  保留 DIRTY，拒绝后续卷 RPC 和新包执行，不能通过命名空间重建清账，需要重新启动系统；
+  一般持久化进程恢复属于 P1，不承诺此处已实现。
 - `unmount /disk`、`stop disk`、crash/dma 测试在驱动失效后通知 `DRIVER_DOWN`；
   `start disk`、`mount /disk` 重新派生并转移能力，再执行 MOUNT 恢复卷。
 - `/persist` 与 `/persist/notes` 现在是客户端投影：`external_read` 对 `index!=UINT32_MAX`
@@ -53,7 +56,8 @@
 - 挂载成功后用 `OP_PERSIST_REVOKED` 把 `/boot/revoked` 分块同步回 sf-init 的 `sf_trust`，
   `revoke-key` 成功后再次同步，使本地包校验与执行入口看到相同撤销集合。
 - `staging` 装载暂存区仍是所有用户映像的唯一入口，扩为 512 KiB；`sf-persist` 的
-  `.bss`（349 KiB）必须容纳在该容量内。
+  `.bss`（349 KiB）必须容纳在该容量内。当前暂存区已随通用 Fs 扩为 1280 KiB，
+  实际 ELF 页对齐装载大小和 2 MiB 可写预算均由构建/归属检查门控。
 
 ### 已挂载卷的只读元数据与重投影
 
@@ -70,8 +74,8 @@
 TRYING 时会提交回退，不能用来恢复单独重建的易失命名空间。`persist` 管理诊断通过真实
 RPC 额外显示 `notes-bytes` 或 `notes-unavailable`，普通会话的管理门保持。
 
-这是 P0 进程拆分的前置接口；当前目录/RAMFS 仍位于 sf-init，不能据此宣称独立 Fs
-死亡/重启已完成。宿主用实际签名包和生产事务/更新/持久化实现进入 TRYING，逐字节比较卷、
+该接口作为 P0 进程拆分的前置交付。后续工作树已接入独立 Fs，真实死亡/重启和
+TRYING 保持的最新验证状态见 NAMESPACE 与 PROGRESS，不能用此前元数据单项替代完整门禁。宿主用实际签名包和生产事务/更新/持久化实现进入 TRYING，逐字节比较卷、
 交易银行、暂存/导出缓存与撤销集合；真实访客覆盖 PENDING/STABLE 的查询与离线/重挂载。
 TRYING 的真实访客恢复仍需后续跨进程迁移场景，当前不以宿主结果替代。
 

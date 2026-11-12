@@ -20,9 +20,10 @@ if not args.skip_build:
     # Keep Crypto()/sfcrypto.dll out of this long-lived parent process: on
     # Windows a loaded DLL blocks the trust-policy tests from rebuilding it.
     subprocess.run([sys.executable, str(ROOT / 'tools' / 'build.py')], check=True)
-def host_test(name,*sources,no_unused=False):
+def host_test(name,*sources,no_unused=False,include_services=False):
     flags=['-target',build.HOST,'-g0','-O2','-Wall','-Wextra','-Werror','-DSF_HOST_TEST']
     if no_unused: flags.append('-Wno-unused-parameter')
+    if include_services: flags.append('-Iservices')
     # 追加 Rust 宿主静态库：argparse/net_proto/sha256/sched_policy 已迁入
     # rust/sfcore，链接器只拉取本测试实际引用的成员。
     build.run([*flags,'-Iinclude','-Ibuild','-Ivendor/monocypher',*sources,build.rust_lib('host'),'-o','build/'+name+build.EXE])
@@ -54,6 +55,12 @@ host_test('test_ns_default','tests/host/test_ns_default.c','services/namespace.c
 host_test('test_ns_mount','tests/host/test_ns_mount.c','services/namespace.c')
 host_test('test_namespace_handles','tests/host/test_namespace_handles.c','services/namespace_handles.c')
 host_test('test_namespace_restart','tests/host/test_namespace_restart.c','services/namespace_handles.c','services/namespace.c')
+host_test('test_namespace_control','tests/host/test_namespace_control.c','services/namespace_client.c','services/namespace_handles.c','services/namespace_control.c','services/namespace.c',include_services=True)
+host_test('test_namespace_frontend','tests/host/test_namespace_frontend.c','services/namespace_client.c','services/namespace_handles.c','services/namespace_frontend.c',include_services=True)
+host_test('test_namespace_runtime','tests/host/test_namespace_runtime.c','services/namespace_client.c','services/namespace_handles.c','services/namespace_runtime.c','services/namespace_control.c','services/namespace.c',include_services=True)
+host_test('test_namespace_process','tests/host/test_namespace_process.c','services/namespace_client.c','services/namespace_handles.c','services/namespace_runtime.c','services/namespace_control.c','services/namespace.c','services/fs_format.c','services/readfs.c',*build.CRYPTO,include_services=True)
+host_test('test_namespace_transport','tests/host/test_namespace_transport.c','services/namespace_transport.c',include_services=True)
+host_test('test_emergency_console','tests/host/test_emergency_console.c','services/emergency_console.c',include_services=True)
 host_test('test_accounts','tests/host/test_accounts.c','services/accounts.c')
 host_test('test_sessions','tests/host/test_sessions.c','services/session.c','services/accounts.c')
 host_test('test_file_client','tests/host/test_file_client.c','services/namespace.c','services/file_rpc.c')
@@ -96,6 +103,7 @@ subprocess.run([sys.executable,'tests/integration/test_abi_snapshot.py'],check=T
 subprocess.run([sys.executable,'tests/integration/test_rust_archive.py'],check=True)
 subprocess.run([sys.executable,'tests/integration/test_poll_deadline.py'],check=True)
 subprocess.run([sys.executable,'tests/integration/test_namespace_boundary.py'],check=True)
+subprocess.run([sys.executable,'tests/integration/test_namespace_ownership.py'],check=True)
 abi_reference_sha256 = hashlib.sha256((ROOT/'abi/x86_64-current.json').read_bytes()).hexdigest()
 abi_capture_sha256 = hashlib.sha256((ROOT/'build/abi-current.json').read_bytes()).hexdigest()
 if not args.host_only:
@@ -130,6 +138,7 @@ if not args.host_only:
         subprocess.run([sys.executable, 'tests/qemu/qemu_test.py', '--storage', case], check=True)
     subprocess.run([sys.executable, 'tests/qemu/qemu_persist_test.py'], check=True)
     subprocess.run([sys.executable, 'tests/qemu/qemu_persist_metadata_test.py'], check=True)
+    subprocess.run([sys.executable, 'tests/qemu/qemu_namespace_recovery_test.py'], check=True)
     subprocess.run([sys.executable, 'tests/qemu/qemu_net_test.py'], check=True)
     subprocess.run([sys.executable, 'tests/qemu/qemu_net_test.py', '--disk'], check=True)
     # 类 niri 合成器：framebuffer 映射、布局与串口输入转发。
@@ -163,7 +172,7 @@ result['manifest_source_profile'] = 'native-source-v1'
 result['manifest_profile_host_tests'] = 12
 result['manifest_schema_sha256'] = manifest_schema_sha256
 result['abi_snapshot_host_tests'] = 9
-result['abi_snapshot_entries'] = 602
+result['abi_snapshot_entries'] = 646
 result['abi_reference_sha256'] = abi_reference_sha256
 result['abi_capture_sha256'] = abi_capture_sha256
 result['posix_qemu'] = not args.host_only
@@ -177,7 +186,15 @@ result['namespace_opaque_host_assertions'] = 22
 result['namespace_boundary_host_groups'] = 7
 result['namespace_handle_map_host_assertions'] = 502975
 result['namespace_restart_host_assertions'] = 24996
-result['persist_metadata_host_assertions'] = 13847
+result['namespace_rpc_host_assertions'] = [5506,30,29,2638,48065]
+result['namespace_rpc_host_groups'] = 5
+result['emergency_console_host_assertions'] = 33016
+result['namespace_ownership_host_tests'] = 4
+result['namespace_ownership'] = json.loads((ROOT/'build/namespace-ownership.json').read_text(encoding='utf-8'))
+result['namespace_recovery_qemu'] = not args.host_only
+result['namespace_recovery_qemu_boots'] = 0 if args.host_only else 2
+result['namespace_recovery_qemu_deaths'] = 0 if args.host_only else 6
+result['persist_metadata_host_assertions'] = 13867
 result['persist_metadata_qemu'] = not args.host_only
 result['persist_metadata_qemu_boots'] = 0 if args.host_only else 2
 result['projection_width_host_assertions'] = 9130

@@ -244,7 +244,7 @@ def main(policy_path=None):
     print('Building userspace packages', flush=True)
     shared = objects('user-common', ['services/start.S', 'services/memory.c', 'services/libsf.c', 'services/arguments.c'], extra=USER_SECTIONS)
     # sf-init：argparse.c/net_proto.c/sha256.c 已迁入 rust/sfcore，由 link_elf 追加链接。
-    init = shared + objects('init', ['services/init.c', 'services/file_rpc.c', 'services/native_image.c', 'services/storage.c', 'services/persist_client.c', 'services/manager.c', 'services/lifecycle_rpc.c', 'services/supervisor.c', 'services/namespace.c', 'services/accounts.c', 'services/session.c', *CRYPTO], extra=USER_SECTIONS)
+    init = shared + objects('init', ['services/init.c', 'services/file_rpc.c', 'services/emergency_console.c', 'services/native_image.c', 'services/storage.c', 'services/persist_client.c', 'services/manager.c', 'services/lifecycle_rpc.c', 'services/supervisor.c', 'services/namespace_frontend.c', 'services/namespace_client.c', 'services/namespace_handles.c', 'services/namespace_transport.c', 'services/accounts.c', 'services/session.c', *CRYPTO], extra=USER_SECTIONS)
     packages = []
     image = link_elf('sf-init', init, 'services/user.ld')
     manifest = {'module_id': 'org.spiritfox.init', 'version': '0.1.0', 'category': 'bootstrap', 'requested_caps': ['bootstrap'], 'resource_limits': {'memory': 2097152}}
@@ -325,7 +325,7 @@ def main(policy_path=None):
     packages.append(('sf-persist.sfmod', pack({'module_id': 'org.spiritfox.persist', 'version': '0.1.0', 'category': 'service', 'requested_caps': [], 'resource_limits': {'memory': 524288}}, image, 1, seed)))
     # sf-fs：通用磁盘格式层（SFRFS1/SFRFS2 探测与解析）+ 文件读取服务。
     # 块请求由 sf-init 的 broker 转发，模块自身不持有 virtio-blk 端点。
-    image = link_elf('sf-fs', shared + objects('fs', ['services/fs_main.c', 'services/fs_format.c', 'services/readfs.c', *CRYPTO], extra=USER_SECTIONS), 'services/user.ld')
+    image = link_elf('sf-fs', shared + objects('fs', ['services/fs_main.c', 'services/namespace_runtime.c', 'services/namespace_control.c', 'services/namespace.c', 'services/fs_format.c', 'services/readfs.c', *CRYPTO], extra=USER_SECTIONS), 'services/user.ld')
     packages.append(('sf-fs.sfmod', pack({'module_id': 'org.spiritfox.fs.disk', 'version': '0.1.0', 'category': 'service', 'requested_caps': [], 'resource_limits': {'memory': 2097152}}, image, 1, seed)))
     # sf-wm：有界类 niri 平铺合成器；framebuffer 由 PID1 经 SYS_FB_GRANT 授权。
     image = link_elf('sf-wm', shared + objects('wm', ['services/sf_wm.c', 'services/tiling.c', 'services/launcher.c', 'services/sfk.c']), 'services/user.ld')

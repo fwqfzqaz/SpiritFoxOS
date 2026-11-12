@@ -20,6 +20,7 @@ unsigned persist_volume_tests(void);
 void persist_fixture_snapshot(void);
 int persist_fixture_unchanged(void);
 void persist_fixture_device(int);
+unsigned persist_fixture_brackets(void);
 static unsigned checks,sends,recvs,closes,corrupt;
 static int send_error,recv_error,semantic;
 static SfMessage reply;
@@ -33,8 +34,8 @@ int sf_storage_driver(uint32_t*a,uint32_t*b,uint32_t*c,uint64_t*d,int*e){(void)a
 uint8_t*sf_storage_scratch(void){return 0;}
 long sf_storage_load(const char*n,void*p,size_t c){(void)n;(void)p;(void)c;return SF_DEVICE_GONE;}
 static long sf_send(uint32_t h,SfMessage*m){
- CHECK(h==0x101&&m->h.opcode==OP_PERSIST_NOTES_SIZE&&!m->h.cap_count);sends++;if(send_error)return send_error;
- reply=*m;reply.h.flags=1;reply.status=persist_metadata_dispatch(1,&reply);if(semantic){reply.status=semantic;reply.handle=0;}return 0;
+ CHECK(h==0x101&&(m->h.opcode==OP_PERSIST_NOTES_SIZE||m->h.opcode==OP_PERSIST_TRUNCATE)&&!m->h.cap_count);sends++;if(send_error)return send_error;
+ reply=*m;reply.h.flags=1;reply.status=m->h.opcode==OP_PERSIST_TRUNCATE?0:persist_metadata_dispatch(1,&reply);if(semantic){reply.status=semantic;reply.handle=0;}return 0;
 }
 static long sf_recv(uint32_t h,SfMessage*m,uint64_t deadline){
  CHECK(h==0x102&&deadline==sf_deadline(10000));recvs++;if(recv_error)return recv_error;
@@ -47,7 +48,7 @@ static long sf_recv(uint32_t h,SfMessage*m,uint64_t deadline){
  case 17:m->handle=1ull<<32;break;case 18:m->h.cap_count=1;m->handle=0x777;break;case 19:m->status=SF_DEVICE_GONE;break;
  }return 12;
 }
-static void reset(void){persist_ep=0x101;persist_reply=0x102;persist_pid=12;corrupt=0;send_error=recv_error=semantic=0;}
+static void reset(void){persist_ep=0x101;persist_reply=0x102;persist_pid=12;uncertain_commit=0;corrupt=0;send_error=recv_error=semantic=0;}
 int main(void){
  checks=persist_volume_tests();reset();
  /* Request validation runs against the actual mounted TRYING volume. */
@@ -84,5 +85,18 @@ int main(void){
  persist_pid=0;CHECK(sf_persist_notes_size(&n)==SF_DEVICE_GONE&&n==UINT64_MAX);reset();
  persist_fixture_device(0);sf_ns_init(&fresh,0);copy=fresh;CHECK(sf_persist_notes_size(&n)==SF_DEVICE_GONE&&n==UINT64_MAX);CHECK(sf_persist_reproject(&fresh)==SF_DEVICE_GONE&&!memcmp(&fresh,&copy,sizeof(fresh)));persist_fixture_device(1);
  CHECK(persist_fixture_unchanged());
+ /* Root's production dirty bracket surrounds writes. Only an authenticated
+  * completion or a refused SEND releases it; uncertain in-flight work pins
+  * recovery and blocks further volume use. The ACK itself is modeled here. */
+ reset();unsigned brackets=persist_fixture_brackets();sf_message(&m,OP_PERSIST_TRUNCATE,0);
+ CHECK(!pf_call(&m)&&persist_fixture_brackets()==brackets+2&&!sf_persist_uncertain());
+ reset();brackets=persist_fixture_brackets();send_error=SF_WOULD_BLOCK;sf_message(&m,OP_PERSIST_TRUNCATE,0);
+ CHECK(pf_call(&m)==SF_WOULD_BLOCK&&persist_fixture_brackets()==brackets+2&&!sf_persist_uncertain());
+ for(unsigned bad=0;bad<3;bad++){
+  reset();brackets=persist_fixture_brackets();if(!bad)recv_error=SF_TIMEOUT;else corrupt=bad==1?1:3;
+  sf_message(&m,OP_PERSIST_TRUNCATE,0);CHECK(pf_call(&m)==(!bad?SF_TIMEOUT:bad==1?SF_STALE_HANDLE:SF_BAD_FORMAT));
+  CHECK(sf_persist_uncertain()&&persist_fixture_brackets()==brackets+1);
+  unsigned sent_before=sends;uint64_t untouched=UINT64_MAX;CHECK(sf_persist_notes_size(&untouched)==SF_COMMIT_UNCERTAIN&&untouched==UINT64_MAX&&sends==sent_before);
+ }
  printf("Persistence metadata tests passed: %u assertions; real TRYING volume, no I/O/cache/trust changes, authenticated codec and atomic fresh-tree reprojection\n",checks);return 0;
 }
