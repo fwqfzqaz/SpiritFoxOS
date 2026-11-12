@@ -44,8 +44,9 @@
 
 ## 项目
 
+- [目标纲要](project/GOALS.md)：最终目标、实用级验收矩阵、证据等级与 v0.4–v1.0 阶段阶梯。
 - [当前能力与剩余工作](project/STATUS.md)：已能运行的功能、近期交付和各阶段缺项。
-- [路线图与下一步方向](project/ROADMAP.md)：阶段基线、下一阶段目标、优先级与验收条件。
+- [路线图与 v0.3 执行计划](project/ROADMAP.md)：M0–M7 阶段基线、当前阶段优先级与验收条件。
 - [实施进度](project/PROGRESS.md)：按轮次记录的历史进度。
 
 ## 归档与合并说明
@@ -56,4 +57,4 @@
 
 ## 阅读顺序
 
-新读者建议按“设计说明 → 实现边界 → 调度/IPC → 安全审查 → 测试记录 → 路线图”阅读。构建命令与工作区结构见根目录 [README](../README.md)，提交与推送规则见 [CONTRIBUTING](../CONTRIBUTING.md)。
+新读者建议按“目标纲要 → 设计说明 → 实现边界 → 调度/IPC → 安全审查 → 测试记录 → 路线图”阅读。构建命令与工作区结构见根目录 [README](../README.md)，提交与推送规则见 [CONTRIBUTING](../CONTRIBUTING.md)。

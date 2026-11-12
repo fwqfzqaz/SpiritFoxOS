@@ -8,7 +8,7 @@
 
 面向 x86_64 UEFI 的**微内核操作系统原型**。Core 0 只保留内存、IPC、设备与 ACPI/VT-d；文件系统、持久化、驱动、native 运行时和网络协议运行在 ring-3 的 `.sfmod` 中；应用以签名 `.sfk` 包从只读磁盘验证后装载。
 
-> 这是研究型原型，不是生产系统。M0–M7 纵向切片已完成，下一阶段为 `v0.3` 模块化收尾与运行时加固，见[路线图](docs/project/ROADMAP.md)；完整边界见[实现说明](docs/architecture/IMPLEMENTATION.md)。
+> 当前仍是研究型原型，不是生产系统。项目的最终目标是**实用级操作系统**：可在真实 x86_64 UEFI 机器上安装、日常使用、持续升级并在故障后恢复；目标定义、验收矩阵与 v0.4–v1.0 阶段见[目标纲要](docs/project/GOALS.md)。M0–M7 纵向切片已交付，当前为 `v0.3` 模块化收尾与运行时加固，执行拆解见[路线图](docs/project/ROADMAP.md)；完整边界见[实现说明](docs/architecture/IMPLEMENTATION.md)。
 
 ## 亮点
 
@@ -186,6 +186,8 @@ python3 tools/package/sfpack.py trust --policy build/trust-policy.json
 
 ## 当前状态与下一步
 
+长期方向按[目标纲要](docs/project/GOALS.md)的 `v0.4` 真机与数据 → `v0.5` 工作台 → `v0.6` 工作负载与可靠性 → `v1.0` 实用级发布推进；下表是当前 `v0.3` 的收尾状态。
+
 | 阶段 | 状态 | 下一步 |
 | --- | --- | --- |
 | M0–M2 | 包格式、CPL3、能力 IPC、模块依赖、生命周期 RPC、能力转移/派生撤销与有界监督 | ABI 语义冻结、优先健康/挂起监督、并发服务状态迁移 |
@@ -215,8 +217,9 @@ python3 tools/package/sfpack.py trust --policy build/trust-policy.json
 | [调度与配额](docs/architecture/SCHEDULING.md) / [IPC](docs/architecture/IPC.md) | SMP/线程、FPU 隔离、页面配额、句柄上限与撤回 |
 | [应用接口](docs/architecture/APP_SDK.md) / [native](docs/architecture/NATIVE.md) | argv/环境、文件 RPC 客户端、装载格式 |
 | [会话](docs/architecture/SESSIONS.md) / [图形切片](docs/architecture/GRAPHICS.md) | 账户与会话、framebuffer 授权、类 niri 平铺与 `gui` 命令 |
+| [目标纲要](docs/project/GOALS.md) | 最终目标、实用级验收矩阵、证据等级与阶段阶梯 |
 | [项目状态](docs/project/STATUS.md) | 当前交付状态 |
-| [路线图](docs/project/ROADMAP.md) / [测试记录](docs/quality/TESTING.md) | 下一阶段方向与验收条件、验证范围 |
+| [路线图](docs/project/ROADMAP.md) / [测试记录](docs/quality/TESTING.md) | v0.3 执行拆解与验收条件、验证范围 |
 
 ## 许可证
 
