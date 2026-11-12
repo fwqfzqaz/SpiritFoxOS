@@ -19,6 +19,9 @@ long sf_main(const SfBootArgs*a,size_t bytes){
  sf_message(&m,OP_WRITE,0);m.handle=file;m.length=1;if(rpc(a,&m)!=SF_DENIED)return 8;
  sf_message(&m,OP_OPEN,0);m.mode=OPEN_WRITE;m.length=13;memcpy(m.data,"/dev/console",13);if(rpc(a,&m))return 9;uint32_t output=m.handle;
  if(oversized(a,OP_WRITE,output))return 10;
+ /* This is valid IPC and fits SYS_LOG's independent 512-byte bound. It must
+  * cross the Fs callback, not be rejected by its former 256-byte limit. */
+ sf_message(&m,OP_WRITE,0);m.handle=output;m.length=512;memset(m.data,'.',m.length);if(rpc(a,&m)!=512)return 13;
  sf_message(&m,OP_WRITE,0);m.handle=output;const char*text="FILE RPC APP PASSED\n";m.length=strlen(text);memcpy(m.data,text,m.length);if(rpc(a,&m)<0)return 11;
  uint32_t handles[]={root,file,output};for(unsigned i=0;i<3;i++){sf_message(&m,OP_CLOSE,0);m.handle=handles[i];if(rpc(a,&m))return 12;}
  return 0;

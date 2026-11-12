@@ -21,6 +21,9 @@ def run():
                 vm.expect('FILE RPC APP PASSED',start);vm.expect('sfexec: exit 0',start)
             assert disk.read_bytes()==before,'Read-only malformed RPCs wrote the disk'
             vm.command('write /persist/notes RPC-PRESERVED','write: OK')
+            # Return more than the former callback payload, not merely accept
+            # a large requested length while replying with a short marker.
+            vm.command('truncate /persist/notes 1024','truncate: OK')
             before=disk.read_bytes()
             start=vm.send('runat /persist rpcprobe.sfk notes')
             vm.expect('FILE RPC APP PASSED',start);vm.expect('sfexec: exit 0',start)
@@ -31,7 +34,7 @@ def run():
         finally: vm.close()
         assert b'^'*64 not in vm.output,'Oversized console write exposed bytes from the manager'
     assert (ROOT/'build/persistent.img').read_bytes()==source
-    print('FILE RPC QEMU PASS: 2 boots; IPC rejects 257/512/2^31/UINT32_MAX read/write/enumerate, later bounded large-file read, console/persistent data/rights preserved and repeated cleanup',flush=True)
+    print('FILE RPC QEMU PASS: 2 boots; IPC rejects payload+1/2*payload/2^31/UINT32_MAX read/write/enumerate, valid512 console and1024 persist callback replies, data/rights preserved and repeated cleanup',flush=True)
 
 
 if __name__=='__main__': run()

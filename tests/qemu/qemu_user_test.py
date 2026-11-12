@@ -49,6 +49,14 @@ def run():
             vm.command('persist','denied: root session required')
             vm.command('install /disk/bin/diskhello.sfk','denied: root session required')
             vm.command('shutdown','denied: root session required')
+            for command in ['namespace-crash','namespace-recover','stop native','gui','cap-limit 1 1']:
+                vm.command(command,'denied: root session required')
+            # Launch admission uses a captured identity, never root merely
+            # because the manager performs the syscall on its behalf.
+            vm.command('run installed','sfexec: failed code=2')
+            vm.command('run echo.sfmod','sfexec: failed code=2')
+            vm.command('runat /home/bob hello.sfk','sfexec: failed code=2')
+            vm.command('run hello.sfk','sfexec: exit 0')
             start=vm.send('login bob bob')
             vm.expect('login: bob uid=1001 gid=1001 session=3 home=/home/bob',start)
             vm.expect('bob@fox> ',start)

@@ -21,6 +21,7 @@
 
 - [命名空间、目录能力与文件语义](architecture/NAMESPACE.md)：openat、只读目录委派、所有者/模式权限、文件截断与回收。
 - [账户与多用户会话](architecture/SESSIONS.md)：构建期账户、有界会话、身份传播与管理员命令门。
+- [管理器身份与装载策略](architecture/MANAGER_POLICY.md)：私有控制台授权、启动身份快照与独立包装载准入。
 - [有界图形切片](architecture/GRAPHICS.md)：framebuffer 授权、类 niri 平铺布局、`sf-wm` 合成器与 `gui` 命令。
 - [存储协议与磁盘格式](architecture/STORAGE.md)：SFRFS1/SFRFS2、sf-fs 文件服务、virtio-blk 与只读区域。
 - [事务持久化与应用更新](architecture/PERSISTENCE.md)：双银行事务、A/B 槽、健康确认、失败回退与密钥撤销。

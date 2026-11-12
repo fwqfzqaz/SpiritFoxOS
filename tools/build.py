@@ -244,7 +244,7 @@ def main(policy_path=None):
     print('Building userspace packages', flush=True)
     shared = objects('user-common', ['services/start.S', 'services/memory.c', 'services/libsf.c', 'services/arguments.c'], extra=USER_SECTIONS)
     # sf-init：argparse.c/net_proto.c/sha256.c 已迁入 rust/sfcore，由 link_elf 追加链接。
-    init = shared + objects('init', ['services/init.c', 'services/file_rpc.c', 'services/emergency_console.c', 'services/native_image.c', 'services/storage.c', 'services/persist_client.c', 'services/manager.c', 'services/lifecycle_rpc.c', 'services/supervisor.c', 'services/namespace_frontend.c', 'services/namespace_client.c', 'services/namespace_handles.c', 'services/namespace_transport.c', 'services/accounts.c', 'services/session.c', *CRYPTO], extra=USER_SECTIONS)
+    init = shared + objects('init', ['services/init.c', 'services/console_policy.c', 'services/launch_policy.c', 'services/file_rpc.c', 'services/emergency_console.c', 'services/native_image.c', 'services/storage.c', 'services/persist_client.c', 'services/manager.c', 'services/lifecycle_rpc.c', 'services/supervisor.c', 'services/namespace_frontend.c', 'services/namespace_client.c', 'services/namespace_handles.c', 'services/namespace_transport.c', 'services/accounts.c', 'services/session.c', *CRYPTO], extra=USER_SECTIONS)
     packages = []
     image = link_elf('sf-init', init, 'services/user.ld')
     manifest = {'module_id': 'org.spiritfox.init', 'version': '0.1.0', 'category': 'bootstrap', 'requested_caps': ['bootstrap'], 'resource_limits': {'memory': 2097152}}

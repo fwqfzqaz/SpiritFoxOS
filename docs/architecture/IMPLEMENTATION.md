@@ -92,3 +92,8 @@ OP_STAT(23)提供32字节句柄元数据，报告当前类型、描述模式、�
 公开 native 文件客户端 SDK 见 APP_SDK.md：私有端点上串行调用，实际 PID/协议/请求与返回约束验证、固定截止时间、单调编号和错误时保留输出；封装既有协议，目录权限保持。SDK 仅链接至新探针，既有包与持久化槽预算保持。
 
 新增有界图形纵向切片：`kernel_main` 保存并校验固件 framebuffer（4 KiB 对齐、≤32 MiB、pitch*height 不越界），非法则视为无图形。ABI 追加 `SF_FB=0x70000000`、`SfFbInfo`（32 字节）、`SYS_FB_GRANT(32)` 与 `SYS_FB_MAP(33)`；仅 PID 1 可授权单一目标 PID，被授权进程再经 `space_map_fb` 逐页映射为 RW+NX+缓存禁用（不置 MMIO 标记，不占私有数据页）。新增 ring-3 `sf-wm.sfmod`（`org.spiritfox.wm`，无额外能力）与纯 C 布局核心 `services/tiling.c`：4 工作区 × 16 列 × 8 窗口、列内纵向堆叠、列宽/窗口高度千分比、水平滚动、consume/expel 与焦点夹紧，全部固定数组无堆。合成器绘制 32px 上栏/列/窗口/焦点环并输出 `WM: fb=... checksum=...` 状态行；`sf-init` 新增 root 命令 `gui`，经现有模块生命周期启动合成器、`SYS_FB_GRANT` 授权、把串口字节以 `OP_WM_INPUT` 作为 SFK 文本输入转发，`Ctrl-]` 发送 `OP_WM_STOP` 并回收，期间继续驱动既有服务监督。图形化不接受任何布局快捷键：内核新增轮询式 PS/2 指针驱动 `kernel/ps2.c`，ABI 追加 `SYS_POINTER_READ(34)`（仅 PID 1，`a=1` 复位居中）与 `OP_WM_POINTER(114)`；`gui` 循环把指针状态转发给合成器，上栏工作区 pill、`SHELL`/`SEARCH` 按钮、搜索行、窗口与 SFK `X` 全部由指针命中，并绘制箭头光标。新增宿主测试 `test_tiling` 与 QEMU `qemu_gui_test.py`（`-display none -vga std`，通过 QMP 注入 PS/2 位移与左键，断言上栏/搜索/工作区操作、旧快捷键失效与至少两个不同的 framebuffer 校验和，退出后 shell 可用）。既有串口/VNC 路径与 ABI 编号不变，详见 GRAPHICS.md。
+
+## 管理器策略分层接续
+
+当前工作树的账户/会话授权与包装载准入边界见 [MANAGER_POLICY](MANAGER_POLICY.md)。
+其验证状态独立记录于 PROGRESS；身份策略仍属于用户态管理器，内核只认证 PID 与能力。

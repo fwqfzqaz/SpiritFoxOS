@@ -12,13 +12,13 @@ if result.get('passed') is not True or result.get('version_policy_host') is not 
     raise SystemExit('Run the full test suite before packaging')
 if result.get('security_host') is not True or result.get('security_qemu') is not True:
     raise SystemExit('Run the kernel boundary and storage failure security regressions before packaging')
-if result.get('scheduler_profile') != 'priority-0..3-aging-4ticks-v1' or result.get('scheduler_host_checks') != 1605642 or result.get('scheduler_ipc_host_checks') != 10000 or result.get('scheduler_qemu') is not True or result.get('scheduler_qemu_boots') != 2:
+if result.get('scheduler_profile') != 'priority-0..3-aging-4ticks-v1' or result.get('scheduler_host_checks') != 3539865 or result.get('scheduler_ipc_host_checks') != 10000 or result.get('scheduler_qemu') is not True or result.get('scheduler_qemu_boots') != 2:
     raise SystemExit('Run priority selection/configuration, fresh IPC wakeups and timer/aging VM regressions before packaging')
 if result.get('cap_limit_host_checks') != 6015 or result.get('ipc_budget_host_checks') != 55043 or result.get('cap_limit_qemu') is not True or result.get('cap_limit_qemu_boots') != 2:
     raise SystemExit('Run live capability limits, atomic quota admission and staged authority/recovery VM regressions before packaging')
 if result.get('ipc_cancel_host_checks') != 25776 or result.get('ipc_cancel_qemu') is not True or result.get('ipc_cancel_qemu_boots') != 2:
     raise SystemExit('Run authenticated pending send withdrawal, FIFO/width/delivery bounds and production queue VM regressions before packaging')
-if result.get('openat_host_assertions') != 108 or result.get('openat_qemu') is not True:
+if result.get('openat_host_assertions') != 140 or result.get('openat_qemu') is not True:
     raise SystemExit('Run the directory capability host and VM regressions before packaging')
 if result.get('namespace_mount_host_assertions') != 256:
     raise SystemExit('Run atomic namespace mount publication and trusted handle handoff regressions before packaging')
@@ -26,9 +26,11 @@ if result.get('namespace_opaque_host_assertions') != 22 or result.get('namespace
     raise SystemExit('Run opaque namespace client and real compile-boundary regressions before packaging')
 if result.get('namespace_handle_map_host_assertions') != 502975 or result.get('namespace_restart_host_assertions') != 24996:
     raise SystemExit('Run namespace client-generation and actual namespace restart regressions before packaging')
-if result.get('namespace_rpc_host_assertions') != [5506,30,29,2638,48065] or result.get('namespace_rpc_host_groups') != 5 or not result.get('namespace_recovery_qemu') or result.get('namespace_recovery_qemu_boots') != 2 or result.get('namespace_recovery_qemu_deaths') != 6:
+if result.get('namespace_rpc_host_assertions') != [5506,30,52,2638,48065] or result.get('namespace_rpc_host_groups') != 5 or not result.get('namespace_recovery_qemu') or result.get('namespace_recovery_qemu_boots') != 2 or result.get('namespace_recovery_qemu_deaths') != 6:
     raise SystemExit('Run trusted namespace transport/control, real Fs incarnation loss, dirty drain, stale app/Root and TRYING preservation regressions before packaging')
 ownership=result.get('namespace_ownership',{})
+if result.get('console_policy_host_assertions') != 663 or result.get('launch_policy_host_assertions') != 2152 or result.get('policy_compile_boundary_tests') != 7:
+    raise SystemExit('Run manager console/launch admission and real compile-boundary regressions before packaging')
 if result.get('emergency_console_host_assertions') != 33016:
     raise SystemExit('Run bounded emergency console SDK/ownership/generation regressions before packaging')
 if result.get('namespace_ownership_host_tests') != 4 or ownership.get('passed') is not True or ownership.get('root_has_namespace_tables') is not False or ownership.get('root_has_transaction_state') is not False:
@@ -49,7 +51,7 @@ if result.get('environment_host_checks') != 12034 or result.get('environment_qem
     raise SystemExit('Run explicit environment bounds and isolation/preflight VM regressions before packaging')
 if result.get('native_relative_host_groups') != 6 or result.get('native_relative_mutations') != 500 or result.get('native_relative_qemu') is not True or result.get('native_relative_qemu_boots') != 4:
     raise SystemExit('Run relative native validation/private-image/isolation/reboot regressions before packaging')
-if result.get('file_rpc_host_checks') != 353 or result.get('file_rpc_qemu') is not True or result.get('file_rpc_qemu_boots') != 2:
+if result.get('file_rpc_host_checks') != 364 or result.get('file_rpc_qemu') is not True or result.get('file_rpc_qemu_boots') != 2:
     raise SystemExit('Run file RPC length bounds and isolation regressions before packaging')
 if result.get('block_reply_channel_qemu') is not True or result.get('block_reply_channel_qemu_boots') != 2:
     raise SystemExit('Run concurrent block reply channel and restart regressions before packaging')
@@ -69,9 +71,9 @@ if result.get('task_pid_host_checks') != 10022:
     raise SystemExit('Run actual task_new PID exhaustion and publication regressions before packaging')
 if result.get('invocation_preflight_qemu') is not True or result.get('invocation_preflight_qemu_boots') != 4:
     raise SystemExit('Run installed invocation preflight and corrupt candidate rollback regressions before packaging')
-if result.get('unlink_host_assertions') != 17340 or result.get('unlink_qemu') is not True or result.get('unlink_qemu_boots') != 2:
+if result.get('unlink_host_assertions') != 17372 or result.get('unlink_qemu') is not True or result.get('unlink_qemu_boots') != 2:
     raise SystemExit('Run RAM unlink rights, busy-reference, slot reuse and VM regressions before packaging')
-if result.get('stat_host_assertions') != 6180 or result.get('canonical_file_handles') is not True or result.get('stat_qemu') is not True or result.get('stat_qemu_boots') != 2:
+if result.get('stat_host_assertions') != 6212 or result.get('canonical_file_handles') is not True or result.get('stat_qemu') is not True or result.get('stat_qemu_boots') != 2:
     raise SystemExit('Run canonical file handle and fixed metadata regressions before packaging')
 if result.get('ipc_host_assertions') != 40950 or result.get('kernel_capability_width') is not True or result.get('capability_width_qemu') is not True or result.get('capability_width_qemu_boots') != 2:
     raise SystemExit('Run canonical kernel capability host and VM regressions before packaging')
@@ -79,13 +81,13 @@ if result.get('fpu_task_init_host_checks') != 3000 or result.get('fpu_profile') 
     raise SystemExit('Run fresh/interleaved FP context and isolated exception VM regressions before packaging')
 if set(result.get('fpu_simd_exception_observation',{})) != {'legacy','modern'} or any(v not in ('exception-delivered','tcg-status-only') for v in result['fpu_simd_exception_observation'].values()):
     raise SystemExit('Record actual SIMD exception delivery limitations before packaging')
-if result.get('rmdir_host_assertions') != 11359 or result.get('rmdir_qemu') is not True or result.get('rmdir_qemu_boots') != 2:
+if result.get('rmdir_host_assertions') != 11391 or result.get('rmdir_qemu') is not True or result.get('rmdir_qemu_boots') != 2:
     raise SystemExit('Run empty directory rights, busy/nonempty, reuse and VM regressions before packaging')
-if result.get('file_client_host_assertions') != 416510 or result.get('file_client_qemu') is not True or result.get('file_client_qemu_boots') != 2:
+if result.get('file_client_host_assertions') != 4256541 or result.get('file_client_qemu') is not True or result.get('file_client_qemu_boots') != 2:
     raise SystemExit('Run file client codec/peer/deadline/counter host and production transport VM regressions before packaging')
-if result.get('file_dup_host_checks') != 23068 or result.get('file_dup_qemu') is not True or result.get('file_dup_qemu_boots') != 2:
+if result.get('file_dup_host_checks') != 23740 or result.get('file_dup_qemu') is not True or result.get('file_dup_qemu_boots') != 2:
     raise SystemExit('Run duplicate handle rights/cursor/lifetime host and production transport VM regressions before packaging')
-if result.get('file_pread_host_checks') != 198935 or result.get('file_pread_qemu') is not True or result.get('file_pread_qemu_boots') != 2:
+if result.get('file_pread_host_checks') != 4060596 or result.get('file_pread_qemu') is not True or result.get('file_pread_qemu_boots') != 2:
     raise SystemExit('Run positional read rights/cursor/backend host and production transport VM regressions before packaging')
 if result.get('txn_compat_host_assertions') != 2046559 or result.get('txn_compat_fault_scenarios') != 783 or result.get('txn_compat_qemu') is not True or result.get('txn_compat_qemu_boots') != 6:
     raise SystemExit('Run legacy transaction geometry, first-upgrade faults and migration/restart VM regressions before packaging')
@@ -98,7 +100,7 @@ if result.get('manifest_schema_sha256') != hashlib.sha256(schema_path.read_bytes
     raise SystemExit('Manifest schema changed since source validation')
 abi_reference = ROOT/'abi/x86_64-current.json'
 abi_capture = BUILD/'abi-current.json'
-if result.get('abi_snapshot_host_tests') != 9 or result.get('abi_snapshot_entries') != 646:
+if result.get('abi_snapshot_host_tests') != 9 or result.get('abi_snapshot_entries') != 660:
     raise SystemExit('Run compiled ABI capture, offline comparison and header-drift regressions before packaging')
 if result.get('ipc_copy_host_checks') != 10041 or result.get('ipc_stats_control_host_checks') != 6001 or result.get('ipc_copy_profile') != 'successful-user-copy-bytes-v1' or not result.get('ipc_stats_qemu') or result.get('ipc_stats_qemu_boots') != 2:
     raise SystemExit('Run actual IPC copy event/control oracles and both production stats VM transports before packaging')

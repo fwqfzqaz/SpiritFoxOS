@@ -14,6 +14,8 @@
 #include "net.h"
 #include "accounts.h"
 #include "session.h"
+#include "console_policy.h"
+#include "launch_policy.h"
 #include "txn.h"
 #include "emergency_console.h"
 static const SfBootArgs*boot;
@@ -47,7 +49,7 @@ void sf_init_namespace_lost(void){
 }
 /* Identity is user-space policy: the kernel only authenticates the sender pid,
  * so sf-init maps that pid to the session identity that launched it. */
-static SfAccountStore accounts;static SfSessionTable sessions;
+static SfConsolePolicy*console_policy;static const SfAccountStore*accounts;static const SfSessionTable*sessions;
 static int password_pending;static char password_user[SF_ACCOUNT_NAME_MAX+1];static char password_buffer[SF_ACCOUNT_PASSWORD_MAX+1];static unsigned password_used;
 typedef struct {uint32_t pid,service,reply;} EchoPeer;
 static int net_slot=-1;static uint32_t net_pid,net_ep,net_reply;static int net_ready,net_dhcp;static SfNetInfo net_info;
@@ -58,8 +60,6 @@ static EchoPeer echo_peers[SF_MAX_TASKS];static SfSupervisor echo_watch;static u
 static int echo_request(uint32_t,uint32_t,unsigned);
 static uint64_t echo_after(uint64_t now,uint64_t delay){return delay>UINT64_MAX-now?UINT64_MAX:now+delay;}
 static long console_write(const void*p,size_t n){return sf_sys(SYS_LOG,(uint64_t)p,n,0);}
-#define SF_POSIX_LIBRARY_FILE "sf-libsf.sfmod"
-#define SF_POSIX_LIBRARY_ID "org.spiritfox.posix"
 static int package_get(const char*name,SfPackage*p,uint64_t*base,uint64_t*have){
  const uint8_t*d;uint64_t n;
  if(name[0]=='/'){
@@ -95,12 +95,10 @@ static int native_upload(const SfPackage*p){
 static int spawn_package_policy_inner(const char*name,uint32_t service,uint32_t rights,uint32_t device,uint32_t device_rights,int directory,const SfArguments*arguments,uint32_t reply,uint16_t expected_kind){
  stage_release();
  if(sf_persist_uncertain())return SF_COMMIT_UNCERTAIN;
- SfPackage p;int r=package_get(name,&p,&pkg_stage,&pkg_stage_bytes);if(r)return r;if(p.kind!=expected_kind)return SF_DENIED;
+ SfPackage p;int r=package_get(name,&p,&pkg_stage,&pkg_stage_bytes);if(r)return r;r=sf_launch_admit(&p,expected_kind,directory,arguments);if(r)return r;
  int native_module=p.kind==1&&!strcmp(name,"sf-native.sfmod");
- if(arguments&&(arguments->count||arguments->env_count)&&p.kind!=2)return SF_DENIED;
  uint64_t image_base=p.native_profile?SF_PIE_MIN+((pie_sequence++&1)*0x2000000ull):SF_BASE;
- if(directory){r=sf_manifest_capability(&p,"namespace.read");if(r<0)return r;if(p.kind!=2||r!=1)return SF_DENIED;}
- if(p.kind==2){char id[96];if(sf_manifest_text(&p,"runtime_id",id,sizeof(id))||strcmp(id,"org.spiritfox.native")||manager.modules[runtime_slot].state!=MOD_ACTIVE)return SF_DEPENDENCY;
+ if(p.kind==2){if(manager.modules[runtime_slot].state!=MOD_ACTIVE)return SF_DEPENDENCY;
   if(sf_sys(SYS_TASK_STATUS,runtime_pid,0,0)!=SF_TASK_RUNNING)return SF_DEVICE_GONE;
   int external=name[0]=='/';if(external){int status=native_upload(&p);if(status)return status;}
   SfMessage request;sf_message(&request,OP_NATIVE_PREPARE,++requests);request.length=strlen(name)+1;if(request.length>sizeof(request.data))return SF_INVALID;request.mode=external;request.offset=image_base;memcpy(request.data,name,request.length);int rc=sf_send(runtime_ep,&request);if(rc)return rc;long from=sf_recv(runtime_reply,&request,sf_deadline(1000));if(from!=(long)runtime_pid||request.h.request_id!=requests)return from<0?from:SF_INVALID;if(request.status)return request.status;
@@ -111,9 +109,9 @@ static int spawn_package_policy_inner(const char*name,uint32_t service,uint32_t 
  if(arguments)plan.arguments=*arguments;
  SfPackage library;int linked=0;
  if(p.kind==2&&p.import_count){
-  char id[96];if(sf_native_library(&p,id,sizeof(id))||strcmp(id,SF_POSIX_LIBRARY_ID))return SF_DEPENDENCY;
-  r=package_get(SF_POSIX_LIBRARY_FILE,&library,&lib_stage,&lib_stage_bytes);if(r)return r;
-  if(library.kind!=1||library.native_profile!=SF_NATIVE_RELATIVE||library.native_role!=SF_NATIVE_ROLE_LIBRARY||!library.export_count||sf_manifest_text(&library,"module_id",id,sizeof(id))||strcmp(id,SF_POSIX_LIBRARY_ID))return SF_DEPENDENCY;
+  r=sf_launch_library_request(&p);if(r)return r;
+  r=package_get(SF_LAUNCH_LIBRARY_FILE,&library,&lib_stage,&lib_stage_bytes);if(r)return r;
+  r=sf_launch_library_admit(&library);if(r)return r;
   linked=1;
  }
  void*image=stage_grow(&img_stage,&img_stage_bytes,image_capacity(&p,linked?&library:0));
@@ -357,10 +355,7 @@ static void native_status(void){
  sf_log(" leases=");sf_number(manager.modules[runtime_slot].resources[RES_LEASE]);sf_log(manager.modules[runtime_slot].state==MOD_DRAINING?" draining=1\n":" draining=0\n");
 }
 static Child*child(uint32_t pid){for(unsigned i=0;i<SF_MAX_TASKS;i++)if(children[i].pid==pid)return&children[i];return 0;}
-static int session_identity(uint32_t*uid,uint32_t*gid,uint32_t*owner){
- const SfSession*s=sf_session_current(&sessions);if(!s)return SF_DENIED;
- if(uid)*uid=s->uid;if(gid)*gid=s->gid;if(owner)*owner=sf_session_owner(sf_session_active(&sessions));return 0;
-}
+static int session_identity(uint32_t*uid,uint32_t*gid,uint32_t*owner){return sf_console_identity(console_policy,uid,gid,owner);}
 static int shell_open(const char*path,unsigned mode){uint32_t uid,gid,owner;int r=session_identity(&uid,&gid,&owner);return r?r:sf_ns_open_as(ns,owner,"/",path,mode,uid,gid);}
 static int launch_app_root_args(const char*name,const char*root,const SfArguments*arguments){
  if(!strcmp(name,"installed"))name="/installed.sfk";
@@ -584,17 +579,18 @@ static int namespace_setup(void){
  return sf_ns_client_healthy()?0:SF_DEVICE_GONE;
 }
 static int identity_namespace(void){
- for(unsigned i=0;i<accounts.count;i++){
-  const SfAccount*a=&accounts.accounts[i];char home[SF_ACCOUNT_HOME_MAX+1];
+ for(unsigned i=0;i<accounts->count;i++){
+  const SfAccount*a=&accounts->accounts[i];char home[SF_ACCOUNT_HOME_MAX+1];
   int r=sf_account_home(a,home,sizeof(home));if(r)return r;
   r=sf_ns_create(ns,home,NODE_DIR,0);if(r)return r;r=sf_ns_assign(ns,home,a->uid,a->gid,0700);if(r)return r;
  }return 0;
 }
 static void identity_setup(void){
- sf_assert(!sf_accounts_load_builtin(&accounts),"embedded account database parses");sf_session_init(&sessions);
- const SfAccount*root=0;sf_assert(!sf_account_lookup(&accounts,"root",&root)&&root->uid==0&&root->gid==0,"account database contains uid-0 root");
+ console_policy=sf_console_policy_default();sf_assert(!sf_console_policy_init(console_policy),"embedded account database parses");
+ accounts=sf_console_accounts(console_policy);sessions=sf_console_sessions(console_policy);
+ const SfAccount*root=0;sf_assert(!sf_account_lookup(accounts,"root",&root)&&root->uid==0&&root->gid==0,"account database contains uid-0 root");
  sf_assert(!identity_namespace(),"account homes are private to their owners");
- sf_assert(!sf_session_boot(&sessions,root),"console boot session is authenticated root");
+ sf_assert(sf_session_is_root(sessions),"console boot session is authenticated root");
 }
 static int namespace_recover(void){
  if(!namespace_lost&&sf_ns_client_healthy())return SF_BUSY;
@@ -686,7 +682,7 @@ static void run_command(const char*name,const char*root,const SfArguments*argume
  int installed=!strcmp(name,"installed")||!strcmp(name,"/installed.sfk"),status=0;uint32_t uid,gid,owner;
  int ir=session_identity(&uid,&gid,&owner);if(ir)status=ir;
  else if(root){int h=shell_open(root,OPEN_READ|OPEN_DIRECTORY);if(h<0)status=h;else sf_ns_close(ns,owner,h);}
- if(!status&&installed&&!sf_session_is_root(&sessions))status=SF_DENIED;
+ if(!status&&installed&&uid)status=SF_DENIED;
  if(!status&&installed)status=installed_preflight(root);
  if(!status){int trial=installed?sf_persist_begin():0;status=trial;
   if(trial>=0){int pid=launch_app_root_args(name,root,arguments);status=pid>0?wait_app(pid):pid;if(trial){int r=sf_persist_finish(!status);if(r)status=r;}}
@@ -849,12 +845,12 @@ static void namespace_recovery_test(void){
  sf_assert(sf_persist_begin()==1,"recovery test enters real signed TRYING state");
  uint8_t before[96],after[96],package_before[32],package_after[32];sf_assert(!transaction_fingerprint(before),"trial transaction bytes fingerprinted before namespace loss");
  uint8_t*buffer=sf_storage_scratch();long count=sf_persist_package(buffer,SF_STORAGE_SNAPSHOT_BYTES);sf_assert(count>0,"trial candidate exported before namespace loss");sf_sha256(package_before,buffer,(size_t)count);
- SfAccountStore saved_accounts=accounts;SfSessionTable saved_sessions=sessions;SfRuntimeTrust saved_trust=sf_trust;
+ SfAccountStore saved_accounts=*accounts;SfSessionTable saved_sessions=*sessions;SfRuntimeTrust saved_trust=sf_trust;
  sf_assert(!sf_storage_transaction(1)&&!sf_storage_namespace_crash(),"actual Fs process is killed with a dirty ledger held");
  sf_assert(namespace_recover()==SF_BUSY,"recovery refuses undrained dirty lease");sf_assert(!sf_storage_transaction(0),"dirty lease releases after provider death");
  sf_assert(!namespace_recover()&&sf_storage_namespace_pid()!=original,"confirmed-dead Fs incarnation is replaced");
  sf_assert(sf_ns_read(ns,1,(uint32_t)ram,text,1)==SF_STALE_HANDLE&&sf_ns_close(ns,1,(uint32_t)reader)==SF_STALE_HANDLE&&sf_ns_close(ns,1,(uint32_t)duplicate)==SF_STALE_HANDLE,"old Root references cannot alias new service integers");
- sf_assert(!memcmp(&accounts,&saved_accounts,sizeof(accounts))&&!memcmp(&sessions,&saved_sessions,sizeof(sessions))&&!memcmp(&sf_trust,&saved_trust,sizeof(sf_trust)),"accounts sessions and revocations survive namespace-only recovery");
+ sf_assert(!memcmp(accounts,&saved_accounts,sizeof(*accounts))&&!memcmp(sessions,&saved_sessions,sizeof(*sessions))&&!memcmp(&sf_trust,&saved_trust,sizeof(sf_trust)),"accounts sessions and revocations survive namespace-only recovery");
  sf_assert(!transaction_fingerprint(after)&&!memcmp(before,after,sizeof(before)),"namespace recovery preserves every transaction sector digest in TRYING");
  buffer=sf_storage_scratch();count=sf_persist_package(buffer,SF_STORAGE_SNAPSHOT_BYTES);sf_assert(count>0,"trial candidate still exportable after namespace replacement");sf_sha256(package_after,buffer,(size_t)count);sf_assert(!memcmp(package_before,package_after,32),"selected signed trial package remains identical");
  child_test_signal((uint32_t)pid,2);sf_assert(!wait_app((uint32_t)pid),"actual child rejects old references and has no replacement ambient root");
@@ -938,7 +934,7 @@ static void cpu_budget_line(char*line){
  sf_log("cpu-budget: pid=");sf_number(pid);sf_log(" limit=");sf_number(r);sf_log(" used=");sf_number(used);sf_log("\n");
 }
 static void prompt(void){
- const SfSession*s=sf_session_current(&sessions);
+ const SfSession*s=sf_session_current(sessions);
  if(!s)sf_log("login> ");
  else if(!s->uid)sf_log("fox> ");
  else{sf_log(s->name);sf_log("@fox> ");}
@@ -950,16 +946,11 @@ static void help_text(void){
  sf_log("install /disk/bin/app.sfk | persist | namespace-status | namespace-crash | namespace-recover | stop echo | start echo | echo-status | echo-crash | echo-hang | echo-bad-reply | echo-bad-op | mount /disk | unmount /disk | stop disk | start disk | gui | selftest | shutdown\n");
  sf_log("ifconfig | dhcp | ping <ip> | udp <ip> <port> <text> | tcp <ip> <port> <text> | open <ip> <port> | send <handle> <text> | recv <handle> | close <handle> | conns | stop native | start native | native-status | native-crash | native-hang | native-bad-reply | native-bad-op\n");
 }
-static int root_only(const char*line){
- static const char*const names[]={"namespace-recovery-test","namespace-status","namespace-crash","namespace-recover","persist","dma-test ","disk-crash","install ","trust","priority-test","priority ","ipc-stats-test","threads-test","threads ","page-quota-test","cap-limit-test","ipc-cancel-test","page-limit ","cap-limit ","cpu-budget ","cpu-state-test","revoke-key ","channel-test","echo-channel-test","echo-capacity-test","native-capacity-test","native-drain-test","native-crash","native-hang","native-bad-reply","native-bad-op","start native","stop native","echo-crash","echo-hang","echo-bad-reply","echo-bad-op","start echo","stop echo","mount /disk","unmount /disk","start disk","stop disk","dhcp","gui","selftest","shutdown"};
- for(unsigned i=0;i<sizeof(names)/sizeof(*names);i++){size_t len=strlen(names[i]);if(!strcmp(line,names[i])||(names[i][len-1]==' '&&!strncmp(line,names[i],len)))return 1;}
- return 0;
-}
 static void login_attempt(const char*name,const char*password){
- uint32_t id=0;int r=sf_session_login(&sessions,&accounts,name,password,&id);
+ uint32_t id=0;int r=sf_console_login(console_policy,name,password,&id);
  if(r==SF_NO_SPACE){sf_log("login: no free session slot\n");return;}
  if(r){sf_log("login: authentication failed\n");return;}
- const SfSession*s=sf_session_current(&sessions);
+ const SfSession*s=sf_session_current(sessions);
  sf_log("login: ");sf_log(s->name);sf_log(" uid=");sf_number(s->uid);sf_log(" gid=");sf_number(s->gid);sf_log(" session=");sf_number(id);sf_log(" home=");sf_log(s->home);sf_log("\n");
 }
 static void login_line(char*args){
@@ -970,27 +961,27 @@ static void login_line(char*args){
  memcpy(password_user,name,len+1);password_used=0;memset(password_buffer,0,sizeof(password_buffer));password_pending=1;sf_log("password: ");
 }
 static void logout_line(void){
- uint32_t ended=0;int r=sf_session_logout(&sessions,&ended);
+ uint32_t ended=0;int r=sf_console_logout(console_policy,&ended);
  if(r){sf_log("logout: no active session\n");return;}
  sf_ns_reap(ns,sf_session_owner(ended));
  sf_log("logout: session ");sf_number(ended);sf_log(" closed\n");
 }
 static void whoami_line(void){
- const SfSession*s=sf_session_current(&sessions);if(!s){sf_log("whoami: no active session\n");return;}
+ const SfSession*s=sf_session_current(sessions);if(!s){sf_log("whoami: no active session\n");return;}
  sf_log("whoami: name=");sf_log(s->name);sf_log(" uid=");sf_number(s->uid);sf_log(" gid=");sf_number(s->gid);
- sf_log(" session=");sf_number(sf_session_active(&sessions));sf_log(" home=");sf_log(s->home);sf_log("\n");
+ sf_log(" session=");sf_number(sf_session_active(sessions));sf_log(" home=");sf_log(s->home);sf_log("\n");
 }
 static void users_line(void){
- for(unsigned i=0;i<accounts.count;i++){char home[SF_ACCOUNT_HOME_MAX+1];const SfAccount*a=&accounts.accounts[i];
+ for(unsigned i=0;i<accounts->count;i++){char home[SF_ACCOUNT_HOME_MAX+1];const SfAccount*a=&accounts->accounts[i];
   if(sf_account_home(a,home,sizeof(home)))continue;
   sf_log("user: ");sf_log(a->name);sf_log(" uid=");sf_number(a->uid);sf_log(" gid=");sf_number(a->gid);sf_log(" home=");sf_log(home);sf_log("\n");
  }
 }
 static void sessions_line(void){
- sf_log("sessions: ");sf_number(sf_session_count(&sessions));sf_log(" active=");sf_number(sf_session_active(&sessions));sf_log("\n");
- for(unsigned i=0;i<SF_SESSION_MAX;i++){const SfSession*s=&sessions.slots[i];if(!s->used)continue;
+ sf_log("sessions: ");sf_number(sf_session_count(sessions));sf_log(" active=");sf_number(sf_session_active(sessions));sf_log("\n");
+ for(unsigned i=0;i<SF_SESSION_MAX;i++){const SfSession*s=&sessions->slots[i];if(!s->used)continue;
   sf_log("session: id=");sf_number(i+1);sf_log(" user=");sf_log(s->name);sf_log(" uid=");sf_number(s->uid);
-  sf_log(sf_session_active(&sessions)==i+1?" active=1\n":" active=0\n");
+  sf_log(sf_session_active(sessions)==i+1?" active=1\n":" active=0\n");
  }
 }
 /* 回收图形模块：先停任务，再归还服务端点与模块生命周期状态，
@@ -1075,8 +1066,8 @@ static void command(char*line){
  if(!strcmp(line,"whoami")){whoami_line();return;}
  if(!strcmp(line,"users")){users_line();return;}
  if(!strcmp(line,"sessions")){sessions_line();return;}
- if(!sf_session_current(&sessions)){sf_log("login required; type login <user>\n");return;}
- if(root_only(line)&&!sf_session_is_root(&sessions)){sf_log("denied: root session required\n");return;}
+ if(!sf_session_current(sessions)){sf_log("login required; type login <user>\n");return;}
+ if(sf_console_authorize(console_policy,line)){sf_log("denied: root session required\n");return;}
  if(!strcmp(line,"rm")||!memcmp(line,"rm ",3))namespace_mutate_line(line+2,0);
  else if(!strcmp(line,"mkdir")||!memcmp(line,"mkdir ",6))namespace_mutate_line(line+5,1);
  else if(!strcmp(line,"rmdir")||!memcmp(line,"rmdir ",6))namespace_mutate_line(line+5,2);

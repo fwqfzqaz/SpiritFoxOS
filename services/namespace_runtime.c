@@ -9,7 +9,7 @@ static int64_t broker(SfMessage*m,unsigned op){
  int64_t from=service.exchange(service.context,m);if(from<0){service.faulted=1;return from;}
  if(from!=1||m->h.flags!=1||m->h.request_id!=id||m->h.opcode!=op||m->h.size!=40||m->h.protocol_major!=1||
     m->h.protocol_minor||m->h.payload_bytes!=sizeof(*m)-40||m->h.cap_count||m->h.deadline_ns||
-    m->handle!=handle||m->offset!=offset||m->mode!=mode||m->length>256)return bad();
+    m->handle!=handle||m->offset!=offset||m->mode!=mode||m->length>sizeof(m->data))return bad();
  if(m->status<0){if(m->length||m->status<INT32_MIN)return bad();return m->status;}
  if(op==OP_NS_CB_READ||op==OP_NS_CB_PROJECTION){if((uint64_t)m->status>requested||m->length!=(uint64_t)m->status)return bad();}
  else if(op==OP_NS_CB_WRITE||op==OP_NS_CB_CONSOLE){if(m->length||(uint64_t)m->status>requested)return bad();}
@@ -17,10 +17,10 @@ static int64_t broker(SfMessage*m,unsigned op){
  return m->status;
 }
 static long console(const void*data,size_t bytes){
- if(bytes>256)return SF_INVALID;SfMessage m={0};m.length=(uint32_t)bytes;memcpy(m.data,data,bytes);return(long)broker(&m,OP_NS_CB_CONSOLE);
+ if(bytes>SF_MSG_BYTES)return SF_INVALID;SfMessage m={0};m.length=(uint32_t)bytes;memcpy(m.data,data,bytes);return(long)broker(&m,OP_NS_CB_CONSOLE);
 }
 static long callback_read(unsigned op,unsigned index,uint64_t offset,void*out,size_t bytes){
- if(bytes>256)return SF_INVALID;SfMessage m={0};m.mode=index;m.offset=offset;m.length=(uint32_t)bytes;
+ if(bytes>SF_MSG_BYTES)return SF_INVALID;SfMessage m={0};m.mode=index;m.offset=offset;m.length=(uint32_t)bytes;
  int64_t r=broker(&m,op);if(r>=0)memcpy(out,m.data,(size_t)r);return(long)r;
 }
 static long read(unsigned index,uint64_t offset,void*out,size_t bytes){
@@ -30,7 +30,7 @@ static long read(unsigned index,uint64_t offset,void*out,size_t bytes){
  return sf_readfs_read(service.fs,index,offset,out,bytes);
 }
 static long write(unsigned index,uint64_t offset,const void*data,size_t bytes){
- if(index!=UINT32_MAX)return SF_READ_ONLY;if(bytes>256)return SF_INVALID;
+ if(index!=UINT32_MAX)return SF_READ_ONLY;if(bytes>SF_MSG_BYTES)return SF_INVALID;
  SfMessage m={0};m.mode=index;m.offset=offset;m.length=(uint32_t)bytes;memcpy(m.data,data,bytes);return(long)broker(&m,OP_NS_CB_WRITE);
 }
 static int truncate(unsigned index,uint64_t bytes){

@@ -7,7 +7,20 @@
 
 2026-11-12：6b627d6 的两项 Linux 检查在安装系统包时持续出现 Ubuntu 仓库 DNS 解析失败，耗尽 30 分钟后取消，代码测试尚未运行。runner 固定为官方支持的 [Ubuntu 24.04 标签](https://github.com/actions/runner-images#available-images)，避免 latest 迁移时基础系统变化；安装阶段单独限时、失败不继续构建，保留原测试与 30 分钟作业门禁。APT 选项见 [apt-get](https://manpages.ubuntu.com/manpages/noble/man8/apt-get.8.html)、[apt.conf](https://manpages.ubuntu.com/manpages/noble/man5/apt.conf.5.html) 与 [HTTP 传输](https://manpages.ubuntu.com/manpages/noble/man1/apt-transport-http.1.html)。这些措施限制依赖失败的影响，实际 Linux 成功仍须看新提交的托管结果；Windows 本地通过不能代替它。
 
+此外，真实访客完整回归发现 Fs 后端回调仍使用旧 256 字节上限，导致合法的持久文件
+读取失败。回调现按当前消息容量校验，增加大载荷与坏回复边界覆盖；底层块协议仍为
+512 字节块/256 字节半块，SYS_LOG 仍独立限制 512 字节，不用扩大消息容量改变业务授权。
+真实 RPC 场景验证 512 字节控制台写、1024 字节持久笔记读取与只读委派不改盘。
+失败日志保留，修正后必须重新跑完整回归和发布门，不能从失败点接着拼接成通过。
+
 ## 工具链与目标
+
+2026-11-13：作者 `bdd5520` 的 Linux 检查成功，Windows 在定位读取夹具的下一次 seek
+断言失败。本地复现发现：IPC 载荷增至 4096 字节后，测试仍使用 258 字节输出区，而
+随机请求可复制更多数据，破坏了邻近状态。夹具改用 `SF_MSG_BYTES+2` 并保留守卫，
+全部宿主/集成诊断随后通过；运行时定位语义与签名格式没有改动。同时按实际输出同步
+文件、调度、内存等断言统计，发布门使用作者现有 660 项 ABI。必须继续核对最终源码的
+完整 QEMU 与新 head 托管结果，不能把此宿主诊断称为 Windows CI 已绿。
 
 Python 3.13、Zig 0.13.0（`tools/bootstrap.py` 下载/校验）、rustup/Cargo 和对应 Rust 标准库目标都必须可用。GitHub 托管 runner 已有 Rust；自建 runner 需要先安装 rustup。`bootstrap.py` 负责 Zig/QEMU/Monocypher，不会安装 Rust。
 
