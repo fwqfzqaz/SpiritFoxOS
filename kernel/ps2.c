@@ -67,13 +67,10 @@ static int ring_pop(uint32_t*out){
  *out=ring_states[ring_tail];ring_tail=(ring_tail+1)%PS2_RING;ring_count--;
  return 1;
 }
-/* 完成一个 3 字节包：更新坐标并记录快照。 */
-static void ps2_commit(void){
- int32_t dx=(int32_t)packet[1];
- int32_t dy=(int32_t)packet[2];
- if(packet[0]&0x10)dx-=256;
- if(packet[0]&0x20)dy-=256;
- pointer_buttons=packet[0]&7u;
+/* 注入一次相对位移与按键状态：PS/2 与 USB HID 鼠标共用同一条自适应
+ * 加速、边界夹紧和快照环形缓冲。dy 为正表示向上移动。 */
+void ps2_pointer_report(int32_t dx,int32_t dy,uint8_t buttons){
+ pointer_buttons=buttons&7u;
  /* 先按自适应增益累加（1/16 像素），再取整写入坐标，余量留到下一包。 */
  int32_t gain=ps2_gain16(dx,dy);
  pointer_acc_x+=(int64_t)dx*gain;
@@ -91,6 +88,14 @@ static void ps2_commit(void){
  if(pointer_x!=cx||pointer_y!=cy)pointer_acc_x=pointer_acc_y=0;
  ring_push(0x80000000u|((uint32_t)pointer_buttons<<26)|
            ((uint32_t)pointer_y<<13)|(uint32_t)pointer_x);
+}
+/* 完成一个 3 字节包：更新坐标并记录快照。 */
+static void ps2_commit(void){
+ int32_t dx=(int32_t)packet[1];
+ int32_t dy=(int32_t)packet[2];
+ if(packet[0]&0x10)dx-=256;
+ if(packet[0]&0x20)dy-=256;
+ ps2_pointer_report(dx,dy,packet[0]&7u);
 }
 /* 排空 i8042 输出缓冲：IRQ12 与轮询兜底共用。非 AUX 字节（键盘）直接丢弃，
  * 但必须读走，否则共享输出缓冲会一直保持 OBF。 */

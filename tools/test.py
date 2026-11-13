@@ -146,6 +146,8 @@ if not args.host_only:
     subprocess.run([sys.executable, 'tests/qemu/qemu_persist_metadata_test.py'], check=True)
     subprocess.run([sys.executable, 'tests/qemu/qemu_namespace_recovery_test.py'], check=True)
     subprocess.run([sys.executable, 'tests/qemu/qemu_hardware_test.py'], check=True)
+    # USB：xHCI 初始化、HID 枚举、键盘输入、指针注入与热插拔。
+    subprocess.run([sys.executable, 'tests/qemu/qemu_usb_test.py'], check=True)
     subprocess.run([sys.executable, 'tests/qemu/qemu_net_test.py'], check=True)
     subprocess.run([sys.executable, 'tests/qemu/qemu_net_test.py', '--disk'], check=True)
     # 类 niri 合成器：framebuffer 映射、布局与串口输入转发。

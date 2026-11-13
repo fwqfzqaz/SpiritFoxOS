@@ -75,6 +75,27 @@ uint64_t space_ap_cr3(void){
  if(fb_ready)ap_p3[fb_group]=(uint64_t)fb_pd|3;
  return(uint64_t)ap_p4;
 }
+/* 把内核自有 PCI 设备的 MMIO 页映射到 3..4 GiB 内的固定虚拟窗口。
+ * 64 位 BAR 可能位于 4 GiB 以上，不能依赖恒等映射；窗口同时写入引导
+ * 页表与共享 mmio_pd，使定时器在任意任务 CR3 下都能访问。 */
+static uint64_t kernel_mmio_pt[512] __attribute__((aligned(4096)));
+int space_map_kernel_mmio(uint64_t physical,uint64_t bytes,uint64_t virt){
+ if(!bytes||bytes>0x200000ull||(physical&0xfffull)||(virt&0x1fffffull)||virt<0xc0000000ull||virt>=0x100000000ull||virt+0x200000ull>0x100000000ull)return SF_BAD_FORMAT;
+ uint64_t cr3;__asm__ volatile("mov %%cr3,%0":"=r"(cr3));
+ uint64_t*p4=(void*)cr3,*p3=(void*)(p4[0]&0x000ffffffffff000ull);
+ if(!(p3[3]&1)||(p3[3]&128))return SF_BAD_FORMAT;
+ boot_mmio_pd=(void*)(p3[3]&0x000ffffffffff000ull);
+ uint64_t idx=(virt-0xc0000000ull)>>21;
+ if((mmio_pd[idx]&1)&&(mmio_pd[idx]&~0xfffull)!=(uint64_t)kernel_mmio_pt)return SF_BUSY;
+ memset(kernel_mmio_pt,0,sizeof(kernel_mmio_pt));
+ for(uint64_t off=0;off<bytes;off+=4096u)kernel_mmio_pt[((virt+off)>>12)&511u]=(physical+off)|0x1b|NX;
+ mmio_pd[idx]=(uint64_t)kernel_mmio_pt|0x3;
+ boot_mmio_pd[idx]=(uint64_t)kernel_mmio_pt|0x3;
+ mmio_ready=1;
+ __asm__ volatile("mov %0,%%cr3"::"r"(cr3):"memory");
+ if(smp_online()>1)smp_tlb_flush_all();
+ return 0;
+}
 /* 为设备授予 MMIO 窗口：把物理页挂到 device_pt 并映射进所有地址空间的
  * 511 号 PD 项（引导页表与各任务页表共享该页表页），刷新 TLB 生效。 */
 int space_device_mmio(uint64_t physical){

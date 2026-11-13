@@ -60,7 +60,8 @@ void console_fb_init(uint64_t base,uint64_t bytes,uint32_t width,uint32_t height
  fb_clear();
 }
 /* 串口控制台 IRQ 处理：轮询读入字符进环形缓冲，缓冲满置溢出标记。 */
-void console_irq(void){while(inb(0x3fd)&1){uint8_t c=inb(0x3f8);if(input_count<sizeof(input)){input[(input_head+input_count)%sizeof(input)]=c;input_count++;}else input_overflow=1;}outb(0x20,0x20);}
+void console_input_push(uint8_t c){if(input_count<sizeof(input)){input[(input_head+input_count)%sizeof(input)]=c;input_count++;}else input_overflow=1;}
+void console_irq(void){while(inb(0x3fd)&1){console_input_push(inb(0x3f8));}outb(0x20,0x20);}
 /* 读取一个输入字符；溢出时报告 SF_EVENT_OVERFLOW 并清空缓冲。 */
 long console_read(void){if(input_overflow){input_overflow=0;input_head=input_count=0;return SF_EVENT_OVERFLOW;}if(!input_count)return SF_WOULD_BLOCK;uint8_t c=input[input_head];input_head=(input_head+1)%sizeof(input);input_count--;return c;}
 extern void load_gdt(Descriptor*);extern void *isr_table[];

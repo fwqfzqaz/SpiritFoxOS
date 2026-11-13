@@ -183,7 +183,7 @@ QEMU 绿色不等于真机结论；真机单次启动不等于长期可靠。
 | CPU/内存 | 最多 8 核；32 任务 / 64 线程固定槽；固定内核页池 | 按预算配置容量；整机 RAM；SMP 扩展与亲和 |
 | 存储 | virtio-blk/AHCI/NVMe；SFRFS1/SFRFS2 只读；5 × 16 KiB 事务卷 | 通用可写文件系统、fsck、配额、快照/回滚 |
 | 应用 | 单一认证运行时库；19 项 POSIX 子集；8 MiB 映像；应用内 mmap 堆 | ABI 1.0；覆盖目标工作负载的导出集；完整 SDK 与分发 |
-| 图形 | 单一 `sf-wm` 合成器直写 framebuffer；PS/2 + 串口输入 | 客户端 surface 协议、终端与编辑器、USB HID |
+| 图形 | 单一 `sf-wm` 合成器直写 framebuffer；PS/2 + xHCI USB HID + 串口输入 | 客户端 surface 协议、终端与编辑器、HID 布局/滚轮 |
 | 网络 | legacy virtio-net；IPv4/ICMP/UDP/TCP；8 连接；248 B 载荷 | IPv6/DNS/socket API；≥ 64 连接；现代网卡与 MSI-X |
 | 安全 | 签名包、W^X、VT-d、能力模型；无 Secure Boot/TPM/ASLR | 完整启动信任链、ASLR、IOMMU 默认开启、审计流程 |
 | 可靠性 | QEMU 故障注入与单点服务恢复 | 真机故障注入、72 小时 soak、转储与看门狗 |

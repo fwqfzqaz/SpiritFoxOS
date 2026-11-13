@@ -202,7 +202,7 @@ python3 tools/package/sfpack.py trust --policy build/trust-policy.json
 
 - 原型无 Secure Boot 配置、生产密钥或发布签名流程；不支持物理断电与真实硬件复位验证。
 - VT-d 模式仍拒绝 legacy 设备；网络设备经共享 INTx 向量 `0x50` 由 IOAPIC 投递，尚无 MSI/MSI-X、IRQ 重映射或通用设备隔离。
-- 图形只有有界纵向切片：单个 `sf-wm` 合成器直接写固件 framebuffer，无 GUI 客户端协议、无 GPU/DRM；输入为 IRQ12 中断驱动的 PS/2 指针（内核环形缓冲）加串口文本（无 USB HID、无滚轮）。SMP 与四个有界会话已实现，但真实硬件多核、x2APIC、CPU 热插拔与中断亲和仍未验证。
+- 图形只有有界纵向切片：单个 `sf-wm` 合成器直接写固件 framebuffer，无 GUI 客户端协议、无 GPU/DRM；输入为 IRQ12 中断驱动的 PS/2 指针与内核 xHCI USB HID 键盘/鼠标（共用内核输入环形缓冲，支持运行期热插拔；无滚轮）加串口文本。SMP 与四个有界会话已实现，但真实硬件多核、x2APIC、CPU 热插拔与中断亲和仍未验证。
 - 无通用动态链接、多库依赖、资源包或完整 POSIX 兼容层；仅有单一认证运行时库的有界导入表与 POSIX 子集。
 - `relative-v1` 提供有界基址切换，不是安全随机化；应用隔离依赖页表与 W^X，而非完整沙箱。
 

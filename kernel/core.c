@@ -306,7 +306,7 @@ Frame *interrupt_dispatch(Frame*f){
  else if(f->vector==0x2c){ps2_irq();outb(0xa0,0x20);outb(0x20,0x20);}
  else if(f->vector>=0x28&&f->vector<=0x2f){device_irq_vector();outb(0xa0,0x20);outb(0x20,0x20);}
  else if(f->vector==0x22){ps2_irq();outb(0xa0,0x20);outb(0x20,0x20);}
- if(f->vector==32&&cpu_index()==0){ticks++;outb(0x20,0x20);cpu_window_reset();cpu_account();ipc_deadlines();smp_preempt_all();}
+ if(f->vector==32&&cpu_index()==0){ticks++;outb(0x20,0x20);cpu_window_reset();cpu_account();ipc_deadlines();usb_poll();smp_preempt_all();}
  if(f->vector==36)console_irq();
  /* 空闲 CPU 在 ring0 收到中断时 current 为 -1，不能索引任务表；直接返回
   * 让 idle_loop 重新加锁调度即可。 */
@@ -341,7 +341,7 @@ void kernel_main(SfBootInfo*b){
   fb_width=b->width;fb_height=b->height;fb_pitch=b->pitch;fb_bpp=b->bpp;
   if(space_fb_init(fb_physical,fb_bytes))console_fb_init(0,0,0,0,0,0);
  }else console_fb_init(0,0,0,0,0,0);
- bundle_phys=b->bundle;bundle_bytes=b->bundle_bytes;arch_init();ps2_mouse_init((uint32_t)fb_width,(uint32_t)fb_height);device_init(b);smp_init(b);device_irq_init();SfLoadPlan p={0};p.size=sizeof(p);p.count=b->init_segment_count;p.entry=b->init_entry;
+ bundle_phys=b->bundle;bundle_bytes=b->bundle_bytes;arch_init();ps2_mouse_init((uint32_t)fb_width,(uint32_t)fb_height);device_init(b);smp_init(b);device_irq_init();usb_init();SfLoadPlan p={0};p.size=sizeof(p);p.count=b->init_segment_count;p.entry=b->init_entry;
  for(unsigned i=0;i<p.count;i++){SfBootSegment*s=&b->init_segments[i];if(s->reserved||s->file_bytes>s->memory_bytes||(s->physical&4095)||!boot_memory(b,s->physical,(s->memory_bytes+4095)&~4095ull))panic("boot segment");if(s->physical<b->bundle+b->bundle_bytes&&b->bundle<s->physical+s->memory_bytes)panic("boot segment overlaps bundle");for(unsigned j=0;j<i;j++){SfBootSegment*t=&b->init_segments[j];if(s->physical<t->physical+t->memory_bytes&&t->physical<s->physical+s->memory_bytes)panic("overlapping boot segments");}p.segments[i]=(SfLoadSegment){s->rva,s->memory_bytes,s->physical,s->flags,0};}
  if(task_new(&p,1)!=1)panic("bootstrap plan rejected");serial("[CORE] entering isolated sf-init.sfmod, timer=100Hz\n");
  kernel_lock_acquire();Frame*f=schedule();kernel_lock_release();arch_enter(f);
