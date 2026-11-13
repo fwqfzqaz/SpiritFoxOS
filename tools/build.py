@@ -134,6 +134,58 @@ def build_accounts_table():
     (ROOT / 'build' / 'accounts_table.h').write_text(header)
 
 
+def elf_section_size(path, name):
+    """读取 ELF64 小端映像中指定节的字节数（用于精确追加 stub/probe 代码段）。"""
+    data = Path(path).read_bytes()
+    shoff = struct.unpack_from('<Q', data, 40)[0]
+    shentsize = struct.unpack_from('<H', data, 58)[0]
+    shnum = struct.unpack_from('<H', data, 60)[0]
+    shstrndx = struct.unpack_from('<H', data, 62)[0]
+    strtab_off = struct.unpack_from('<Q', data, shoff + shstrndx * shentsize + 24)[0]
+    for i in range(shnum):
+        off = shoff + i * shentsize
+        name_off = struct.unpack_from('<I', data, off)[0]
+        end = data.index(b'\0', strtab_off + name_off)
+        if data[strtab_off + name_off:end] == name.encode():
+            return struct.unpack_from('<Q', data, off + 32)[0]
+    raise RuntimeError(f'{path}: missing section {name}')
+
+
+def build_linux_compat_blobs():
+    """生成 S2 兼容启动 stub、负例探针与 Linux 静态 PIE 夹具。
+
+    stub/probe 固定布局（.text@0、.data@0x1000），由 sf-init 按 RX/RW 两段
+    追加到 Linux 映像计划；hello 是只含一个 RX 段的 ET_DYN。这里同时输出
+    incbin 汇编和精确 .text 长度，避免 init 里硬编码二进制尺寸。
+    """
+    print('Building Linux compatibility blobs', flush=True)
+    run(['-target', 'x86_64-freestanding-none', '-nostdlib', '-fpie', '-pie',
+         '-Wl,-Bsymbolic', '-Wl,-e,_start', '-Wl,-T,tests/fixtures/linux_hello.ld',
+         '-Wl,--build-id=none', 'tests/fixtures/linux_hello.S', '-o', 'build/linux_hello.elf'])
+    texts = {}
+    for name, entry in [('stub', '_sf_linux_stub_start'), ('probe', '_sf_linux_probe_start')]:
+        elf = 'build/linux_compat_' + name + '.elf'
+        run(['-target', 'x86_64-freestanding-none', '-nostdlib', '-Wl,-e,' + entry,
+             '-Wl,-T,services/linux_compat.ld', '-Wl,--build-id=none',
+             'services/linux_compat_' + name + '.S', '-o', elf])
+        subprocess.run([ZIG, 'objcopy', '-O', 'binary', elf,
+                        'build/linux_compat_' + name + '.bin'], check=True)
+        texts[name] = elf_section_size(elf, '.text')
+    lines = ['.section .rodata,"a"', '.balign 4096']
+    for symbol, path in [('hello', 'build/linux_hello.elf'),
+                         ('stub', 'build/linux_compat_stub.bin'),
+                         ('probe', 'build/linux_compat_probe.bin')]:
+        lines += [f'.global __sf_linux_{symbol}_start', f'.global __sf_linux_{symbol}_end',
+                  f'__sf_linux_{symbol}_start:', f'.incbin "{path}"',
+                  f'__sf_linux_{symbol}_end:', '.balign 4096']
+    (ROOT / 'build' / 'linux_blobs.S').write_text('\n'.join(lines) + '\n')
+    header = ['#ifndef SF_LINUX_BLOBS_H', '#define SF_LINUX_BLOBS_H',
+              f'#define SF_LINUX_STUB_TEXT_BYTES {texts["stub"]}u',
+              f'#define SF_LINUX_PROBE_TEXT_BYTES {texts["probe"]}u',
+              '#endif']
+    (ROOT / 'build' / 'linux_blobs.h').write_text('\n'.join(header) + '\n')
+
+
 def compile_one(item):
     source, target, out, defines, extra = item
     run(['-target', target, *COMMON, *extra, *defines, '-c', source, '-o', out])
@@ -241,10 +293,11 @@ def main(policy_path=None):
     Path('build/trust.h').write_text(trust_policy.header(policy))
     Path('build/trust-policy.json').write_text(json.dumps(policy, indent=2)+'\n')
     build_accounts_table()
+    build_linux_compat_blobs()
     print('Building userspace packages', flush=True)
     shared = objects('user-common', ['services/start.S', 'services/memory.c', 'services/libsf.c', 'services/arguments.c'], extra=USER_SECTIONS)
     # sf-init：argparse.c/net_proto.c/sha256.c 已迁入 rust/sfcore，由 link_elf 追加链接。
-    init = shared + objects('init', ['services/init.c', 'services/console_policy.c', 'services/launch_policy.c', 'services/file_rpc.c', 'services/emergency_console.c', 'services/native_image.c', 'services/storage.c', 'services/persist_client.c', 'services/manager.c', 'services/lifecycle_rpc.c', 'services/supervisor.c', 'services/namespace_frontend.c', 'services/namespace_client.c', 'services/namespace_handles.c', 'services/namespace_transport.c', 'services/accounts.c', 'services/session.c', *CRYPTO], extra=USER_SECTIONS)
+    init = shared + objects('init', ['services/init.c', 'services/console_policy.c', 'services/launch_policy.c', 'services/file_rpc.c', 'services/emergency_console.c', 'services/native_image.c', 'services/storage.c', 'services/persist_client.c', 'services/manager.c', 'services/lifecycle_rpc.c', 'services/supervisor.c', 'services/namespace_frontend.c', 'services/namespace_client.c', 'services/namespace_handles.c', 'services/namespace_transport.c', 'services/accounts.c', 'services/session.c', 'services/linux_image.c', 'build/linux_blobs.S', *CRYPTO], extra=USER_SECTIONS)
     packages = []
     image = link_elf('sf-init', init, 'services/user.ld')
     manifest = {'module_id': 'org.spiritfox.init', 'version': '0.1.0', 'category': 'bootstrap', 'requested_caps': ['bootstrap'], 'resource_limits': {'memory': 2097152}}
@@ -357,7 +410,7 @@ def main(policy_path=None):
     Path('build/interrupts.S').write_text('\n'.join(asm)+'\n')
     print('Building Core 0', flush=True)
     # 内核：sched_policy.c 策略函数已迁入 rust/sfcore（sf_sched_pick）。
-    kernel = objects('kernel', ['kernel/entry.S', 'kernel/arch.c', 'kernel/smp.c', 'kernel/core.c', 'kernel/pid.c', 'kernel/memory.c', 'kernel/shm.c', 'kernel/ipc.c', 'kernel/device.c', 'kernel/ps2.c', 'kernel/usb.c', 'kernel/acpi.c', 'kernel/vtd_tables.c', 'kernel/iommu.c', 'services/memory.c', 'services/arguments.c', 'build/interrupts.S'])
+    kernel = objects('kernel', ['kernel/entry.S', 'kernel/arch.c', 'kernel/smp.c', 'kernel/core.c', 'kernel/pid.c', 'kernel/memory.c', 'kernel/compat.c', 'kernel/shm.c', 'kernel/ipc.c', 'kernel/device.c', 'kernel/ps2.c', 'kernel/usb.c', 'kernel/acpi.c', 'kernel/vtd_tables.c', 'kernel/iommu.c', 'services/memory.c', 'services/arguments.c', 'build/interrupts.S'])
     link_elf('kernel', kernel, 'kernel/linker.ld')
     # Content-addressed incbin inputs prevent assembler caches reusing old bytes.
     embedded = {}

@@ -34,18 +34,19 @@ host_test('test_arguments','tests/host/test_arguments.c','services/arguments.c')
 host_test('test_environment','tests/host/test_environment.c','services/arguments.c')
 host_test('test_file_rpc','tests/host/test_file_rpc.c','services/file_rpc.c','services/namespace.c')
 # 调度策略：kernel/sched_policy.c → rust/sfcore/src/sched.rs
-host_test('test_task_pid','tests/host/test_task_pid.c','kernel/pid.c','services/arguments.c',no_unused=True)
-host_test('test_scheduler','tests/host/test_scheduler.c','kernel/pid.c','services/arguments.c',no_unused=True)
+host_test('test_task_pid','tests/host/test_task_pid.c','kernel/pid.c','kernel/compat.c','services/arguments.c',no_unused=True)
+host_test('test_scheduler','tests/host/test_scheduler.c','kernel/pid.c','kernel/compat.c','services/arguments.c',no_unused=True)
 host_test('test_sched_ipc','tests/host/test_sched_ipc.c')
-host_test('test_cap_limit','tests/host/test_cap_limit.c','kernel/pid.c','services/arguments.c',no_unused=True)
+host_test('test_cap_limit','tests/host/test_cap_limit.c','kernel/pid.c','kernel/compat.c','services/arguments.c',no_unused=True)
 host_test('test_memory_quota','tests/host/test_memory_quota.c','kernel/memory.c',no_unused=True)
-host_test('test_page_limit','tests/host/test_page_limit.c','kernel/pid.c','services/arguments.c',no_unused=True)
+host_test('test_page_limit','tests/host/test_page_limit.c','kernel/pid.c','kernel/compat.c','services/arguments.c',no_unused=True)
 host_test('test_ipc_budget','tests/host/test_ipc_budget.c')
 host_test('test_ipc_cancel','tests/host/test_ipc_cancel.c')
 host_test('test_ipc_stats','tests/host/test_ipc_stats.c')
-host_test('test_threads','tests/host/test_threads.c','kernel/pid.c','services/arguments.c',no_unused=True)
+host_test('test_threads','tests/host/test_threads.c','kernel/pid.c','kernel/compat.c','services/arguments.c',no_unused=True)
 host_test('test_shm','tests/host/test_shm.c','kernel/memory.c','kernel/shm.c',no_unused=True)
-host_test('test_ipc_stats_control','tests/host/test_ipc_stats_control.c','kernel/pid.c','services/arguments.c',no_unused=True)
+host_test('test_compat','tests/host/test_compat.c','kernel/compat.c','kernel/memory.c',no_unused=True)
+host_test('test_ipc_stats_control','tests/host/test_ipc_stats_control.c','kernel/pid.c','kernel/compat.c','services/arguments.c',no_unused=True)
 host_test('test_supervisor','tests/host/test_supervisor.c','services/supervisor.c')
 host_test('test_manager','tests/host/test_manager.c','services/manager.c')
 host_test('test_lifecycle_rpc','tests/host/test_lifecycle_rpc.c','services/manager.c','services/lifecycle_rpc.c')
@@ -66,6 +67,7 @@ host_test('test_accounts','tests/host/test_accounts.c','services/accounts.c')
 host_test('test_sessions','tests/host/test_sessions.c','services/session.c','services/accounts.c')
 host_test('test_console_policy','tests/host/test_console_policy.c','services/console_policy.c','services/session.c','services/accounts.c',include_services=True)
 host_test('test_launch_policy','tests/host/test_launch_policy.c','services/launch_policy.c',*build.CRYPTO,include_services=True)
+host_test('test_linux_elf','tests/host/test_linux_elf.c','services/linux_image.c')
 host_test('test_file_client','tests/host/test_file_client.c','services/namespace.c','services/file_rpc.c')
 host_test('test_file_dup','tests/host/test_file_dup.c','services/namespace.c','services/file_rpc.c')
 host_test('test_file_pread','tests/host/test_file_pread.c','services/namespace.c','services/file_rpc.c')
@@ -100,6 +102,7 @@ subprocess.run([sys.executable,'tests/integration/test_packages.py'],check=True)
 subprocess.run([sys.executable,'tests/integration/test_trust.py'],check=True)
 subprocess.run([sys.executable,'tests/integration/test_readfs.py'],check=True)
 subprocess.run([sys.executable,'tests/integration/test_native.py'],check=True)
+subprocess.run([sys.executable,'tests/integration/test_linux_elf.py'],check=True)
 subprocess.run([sys.executable,'tests/integration/test_manifest_profile.py'],check=True)
 manifest_schema_sha256 = hashlib.sha256((ROOT/'schemas/native-source-v1.schema.json').read_bytes()).hexdigest()
 subprocess.run([sys.executable,'tests/integration/test_abi_snapshot.py'],check=True)
@@ -162,6 +165,7 @@ if not args.host_only:
     subprocess.run([sys.executable, 'tests/qemu/qemu_truncate_test.py'], check=True)
     subprocess.run([sys.executable, 'tests/qemu/qemu_trust_test.py'], check=True)
     subprocess.run([sys.executable, 'tests/qemu/qemu_txn_compat_test.py'], check=True)
+    subprocess.run([sys.executable, 'tests/qemu/qemu_linux_compat_test.py'], check=True)
 result = {'passed': True, 'elapsed_seconds': round(time.time()-started, 2), 'service_assertions': 116, 'storage_assertions': 83, 'package_tests': 'passed (11 groups, including 1500 seeded mutations)', 'readfs_tests': 'passed (5 groups, including 500 seeded metadata mutations)', 'qemu_memory_mib': [] if args.host_only else [128, 256, 512], 'storage_failure_cases': [] if args.host_only else ['missing', 'badheader', 'badhash', 'badsignature', 'writable', 'ioerror']}
 result['txn_fault_boundaries'] = 261
 result['txn_fault_modes'] = 3
@@ -181,7 +185,7 @@ result['manifest_source_profile'] = 'native-source-v1'
 result['manifest_profile_host_tests'] = 12
 result['manifest_schema_sha256'] = manifest_schema_sha256
 result['abi_snapshot_host_tests'] = 9
-result['abi_snapshot_entries'] = 660
+result['abi_snapshot_entries'] = 662
 result['abi_reference_sha256'] = abi_reference_sha256
 result['abi_capture_sha256'] = abi_capture_sha256
 result['posix_qemu'] = not args.host_only
@@ -311,6 +315,8 @@ result['txn_compat_host_assertions'] = 2046559
 result['txn_compat_fault_scenarios'] = 783
 result['txn_compat_qemu'] = not args.host_only
 result['txn_compat_qemu_boots'] = 0 if args.host_only else 6
+result['linux_compat_qemu'] = not args.host_only
+result['linux_compat_qemu_boots'] = 0 if args.host_only else 1
 result['artifacts_sha256'] = {name: hashlib.sha256((ROOT/'build'/name).read_bytes()).hexdigest() for name in ['esp/EFI/BOOT/BOOTX64.EFI', 'storage.img', 'persistent.img', 'development.pub', 'application.pub', 'backup.pub', 'trust-policy.json']}
 (ROOT / 'build/test-results.json').write_text(json.dumps(result, indent=2)+'\n')
 print(json.dumps(result, indent=2))

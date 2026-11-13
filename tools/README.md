@@ -39,3 +39,5 @@ python3 tools/package/sfpack.py validate-manifest build/hello-source.json --kind
 ## 开发辅助
 
 `dev/` 存放仅用于特定宿主机环境的适配脚本，不参与构建、测试或发布。
+
+`linux_elf_check.c` 是 S1 Linux 装载核心的宿主检查工具：直接复用 `services/linux_image.c`，对给定 ELF 做有界校验，或按指定 PIE 基址试装载并输出段计划。它由 `tests/integration/test_linux_elf.py` 编译调用，不是独立发布入口。

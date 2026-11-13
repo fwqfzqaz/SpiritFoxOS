@@ -2,6 +2,22 @@
 
 更新日期：2026-11-13（Asia/Shanghai）。
 
+## Linux 兼容 S0/S1：有界 ELF 装载核心（E1 通过）
+
+按 [Linux 兼容规划](../specs/linux-compat/spec.md) 完成 S0 文档修订：在 GOALS 中登记 v1.x 可选轨道 G5，明确不进入 v1.0 验收矩阵；规划文档状态改为 S0 已评审、S1 实施中。
+
+S1 只做纯用户态装载核心，不修改内核、ABI 或任何构建产物。`include/linux_image.h` 与 `services/linux_image.c` 实现 ET_DYN 有界解析、非页对齐 `p_vaddr`（页内偏移与 `p_offset` 同余）、同权限相邻段合并（≤8 段、≤8 MiB）、`R_X86_64_RELATIVE` 应用与目标校验、仅 RX 的 `0F 05 → CD 80` 改写，以及 SysV `argc/argv/envp/auxv` 初始栈；装载结果直接填写既有 `SfLoadPlan`。`tools/linux_elf_check.c` 复用同一解析代码做宿主检查与按基址试装载。
+
+E1：`tests/host/test_linux_elf.c` 5652 项断言（含 2000 次固定种子变异）通过；`tests/integration/test_linux_elf.py` 用项目 Zig 交叉生成真实 x86_64 static-PIE（入口 0x1300、映像 16 KiB、1 条相对重定位、3 段）通过。完整 `python3 tools/test.py --host-only` 111.88 秒全绿，结果 `build/test-results.json`。S2 兼容入口见下节。
+
+## Linux 兼容 S2：兼容入口机制（E2 通过）
+
+`kernel/compat.c` 与 `kernel/core.c` 追加有界兼容上行调用：`SYS_COMPAT_SET=41` 每进程只允许主线程注册一次，入口必须可执行、帧页必须可写且不可执行、页对齐、flags 必须为 0；`int 0x80` 在已注册进程中把完整 `Frame` 写入帧页并跳到 handler，`SYS_COMPAT_RET=42` 经新增 `int 0x81` 只从内核 `Task.compat_saved` 权威副本恢复，帧页内容不被信任。`0x81` 在未注册进程返回 `SF_DENIED` 而不终止；嵌套计数不为 1 才终止进程（PID1 触发 panic）。`kernel/arch.c` 仅把向量 128/129 的 IDT 门改为 DPL3。
+
+`services/linux_compat_stub.S` 最小翻译器只实现 `write`（→`SYS_LOG`）与 `exit/exit_group`（→`SYS_EXIT`），`services/linux_compat_probe.S` 覆盖非 RX 入口、错页帧、RW 帧、跨进程帧页、非零 flags、合法注册、重复注册，以及未注册 `0x81` 与嵌套 `0x80`。`tools/build.py` 在构建期生成 hello/stub/probe 三个 `.incbin` blob 与精确 `.text` 长度，`services/init.c` 在 `boot_splash()` 前运行 hello 与三组探针。
+
+验证：`tests/host/test_compat.c` 28 项断言通过；`python3 tools/test.py --host-only` 全绿（ABI 660→662，旧 660 项无删改）；`tests/qemu/qemu_linux_compat_test.py` 真实启动确认 `LINUX COMPAT HELLO` 输出、hello 退出 0、四组负例按预期拒绝/终止，且原生 `run hello.sfk` 路径不受影响。完整 `python3 tools/test.py` 3497.59 秒、79 次 VM 启动全绿，无 `[FAIL]`/`[PANIC]`，结果 `build/test-results.json`。
+
 ## P1 未登记文件对端的附加能力清理（本地完整通过）
 
 Root 接收文件请求时，内核已把附加能力安装到接收方。旧 `serve_once` 先查询应用 Child

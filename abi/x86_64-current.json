@@ -183,6 +183,8 @@
     "constant.SYS_CAP_CLOSE": 13,
     "constant.SYS_CAP_DERIVE": 12,
     "constant.SYS_CAP_REVOKE": 15,
+    "constant.SYS_COMPAT_RET": 42,
+    "constant.SYS_COMPAT_SET": 41,
     "constant.SYS_CONSOLE_READ": 10,
     "constant.SYS_DEVICE_RELEASE": 18,
     "constant.SYS_DMA_STATUS": 19,

@@ -16,6 +16,8 @@
 #include "session.h"
 #include "console_policy.h"
 #include "launch_policy.h"
+#include "linux_image.h"
+#include "linux_blobs.h"
 #include "txn.h"
 #include "emergency_console.h"
 static const SfBootArgs*boot;
@@ -1184,6 +1186,64 @@ static void command(char*line){
  else if(!strcmp(line,"shutdown")){sf_log("SHUTDOWN OK\n");sf_sys(SYS_SHUTDOWN,0,0,0);}
  else if(*line)sf_log("unknown command; type help\n");
 }
+/* S2 兼容验收：静态 PIE hello 经启动 stub 与最小翻译器输出并退出，随后用
+ * 探针覆盖注册边界、未注册 0x81 与嵌套上行调用。所有夹具都随 sf-init 内嵌，
+ * 不依赖磁盘或捆绑包。 */
+extern const uint8_t __sf_linux_hello_start[],__sf_linux_hello_end[];
+extern const uint8_t __sf_linux_stub_start[],__sf_linux_stub_end[];
+extern const uint8_t __sf_linux_probe_start[],__sf_linux_probe_end[];
+static uint64_t lx_stage,lx_stage_bytes;
+static uint8_t lx_data[SF_PAGE] __attribute__((aligned(4096)));
+/* 追加 stub/probe 的两段：代码段紧接 Linux 映像，数据页固定在其后一页。
+ * 数据页首两个 qword 由调用方写入（hello 入口绝对地址或探针参数）。 */
+static int linux_compat_append(SfLoadPlan*plan,const uint8_t*blob,uint64_t text_bytes,
+                               uint64_t data0,uint64_t data1){
+ uint64_t span=0;
+ for(unsigned i=0;i<plan->count;i++){uint64_t end=plan->segments[i].rva+plan->segments[i].bytes;if(end>span)span=end;}
+ uint64_t code=(span+SF_PAGE-1)&~(SF_PAGE-1);
+ if(plan->count+2>8||code+2*SF_PAGE>SF_IMAGE_MAX)return SF_NO_SPACE;
+ memcpy(lx_data,blob+SF_PAGE,SF_PAGE);
+ uint64_t*words=(uint64_t*)lx_data;words[0]=data0;words[1]=data1;
+ plan->segments[plan->count++]=(SfLoadSegment){code,text_bytes,(uint64_t)blob,5,0};
+ plan->segments[plan->count++]=(SfLoadSegment){code+SF_PAGE,SF_PAGE,(uint64_t)lx_data,3,0};
+ plan->entry=code;
+ return SF_OK;
+}
+static int linux_compat_spawn(const uint8_t*blob,uint64_t text_bytes,int mode,uint64_t foreign,
+                              const uint8_t*image,size_t image_bytes,const char*label){
+ SfLoadPlan plan={0};SfLinuxInfo info={0};int r=0;
+ if(image_bytes){
+  void*staging=stage_grow(&lx_stage,&lx_stage_bytes,SF_IMAGE_MAX);
+  if(!staging)return SF_NO_SPACE;
+  r=sf_linux_elf_load(image,image_bytes,SF_PIE_MIN,staging,SF_IMAGE_MAX,&plan,&info,
+                      SF_LINUX_FLAG_REWRITE_SYSCALLS);
+ }
+ /* 无 ELF 的探针计划只含追加段，必须自行给出合法映像基址与计划尺寸。 */
+ if(!r&&!image_bytes){plan.size=sizeof(plan);plan.image_base=SF_PIE_MIN;}
+ /* mode<0 表示 hello 启动 stub：数据页写入映像入口的绝对地址。 */
+ if(!r)r=linux_compat_append(&plan,blob,text_bytes,mode<0?SF_PIE_MIN+info.entry_rva:(uint64_t)mode,foreign);
+ if(r){sf_log(label);sf_log(": load failed code=");sf_number(-r);sf_log("\n");return r;}
+ long pid=sf_sys(SYS_SPAWN,(uint64_t)&plan,0,0);
+ if(pid<0){sf_log(label);sf_log(": spawn failed code=");sf_number(-pid);sf_log("\n");}
+ return (int)pid;
+}
+static void linux_compat_tests(void){
+ int pid=linux_compat_spawn(__sf_linux_stub_start,SF_LINUX_STUB_TEXT_BYTES,-1,0,
+                            __sf_linux_hello_start,
+                            (uint64_t)(__sf_linux_hello_end-__sf_linux_hello_start),"linux hello");
+ if(pid<=0||wait_app(pid))sf_assert(0,"linux static PIE hello writes and exits 0");
+ /* 跨进程帧页：init 映射两页，把第二页地址交给探针；它在探针地址空间未映射。 */
+ long foreign=sf_mmap(0,2*SF_PAGE);
+ uint64_t foreign_page=foreign>0?(uint64_t)foreign+SF_PAGE:SF_HEAP+SF_PAGE;
+ pid=linux_compat_spawn(__sf_linux_probe_start,SF_LINUX_PROBE_TEXT_BYTES,0,foreign_page,0,0,"linux probe 0");
+ if(pid<=0||wait_app(pid))sf_assert(0,"linux compat registration bounds");
+ pid=linux_compat_spawn(__sf_linux_probe_start,SF_LINUX_PROBE_TEXT_BYTES,1,0,0,0,"linux probe 1");
+ if(pid<=0||wait_app(pid))sf_assert(0,"unregistered int 0x81 returns SF_DENIED");
+ pid=linux_compat_spawn(__sf_linux_probe_start,SF_LINUX_PROBE_TEXT_BYTES,2,0,0,0,"linux probe 2");
+ if(pid<=0||wait_app(pid)!=SF_DENIED)sf_assert(0,"nested upcall terminates the process");
+ if(foreign>0)sf_munmap((uint64_t)foreign,2*SF_PAGE);
+ sf_log("LINUX COMPAT TESTS PASSED\n");
+}
 /* 启动 Logo：移植自宏内核阶段 shell_init 的开机画面，自检完成后显示 2 秒。 */
 static const char*const boot_logo[]={
 "                               *****                      ******",
@@ -1226,6 +1286,7 @@ long sf_main(const SfBootArgs*a,size_t size){
  {int net=net_start();if(!net)sf_log("net: READY\n");else if(net!=SF_NOT_FOUND){sf_log("NET UNAVAILABLE code=");sf_number(-net);sf_log("\n");}}
  sf_assert(!sf_supervisor_init(&echo_watch,3,25,1000),"echo restart policy configured");sf_supervisor_enable(&echo_watch,sf_ticks(),1);echo_health_at=echo_after(sf_ticks(),100);
  sf_assert(!sf_supervisor_init(&native_watch,3,25,1000),"native restart policy configured");sf_supervisor_enable(&native_watch,sf_ticks(),1);native_health_at=echo_after(sf_ticks(),100);
+ linux_compat_tests();
  boot_splash();
  sf_log("BOOT TESTS PASSED\nSpiritFoxOS ready. Type help.\n");prompt();char line[192]={0};unsigned used=0;
  for(;;){echo_supervise();native_supervise();manager_serve();long c=sf_sys(SYS_CONSOLE_READ,0,0,0);
