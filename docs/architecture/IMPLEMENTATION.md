@@ -59,6 +59,8 @@ M6 新增 `/persist/notes` 的 16 KiB 有界读写适配器，每次成功 write
 
 用户栈顶 `0x41010000`，大小 64 KiB；只读 BootArgs 在 `0x42000000`，显式调用支持最多八个 argv 和八条环境，头保持 96 字节，规范偏移表和字符串使对象总长最多 608；无显式调用数据保留旧 argc=envc=0/96 字节布局，不继承宿主或上次进程环境。Core 0 独立校验和复制载荷，SDK 与词法规则见 `APP_SDK.md`。只读启动包在 `0x60000000`，仅授予初始任务和 native 运行时。BootArgs 原 24 字节保留区现用于可选设备授权信息；驱动的 64 KiB 固定 DMA 区位于 `0x50000000`，普通应用没有该映射。普通应用通过 `_sf_start` 进入 main，并通过退出系统调用回收。
 
+Linux 兼容入口是同一 `int 0x80` 路径上的可选分支：进程经 `SYS_COMPAT_SET` 注册后，内核把完整 `Frame` 写入其 RW NX 帧页并跳到 RX handler，翻译器用新增的 `int 0x81`（IDT 向量 129，DPL3）调用原生系统调用，最后以 `SYS_COMPAT_RET` 从内核保留副本恢复寄存器。未注册进程的 `int 0x81` 返回 `SF_DENIED`；嵌套计数不为 1 时终止进程。帧页内容只作为参数副本，恢复路径不信任 CPL3 可写内存。
+
 本开发版本保持 BootArgs 固定头 96 字节，把尾部设备 BDF 的高 16 位定义为 device_rights；装载计划相应字段传递显式写权。只读驱动模式和带 FLUSH 的可写模式分别协商。尚未冻结 ABI，不承诺兼容此前构建的设备驱动包。
 
 设备释放先复位并确认状态、禁用 PCI Bus Master，再撤销 I/O 权和可选 IOMMU context。DMA 页始终保留；只有旧地址空间销毁后才允许新驱动使用。复位或失效不能确认时进入隔离状态并禁止新授权。默认无 DMAR 时是 legacy 可信驱动模式；QEMU q35 可选 Intel VT-d + modern virtio ACCESS_PLATFORM，实际把未授权 RAM DMA 阻止在设备页表之外。完整限制见 `IOMMU.md`。

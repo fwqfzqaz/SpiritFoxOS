@@ -52,6 +52,7 @@ int task_new_limited(const SfLoadPlan*p,int bootstrap,uint32_t pages){
  t->priority=SF_PRIORITY_DEFAULT;t->cap_limit=SF_CAP_LIMIT_MAX;t->page_limit=pages;t->page_count=0;t->ready_since=ticks;
  t->tid=1;t->main=1;t->main_slot=(uint32_t)slot;t->thread_slot=0;t->cpu=-1;
  t->thread_limit=SF_THREAD_LIMIT_MAX;t->thread_count=1;t->thread_slots=1;t->next_tid=1;t->cpu_budget=0;t->cpu_used=0;
+ t->compat_handler=0;t->compat_frame=0;t->compat_nested=0;t->compat_flags=0;
  /* FXSAVE64 layout: empty x87 tags, zero physical payloads/XMM/pointers,
   * default round-to-nearest controls. FNINIT alone leaves data registers. */
  /* The admitted/reused slot is not the live parent kernel stack.
@@ -226,6 +227,7 @@ static long syscall(Frame*f){Task*t=&tasks[current];uint64_t a=f->rdi,b=f->rsi,c
   n->priority=m->priority;n->cap_limit=0;n->page_limit=0;n->page_count=0;
   n->tid=++m->next_tid;n->main=0;n->main_slot=m->main_slot;n->thread_slot=ts;n->cpu=-1;
   n->thread_limit=n->thread_count=n->thread_slots=n->next_tid=n->cpu_budget=0;n->cpu_used=0;n->ready_since=ticks;
+  n->compat_handler=0;n->compat_frame=0;n->compat_nested=0;n->compat_flags=0;
   memset(n->kstack,0,sizeof(n->kstack));memset(n->fxstate,0,sizeof(n->fxstate));n->fxstate[0]=0x7f;n->fxstate[1]=3;n->fxstate[24]=0x80;n->fxstate[25]=0x1f;
   uint64_t base=thread_stack(n);unsigned mapped=0;
   for(uint64_t off=0;off<SF_THREAD_STACK_BYTES;off+=4096){void*p=page_alloc(n->pid);if(!p){space_unmap_range(n,base,mapped);n->state=T_DEAD;return SF_NO_SPACE;}if(space_map(n,base+off,(uint64_t)p,3)){page_free_phys(n->pid,(uint64_t)p);space_unmap_range(n,base,mapped);n->state=T_DEAD;return SF_NO_SPACE;}mapped+=4096;}
@@ -285,8 +287,21 @@ static long syscall(Frame*f){Task*t=&tasks[current];uint64_t a=f->rdi,b=f->rsi,c
  }
  case SYS_SHM_CREATE:case SYS_SHM_MAP:case SYS_SHM_GRANT:case SYS_SHM_CLOSE:
   return shm_syscall(f->rax,a,b,c);
+ /* 兼容描述符由启动 stub 经普通 int 0x80 注册；返回只能由 dispatch 在
+  * int 0x81 内完成，未经上行的 RET 一律拒绝。 */
+ case SYS_COMPAT_SET:return sf_compat_register(t,a,b,c);
+ case SYS_COMPAT_RET:return SF_DENIED;
  default:return ipc_syscall(f->rax,a,b,c);
  }
+}
+/* 兼容上行调用的有界性违规：PID1 不允许进入该状态，其余进程直接终止。
+ * 调用时内核锁已持有，返回可交给 restore_frame 的调度结果。 */
+static Frame *compat_deny(Task*t){
+ if(t->pid==1)panic("initial task compat violation");
+ serial("[CORE] compat violation pid=");hex(t->pid);serial("\n");
+ __asm__ volatile("mov %0,%%cr3"::"r"(boot_cr3):"memory");
+ kill_process(t->pid,SF_DENIED);
+ Frame*r=schedule();kernel_lock_release();return r;
 }
 /* 中断/异常总入口：vector 32 为时钟（驱动滴答与 IPC 截止时间），36 为串口输入。
  * 内核态异常立即 panic；用户态异常按任务隔离处理（终结该任务，exit_status
@@ -312,7 +327,26 @@ Frame *interrupt_dispatch(Frame*f){
   * 让 idle_loop 重新加锁调度即可。 */
  if((f->cs&3)==0){if(f->vector<32){serial("[CORE] kernel exception ");hex(f->vector);serial(" at ");hex(f->rip);panic("kernel exception");}kernel_lock_release();return f;}
  Task*t=&tasks[current];arch_save(t);t->frame=f;device_poll();if(t->state==T_DEAD){Frame*r=schedule();kernel_lock_release();return r;}
- if(f->vector==128)f->rax=syscall(f);
+ Task*m=task_main(t);
+ /* 兼容上行调用：把完整帧写入该线程的帧页供翻译器读取，保存帧另存内核
+  * 副本；返回用户 handler 时不经过 schedule，与 0x71 路径同一契约。 */
+ if(f->vector==128&&m->compat_handler){
+  if(!t->main||t->compat_nested||!sf_compat_frame_valid(f)||copy_out(t,m->compat_frame,f,sizeof(*f)))return compat_deny(t);
+  t->compat_saved=*f;t->compat_nested=1;
+  f->rip=m->compat_handler;f->rsp=m->compat_frame+SF_PAGE;f->rdi=m->compat_frame;
+  kernel_lock_release();return f;
+ }
+ if(f->vector==0x81){
+  /* 非兼容任务没有描述符：拒绝本次原生调用，不改变现有任务行为。 */
+  if(!m->compat_handler)f->rax=SF_DENIED;
+  else if(f->rax==SYS_COMPAT_RET){
+   uint64_t value=f->rdi;
+   if(f->rsi||!t->main||t->compat_nested!=1)return compat_deny(t);
+   *f=t->compat_saved;f->rax=value;t->compat_nested=0;t->frame=f;
+   kernel_lock_release();return f;
+  }else f->rax=syscall(f);
+ }
+ else if(f->vector==128)f->rax=syscall(f);
  else if(f->vector<32){serial("[CORE] isolated user fault pid=");hex(t->pid);serial(" vector=");hex(f->vector);serial("\n");if(t->pid==1)panic("initial task fault");
   __asm__ volatile("mov %0,%%cr3"::"r"(boot_cr3):"memory");kill_process(t->pid,-100-(int)f->vector);}
  Frame*r=schedule();kernel_lock_release();return r;

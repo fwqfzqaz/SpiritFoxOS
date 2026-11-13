@@ -107,7 +107,7 @@ void arch_cpu_init(unsigned index){
 /* BSP 初始化：构建共享 IDT、装载 CPU 0 的 GDT/TSS、配置 8259 重映射与
  * PIT 100Hz 时钟。 */
 void arch_init(void){
- for(unsigned i=0;i<256;i++){uint64_t a=(uint64_t)isr_table[i];idt[i]=(Gate){a&65535,8,i==8?1:0,i==128?0xee:0x8e,(a>>16)&65535,a>>32,0};}
+ for(unsigned i=0;i<256;i++){uint64_t a=(uint64_t)isr_table[i];idt[i]=(Gate){a&65535,8,i==8?1:0,(i==128||i==129)?0xee:0x8e,(a>>16)&65535,a>>32,0};}
  arch_cpu_init(0);
  /* PIC, PIT channel 0: 100Hz; all other IRQs remain masked. */
  outb(0x20,0x11);outb(0xa0,0x11);outb(0x21,32);outb(0xa1,40);outb(0x21,4);outb(0xa1,2);outb(0x21,1);outb(0xa1,1);outb(0x21,0xee);outb(0xa1,0xff);outb(0x3f9,1);

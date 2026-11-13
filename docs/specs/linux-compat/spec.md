@@ -1,11 +1,11 @@
 # 规划：Linux 应用兼容模块（有界兼容层）
 
-状态：规划草案 / 待评审
+状态：S0 已评审 / S1 通过（E1）/ S2 完成（E2）
 日期：2026-11-13
 适用项目：SpiritFoxOS（x86_64 UEFI 微内核原型）
 
 本文件回答四个问题：兼容到什么程度、由哪个模块承担、需要哪些内核机制增量、按什么顺序实施与验收。
-它是**规划**，不是实现承诺；在评审通过前不改变 [GOALS](../../project/GOALS.md) 的 v1.0 范围，也不进入 ROADMAP 的当前优先级。
+它是**规划**，不是实现承诺；已按 §3 完成 S0 文档修订，在 [GOALS](../../project/GOALS.md) 中登记为 v1.x 可选轨道 G5，不改变 v1.0 范围，也不进入 ROADMAP 的当前优先级。
 
 ## 1 结论摘要
 
@@ -176,6 +176,7 @@ Core 0
 - 交付：`SYS_COMPAT_SET/RET`、`0x81` 向量、帧页与嵌套计数；启动 stub 与最小翻译器（仅 `write/exit`）；装载期 `0F 05→CD 80` 改写。
 - 验收（E2）：QEMU 运行静态 PIE 的 hello，输出与期望一致、退出码正确；负例覆盖非 RX 入口、错页帧、重复注册、嵌套调用、跨进程帧页均被拒绝。
 - 回退：兼容描述符为每任务可选字段，关闭后内核行为与当前完全一致。
+- 实现（2026-11-13）：`kernel/compat.c` 提供每进程注册（仅主线程、一次、handler 必须 RX、帧页必须 RW NX 且非 RX、flags 必须为 0），`kernel/core.c` 在 `int 0x80` 处把完整帧写入帧页并跳转 handler，`SYS_COMPAT_RET` 只从内核保留副本恢复；`0x81` 无描述符时返回 `SF_DENIED`，嵌套计数非 1 时终止进程。`services/linux_compat_stub.S` 与 `services/linux_compat_probe.S` 分别承载最小翻译器（write/exit）与负例探针，`services/init.c` 在开机自检中运行静态 PIE hello 和四组探针。ABI 追加 `SYS_COMPAT_SET=41`、`SYS_COMPAT_RET=42`（660→662）。
 
 ### S3 syscall 子集 v1 与 errno 映射
 
@@ -254,3 +255,24 @@ Core 0
 | S8 | v1.0 发布工程之后 | 包仓库、签名与发布流程稳定 |
 
 在 S0 评审完成前，本文件只登记为规划草案；`docs/README.md` 的索引条目仅说明其存在，不代表已排期。
+
+## 11 S1 实施记录（linux-elf-v1 静态子集）
+
+S1 只做纯用户态装载核心，不修改内核、ABI 或任何构建产物：
+
+| 交付 | 位置 |
+| --- | --- |
+| 有界 ELF64 解析、段合并、重定位应用、初始栈构造 | `include/linux_image.h`、`services/linux_image.c` |
+| 宿主正负例、真实 ELF 检查 | `tests/host/test_linux_elf.c`、`tests/integration/test_linux_elf.py` |
+| 复用同一解析代码的检查工具 | `tools/linux_elf_check.c` |
+
+当前子集与边界：
+
+- 仅接受 x86_64、小端、ELF64、`ET_DYN`（PIE）；`ET_EXEC`、`PT_INTERP`、`PT_TLS`、`DT_NEEDED` 明确拒绝（后三者返回 `SF_DEPENDENCY`）。
+- `PT_LOAD` 仅允许 R/RX/RW 三种组合，页内偏移与虚拟地址同余（支持真实链接器产生的非页对齐 `p_vaddr`，如 `0x12a0/0x2a0`），页区间不得重叠；同权限相邻段合并，合并后最多 8 段，映像跨度不超过 8 MiB，超出返回 `SF_NO_SPACE`。
+- 重定位只接受 `R_X86_64_RELATIVE`（RELA）；`DT_RELA` 按虚拟地址经 `PT_LOAD` 映射解析为文件偏移，表必须完整落在文件后备段内；目标必须 8 字节对齐且完整落在可写段的实际内存内，加数非负且位于映像内；`REL`、`RELR`、`TEXTREL` 与带符号索引的重定位拒绝。
+- 装载计划使用既有 `SfLoadPlan`（入口为 RVA、`image_base` 为 PIE 基址），因此可直接进入 Core 0 的现有校验与复制路径；S1 不注册兼容描述符。
+- 装载期可选的 `0F 05 → CD 80` 改写只作用于 RX 段副本，供 S2 的兼容入口使用。
+- 初始栈按 SysV 布局提供 `argc/argv/envp/auxv`，并要求程序头由某个 `PT_LOAD` 文件范围映射；缺失时校验仍可通过（`phdr_rva=0`），但 `sf_linux_stack_init` 返回 `SF_BAD_FORMAT`。
+
+S1 证据等级为 E1（宿主与集成测试）；S2 起静态 PIE 已可在 QEMU 内经兼容入口运行（E2），动态链接、完整 syscall 子集与真机仍属后续阶段。

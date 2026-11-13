@@ -45,7 +45,7 @@ class AbiSnapshot(unittest.TestCase):
     def test_capture_and_independent_wire_sizes(self):
         self.assertEqual(self.current,self.reference)
         values=self.current['values']
-        self.assertEqual(len(values),660)
+        self.assertEqual(len(values),662)
         self.assertEqual(values['constant.OP_NS_INIT'],200)
         self.assertEqual(values['constant.OP_NS_UNMOUNT'],227)
         self.assertEqual(values['constant.OP_NS_ENUMERATE_AT'],228)
@@ -69,6 +69,8 @@ class AbiSnapshot(unittest.TestCase):
         self.assertEqual(values['constant.SYS_THREAD_CREATE'],26)
         self.assertEqual(values['constant.SYS_THREAD_LIMIT'],27)
         self.assertEqual(values['constant.SYS_TASK_CPU_BUDGET'],28)
+        self.assertEqual(values['constant.SYS_COMPAT_SET'],41)
+        self.assertEqual(values['constant.SYS_COMPAT_RET'],42)
         self.assertEqual(values['constant.SYS_IRQ_ACQUIRE'],29)
         self.assertEqual(values['constant.SYS_IRQ_RELEASE'],30)
         self.assertEqual(values['constant.SYS_IRQ_WAIT'],31)
