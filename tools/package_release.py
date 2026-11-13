@@ -37,8 +37,10 @@ if result.get('emergency_console_host_assertions') != 33016:
     raise SystemExit('Run bounded emergency console SDK/ownership/generation regressions before packaging')
 if result.get('namespace_ownership_host_tests') != 4 or ownership.get('passed') is not True or ownership.get('root_has_namespace_tables') is not False or ownership.get('root_has_transaction_state') is not False:
     raise SystemExit('Verify actual linked ELF namespace/transaction state ownership before packaging')
-if result.get('persist_metadata_host_assertions') != 13867 or result.get('persist_metadata_qemu') is not True or result.get('persist_metadata_qemu_boots') != 2:
+if result.get('persist_metadata_host_assertions') != 14434 or result.get('persist_metadata_qemu') is not True or result.get('persist_metadata_qemu_boots') != 2:
     raise SystemExit('Run read-only TRYING metadata/reprojection and real persistence IPC regressions before packaging')
+if result.get('persist_read_reply_bounds') is not True or result.get('persist_read_qemu_boots') != 2 or result.get('persist_read_qemu_bytes') != 8192:
+    raise SystemExit('Run bounded persistence READ replies and full-width sequential guest read/EOF regressions before packaging')
 if result.get('projection_width_host_assertions') != 9130 or result.get('projection_sdk_qemu') is not True or result.get('projection_sdk_qemu_boots') != 2:
     raise SystemExit('Run projection metadata/full-width seek host and both transport SDK regressions before packaging')
 if result.get('host_poll_deadline_host_tests') != 8:

@@ -2,6 +2,31 @@
 
 更新日期：2026-11-13（Asia/Shanghai）。
 
+## P1 持久化 READ 回复契约（本地完整通过）
+
+基于 PR18 的 782adee 接续。实际 `persist_client.c:pf_call` 宿主基线接受四种不合法
+READ 回复：4096 字节数据区却声明 4097、错误操作码、2^32 状态被窄化为 0、附加能力
+未关闭。基线只检查接受结果，没有执行越界复制；这属于已签名服务的故障边界，未证明
+未签名调用者可利用、内存披露或越权。证明 `.cache/persist-reply-baseline-proof-20261113.json`。
+
+现把完整头部、实际发送者/请求号、关联 deadline、无附加能力及 64 位状态范围检查
+用于普通持久化回复，在窄化状态前拒绝异常。READ 还验证返回长度同时不超过请求和消息
+数据区，保持原 offset/零 handle/mode；接收的能力无论读取或元数据/写操作都先关闭。
+语义错误继续原样返回；已发送的变更没有认证完成时仍保留 DIRTY 并失败关闭，不清除
+不确定完成，不自动重放。包、磁盘格式、660 项 ABI 和作者硬件/M7 保持。
+
+实际生产客户端、真实 TRYING 卷及既有 DIRTY 检查合计 14434 项通过。新例覆盖完整及
+短读/EOF、4096/多消息和大偏移、错误头/关联号/状态/能力/长度、缓冲区完整守卫及
+发送/接收错误。访客 RPC 回归保留原 1024 字节场景，增加 8192 字节笔记的两次满宽
+4096 字节读取与 EOF，核对前缀、零尾、只读权限及盘字节。含初始构建、源码冻结专项 266.8 秒/10 VM 已通过，
+覆盖 RPC2、元数据2、Fs恢复2（六次真实死亡）及硬件4（仅 E2）。源码冻结、含初始构建完整 `tools/test.py` 已通过（4667.31 秒、退出码 0）。
+完整证明 `.cache/persist-read-full-proof-20261113.json`，结果
+`build/persist-read-verified-test-results-20261113.json`，日志 `build/persist-read-full-20261113.log`。
+660 项 ABI 与作者参考一致，七产物匹配、默认三密钥保持；发布门及实际 ZIP 的 CRC/
+44 项摘要和解压离线 14 项通过，证明 `.cache/persist-read-release-proof-20261113.json`。
+新 head Windows/Linux 托管检查独立核对，未沿用 PR18。Stage/export 的进度与总量一致性、attach
+ACK 和通用服务重启属于后续有界事项，本轮不宣称整个持久化协议已经加固完毕。
+
 ## P1 未登记文件对端的附加能力清理（本地完整通过）
 
 Root 接收文件请求时，内核已把附加能力安装到接收方。旧 `serve_once` 先查询应用 Child
@@ -26,7 +51,9 @@ E1：编译生产 `child/serve_once` 的 20001 项检查通过；账户管理门
 `build/file-peer-verified-test-results-20261113.json`，日志 `build/file-peer-full-20261113.log`。
 660 项 ABI 与作者参考一致，七项产物匹配、默认三密钥保持；发布门与实际 ZIP 的 CRC/
 44 项摘要及解压离线 14 项通过，证明 `.cache/file-peer-release-proof-20261113.json`。
-新提交 Windows/Linux 托管结果独立核对，不沿用 PR17；E1/E2 不代表真机或长期验收。
+PR17 已由作者合并为 main f5fb755（树与3662a59相同），PR18 已转向 main，head仍为
+782adee；该 head 四项 Windows/Linux push/PR 检查均实际成功，证明
+.cache/file-peer-hosted-proof-20261113.json。E1/E2 不代表真机或长期验收。
 
 ## P0 管理器策略分层与 IPC 容量衔接（本地完整通过）
 

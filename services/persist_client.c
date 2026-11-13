@@ -21,23 +21,25 @@ static int pf_call(SfMessage*m){
            opcode==OP_PERSIST_INSTALL||opcode==OP_PERSIST_BEGIN||opcode==OP_PERSIST_FINISH||opcode==OP_PERSIST_REVOKE;
  if(requests==UINT64_MAX)return SF_NO_SPACE;
  if(dirty){int r=sf_storage_transaction(1);if(r)return r;}
- uint64_t id=++requests,deadline=m->h.deadline_ns;uint32_t requested=m->length;m->h.request_id=id;
+ uint64_t id=++requests,deadline=m->h.deadline_ns,offset=m->offset;uint32_t requested=m->length;m->h.request_id=id;
  int r=sf_send(persist_ep,m);if(r){if(dirty&&(r>0||sf_storage_transaction(0)))uncertain_commit=1;return r>0?SF_BAD_FORMAT:r;}
  long from=sf_recv(persist_reply,m,sf_deadline(10000));if(from<0){if(dirty)uncertain_commit=1;return(int)from;}
- if((metadata||dirty)&&m->h.cap_count==1)sf_cap_close(m->handle);
+ /* RECV installed any transferred capability before returning. None of
+  * these replies consumes one, including non-mutating reads and failures. */
+ if(m->h.cap_count==1)sf_cap_close(m->handle);
  if(from!=(long)persist_pid||m->h.request_id!=id){if(dirty)uncertain_commit=1;return SF_STALE_HANDLE;}
- if(dirty){
-  unsigned maximum=opcode==OP_PERSIST_WRITE?sizeof(m->data):(opcode==OP_PERSIST_BEGIN||opcode==OP_PERSIST_INSTALL||opcode==OP_PERSIST_REVOKE)?1u:0u;
-  if(m->h.size!=40||m->h.protocol_major!=1||m->h.protocol_minor||m->h.opcode!=opcode||
+ unsigned maximum=opcode==OP_PERSIST_WRITE?sizeof(m->data):(opcode==OP_PERSIST_BEGIN||opcode==OP_PERSIST_INSTALL||opcode==OP_PERSIST_REVOKE)?1u:0u;
+ if(m->h.size!=40||m->h.protocol_major!=1||m->h.protocol_minor||m->h.opcode!=opcode||
      m->h.flags!=persist_pid||m->h.cap_count||m->h.payload_bytes!=sizeof(*m)-40||m->h.deadline_ns!=deadline||
      m->status<SF_VERSION_REJECTED||m->status>(int64_t)maximum||
-     (opcode==OP_PERSIST_WRITE&&m->status>=0&&m->status!=requested)){uncertain_commit=1;return SF_BAD_FORMAT;}
+     (opcode==OP_PERSIST_WRITE&&m->status>=0&&m->status!=requested)||
+     (opcode==OP_PERSIST_READ&&(m->length>requested||m->length>sizeof(m->data)||m->offset!=offset||m->handle||m->mode))){
+  if(dirty)uncertain_commit=1;return SF_BAD_FORMAT;
+ }
+ if(dirty){
   if(sf_storage_transaction(0)){uncertain_commit=1;return SF_BAD_FORMAT;}
  }
- if(metadata&&(m->h.size!=sizeof(SfIpcHeader)||m->h.protocol_major!=1||m->h.protocol_minor||
-    m->h.flags!=persist_pid||m->h.opcode!=OP_PERSIST_NOTES_SIZE||m->h.cap_count||
-    m->h.payload_bytes!=sizeof(*m)-sizeof(SfIpcHeader)||m->h.deadline_ns!=deadline||
-    m->offset||m->length||m->mode||m->status>0||m->status<SF_VERSION_REJECTED||
+ if(metadata&&(m->offset||m->length||m->mode||
     (m->status?m->handle!=0:m->handle>SF_TXN_FILE_BYTES)))return SF_BAD_FORMAT;
  return(int)m->status;
 }

@@ -28,13 +28,19 @@ def run():
             start=vm.send('runat /persist rpcprobe.sfk notes')
             vm.expect('FILE RPC APP PASSED',start);vm.expect('sfexec: exit 0',start)
             assert disk.read_bytes()==before,'Malformed/delegated RPCs changed persistent notes'
+            vm.command('truncate /persist/notes 8192','truncate: OK')
+            before=disk.read_bytes()
+            start=vm.send('runat /persist rpcprobe.sfk notes --full-notes')
+            vm.expect('PERSIST FULL READ PASSED',start)
+            vm.expect('FILE RPC APP PASSED',start);vm.expect('sfexec: exit 0',start)
+            assert disk.read_bytes()==before,'Full-width sequential reads/EOF changed persistent notes'
             vm.command('cat /persist/notes','RPC-PRESERVED')
             vm.command('echo','echo: ping')
             vm.command('unmount /disk','disk: UNMOUNTED');vm.command('stop disk','disk: STOPPED')
         finally: vm.close()
         assert b'^'*64 not in vm.output,'Oversized console write exposed bytes from the manager'
     assert (ROOT/'build/persistent.img').read_bytes()==source
-    print('FILE RPC QEMU PASS: 2 boots; IPC rejects payload+1/2*payload/2^31/UINT32_MAX read/write/enumerate, valid512 console and1024 persist callback replies, data/rights preserved and repeated cleanup',flush=True)
+    print('FILE RPC QEMU PASS: 2 boots; IPC rejects payload+1/2*payload/2^31/UINT32_MAX read/write/enumerate, valid512 console and1024/8192 persist reads with full-width chunks/EOF, data/rights preserved and repeated cleanup',flush=True)
 
 
 if __name__=='__main__': run()
