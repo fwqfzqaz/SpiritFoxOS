@@ -283,3 +283,16 @@ NODE_DISK 通过 `external_truncate(index, length)` 回调处理，回调只有�
 完整套件继续由 `python3 tools/test.py --skip-build` 运行，增加到 95 次 VM 启动。发布门要求 `truncate_host_assertions=83`、`resize_fault_scenarios=3132`、`truncate_qemu=true` 以及全部已有标记和精确镜像摘要。
 
 最终产品源码构建后完整回归通过（386.03 秒），实际日志计数为 95 个 VM，输出 `build/truncate-final-test.txt`。新增事务测试完成 474481 条内部检查及上述 3132 个有界故障场景；缺少本轮标记的旧结果被打包门拒绝。
+
+## 文件入口对附加能力的所有权（2026-11-13）
+
+`sf_recv` 成功返回时，附加能力已安装到 Root。文件入口在查应用 Child 表前关闭这次
+收到的单个能力：未知对端返回 `SF_INVALID`；已知应用收到原有无附加能力的错误回复。
+这样拒绝未知对端也会回收接收方的引用，不依赖对端随后退出。普通文件消息的 handle
+是文件句柄，cap_count=0 时不得当作内核能力关闭。该修复未改变文件授权、公开 ABI、
+包/磁盘格式或 Fs/Persist 的服务归属。
+
+root 可执行 `file-peer-test`：由独立签名 `foreigncap.sfmod` 在活着且未登记为应用时
+发送 64 次附加端点，逐次验证 Root 占用仅含一个临时控制端点，结束后回到原值。该模块
+使用既有服务端点授权，不能作为普通应用运行；失败路径有界终止探针并撤销控制端点。
+实际覆盖及完整/发布/托管状态见 PROGRESS 与 TESTING。

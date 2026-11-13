@@ -29,8 +29,10 @@ if result.get('namespace_handle_map_host_assertions') != 502975 or result.get('n
 if result.get('namespace_rpc_host_assertions') != [5506,30,52,2638,48065] or result.get('namespace_rpc_host_groups') != 5 or not result.get('namespace_recovery_qemu') or result.get('namespace_recovery_qemu_boots') != 2 or result.get('namespace_recovery_qemu_deaths') != 6:
     raise SystemExit('Run trusted namespace transport/control, real Fs incarnation loss, dirty drain, stale app/Root and TRYING preservation regressions before packaging')
 ownership=result.get('namespace_ownership',{})
-if result.get('console_policy_host_assertions') != 663 or result.get('launch_policy_host_assertions') != 2152 or result.get('policy_compile_boundary_tests') != 7:
+if result.get('console_policy_host_assertions') != 665 or result.get('launch_policy_host_assertions') != 2152 or result.get('policy_compile_boundary_tests') != 7:
     raise SystemExit('Run manager console/launch admission and real compile-boundary regressions before packaging')
+if result.get('file_ingress_host_checks') != 20001 or result.get('file_ingress_host_groups') != 1 or result.get('file_peer_qemu') is not True or result.get('file_peer_qemu_boots') != 2 or result.get('file_peer_transferred_caps') != 384:
+    raise SystemExit('Run actual manager ingress cap cleanup and live rejected-peer budget regressions before packaging')
 if result.get('emergency_console_host_assertions') != 33016:
     raise SystemExit('Run bounded emergency console SDK/ownership/generation regressions before packaging')
 if result.get('namespace_ownership_host_tests') != 4 or ownership.get('passed') is not True or ownership.get('root_has_namespace_tables') is not False or ownership.get('root_has_transaction_state') is not False:

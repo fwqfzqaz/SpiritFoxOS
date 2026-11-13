@@ -2,6 +2,32 @@
 
 更新日期：2026-11-13（Asia/Shanghai）。
 
+## P1 未登记文件对端的附加能力清理（本地完整通过）
+
+Root 接收文件请求时，内核已把附加能力安装到接收方。旧 `serve_once` 先查询应用 Child
+表，未登记对端会提前返回 `SF_INVALID`，遗漏关闭这次收到的能力。宿主实际函数基线
+显示 installed=1/closed=0；legacy/modern 两次真实访客基线中，Root 原占用 15，加诊断
+控制端点应为 16，活对端发送一次后变为 17。终止所有者后回到 15，因此这是对端存活
+期间的引用占用，不是退出后永久泄漏，也未证明越权。
+
+现在在查 Child 前关闭已安装的单个附加能力。已知应用的附加能力仍被拒绝，普通文件
+句柄（cap_count=0）不关闭，原发送者、应用权限和文件分发保持。新增签名诊断模块
+`foreigncap.sfmod`，刻意不进入应用 Child 表；仅 root 的 `file-peer-test` 控制它在存活
+期间逐次转移端点，使用真实内核占用查询检查每次接收即回收，最终撤销控制端点。
+
+E1：编译生产 `child/serve_once` 的 20001 项检查通过；账户管理门 665、包准入 2152、
+编译边界 7 组、ABI 9 组/660 项与 ELF 归属 4 组通过。E2：源码冻结、含初始构建专项
+394.64 秒/8 VM 通过；两种传输共 384 次活对端转移，逐次占用保持在
+控制端点的 +1，结束回到基线；普通应用、echo、非 root 拒绝、模块不能冒充应用、
+磁盘字节保持及六次 Fs 死亡恢复保持。源码冻结、含初始构建完整 `tools/test.py` 已通过（4681.59 秒、退出码 0）。
+证明 `.cache/file-peer-baseline-proof-20261113.json`、
+`.cache/file-peer-focused-proof-20261113.json`；当前任务与 PR17 的已交付完整证明分开。
+本轮完整证明 `.cache/file-peer-full-proof-20261113.json`，结果
+`build/file-peer-verified-test-results-20261113.json`，日志 `build/file-peer-full-20261113.log`。
+660 项 ABI 与作者参考一致，七项产物匹配、默认三密钥保持；发布门与实际 ZIP 的 CRC/
+44 项摘要及解压离线 14 项通过，证明 `.cache/file-peer-release-proof-20261113.json`。
+新提交 Windows/Linux 托管结果独立核对，不沿用 PR17；E1/E2 不代表真机或长期验收。
+
 ## P0 管理器策略分层与 IPC 容量衔接（本地完整通过）
 
 已整合作者 `bdd5520`，保留 GOALS、M7、4096 字节消息、共享内存传包、mmap 按需暂存、
@@ -31,6 +57,8 @@ kind2、Fs恢复2、硬件4、POSIX1、SDK2、RPC2。覆盖六次真实 Fs 死�
 `build/policy-verified-test-results-20261113.json`，日志 `build/policy-full-20261113.log`。
 发布门与实际 ZIP 证明另存 `.cache/policy-release-proof-20261113.json`。新提交的托管
 Windows/Linux 检查独立核对，不沿用已合并 PR16；E1/E2 不替代 GOALS 的 E3/E4 验收。
+PR17 的 3662a59 已实际核对四项 Windows/Linux push/PR 检查全部成功，证明
+.cache/policy-hosted-proof-20261113.json；这份托管结果只对应该 head。
 后续继续 G0/P1 服务可靠性与剩余接口，不据此宣称整个操作系统完成。
 
 ## 磁盘：512–4096 字节逻辑扇区与部分写读-改-写（专项通过）
