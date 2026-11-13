@@ -514,6 +514,10 @@ def main(policy_path=None):
     # 内核：sched_policy.c 策略函数已迁入 rust/sfcore（sf_sched_pick）。
     kernel = objects('kernel', ['kernel/entry.S', 'kernel/arch.c', 'kernel/smp.c', 'kernel/core.c', 'kernel/pid.c', 'kernel/memory.c', 'kernel/compat.c', 'kernel/shm.c', 'kernel/ipc.c', 'kernel/device.c', 'kernel/ps2.c', 'kernel/usb.c', 'kernel/acpi.c', 'kernel/vtd_tables.c', 'kernel/iommu.c', 'services/memory.c', 'services/arguments.c', 'build/interrupts.S'])
     link_elf('kernel', kernel, 'kernel/linker.ld')
+    build_efi()
+
+
+def build_efi():
     # Content-addressed incbin inputs prevent assembler caches reusing old bytes.
     embedded = {}
     for source in ['kernel.elf', 'bundle.bin']:
