@@ -2,6 +2,7 @@
 #include "persist_server.h"
 #include "txn.h"
 #include "trust.h"
+#include "block_rpc.h"
 /* sf-persist.sfmod: the transaction volume, update state machine and block
  * access live in this process. sf-init owns the virtio-blk process and transfers
  * derived endpoint capabilities here; the block service accepts any holder of
@@ -13,9 +14,13 @@ static uint8_t revoked[SF_TRUST_MAX*32];
 static long revoked_bytes=-1;
 static int call(SfMessage*m){
  if(!driver_alive||!driver_ep||!driver_reply)return SF_DEVICE_GONE;
- uint64_t id=++sequence;m->h.request_id=id;int r=sf_send(driver_ep,m);if(r)return r;
+ if(sequence==UINT64_MAX)return SF_NO_SPACE;
+ m->h.request_id=++sequence;SfBlockRequest request=sf_block_request(m);
+ int r=sf_send(driver_ep,m);if(r){if(r>0)driver_alive=0;return r>0?SF_BAD_FORMAT:r;}
  long from=sf_recv(driver_reply,m,sf_deadline(2000));if(from<0){driver_alive=0;return(int)from;}
- if(from!=(long)driver_pid||m->h.request_id!=id)return SF_STALE_HANDLE;return(int)m->status;
+ if(m->h.cap_count==1)sf_cap_close(m->handle);
+ r=sf_block_reply(&request,m,from,driver_pid);if(r){driver_alive=0;return r;}
+ return(int)m->status;
 }
 int sf_storage_writable(void){return writable&&driver_alive&&driver_ep&&driver_reply;}
 /* The dirty lease belongs to sf-init's storage ledger; this process only
