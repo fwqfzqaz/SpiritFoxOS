@@ -24,29 +24,46 @@ unsigned persist_fixture_brackets(void);
 static unsigned checks,sends,recvs,closes,corrupt;
 static int send_error,recv_error,semantic;
 static uint32_t read_limit=UINT32_MAX;
+static unsigned exchanges,mutate_call,cap_sends,input_closes,reply_closes;
+static uint64_t export_size;
+static size_t staged_end;
+static uint8_t chunk_data[SF_TXN_FILE_BYTES],staged_data[SF_TXN_FILE_BYTES];
 static SfMessage reply;
 static SfNamespace fresh,copy;
 #define CHECK(c) do{checks++;if(!(c)){fprintf(stderr,"PERSIST METADATA FAIL line %d: %s\n",__LINE__,#c);exit(1);}}while(0)
 static long sf_sys(long op,uint64_t a,uint64_t b,uint64_t c){(void)op;(void)a;(void)b;(void)c;return SF_DENIED;}
-static long sf_cap_close(uint64_t h){CHECK(h==0x777);closes++;return 0;}
+static long sf_cap_close(uint64_t h){CHECK(h==0x777||h==0x888);closes++;if(h==0x777)input_closes++;else reply_closes++;return 0;}
 static long sf_cap_derive(uint64_t h,uint64_t r){(void)h;(void)r;return SF_DENIED;}
-static long sf_send_cap(uint32_t h,SfMessage*m,uint64_t c){(void)h;(void)m;(void)c;return SF_DENIED;}
+static long sf_send_cap(uint32_t h,SfMessage*m,uint64_t c){
+ CHECK(h==0x101&&c==0x777&&!m->h.cap_count&&(m->h.opcode==OP_PERSIST_ATTACH_SEND||m->h.opcode==OP_PERSIST_ATTACH_REPLY));
+ cap_sends++;exchanges++;if(send_error)return send_error;reply=*m;reply.h.flags=12;reply.handle=0x444;reply.status=semantic;return 0;
+}
 int sf_storage_driver(uint32_t*a,uint32_t*b,uint32_t*c,uint64_t*d,int*e){(void)a;(void)b;(void)c;(void)d;(void)e;return SF_DEVICE_GONE;}
 uint8_t*sf_storage_scratch(void){return 0;}
 long sf_storage_load(const char*n,void*p,size_t c){(void)n;(void)p;(void)c;return SF_DEVICE_GONE;}
 static long sf_send(uint32_t h,SfMessage*m){
- CHECK(h==0x101&&(m->h.opcode==OP_PERSIST_NOTES_SIZE||m->h.opcode==OP_PERSIST_TRUNCATE||m->h.opcode==OP_PERSIST_READ)&&!m->h.cap_count);sends++;if(send_error)return send_error;
+ CHECK(h==0x101&&(m->h.opcode==OP_PERSIST_NOTES_SIZE||m->h.opcode==OP_PERSIST_TRUNCATE||m->h.opcode==OP_PERSIST_READ||m->h.opcode==OP_PERSIST_STAGE||m->h.opcode==OP_PERSIST_PACKAGE||m->h.opcode==OP_PERSIST_PREVIEW)&&!m->h.cap_count);sends++;exchanges++;if(send_error)return send_error;
  reply=*m;reply.h.flags=1;
  if(m->h.opcode==OP_PERSIST_READ){
   CHECK(m->length<=sizeof(m->data));reply.status=0;
   if(reply.length>read_limit)reply.length=read_limit;
   for(unsigned i=0;i<reply.length;i++)reply.data[i]=(uint8_t)(m->offset+i);
+ }else if(m->h.opcode==OP_PERSIST_STAGE){
+  CHECK(exchanges<=SF_TXN_FILE_BYTES/SF_MSG_BYTES+1); /* Bound a stalled-progress regression. */
+  CHECK(m->offset<=sizeof(staged_data)&&m->length<=sizeof(staged_data)-m->offset&&m->length<=sizeof(m->data));
+  memcpy(staged_data+m->offset,m->data,m->length);staged_end=(size_t)m->offset+m->length;reply.status=0;
+ }else if(m->h.opcode==OP_PERSIST_PACKAGE||m->h.opcode==OP_PERSIST_PREVIEW){
+  CHECK(exchanges<=SF_TXN_FILE_BYTES/SF_MSG_BYTES+1);
+  CHECK(m->offset<=sizeof(chunk_data));uint64_t left=m->offset<export_size?export_size-m->offset:0;
+  reply.handle=export_size;reply.length=left>sizeof(m->data)?sizeof(m->data):(uint32_t)left;reply.status=0;
+  CHECK(reply.length<=sizeof(chunk_data)-m->offset);if(reply.length)memcpy(reply.data,chunk_data+m->offset,reply.length);
  }else reply.status=m->h.opcode==OP_PERSIST_TRUNCATE?0:persist_metadata_dispatch(1,&reply);
  if(semantic){reply.status=semantic;reply.handle=0;}return 0;
 }
 static long sf_recv(uint32_t h,SfMessage*m,uint64_t deadline){
  CHECK(h==0x102&&deadline==sf_deadline(10000));recvs++;if(recv_error)return recv_error;
  *m=reply;m->h.flags=12;
+ if(mutate_call&&exchanges!=mutate_call)return 12;
  switch(corrupt){
  case 1:return 13;case 2:m->h.request_id++;break;case 3:m->h.size--;break;case 4:m->h.protocol_major++;break;
  case 5:m->h.protocol_minor++;break;case 6:m->h.opcode++;break;case 7:m->h.flags=1;break;case 8:m->h.payload_bytes--;break;
@@ -54,9 +71,16 @@ static long sf_recv(uint32_t h,SfMessage*m,uint64_t deadline){
  case 13:m->status=1;break;case 14:m->status=-22;break;case 15:m->status=-(1ll<<32);break;case 16:m->handle=16385;break;
  case 17:m->handle=1ull<<32;break;case 18:m->h.cap_count=1;m->handle=0x777;break;case 19:m->status=SF_DEVICE_GONE;break;
  case 20:m->status=1ll<<32;break;case 21:m->length=sizeof(m->data)+1;break;case 22:m->length++;break;
- }return 12;
+ case 23:m->length=0;break;case 24:if(m->length)m->length--;break;case 25:m->offset++;break;
+ case 26:m->handle=0;break;case 27:m->handle++;break;case 28:m->handle=UINT64_MAX;break;
+ case 29:m->handle=0;m->length=2;break;case 30:m->h.cap_count=1;m->handle=0x888;return 13;
+ case 31:m->h.cap_count=1;m->handle=0x888;m->h.request_id++;break;case 32:m->h.cap_count=2;break;
+ case 34:return SF_TIMEOUT;
+ }
+ if(corrupt==18&&(reply.h.opcode==OP_PERSIST_ATTACH_SEND||reply.h.opcode==OP_PERSIST_ATTACH_REPLY))m->handle=0x888;
+ return 12;
 }
-static void reset(void){persist_ep=0x101;persist_reply=0x102;persist_pid=12;uncertain_commit=0;corrupt=0;send_error=recv_error=semantic=0;read_limit=UINT32_MAX;}
+static void reset(void){persist_ep=0x101;persist_reply=0x102;persist_pid=12;uncertain_commit=0;corrupt=0;send_error=recv_error=semantic=0;read_limit=UINT32_MAX;exchanges=mutate_call=cap_sends=input_closes=reply_closes=0;export_size=0;staged_end=0;}
 static void read_reply_tests(void){
  uint8_t out[2*SF_MSG_BYTES+9],expected[sizeof(out)];
  const size_t lengths[]={0,1,255,256,SF_MSG_BYTES-1,SF_MSG_BYTES,SF_MSG_BYTES+1,2*SF_MSG_BYTES+7};
@@ -86,6 +110,80 @@ static void read_reply_tests(void){
  reset();send_error=SF_WOULD_BLOCK;unsigned received=recvs;CHECK(ext_read(0,out,1)==SF_WOULD_BLOCK&&recvs==received);
  reset();recv_error=SF_TIMEOUT;CHECK(ext_read(0,out,1)==SF_TIMEOUT&&!sf_persist_uncertain());
  reset();requests=UINT64_MAX;unsigned sent=sends;CHECK(ext_read(0,out,1)==SF_NO_SPACE&&sends==sent);requests=0x300000000ull;
+}
+static int stale_case(unsigned c){return c==1||c==2||c==30||c==31;}
+static void chunk_reply_tests(void){
+ /* The preceding dirty tests intentionally changed the bracket counter.
+  * Snapshot immediately before this new no-I/O/cache/trust-change scope. */
+ persist_fixture_snapshot();
+ uint8_t out[SF_TXN_FILE_BYTES+2],expected[sizeof(out)];
+ for(unsigned i=0;i<sizeof(chunk_data);i++)chunk_data[i]=(uint8_t)(i*29u+i/257u);
+ const size_t sizes[]={0,1,SF_MSG_BYTES-1,SF_MSG_BYTES,SF_MSG_BYTES+1,2*SF_MSG_BYTES,SF_TXN_FILE_BYTES};
+ for(unsigned i=0;i<sizeof(sizes)/sizeof(*sizes);i++){
+  reset();memset(staged_data,0xcc,sizeof(staged_data));CHECK(stage(chunk_data,sizes[i])==(sizes[i]?0:SF_BAD_FORMAT));CHECK(staged_end==sizes[i]);
+  CHECK(!memcmp(staged_data,chunk_data,sizes[i]));CHECK(exchanges==(sizes[i]+SF_MSG_BYTES-1)/SF_MSG_BYTES);
+  for(size_t k=sizes[i];k<sizeof(staged_data);k++)if(staged_data[k]!=0xcc){CHECK(0);}
+ }
+ const unsigned bad_stage[]={1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,20,21,22,23,24,25,30,31,32};
+ for(unsigned i=0;i<sizeof(bad_stage)/sizeof(*bad_stage);i++){
+  reset();corrupt=bad_stage[i];unsigned oldclose=closes;
+  CHECK(stage(chunk_data,SF_MSG_BYTES)==(stale_case(corrupt)?SF_STALE_HANDLE:SF_BAD_FORMAT));
+  CHECK(exchanges==1&&!sf_persist_uncertain());CHECK(closes==oldclose+(corrupt==18||corrupt==30||corrupt==31));
+ }
+ reset();send_error=SF_WOULD_BLOCK;unsigned before=recvs;CHECK(stage(chunk_data,1)==SF_WOULD_BLOCK&&recvs==before);
+ reset();recv_error=SF_TIMEOUT;CHECK(stage(chunk_data,1)==SF_TIMEOUT&&exchanges==1&&!sf_persist_uncertain());
+ reset();before=sends;CHECK(stage(0,0)==SF_BAD_FORMAT&&stage(0,1)==SF_INVALID&&stage(chunk_data,SF_TXN_FILE_BYTES+1)==SF_NO_SPACE&&sends==before);
+ for(int e=SF_INVALID;e>=SF_VERSION_REJECTED;e--){reset();semantic=e;CHECK(stage(chunk_data,1)==e&&exchanges==1&&!sf_persist_uncertain());}
+ for(unsigned preview=0;preview<2;preview++){
+  for(unsigned i=0;i<sizeof(sizes)/sizeof(*sizes);i++)for(unsigned extra=0;extra<2;extra++){
+   reset();export_size=sizes[i];memset(out,0xcc,sizeof(out));memset(expected,0xcc,sizeof(expected));memcpy(expected+1,chunk_data,sizes[i]);
+   CHECK(export(out+1,sizes[i]+extra,(int)preview)==(long)sizes[i]);CHECK(!memcmp(out,expected,sizeof(out)));
+   CHECK(exchanges==(sizes[i]?(sizes[i]+SF_MSG_BYTES-1)/SF_MSG_BYTES:1));CHECK(!sf_persist_uncertain());
+  }
+  const unsigned bad[]={1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,20,21,22,23,24,25,26,28,29,30,31,32};
+  for(unsigned i=0;i<sizeof(bad)/sizeof(*bad);i++){
+   reset();export_size=2*SF_MSG_BYTES;corrupt=bad[i];unsigned oldclose=closes;memset(out,0xcc,sizeof(out));memcpy(expected,out,sizeof(out));
+   CHECK(export(out+1,SF_TXN_FILE_BYTES,(int)preview)==(stale_case(corrupt)?SF_STALE_HANDLE:SF_BAD_FORMAT));
+   CHECK(!memcmp(out,expected,sizeof(out))&&exchanges==1);CHECK(closes==oldclose+(corrupt==18||corrupt==30||corrupt==31));
+  }
+  const unsigned later[]={1,2,18,23,25,27,28,29,30,31,34};
+  for(unsigned i=0;i<sizeof(later)/sizeof(*later);i++){
+   reset();export_size=2*SF_MSG_BYTES;corrupt=later[i];mutate_call=2;unsigned oldclose=closes;
+   memset(out,0xcc,sizeof(out));memset(expected,0xcc,sizeof(expected));memcpy(expected+1,chunk_data,SF_MSG_BYTES);
+   CHECK(export(out+1,SF_TXN_FILE_BYTES,(int)preview)==(corrupt==34?SF_TIMEOUT:stale_case(corrupt)?SF_STALE_HANDLE:SF_BAD_FORMAT));
+   CHECK(!memcmp(out,expected,sizeof(out))&&exchanges==2);CHECK(closes==oldclose+(corrupt==18||corrupt==30||corrupt==31));CHECK(!sf_persist_uncertain());
+  }
+  reset();export_size=1;memset(out,0xcc,sizeof(out));memcpy(expected,out,sizeof(out));CHECK(export(out,0,(int)preview)==SF_NO_SPACE&&!memcmp(out,expected,sizeof(out)));
+  reset();export_size=SF_TXN_FILE_BYTES+1;CHECK(export(out,SF_TXN_FILE_BYTES,(int)preview)==SF_BAD_FORMAT);
+  reset();before=sends;CHECK(export(0,1,(int)preview)==SF_INVALID&&sends==before);CHECK(export(0,0,(int)preview)==0);
+  for(int e=SF_INVALID;e>=SF_VERSION_REJECTED;e--){
+   reset();semantic=e;export_size=1;memset(out,0xcc,sizeof(out));memcpy(expected,out,sizeof(out));
+   CHECK(export(out,sizeof(out),(int)preview)==e&&!memcmp(out,expected,sizeof(out))&&!sf_persist_uncertain());
+  }
+ }
+ reset();CHECK(persist_fixture_unchanged());
+}
+static void attach_reply_tests(void){
+ persist_fixture_snapshot();
+ const unsigned ops[]={OP_PERSIST_ATTACH_SEND,OP_PERSIST_ATTACH_REPLY};
+ const unsigned bad[]={1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,18,20,21,22,25,29,30,31,32};
+ for(unsigned i=0;i<2;i++){
+  reset();CHECK(!pf_send_cap(ops[i],0x777,512,0));CHECK(cap_sends==1&&input_closes==1&&!reply_closes&&!sf_persist_uncertain());
+  reset();CHECK(!pf_send_cap(ops[i],0x777,UINT64_MAX,1));CHECK(input_closes==1&&cap_sends==1);
+  reset();corrupt=17;CHECK(!pf_send_cap(ops[i],0x777,512,0));CHECK(input_closes==1&&!reply_closes); /* Provider-local handle is opaque. */
+  for(unsigned j=0;j<sizeof(bad)/sizeof(*bad);j++){
+   reset();corrupt=bad[j];CHECK(pf_send_cap(ops[i],0x777,512,0)==(stale_case(corrupt)?SF_STALE_HANDLE:SF_BAD_FORMAT));
+   CHECK(input_closes==1&&cap_sends==1&&reply_closes==(corrupt==18||corrupt==30||corrupt==31));CHECK(!sf_persist_uncertain());
+  }
+  for(int e=SF_INVALID;e>=SF_VERSION_REJECTED;e--){reset();semantic=e;CHECK(pf_send_cap(ops[i],0x777,512,0)==e);CHECK(input_closes==1&&cap_sends==1&&!reply_closes);}
+  reset();send_error=SF_WOULD_BLOCK;unsigned received=recvs;CHECK(pf_send_cap(ops[i],0x777,512,0)==SF_WOULD_BLOCK&&recvs==received&&input_closes==1);
+  reset();send_error=1;received=recvs;CHECK(pf_send_cap(ops[i],0x777,512,0)==SF_BAD_FORMAT&&recvs==received&&input_closes==1);
+  reset();recv_error=SF_TIMEOUT;CHECK(pf_send_cap(ops[i],0x777,512,0)==SF_TIMEOUT&&input_closes==1&&!sf_persist_uncertain());
+  reset();persist_pid=0;CHECK(pf_send_cap(ops[i],0x777,512,0)==SF_DEVICE_GONE&&input_closes==1&&!cap_sends);
+  reset();uncertain_commit=1;CHECK(pf_send_cap(ops[i],0x777,512,0)==SF_COMMIT_UNCERTAIN&&input_closes==1&&!cap_sends);
+  reset();requests=UINT64_MAX;CHECK(pf_send_cap(ops[i],0x777,512,0)==SF_NO_SPACE&&input_closes==1&&!cap_sends);requests=0x300000000ull;
+ }
+ reset();CHECK(persist_fixture_unchanged());
 }
 int main(void){
  checks=persist_volume_tests();reset();
@@ -137,5 +235,6 @@ int main(void){
   unsigned sent_before=sends;uint64_t untouched=UINT64_MAX;CHECK(sf_persist_notes_size(&untouched)==SF_COMMIT_UNCERTAIN&&untouched==UINT64_MAX&&sends==sent_before);
  }
  read_reply_tests();
- printf("Persistence metadata tests passed: %u assertions; real TRYING volume, no I/O/cache/trust changes, authenticated codec, bounded READ replies and atomic fresh-tree reprojection\n",checks);return 0;
+ chunk_reply_tests();attach_reply_tests();
+ printf("Persistence metadata tests passed: %u assertions; real TRYING volume, no I/O/cache/trust changes, authenticated READ/STAGE/attach/export bounds and atomic fresh-tree reprojection\n",checks);return 0;
 }

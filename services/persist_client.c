@@ -33,7 +33,8 @@ static int pf_call(SfMessage*m){
      m->h.flags!=persist_pid||m->h.cap_count||m->h.payload_bytes!=sizeof(*m)-40||m->h.deadline_ns!=deadline||
      m->status<SF_VERSION_REJECTED||m->status>(int64_t)maximum||
      (opcode==OP_PERSIST_WRITE&&m->status>=0&&m->status!=requested)||
-     (opcode==OP_PERSIST_READ&&(m->length>requested||m->length>sizeof(m->data)||m->offset!=offset||m->handle||m->mode))){
+     (opcode==OP_PERSIST_READ&&(m->length>requested||m->length>sizeof(m->data)||m->offset!=offset||m->handle||m->mode))||
+     (opcode==OP_PERSIST_STAGE&&!m->status&&(m->length!=requested||m->offset!=offset||m->handle||m->mode))){
   if(dirty)uncertain_commit=1;return SF_BAD_FORMAT;
  }
  if(dirty){
@@ -47,9 +48,17 @@ static int pf_send_cap(uint64_t opcode,uint32_t cap,uint64_t offset,uint32_t mod
  if(!ready()){sf_cap_close(cap);return SF_DEVICE_GONE;}
  if(uncertain_commit||requests==UINT64_MAX){sf_cap_close(cap);return uncertain_commit?SF_COMMIT_UNCERTAIN:SF_NO_SPACE;}
  SfMessage m;sf_message(&m,opcode,++requests);m.offset=offset;m.mode=mode;
- int r=sf_send_cap(persist_ep,&m,cap);sf_cap_close(cap);if(r)return r;
+ uint64_t id=m.h.request_id,deadline=m.h.deadline_ns;
+ int r=sf_send_cap(persist_ep,&m,cap);sf_cap_close(cap);if(r)return r>0?SF_BAD_FORMAT:r;
  long from=sf_recv(persist_reply,&m,sf_deadline(10000));if(from<0)return(int)from;
- if(from!=(long)persist_pid||m.h.request_id!=requests)return SF_STALE_HANDLE;
+ if(m.h.cap_count==1)sf_cap_close(m.handle);
+ if(from!=(long)persist_pid||m.h.request_id!=id)return SF_STALE_HANDLE;
+ /* The ACK's handle is local to the provider when cap_count=0. Never close
+  * it as a manager capability; an unexpected transferred cap was closed above. */
+ if(m.h.size!=40||m.h.protocol_major!=1||m.h.protocol_minor||m.h.opcode!=opcode||
+    m.h.flags!=persist_pid||m.h.cap_count||m.h.payload_bytes!=sizeof(m)-40||m.h.deadline_ns!=deadline||
+    m.status<SF_VERSION_REJECTED||m.status>0||
+    (!m.status&&(m.offset!=offset||m.mode!=mode||m.length)))return SF_BAD_FORMAT;
  return(int)m.status;
 }
 static int attach(void){
@@ -157,6 +166,10 @@ static void hooks(SfNamespace*ns){
  if(previous!=notes_read)disk_read=previous;
 }
 static int stage(const uint8_t*bytes,size_t n){
+ /* An empty upload must not turn INSTALL/REVOKE into use of an old stage. */
+ if(!n)return SF_BAD_FORMAT;
+ if(!bytes)return SF_INVALID;
+ if(n>SF_TXN_FILE_BYTES)return SF_NO_SPACE;
  const uint64_t chunk=sizeof(((SfMessage*)0)->data);
  for(uint64_t off=0;off<n;){
   SfMessage m;sf_message(&m,OP_PERSIST_STAGE,0);m.offset=off;m.length=n-off>chunk?chunk:(uint32_t)(n-off);
@@ -187,17 +200,22 @@ int sf_persist_revoke(const char*name){
 }
 static long export(void*out,size_t capacity,int preview){
  if(!ready()||!sf_storage_writable())return SF_DEVICE_GONE;
- uint64_t offset=0;long total=-1;
+ if(!out&&capacity)return SF_INVALID;
+ uint64_t offset=0,total=0;int have_total=0;
  for(;;){
   SfMessage m;sf_message(&m,preview?OP_PERSIST_PREVIEW:OP_PERSIST_PACKAGE,0);m.offset=offset;
   int r=pf_call(&m);if(r)return r;
-  total=(long)m.handle;if(total>(long)capacity)return SF_NO_SPACE;
-  if(m.length>sizeof(m.data))return SF_BAD_FORMAT;
-  memcpy((uint8_t*)out+offset,m.data,m.length);
-  offset+=m.length;if(offset>=(uint64_t)total)break;
-  if(!m.length)return SF_BAD_FORMAT;
+  /* A slot is one transaction file. Authenticate the complete chunk shape
+   * before touching output, and pin its total for this bounded export. */
+  if(m.handle>SF_TXN_FILE_BYTES||(have_total&&m.handle!=total)||m.offset!=offset||m.mode)return SF_BAD_FORMAT;
+  total=m.handle;have_total=1;if(total>capacity)return SF_NO_SPACE;
+  if(offset>total)return SF_BAD_FORMAT;
+  uint64_t remaining=total-offset;uint32_t chunk=remaining>sizeof(m.data)?sizeof(m.data):(uint32_t)remaining;
+  if(m.length!=chunk)return SF_BAD_FORMAT;
+  if(chunk)memcpy((uint8_t*)out+offset,m.data,chunk);
+  offset+=chunk;if(offset==total)break;
  }
- return total;
+ return(long)total;
 }
 long sf_persist_package(void*out,size_t capacity){return export(out,capacity,0);}
 long sf_persist_preview(void*out,size_t capacity){return export(out,capacity,1);}

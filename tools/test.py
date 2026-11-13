@@ -144,6 +144,7 @@ if not args.host_only:
         subprocess.run([sys.executable, 'tests/qemu/qemu_test.py', '--storage', case], check=True)
     subprocess.run([sys.executable, 'tests/qemu/qemu_persist_test.py'], check=True)
     subprocess.run([sys.executable, 'tests/qemu/qemu_persist_metadata_test.py'], check=True)
+    subprocess.run([sys.executable, 'tests/qemu/qemu_persist_chunk_test.py'], check=True)
     subprocess.run([sys.executable, 'tests/qemu/qemu_namespace_recovery_test.py'], check=True)
     subprocess.run([sys.executable, 'tests/qemu/qemu_hardware_test.py'], check=True)
     subprocess.run([sys.executable, 'tests/qemu/qemu_net_test.py'], check=True)
@@ -209,10 +210,12 @@ result['file_ingress_host_groups'] = 1
 result['file_peer_qemu'] = not args.host_only
 result['file_peer_qemu_boots'] = 0 if args.host_only else 2
 result['file_peer_transferred_caps'] = 0 if args.host_only else 384
-result['persist_metadata_host_assertions'] = 14434
+result['persist_metadata_host_assertions'] = 16821
 result['persist_read_reply_bounds'] = True
 result['persist_read_qemu_boots'] = 0 if args.host_only else 2
 result['persist_read_qemu_bytes'] = 0 if args.host_only else 8192
+chunks = {} if args.host_only else json.loads((ROOT/'build/persist-chunk-results.json').read_text(encoding='utf-8'))
+result['persist_chunk_qemu'] = chunks
 result['persist_metadata_qemu'] = not args.host_only
 result['persist_metadata_qemu_boots'] = 0 if args.host_only else 2
 result['projection_width_host_assertions'] = 9130

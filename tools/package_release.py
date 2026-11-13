@@ -37,10 +37,13 @@ if result.get('emergency_console_host_assertions') != 33016:
     raise SystemExit('Run bounded emergency console SDK/ownership/generation regressions before packaging')
 if result.get('namespace_ownership_host_tests') != 4 or ownership.get('passed') is not True or ownership.get('root_has_namespace_tables') is not False or ownership.get('root_has_transaction_state') is not False:
     raise SystemExit('Verify actual linked ELF namespace/transaction state ownership before packaging')
-if result.get('persist_metadata_host_assertions') != 14434 or result.get('persist_metadata_qemu') is not True or result.get('persist_metadata_qemu_boots') != 2:
+if result.get('persist_metadata_host_assertions') != 16821 or result.get('persist_metadata_qemu') is not True or result.get('persist_metadata_qemu_boots') != 2:
     raise SystemExit('Run read-only TRYING metadata/reprojection and real persistence IPC regressions before packaging')
 if result.get('persist_read_reply_bounds') is not True or result.get('persist_read_qemu_boots') != 2 or result.get('persist_read_qemu_bytes') != 8192:
     raise SystemExit('Run bounded persistence READ replies and full-width sequential guest read/EOF regressions before packaging')
+chunks=result.get('persist_chunk_qemu',{})
+if chunks.get('passed') is not True or chunks.get('guest_boots')!=2 or chunks.get('empty_file_rejections')!=32 or chunks.get('driver_reattach_cycles')!=4 or chunks.get('base_disk_unchanged') is not True or not 8192<chunks.get('stage_bytes',0)<=16384 or chunks.get('package_chunks')!=(chunks.get('stage_bytes',0)+4095)//4096:
+    raise SystemExit('Run actual chunked STAGE/preview/export, empty-path stale-stage refusal and driver reattach regressions before packaging')
 if result.get('projection_width_host_assertions') != 9130 or result.get('projection_sdk_qemu') is not True or result.get('projection_sdk_qemu_boots') != 2:
     raise SystemExit('Run projection metadata/full-width seek host and both transport SDK regressions before packaging')
 if result.get('host_poll_deadline_host_tests') != 8:
