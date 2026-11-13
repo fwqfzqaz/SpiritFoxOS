@@ -2,6 +2,42 @@
 
 更新日期：2026-11-13（Asia/Shanghai）。
 
+## P1 块驱动回复契约（本地完整通过）
+
+接续 PR21 的100b7dc。Root storage 与 Persist 两个实际 call 的有界宿主基线各接受
+13种畸形回复、未关闭附加能力，并在请求号耗尽时发送零编号。仅检查实际函数结果，
+未执行物理越界、磁盘变更或证明未签名利用；证明
+`.cache/persist-block-baseline-proof-20261113.json`。Windows LLP64 宿主夹具须用64位
+task-status哨兵，最初两次夹具编译失败不计通过，未改抽取的生产函数。
+
+当前草稿共享私有回复契约，完整核对头/发送者/编号/期限/操作码、64位状态、能力、
+offset/handle/mode、成功长度及错误空载荷；接收能力先关闭，请求号耗尽不发送。
+协议故障使 Persist 放弃此驱动会话，Root 沿用超时的驱动终止路径；有效服务错误不
+毒化会话。未改作者 AHCI/NVMe 扇区桥、M7、公开ABI或盘格式。真实写入之后未确认
+回复的事务传播仍要独立审阅，不能把拒绝回复等同于取消磁盘副作用或已解决全部DIRTY。
+
+实际两个客户端及原扇区复制循环共3968项通过，含完整输出守卫、第一/第二半块失败、
+有效前缀、错误码、能力关闭、会话失效和编号耗尽。首轮宿主因原生产函数未使用的
+context参数而编译失败，补宿主专用告警设置后通过，未修改该生产函数。含初始构建、
+冻结源码的正常硬件4、分块2、信任2及完整IOMMU专项726.42秒通过，证明
+`.cache/persist-block-healthy-proof-20261113.json`。随后四次实际签名故障驱动启动
+89.47秒通过：双传输分别给Root/Persist返回正确关联号但错误操作码的READ，均拒绝，
+Root仍能回退bundle，Persist所需信任未就绪时关闭新包；卸载/驱动重建或重新附着后
+恢复，已提交笔记与盘字节保持。默认bundle/payload/EFI及原盘摘要还原，证明
+`.cache/persist-block-fault-proof-20261113.json`。首次故障访客错误地期待缓存元数据
+不可读，实际返回已提交长度是既有只读契约；只改测试预期后整套通过，首次失败日志
+保留，不计通过。缓存元数据可读不表示驱动仍健康。
+
+初始构建、冻结源码完整 `tools/test.py` 已通过（4819.42秒、退出码0）；
+完整证明 `.cache/persist-block-full-proof-20261113.json`，结果
+`build/persist-block-verified-test-results-20261113.json`。660项ABI与作者参考相同，
+七产物及默认三密钥保持；发布门、实际ZIP CRC/44项摘要、docs/下全部MD
+及解压离线14项通过，证明 `.cache/persist-block-release-proof-20261113.json`。新head的
+Windows/Linux托管检查另行核对，不沿用PR21。日志
+`build/persist-block-full-20261113.log`。本轮初始构建、冻结源码完整和相同
+产物发布/离线证明分别保存，未复用PR21。恢复点 `.cache/progress-live.json`；额度停工先
+停止本聊天测试树，再恢复可能激活的block-reply/trust-sync独立产物夹具。
+
 ## P1 运行期撤销同步与新包准入（本地完整通过）
 
 接续 PR20 的 bb32a5d。生产客户端与真实密码学实现的有界宿主基线确认：声明总量
@@ -36,8 +72,8 @@ E1：新增实际完整客户端/真实 trust 的496项、实际 Root 包入口7
 完整证明 `.cache/trust-sync-full-proof-20261113.json`，结果
 `build/trust-sync-verified-test-results-20261113.json`。七产物与默认三密钥保持；
 发布门及实际ZIP的CRC/44项摘要、全部当前MD字节一致和解压离线14项通过，
-证明 `.cache/trust-sync-release-proof-20261113.json`。新head的Windows/Linux托管结果
-仍须独立核对，未沿用PR20。运行日志
+证明 `.cache/trust-sync-release-proof-20261113.json`。PR21的100b7dc已实际核对四项Windows/Linux push/PR检查全部成功；
+证明 `.cache/trust-sync-hosted-proof-20261113.json`，未沿用PR20。运行日志
 `build/trust-sync-full-20261113.log`，专项证明
 `.cache/trust-sync-focused-proof-20261113.json`。本轮初始构建、冻结源码完整
 证明及相同产物的发布/离线检查分别保存，未复用 PR20。660项 ABI、签名/盘格式及作者 M7/

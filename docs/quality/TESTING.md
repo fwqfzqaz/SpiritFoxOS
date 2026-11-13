@@ -606,3 +606,29 @@ python tests/qemu/trust_sync_fixture.py --restore
 拒绝/四次同步、两次启动和产物还原证据。含构建、冻结专项276.38秒/12VM通过，另含
 既有trust4、Fs2/六次死亡、硬件4；本轮完整、实际ZIP与托管状态分别以 PROGRESS 为准。
 没有用 E1 代替真实访客故障，也没有用 E2 代替 E3/E4。
+
+## 块回复与真实故障驱动（2026-11-13）
+
+`test_block_reply.py` 编译两个实际call、扇区复制循环及共享私有校验器，合计3968项。
+覆盖七种正常操作、20种坏帧/64位状态/能力/关联、全部21个既有负错误的语义与传输
+路径、正SEND异常、耗尽不发送，以及完整512字节输出守卫和首/后半块拒绝。Windows
+宿主保留guest的64位task-status哨兵，未改变生产函数来迁就LLP64。
+
+初始构建、冻结源码正常硬件4、分块2、信任2及完整IOMMU专项726.42秒通过。
+`qemu_block_reply_test.py` 使用另签名的实际virtio驱动，普通笔记提交后仅向指定Root/
+Persist客户端注入一次错误操作码READ；legacy/modern共四次启动89.47秒通过。分别
+核对Root拒绝后bundle可用、Persist挂载故障的新包信任屏障、控制台、显式驱动重建/
+重新附着、已提交笔记与盘字节。首次错误期待缓存notes-size不可用，改为既有缓存
+语义后整套通过；首次失败日志单独保留，不能当作验证成功或改成设备健康断言。
+
+真实结果写入 `build/block-reply-results.json`，完整汇总/发布门要求四次拒绝和恢复、
+默认产物还原及原盘保持。测试默认驱动没有故障分支；中断先停止本聊天测试树，再：
+
+```powershell
+python tests/qemu/block_reply_fixture.py --restore
+python tests/qemu/trust_sync_fixture.py --restore
+```
+
+两种夹具有独立状态/逐项摘要备份，禁止重叠运行。完整本地、实际ZIP及精确head的
+Windows/Linux托管结果另见PROGRESS；E1/E2不等于真机/长稳，真实WRITE未确认完成
+不在这组READ注入的完成声明之内。

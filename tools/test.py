@@ -110,6 +110,7 @@ subprocess.run([sys.executable,'tests/integration/test_namespace_boundary.py'],c
 subprocess.run([sys.executable,'tests/integration/test_namespace_ownership.py'],check=True)
 subprocess.run([sys.executable,'tests/integration/test_policy_boundary.py'],check=True)
 subprocess.run([sys.executable,'tests/integration/test_trust_boundary.py'],check=True)
+subprocess.run([sys.executable,'tests/integration/test_block_reply.py'],check=True)
 subprocess.run([sys.executable,'tests/integration/test_file_ingress.py'],check=True)
 abi_reference_sha256 = hashlib.sha256((ROOT/'abi/x86_64-current.json').read_bytes()).hexdigest()
 abi_capture_sha256 = hashlib.sha256((ROOT/'build/abi-current.json').read_bytes()).hexdigest()
@@ -148,6 +149,7 @@ if not args.host_only:
     subprocess.run([sys.executable, 'tests/qemu/qemu_persist_metadata_test.py'], check=True)
     subprocess.run([sys.executable, 'tests/qemu/qemu_persist_chunk_test.py'], check=True)
     subprocess.run([sys.executable, 'tests/qemu/qemu_trust_sync_test.py'], check=True)
+    subprocess.run([sys.executable, 'tests/qemu/qemu_block_reply_test.py'], check=True)
     subprocess.run([sys.executable, 'tests/qemu/qemu_namespace_recovery_test.py'], check=True)
     subprocess.run([sys.executable, 'tests/qemu/qemu_hardware_test.py'], check=True)
     subprocess.run([sys.executable, 'tests/qemu/qemu_net_test.py'], check=True)
@@ -223,6 +225,8 @@ result['trust_sync_host_checks'] = 496
 result['trust_admission_host_tests'] = 1
 result['trust_admission_host_checks'] = 76
 result['trust_sync_qemu'] = {} if args.host_only else json.loads((ROOT/'build/trust-sync-results.json').read_text(encoding='utf-8'))
+result['block_reply_host'] = json.loads((ROOT/'build/block-reply-host-results.json').read_text(encoding='utf-8'))
+result['block_reply_qemu'] = {} if args.host_only else json.loads((ROOT/'build/block-reply-results.json').read_text(encoding='utf-8'))
 result['persist_metadata_qemu'] = not args.host_only
 result['persist_metadata_qemu_boots'] = 0 if args.host_only else 2
 result['projection_width_host_assertions'] = 9130
