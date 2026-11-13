@@ -61,6 +61,7 @@ static int echo_request(uint32_t,uint32_t,unsigned);
 static uint64_t echo_after(uint64_t now,uint64_t delay){return delay>UINT64_MAX-now?UINT64_MAX:now+delay;}
 static long console_write(const void*p,size_t n){return sf_sys(SYS_LOG,(uint64_t)p,n,0);}
 static int package_get(const char*name,SfPackage*p,uint64_t*base,uint64_t*have){
+ int secure=sf_persist_security_error();if(secure)return secure;
  const uint8_t*d;uint64_t n;
  if(name[0]=='/'){
   uint64_t cap=SF_STORAGE_SNAPSHOT_BYTES;

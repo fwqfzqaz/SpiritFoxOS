@@ -581,3 +581,28 @@ legacy/modern 两次真实启动。三块 STAGE 后核对事务中的完整签�
 证明；首个 SFRFS1 夹具因不允许空文件在启动前失败，改用作者支持的 SFRFS2 后才
 得到基线，不把该失败当作通过。坏服务 ACK/分块只在宿主夹具验证，QEMU 覆盖正常
 IPC 和真实空输入拒绝；不能将 E1/E2 描述为未签名利用或真机验证。
+
+## 运行期撤销快照与 Root 准入（2026-11-13）
+
+`tests/host/test_trust_sync.c` 直接编译完整生产客户端、namespace 和真实 trust/密码学
+实现，共496项：规范空表到八项、重复和旧表、畸形回复/状态/能力、原子容量失败、
+非容量修复、临时离线回退、初次就绪、已确认撤销后同步失败、DIRTY不清除、BEGIN/
+安装/撤销无新增权限、FINISH与已有数据路径保留。原客户端16821项独立保留。
+`tests/integration/test_trust_boundary.py` 编译实际 Root `package_get`，一组76项验证
+四种错误与四个入口在存储/映射/包认证之前拒绝，成功路径仍工作。
+
+`tests/qemu/qemu_trust_sync_test.py` 在 legacy/modern 各启动一次。它用已有开发模块
+签名者生成另一个实际 Persist 测试包，只改回复时注入一次坏快照；默认生产模块不变。
+四次畸形快照、八次新包拒绝、四次有效同步恢复，逐步核对 PENDING/盘字节、已提交
+撤销不重放、缓存及备用签名应用、普通服务。finally 恢复并校验 bundle/payload/EFI；
+若额度或进程中断，停止本聊天测试树后执行：
+
+```powershell
+python tests/qemu/trust_sync_fixture.py --restore
+```
+
+恢复使用工作区内状态文件和逐项摘要备份，不把故障 EFI 当成交付产物。每次真实运行
+写 `build/trust-sync-results.json`，完整测试汇总与发布门检查其四次坏快照/八次权限
+拒绝/四次同步、两次启动和产物还原证据。含构建、冻结专项276.38秒/12VM通过，另含
+既有trust4、Fs2/六次死亡、硬件4；本轮完整、实际ZIP与托管状态分别以 PROGRESS 为准。
+没有用 E1 代替真实访客故障，也没有用 E2 代替 E3/E4。

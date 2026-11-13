@@ -82,6 +82,7 @@ host_test('test_txn','tests/host/test_txn.c','services/txn.c',no_unused=True)
 host_test('test_txn_compat','tests/host/test_txn_compat.c','services/txn.c',no_unused=True)
 host_test('test_update','tests/host/test_update.c','services/update.c','services/txn.c',no_unused=True)
 host_test('test_persist_metadata','tests/host/test_persist_metadata.c','tests/host/persist_volume_fixture.c','services/persist_metadata.c','services/namespace.c','services/txn.c','services/update.c','services/version.c',*build.CRYPTO,no_unused=True)
+host_test('test_trust_sync','tests/host/test_trust_sync.c','services/namespace.c',*build.CRYPTO,no_unused=True)
 host_test('test_version','tests/host/test_version.c','services/version.c')
 # 网络帧逻辑：services/net_proto.c → rust/sfcore/src/net.rs
 host_test('test_net','tests/host/test_net.c')
@@ -108,6 +109,7 @@ subprocess.run([sys.executable,'tests/integration/test_poll_deadline.py'],check=
 subprocess.run([sys.executable,'tests/integration/test_namespace_boundary.py'],check=True)
 subprocess.run([sys.executable,'tests/integration/test_namespace_ownership.py'],check=True)
 subprocess.run([sys.executable,'tests/integration/test_policy_boundary.py'],check=True)
+subprocess.run([sys.executable,'tests/integration/test_trust_boundary.py'],check=True)
 subprocess.run([sys.executable,'tests/integration/test_file_ingress.py'],check=True)
 abi_reference_sha256 = hashlib.sha256((ROOT/'abi/x86_64-current.json').read_bytes()).hexdigest()
 abi_capture_sha256 = hashlib.sha256((ROOT/'build/abi-current.json').read_bytes()).hexdigest()
@@ -145,6 +147,7 @@ if not args.host_only:
     subprocess.run([sys.executable, 'tests/qemu/qemu_persist_test.py'], check=True)
     subprocess.run([sys.executable, 'tests/qemu/qemu_persist_metadata_test.py'], check=True)
     subprocess.run([sys.executable, 'tests/qemu/qemu_persist_chunk_test.py'], check=True)
+    subprocess.run([sys.executable, 'tests/qemu/qemu_trust_sync_test.py'], check=True)
     subprocess.run([sys.executable, 'tests/qemu/qemu_namespace_recovery_test.py'], check=True)
     subprocess.run([sys.executable, 'tests/qemu/qemu_hardware_test.py'], check=True)
     subprocess.run([sys.executable, 'tests/qemu/qemu_net_test.py'], check=True)
@@ -216,6 +219,10 @@ result['persist_read_qemu_boots'] = 0 if args.host_only else 2
 result['persist_read_qemu_bytes'] = 0 if args.host_only else 8192
 chunks = {} if args.host_only else json.loads((ROOT/'build/persist-chunk-results.json').read_text(encoding='utf-8'))
 result['persist_chunk_qemu'] = chunks
+result['trust_sync_host_checks'] = 496
+result['trust_admission_host_tests'] = 1
+result['trust_admission_host_checks'] = 76
+result['trust_sync_qemu'] = {} if args.host_only else json.loads((ROOT/'build/trust-sync-results.json').read_text(encoding='utf-8'))
 result['persist_metadata_qemu'] = not args.host_only
 result['persist_metadata_qemu_boots'] = 0 if args.host_only else 2
 result['projection_width_host_assertions'] = 9130

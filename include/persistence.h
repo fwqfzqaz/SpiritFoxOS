@@ -10,6 +10,9 @@ int sf_persist_ready(void);
 /* A mutating request with no authenticated completion keeps its dirty lease.
  * New package execution and volume RPC fail closed until a fresh boot. */
 int sf_persist_uncertain(void);
+/* New package authority requires a complete runtime-trust cache. A valid
+ * explicit sync can repair this fault; it never clears an uncertain write. */
+int sf_persist_security_error(void);
 void sf_persist_driver_down(void);
 int sf_persist_mount(SfNamespace*);
 /* Existing mounted volume only. Neither operation mounts, recovers a trial,

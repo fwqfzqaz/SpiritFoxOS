@@ -44,6 +44,9 @@ if result.get('persist_read_reply_bounds') is not True or result.get('persist_re
 chunks=result.get('persist_chunk_qemu',{})
 if chunks.get('passed') is not True or chunks.get('guest_boots')!=2 or chunks.get('empty_file_rejections')!=32 or chunks.get('driver_reattach_cycles')!=4 or chunks.get('base_disk_unchanged') is not True or not 8192<chunks.get('stage_bytes',0)<=16384 or chunks.get('package_chunks')!=(chunks.get('stage_bytes',0)+4095)//4096:
     raise SystemExit('Run actual chunked STAGE/preview/export, empty-path stale-stage refusal and driver reattach regressions before packaging')
+trust_sync=result.get('trust_sync_qemu',{})
+if result.get('trust_sync_host_checks')!=496 or result.get('trust_admission_host_tests')!=1 or result.get('trust_admission_host_checks')!=76 or trust_sync.get('passed') is not True or trust_sync.get('guest_boots')!=2 or trust_sync.get('malformed_snapshots')!=4 or trust_sync.get('denied_new_authority')!=8 or trust_sync.get('valid_resyncs')!=4 or not all(trust_sync.get(k) is True for k in ('pending_and_known_commit_preserved','ordinary_standby_app','production_artifacts_restored','base_disk_unchanged')):
+    raise SystemExit('Run atomic runtime trust/actual Root admission and signed-provider fault/resync regressions before packaging')
 if result.get('projection_width_host_assertions') != 9130 or result.get('projection_sdk_qemu') is not True or result.get('projection_sdk_qemu_boots') != 2:
     raise SystemExit('Run projection metadata/full-width seek host and both transport SDK regressions before packaging')
 if result.get('host_poll_deadline_host_tests') != 8:
