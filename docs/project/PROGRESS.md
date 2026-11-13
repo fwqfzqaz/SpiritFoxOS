@@ -2,6 +2,42 @@
 
 更新日期：2026-11-13（Asia/Shanghai）。
 
+## P1 持久化分块、握手与空包拒绝（本地完整通过）
+
+接续 PR19 的 617233f。宿主实际函数基线确认 STAGE 零长度成功 ACK 使客户端重复
+同一 offset、PACKAGE total=0/length=2 会越过声明容量 1 写入较大的物理数组，以及
+两个 attach 操作都接受错误操作码、2^32 状态和未关闭的回复能力。复现有界、没有执行
+物理越界或证明未签名利用，证明见 `.cache/persist-chunk-baseline-proof-20261113.json`
+及 `.cache/persist-attach-baseline-proof-20261113.json`。
+
+另用已核对七产物的上一轮 617233f 镜像实际复现空文件问题：先暂存合法包，再对空的
+SFRFS2 文件执行 revoke-key，旧客户端复用此前暂存包，Root 的已撤销数 0→1、盘代次
+2→3。此为 root 管理命令的错误目标副作用，不是管理员门或签名绕过；只操作独立
+QEMU 盘副本，原盘保持。证明 `.cache/persist-empty-baseline-proof-20261113.json`。
+
+现拒绝空/NULL/超过事务单文件容量的上传，防止 INSTALL/REVOKE 消费旧暂存；成功
+STAGE ACK 必须确认本次完整长度和 offset。attach ACK 验证完整头/状态与关联字段，
+输入能力每条路径关闭一次，意外接收能力也关闭；无附加能力的 provider-local handle
+不作为 Root 能力关闭。PACKAGE/PREVIEW 在复制前检查 16 KiB 事务文件上限、输出容量、
+固定总量、offset/mode 和精确块长，确保有界进度；后续坏回复可留下此前已验证前缀。
+16 KiB 是既有事务格式限制，不是恢复旧的应用镜像/mmap 限制。DIRTY 未知完成、
+trust_sync 缓存策略、包/盘格式与 660 项 ABI 保持。
+
+E1：生产完整客户端、真实 TRYING 卷和原 DIRTY 检查合计 16821 项；新增分块/握手与
+整个输出区守卫、合法前缀后坏回复、语义错误/超时/请求号耗尽及能力清理通过。原 DIRTY
+用例会改括号计数，新增无副作用快照在新用例起点建立，未删除旧断言。E2：含初始构建、
+源码冻结专项 281.24 秒/10 VM 通过；8336 字节签名包实际三块暂存、
+预览/导出执行，PENDING/STABLE 下 32 次空文件安装/撤销拒绝且盘、信任、笔记保持，
+四次驱动重新附着通过；另含元数据2、Fs恢复2（六次死亡）、硬件4，仅属 E2。
+初始构建、源码冻结完整 `tools/test.py` 已通过（4725.38 秒、退出码 0）。
+完整证明 `.cache/persist-chunk-full-proof-20261113.json`，结果
+`build/persist-chunk-verified-test-results-20261113.json`；660 项 ABI 与作者参考相同，
+七产物与默认三密钥保持。发布门及实际 ZIP 的 CRC/44 项摘要、
+所有当前 MD 字节匹配及解压离线 14 项通过，证明 `.cache/persist-chunk-release-proof-20261113.json`。
+新 head 的 Windows/Linux 托管检查独立核对，未沿用 PR19；畸形服务回复属于宿主证据，正常握手及空
+文件拒绝才是实际访客证据。专项证明 `.cache/persist-chunk-focused-proof-20261113.json`，
+完整日志 `build/persist-chunk-full-20261113.log`；本轮结果与 PR19 的旧完整证明分别保存。
+
 ## P1 持久化 READ 回复契约（本地完整通过）
 
 基于 PR18 的 782adee 接续。实际 `persist_client.c:pf_call` 宿主基线接受四种不合法
@@ -24,7 +60,8 @@ READ 回复：4096 字节数据区却声明 4097、错误操作码、2^32 状态
 `build/persist-read-verified-test-results-20261113.json`，日志 `build/persist-read-full-20261113.log`。
 660 项 ABI 与作者参考一致，七产物匹配、默认三密钥保持；发布门及实际 ZIP 的 CRC/
 44 项摘要和解压离线 14 项通过，证明 `.cache/persist-read-release-proof-20261113.json`。
-新 head Windows/Linux 托管检查独立核对，未沿用 PR18。Stage/export 的进度与总量一致性、attach
+PR19 的 617233f 已实际核对四项 Windows/Linux push/PR 检查全部成功，证明
+.cache/persist-read-hosted-proof-20261113.json，仅对应该 head。Stage/export 的进度与总量一致性、attach
 ACK 和通用服务重启属于后续有界事项，本轮不宣称整个持久化协议已经加固完毕。
 
 ## P1 未登记文件对端的附加能力清理（本地完整通过）
