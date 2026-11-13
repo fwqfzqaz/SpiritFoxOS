@@ -15,9 +15,9 @@ static void sf_log(const char*);
 static void sf_number(uint64_t);
 #include "../../services/persist_client.c"
 
-static unsigned checks,sends,recvs,closes,loads,stages,mutations,dirty_begins,dirty_ends,dirty_active;
+static unsigned checks,sends,recvs,closes,loads,stages,mutations,dirty_begins,dirty_ends,dirty_active,queries;
 static unsigned corrupt,sys_calls,sys_fail,revokes,spawn_calls;
-static int send_error,recv_error,query_status,mount_status,mutation_status,device_up=1,driver_up,spawn_result=12;
+static int send_error,recv_error,query_status,mount_status,mutation_status,mutation_send_error,mutation_recv_error,device_up=1,driver_up,spawn_result=12;
 static uint32_t list_bytes;
 static uint8_t list_data[SF_TRUST_MAX*32],scratch[SF_STORAGE_SNAPSHOT_BYTES],app_id[32];
 static SfMessage reply;
@@ -43,17 +43,19 @@ static long sf_send_cap(uint32_t ep,SfMessage*m,uint64_t cap){CHECK(ep==persist_
 static long sf_send(uint32_t ep,SfMessage*m){
  CHECK(ep==persist_ep&&!m->h.cap_count);sends++;if(send_error)return send_error;reply=*m;
  switch(m->h.opcode){
- case OP_PERSIST_REVOKED:reply.handle=list_bytes;reply.length=list_bytes;reply.status=query_status;memcpy(reply.data,list_data,sizeof(list_data));break;
+ case OP_PERSIST_REVOKED:queries++;reply.handle=list_bytes;reply.length=list_bytes;reply.status=query_status;memcpy(reply.data,list_data,sizeof(list_data));break;
  case OP_PERSIST_MOUNT:reply.handle=12;reply.status=mount_status;break;
  case OP_PERSIST_STAGE:stages++;break;
- case OP_PERSIST_REVOKE:case OP_PERSIST_INSTALL:mutations++;reply.status=mutation_status;break;
- case OP_PERSIST_BEGIN:case OP_PERSIST_FINISH:break;
+ case OP_PERSIST_REVOKE:if(mutation_send_error)return mutation_send_error;mutations++;reply.status=mutation_status;break;
+ case OP_PERSIST_INSTALL:case OP_PERSIST_WRITE:case OP_PERSIST_TRUNCATE:mutations++;reply.status=mutation_status;break;
+ case OP_PERSIST_BEGIN:case OP_PERSIST_FINISH:reply.status=mutation_status;break;
  case OP_PERSIST_READ:reply.length=m->length>4?4:m->length;memcpy(reply.data,"note",reply.length);break;
  default:CHECK(0);
  }return 0;
 }
 static long sf_recv(uint32_t ep,SfMessage*m,uint64_t until){
  CHECK(ep==persist_reply&&until==sf_deadline(10000));recvs++;if(recv_error)return recv_error;*m=reply;m->h.flags=persist_pid;
+ if(reply.h.opcode==OP_PERSIST_REVOKE&&mutation_recv_error)return mutation_recv_error;
  if(reply.h.opcode!=OP_PERSIST_REVOKED)return persist_pid;
  switch(corrupt){
  case 1:return persist_pid+1;case 2:m->h.request_id++;break;case 3:m->h.size--;break;case 4:m->h.protocol_major++;break;
@@ -67,8 +69,8 @@ static long sf_recv(uint32_t ep,SfMessage*m,uint64_t until){
 }
 static void reset(void){
  persist_ep=0x101;persist_reply=0x102;persist_pid=12;requests=0x300000000ull;uncertain_commit=trust_error=0;
- sends=recvs=closes=loads=stages=mutations=dirty_begins=dirty_ends=dirty_active=0;
- corrupt=sys_calls=sys_fail=revokes=spawn_calls=0;send_error=recv_error=query_status=mount_status=mutation_status=0;device_up=1;driver_up=0;spawn_result=12;
+ sends=recvs=closes=loads=stages=mutations=dirty_begins=dirty_ends=dirty_active=queries=0;
+ corrupt=sys_calls=sys_fail=revokes=spawn_calls=0;send_error=recv_error=query_status=mount_status=mutation_status=mutation_send_error=mutation_recv_error=0;device_up=1;driver_up=0;spawn_result=12;
  list_bytes=0;memset(list_data,0,sizeof(list_data));logged=0;logs[0]=0;CHECK(!sf_trust_init(&sf_trust,&sf_trust_store));
 }
 static void ids(unsigned count){list_bytes=count*32;for(unsigned i=0;i<count;i++)memset(list_data+i*32,(int)(i+1),32);}
@@ -119,5 +121,33 @@ int main(void){
  corrupt=0;list_bytes=32;memcpy(list_data,app_id,32);CHECK(!trust_sync(0)&&!sf_persist_security_error()&&sf_trust_revoked(&sf_trust,app_id));
  reset();corrupt=12;sf_persist_trust_status();char text[64];snprintf(text,sizeof(text),"trust: anchors=%u revoked=0",sf_trust_store.count);CHECK(strstr(logs,"trust: sync unavailable code=3")&&strstr(logs,text));
  corrupt=0;sf_persist_trust_status();CHECK(!sf_persist_security_error());
+ /* A verified failure does not prove that no revocation was committed. */
+ for(int error=SF_VERSION_REJECTED;error<0;error++){
+  if(error==SF_COMMIT_UNCERTAIN)continue;
+  reset();mutation_status=error;list_bytes=32;memcpy(list_data,app_id,32);
+  CHECK(sf_persist_revoke("fixture")==error);CHECK(queries==1&&mutations==1&&!dirty_active&&!sf_persist_uncertain());
+  CHECK(!sf_persist_security_error()&&sf_trust_revoked(&sf_trust,app_id));
+ }
+ reset();mutation_status=SF_BAD_SIGNATURE;CHECK(sf_persist_revoke("fixture")==SF_BAD_SIGNATURE&&queries==1&&!sf_persist_security_error()&&!sf_trust.revoked&&!dirty_active);
+ const int failed_query[]={SF_DEVICE_GONE,SF_TIMEOUT,SF_WOULD_BLOCK};
+ for(unsigned i=0;i<3;i++){
+  reset();mutation_status=SF_BAD_SIGNATURE;query_status=failed_query[i];
+  CHECK(sf_persist_revoke("fixture")==SF_BAD_SIGNATURE&&queries==1&&sf_persist_security_error()==failed_query[i]&&!dirty_active&&!sf_persist_uncertain());
+  old=sends;CHECK(sf_persist_begin()==failed_query[i]&&sends==old);
+  query_status=0;CHECK(!trust_sync(0)&&!sf_persist_security_error());
+ }
+ reset();mutation_status=SF_DEVICE_GONE;corrupt=12;before=sf_trust;
+ CHECK(sf_persist_revoke("fixture")==SF_DEVICE_GONE&&sf_persist_security_error()==SF_BAD_FORMAT&&!memcmp(&before,&sf_trust,sizeof(before))&&!dirty_active);
+ corrupt=0;CHECK(!trust_sync(0)&&!sf_persist_security_error());
+ reset();mutation_send_error=SF_WOULD_BLOCK;CHECK(sf_persist_revoke("fixture")==SF_WOULD_BLOCK&&queries==1&&!mutations&&!dirty_active&&!sf_persist_uncertain()&&!sf_persist_security_error());
+ reset();mutation_recv_error=SF_TIMEOUT;CHECK(sf_persist_revoke("fixture")==SF_TIMEOUT&&!queries&&mutations==1&&dirty_active==1&&sf_persist_uncertain()&&sf_persist_security_error()==SF_COMMIT_UNCERTAIN);
+ const unsigned uncertain_ops[]={OP_PERSIST_MOUNT,OP_PERSIST_WRITE,OP_PERSIST_TRUNCATE,OP_PERSIST_INSTALL,OP_PERSIST_BEGIN,OP_PERSIST_FINISH,OP_PERSIST_REVOKE};
+ for(unsigned i=0;i<sizeof(uncertain_ops)/sizeof(*uncertain_ops);i++){
+  reset();mutation_status=mount_status=SF_COMMIT_UNCERTAIN;SfMessage m;sf_message(&m,uncertain_ops[i],0);m.length=uncertain_ops[i]==OP_PERSIST_WRITE?4:0;
+  CHECK(pf_call(&m)==SF_COMMIT_UNCERTAIN&&dirty_active==1&&dirty_begins==1&&!dirty_ends&&sf_persist_uncertain());
+  old=sends;CHECK(trust_sync(1)==SF_COMMIT_UNCERTAIN&&sf_persist_security_error()==SF_COMMIT_UNCERTAIN&&sends==old&&dirty_active==1);
+ }
+ reset();mutation_status=SF_COMMIT_UNCERTAIN;CHECK(sf_persist_revoke("fixture")==SF_COMMIT_UNCERTAIN&&!queries&&dirty_active==1&&sf_persist_uncertain());
+ old=sends;sf_persist_status();CHECK(strstr(logs,"persist: UNAVAILABLE code=20")&&sends==old&&dirty_active==1&&sf_persist_uncertain());
  printf("TRUST SYNC PASS: %u checks; actual client/crypto, atomic monotonic cache, bounded snapshot, readiness/dirty separation and caller guards\n",checks);return 0;
 }

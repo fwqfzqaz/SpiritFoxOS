@@ -1,6 +1,6 @@
 """Durable truncate/zero extension, exact recovery and read-only RPC policy."""
 import time
-from qemu_persist_test import VM, ROOT, generation, snapshot
+from qemu_persist_test import VM, ROOT, generation, snapshot, unknown_completion
 
 
 def notes(disk, expected, gen, protected):
@@ -87,10 +87,10 @@ def run():
                         time.sleep(.05)
                 else:
                     vm.command('truncate /persist/notes 2', 'truncate: failed code=20')
-                    vm.command('persist', 'persist: UNAVAILABLE')
+                    unknown_completion(vm)
                     vm.command('cat /persist/notes', 'cat: error')
-                    vm.command('truncate /persist/notes 10', 'truncate: failed code=10')
-                    vm.command('unmount /disk', 'disk: UNMOUNTED')
+                    vm.command('truncate /persist/notes 10', 'truncate: failed code=20')
+                    vm.command('unmount /disk', 'disk: unmount refused')
                 assert b'truncate: OK' not in vm.output
             finally:
                 vm.close(event!='interrupt')

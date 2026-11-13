@@ -49,8 +49,10 @@ def packages(data):
 
 
 @contextmanager
-def provider():
+def provider(source='tests/fixtures/persist_trust_fault.c',revoke_error=-10):
     assert Path.cwd().resolve()==ROOT
+    assert source in ('tests/fixtures/persist_trust_fault.c','tests/fixtures/persist_revoke_failure.c')
+    assert revoke_error in (-10,-20)
     restore();BACKUP.mkdir(parents=True,exist_ok=True)
     hashes={}
     for i,name in enumerate(FILES):
@@ -58,8 +60,9 @@ def provider():
     write_state({'active':True,'restored':False,'files':hashes})
     try:
         shared=build.objects('trust-fault-common',['services/start.S','services/memory.c','services/libsf.c','services/arguments.c'],extra=build.USER_SECTIONS)
-        sources=['tests/fixtures/persist_trust_fault.c','services/persist_metadata.c','services/persistence.c','services/txn.c','services/update.c','services/version.c',*build.CRYPTO]
-        image=build.link_elf('trust-fault-persist',shared+build.objects('trust-fault-persist',sources,extra=build.USER_SECTIONS),'services/user.ld')
+        sources=[source,'services/persist_metadata.c','services/persistence.c','services/txn.c','services/update.c','services/version.c',*build.CRYPTO]
+        definitions=[] if source.endswith('persist_trust_fault.c') else ['-DSF_REVOKE_FAILURE_STATUS='+str(revoke_error)]
+        image=build.link_elf('trust-fault-persist',shared+build.objects('trust-fault-persist',sources,extra=[*build.USER_SECTIONS,*definitions]),'services/user.ld')
         build.check_rw_budget('sf-persist',ROOT/'build/trust-fault-persist.elf')
         replacement=pack({'module_id':'org.spiritfox.persist','version':'0.1.0','category':'service','requested_caps':[],'resource_limits':{'memory':524288}},image,1,(ROOT/'.keys/development.seed').read_bytes())
         original=packages((ROOT/'build/bundle.bin').read_bytes());assert sum(n=='sf-persist.sfmod' for n,_ in original)==1

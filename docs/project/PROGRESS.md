@@ -2,6 +2,46 @@
 
 更新日期：2026-11-13（Asia/Shanghai）。
 
+## P1 撤销失败后的信任一致性（本地完整通过）
+
+接续PR22的aaa826a。旧七产物与源码已核对的双传输基线实际复现：签名测试服务完成
+合法撤销、盘代次升到2，但返回认证的DEVICE_GONE后，Root仍允许该签名者的bundle
+应用；显式trust后才拒绝。证明 `.cache/revoke-error-baseline-proof-20261113.json`。
+这模拟服务在真实提交后报错，不是未签名利用、物理EIO或掉电。另用实际完整客户端
+复现认证COMMIT_UNCERTAIN回复被返回但Root释放DIRTY、未锁定未知完成，证明
+`.cache/revoke-uncertain-baseline-proof-20261113.json`；宿主初次缺少标准crypto包含/
+Rust静态库的两次夹具编译失败不计通过。
+
+当前草稿在每次实际REVOKE RPC尝试后要求权威撤销同步，保留原负错误码；有效列表
+能核对已提交政策，也使无害语义拒绝后继续可用，同步不可用/畸形则关闭新权限。
+未知完成保持而不自动查询/重放；认证的COMMIT_UNCERTAIN也保留已取得的DIRTY租约，
+只有新启动上下文恢复，不让trust查询释放它。空/加载失败/未成功暂存仍在REVOKE前
+返回，不新增策略操作。保持签名/盘格式、660项ABI及作者M7/硬件。
+
+初版实际客户端/trust宿主999项、原客户端与真实TRYING卷16821项已通过。含初始构建、
+源码冻结18VM专项363.74秒通过，覆盖新6VM的真实提交后负错误/显式未知完成、四次
+无害文本包拒绝、备用签名者、两次DIRTY卸载拒绝/重启恢复，以及原trust6、Fs2/六死亡、
+硬件4。原客户端16821、Root准入76、ABI九组/660及实际归属四组保持。专项证明
+`.cache/revoke-failure-focused-proof-20261113.json`，默认产物恢复、原盘保持。
+首套完整在真实QEMU blkdebug EIO用例失败：事务层返回明确COMMIT_UNCERTAIN，新Root
+正确停止后续RPC，但状态命令未本地报告UNAVAILABLE，旧用例还期待普通离线/允许卸载。
+已补本地UNAVAILABLE code20和零RPC断言；EIO/截断用例改为保留DIRTY、拒绝新包与
+卸载，保留原盘/银行/重启恢复检查，不放宽保护。现宿主1003项与原16821项通过；
+旧999/18VM证据单独保存，不能充当新诊断代码的证明。失败原日志
+`.cache/revoke-failure-first-full-20261113.log`与退出码记录保留，不计通过。
+新的含初始构建、冻结源码专项已通过（770.12秒、实际52VM）：签名六VM、标准
+Persist全套EIO/恢复、双传输截断，实际11次明确未知完成检查保持新包/卸载拒绝；
+原盘/银行/笔记/重启断言均保持。证明 `.cache/revoke-failure-recheck-proof-20261113.json`，
+日志 `build/revoke-failure-recheck-20261113.log`，当前宿主1003项与原16821项通过。
+含初始构建、冻结源码完整 `tools/test.py` 已通过（4943.02秒、退出码0）；
+完整证明 `.cache/revoke-failure-full-proof-20261113.json`，结果
+`build/revoke-failure-verified-test-results-20261113.json`。660项ABI与作者参考一致，七产物
+及默认三密钥保持；发布门、实际ZIP CRC/44项摘要、docs/下全部MD
+及解压离线14项通过，证明 `.cache/revoke-failure-release-proof-20261113.json`。新head
+的Windows/Linux托管仍独立核对，不沿用PR22。日志
+`build/revoke-failure-full-20261113.log`。本次完整从初始构建重验，未复用首套失败或旧18VM；匹配发布已通过，精确托管仍独立核对。
+恢复点 `.cache/progress-live.json`。
+
 ## P1 块驱动回复契约（本地完整通过）
 
 接续 PR21 的100b7dc。Root storage 与 Persist 两个实际 call 的有界宿主基线各接受
@@ -32,8 +72,8 @@ Root仍能回退bundle，Persist所需信任未就绪时关闭新包；卸载/�
 完整证明 `.cache/persist-block-full-proof-20261113.json`，结果
 `build/persist-block-verified-test-results-20261113.json`。660项ABI与作者参考相同，
 七产物及默认三密钥保持；发布门、实际ZIP CRC/44项摘要、docs/下全部MD
-及解压离线14项通过，证明 `.cache/persist-block-release-proof-20261113.json`。新head的
-Windows/Linux托管检查另行核对，不沿用PR21。日志
+及解压离线14项通过，证明 `.cache/persist-block-release-proof-20261113.json`。PR22的aaa826a已实际核对四项Windows/Linux push/PR检查全部成功；
+证明 `.cache/persist-block-hosted-proof-20261113.json`，未沿用PR21。日志
 `build/persist-block-full-20261113.log`。本轮初始构建、冻结源码完整和相同
 产物发布/离线证明分别保存，未复用PR21。恢复点 `.cache/progress-live.json`；额度停工先
 停止本聊天测试树，再恢复可能激活的block-reply/trust-sync独立产物夹具。
@@ -790,3 +830,12 @@ quota_paused=true，user_paused=false；本聊天测试树已停止，证明 `.c
 并入当前策略草稿。恢复必须先阅读新目标并保留作者修复；当前完整测试因额度停止，
 不能计为通过或直接沿用旧 646 项假设发布。下一次按实际短期重置后一分钟，
 北京时间 2026-11-13 02:29:33 检查真实额度；当前没有本聊天测试/VM 留存。
+
+## 撤销失败同步额度保存点（2026-11-13T16:55:20.763477+08:00）
+
+quota_paused=true，user_paused=false；本聊天测试树已停止，证明 `.cache/revoke-failure-quota-stop-20261113.json`。当前验证、进程及下一步保存在 `.cache/progress-live.json` 和 `.cache/active-work.json`；未完成的完整回归不计通过，未验证工作不提交推送。PR22 已交付证明与当前后续草稿分开。仅实际两窗口均高于 20% 且普通使用允许后恢复。
+
+## 额度恢复（2026-11-13T17:35:27.458353+08:00）
+
+quota_paused=false；实际短期99%、长期27%，普通使用允许。源码/七产物与4943.02秒
+完整证明一致、夹具均非激活；不重复完整回归，先完成匹配发布/文档及正常推送PR。
