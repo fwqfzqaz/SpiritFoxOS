@@ -41,6 +41,10 @@ static int pf_call(SfMessage*m){
      (opcode==OP_PERSIST_STAGE&&!m->status&&(m->length!=requested||m->offset!=offset||m->handle||m->mode))){
   if(dirty)uncertain_commit=1;return SF_BAD_FORMAT;
  }
+ /* A service can authenticate that completion is unknown. Preserve the same
+  * admitted dirty lease as a lost/malformed mutating reply; a query is not
+  * permission to release it or replay the operation. */
+ if(dirty&&m->status==SF_COMMIT_UNCERTAIN){uncertain_commit=1;return SF_COMMIT_UNCERTAIN;}
  if(dirty){
   if(sf_storage_transaction(0)){uncertain_commit=1;return SF_BAD_FORMAT;}
  }
@@ -214,8 +218,11 @@ int sf_persist_revoke(const char*name){
  int secure=sf_persist_security_error();if(secure)return secure;
  uint8_t*snapshot=sf_storage_scratch();long n=sf_storage_load(name,snapshot,SF_STORAGE_SNAPSHOT_BYTES);if(n<0)return(int)n;
  int r=stage(snapshot,n);if(r)return r;
- SfMessage m;sf_message(&m,OP_PERSIST_REVOKE,0);r=pf_call(&m);if(r>=0){int sync=trust_sync(1);if(sync)return sync;}
- return r;
+ SfMessage m;sf_message(&m,OP_PERSIST_REVOKE,0);r=pf_call(&m);
+ /* Even an authenticated negative response can follow a policy commit.
+  * Reconcile authoritative trust, preserving the original operation error.
+  * An uncertain write remains latched and prevents this query from sending. */
+ int sync=trust_sync(1);if(r<0)return r;return sync?sync:r;
 }
 static long export(void*out,size_t capacity,int preview){
  if(!ready()||!sf_storage_writable())return SF_DEVICE_GONE;
@@ -239,6 +246,7 @@ static long export(void*out,size_t capacity,int preview){
 long sf_persist_package(void*out,size_t capacity){return export(out,capacity,0);}
 long sf_persist_preview(void*out,size_t capacity){return export(out,capacity,1);}
 void sf_persist_status(void){
+ if(uncertain_commit){sf_log("persist: UNAVAILABLE code=");sf_number(-(int64_t)SF_COMMIT_UNCERTAIN);sf_log("\n");return;}
  if(!ready()){sf_log("persist: UNAVAILABLE\n");return;}
  SfMessage m;sf_message(&m,OP_PERSIST_STATUS,0);pf_call(&m);
  uint64_t notes=0;int r=sf_persist_notes_size(&notes);

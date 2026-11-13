@@ -120,6 +120,14 @@ class VM:
                 self.qmp.close()
 
 
+def unknown_completion(vm):
+    """An authenticated uncertain commit retains Root admission and DIRTY."""
+    vm.command('persist','persist: UNAVAILABLE code=20')
+    vm.command('run hello.sfk','sfexec: failed code=20')
+    vm.command('unmount /disk','disk: unmount refused')
+    print('ROOT UNKNOWN COMPLETION PRESERVED: '+vm.name,flush=True)
+
+
 def generation(disk):
     data = disk.read_bytes()
     valid = []
@@ -311,7 +319,7 @@ def update_health(machine,disk,pristine,committed):
         vm.expect('sfexec: failed code=20',start)
         assert b'update: TRIAL started' not in vm.output[start:]
         assert b'update: CONFIRMED' not in vm.output[start:]
-        vm.command('persist','persist: UNAVAILABLE')
+        unknown_completion(vm)
     finally:
         vm.close()
     vm = machine('update-begin-recovery')
@@ -333,8 +341,8 @@ def update_health(machine,disk,pristine,committed):
     vm = machine('update-recovery-error',debug=conf.name)
     try:
         vm.boot('PERSIST UNAVAILABLE code=20')
-        vm.command('run installed','sfexec: failed code=10')
-        vm.command('persist','persist: UNAVAILABLE')
+        vm.command('run installed','sfexec: failed code=20')
+        unknown_completion(vm)
     finally:
         vm.close()
     vm = machine('update-trial-recovery')
@@ -374,7 +382,7 @@ def update_health(machine,disk,pristine,committed):
         assert b'Hello from diskhello.sfk!' in vm.output[start:]
         assert b'update: CONFIRMED' not in vm.output[start:]
         assert b'sfexec: exit 0' not in vm.output[start:]
-        vm.command('persist','persist: UNAVAILABLE')
+        unknown_completion(vm)
     finally:
         vm.close()
     vm = machine('update-confirm-recovery')
@@ -485,7 +493,7 @@ def run(iommu=False):
     try:
         vm.boot()
         vm.command('write /persist/notes forbidden-new','write: error')
-        vm.command('persist','persist: UNAVAILABLE')
+        unknown_completion(vm)
         assert b'write: OK' not in vm.output
     finally:
         vm.close()
@@ -519,7 +527,7 @@ def run(iommu=False):
     try:
         vm.boot()
         vm.command('write /persist/notes flush-error!','write: error')
-        vm.command('persist','persist: UNAVAILABLE')
+        unknown_completion(vm)
     finally:
         vm.close()
     vm = machine('error-recovery')
