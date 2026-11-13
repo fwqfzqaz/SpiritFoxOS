@@ -23,6 +23,7 @@ void persist_fixture_device(int);
 unsigned persist_fixture_brackets(void);
 static unsigned checks,sends,recvs,closes,corrupt;
 static int send_error,recv_error,semantic;
+static uint32_t read_limit=UINT32_MAX;
 static SfMessage reply;
 static SfNamespace fresh,copy;
 #define CHECK(c) do{checks++;if(!(c)){fprintf(stderr,"PERSIST METADATA FAIL line %d: %s\n",__LINE__,#c);exit(1);}}while(0)
@@ -34,8 +35,14 @@ int sf_storage_driver(uint32_t*a,uint32_t*b,uint32_t*c,uint64_t*d,int*e){(void)a
 uint8_t*sf_storage_scratch(void){return 0;}
 long sf_storage_load(const char*n,void*p,size_t c){(void)n;(void)p;(void)c;return SF_DEVICE_GONE;}
 static long sf_send(uint32_t h,SfMessage*m){
- CHECK(h==0x101&&(m->h.opcode==OP_PERSIST_NOTES_SIZE||m->h.opcode==OP_PERSIST_TRUNCATE)&&!m->h.cap_count);sends++;if(send_error)return send_error;
- reply=*m;reply.h.flags=1;reply.status=m->h.opcode==OP_PERSIST_TRUNCATE?0:persist_metadata_dispatch(1,&reply);if(semantic){reply.status=semantic;reply.handle=0;}return 0;
+ CHECK(h==0x101&&(m->h.opcode==OP_PERSIST_NOTES_SIZE||m->h.opcode==OP_PERSIST_TRUNCATE||m->h.opcode==OP_PERSIST_READ)&&!m->h.cap_count);sends++;if(send_error)return send_error;
+ reply=*m;reply.h.flags=1;
+ if(m->h.opcode==OP_PERSIST_READ){
+  CHECK(m->length<=sizeof(m->data));reply.status=0;
+  if(reply.length>read_limit)reply.length=read_limit;
+  for(unsigned i=0;i<reply.length;i++)reply.data[i]=(uint8_t)(m->offset+i);
+ }else reply.status=m->h.opcode==OP_PERSIST_TRUNCATE?0:persist_metadata_dispatch(1,&reply);
+ if(semantic){reply.status=semantic;reply.handle=0;}return 0;
 }
 static long sf_recv(uint32_t h,SfMessage*m,uint64_t deadline){
  CHECK(h==0x102&&deadline==sf_deadline(10000));recvs++;if(recv_error)return recv_error;
@@ -46,9 +53,40 @@ static long sf_recv(uint32_t h,SfMessage*m,uint64_t deadline){
  case 9:m->h.deadline_ns++;break;case 10:m->offset=1;break;case 11:m->length=1;break;case 12:m->mode=1;break;
  case 13:m->status=1;break;case 14:m->status=-22;break;case 15:m->status=-(1ll<<32);break;case 16:m->handle=16385;break;
  case 17:m->handle=1ull<<32;break;case 18:m->h.cap_count=1;m->handle=0x777;break;case 19:m->status=SF_DEVICE_GONE;break;
+ case 20:m->status=1ll<<32;break;case 21:m->length=sizeof(m->data)+1;break;case 22:m->length++;break;
  }return 12;
 }
-static void reset(void){persist_ep=0x101;persist_reply=0x102;persist_pid=12;uncertain_commit=0;corrupt=0;send_error=recv_error=semantic=0;}
+static void reset(void){persist_ep=0x101;persist_reply=0x102;persist_pid=12;uncertain_commit=0;corrupt=0;send_error=recv_error=semantic=0;read_limit=UINT32_MAX;}
+static void read_reply_tests(void){
+ uint8_t out[2*SF_MSG_BYTES+9],expected[sizeof(out)];
+ const size_t lengths[]={0,1,255,256,SF_MSG_BYTES-1,SF_MSG_BYTES,SF_MSG_BYTES+1,2*SF_MSG_BYTES+7};
+ const uint64_t offsets[]={0,1,UINT32_MAX-3,(1ull<<33)+7};
+ for(unsigned i=0;i<sizeof(offsets)/sizeof(*offsets);i++)for(unsigned j=0;j<sizeof(lengths)/sizeof(*lengths);j++){
+  reset();memset(out,0xcc,sizeof(out));memset(expected,0xcc,sizeof(expected));
+  for(size_t k=0;k<lengths[j];k++)expected[k+1]=(uint8_t)(offsets[i]+k);
+  CHECK(ext_read(offsets[i],out+1,lengths[j])==(long)lengths[j]);CHECK(!memcmp(out,expected,sizeof(out)));CHECK(!sf_persist_uncertain());
+ }
+ for(uint32_t limit=0;limit<=SF_MSG_BYTES;limit=limit?limit*2:1){
+  reset();read_limit=limit;memset(out,0xcc,sizeof(out));memset(expected,0xcc,sizeof(expected));
+  size_t n=limit==SF_MSG_BYTES?2*SF_MSG_BYTES:limit;
+  for(size_t k=0;k<n;k++)expected[k+1]=(uint8_t)(123+k);
+  CHECK(ext_read(123,out+1,2*SF_MSG_BYTES)==(long)n);CHECK(!memcmp(out,expected,sizeof(out)));
+ }
+ const unsigned bad[]={1,2,3,4,5,6,7,8,9,10,12,13,14,15,16,17,18,20,21,22};
+ for(unsigned i=0;i<sizeof(bad)/sizeof(*bad);i++){
+  reset();corrupt=bad[i];unsigned oldclose=closes;memset(out,0xcc,sizeof(out));memcpy(expected,out,sizeof(out));
+  CHECK(ext_read(0,out+1,2*SF_MSG_BYTES)==(bad[i]<=2?SF_STALE_HANDLE:SF_BAD_FORMAT));
+  CHECK(!memcmp(out,expected,sizeof(out)));CHECK(closes==oldclose+(bad[i]==18));CHECK(!sf_persist_uncertain());
+ }
+ reset();corrupt=22;SfMessage m;sf_message(&m,OP_PERSIST_READ,0);m.length=1;
+ CHECK(pf_call(&m)==SF_BAD_FORMAT); /* exceeds requested size while still inside data */
+ reset();for(int e=SF_INVALID;e>=SF_VERSION_REJECTED;e--){
+  semantic=e;memset(out,0xcc,sizeof(out));memcpy(expected,out,sizeof(out));CHECK(ext_read(0,out+1,2*SF_MSG_BYTES)==e);CHECK(!memcmp(out,expected,sizeof(out)));CHECK(!sf_persist_uncertain());
+ }
+ reset();send_error=SF_WOULD_BLOCK;unsigned received=recvs;CHECK(ext_read(0,out,1)==SF_WOULD_BLOCK&&recvs==received);
+ reset();recv_error=SF_TIMEOUT;CHECK(ext_read(0,out,1)==SF_TIMEOUT&&!sf_persist_uncertain());
+ reset();requests=UINT64_MAX;unsigned sent=sends;CHECK(ext_read(0,out,1)==SF_NO_SPACE&&sends==sent);requests=0x300000000ull;
+}
 int main(void){
  checks=persist_volume_tests();reset();
  /* Request validation runs against the actual mounted TRYING volume. */
@@ -98,5 +136,6 @@ int main(void){
   CHECK(sf_persist_uncertain()&&persist_fixture_brackets()==brackets+1);
   unsigned sent_before=sends;uint64_t untouched=UINT64_MAX;CHECK(sf_persist_notes_size(&untouched)==SF_COMMIT_UNCERTAIN&&untouched==UINT64_MAX&&sends==sent_before);
  }
- printf("Persistence metadata tests passed: %u assertions; real TRYING volume, no I/O/cache/trust changes, authenticated codec and atomic fresh-tree reprojection\n",checks);return 0;
+ read_reply_tests();
+ printf("Persistence metadata tests passed: %u assertions; real TRYING volume, no I/O/cache/trust changes, authenticated codec, bounded READ replies and atomic fresh-tree reprojection\n",checks);return 0;
 }
