@@ -1,6 +1,28 @@
 # SpiritFoxOS 实施进度
 
-更新日期：2026-11-13（Asia/Shanghai）。
+更新日期：2026-11-14（Asia/Shanghai）。
+
+## 当前 main 的 Windows Linux-blob 构建修复（完整验证尚未完成）
+
+基于作者2650385，保留其USB/xHCI/HID与Linux S0–S3。实际Windows作业
+132332765985在translator的反斜杠.incbin路径上报非法转义；生成器现输出POSIX路径，
+保持内容摘要缓存键及4096字节对齐。真实汇编器逐字节核对Windows/POSIX/含空格路径
+的三个载荷，并验证同名同长二进制改写后的实际输出更新。发布门同时对齐作者已有
+ABI662，未修改编号、布局或内核运行时代码。
+
+首套完整在COFF链接Core宿主夹具缺少usb_init/usb_poll时失败，已按原device/console
+策略补齐硬件桩；真实USB验证仍由原QEMU用例负责。修正后的初始构建、全宿主及真实
+Linux七工具/syscall探针和USB专项213.88秒通过，证明
+`.cache/linux-blob-focused-proof-20261114.json`。
+
+后续本地完整进程以1073807364退出，当前未取得完整通过结果；日志
+`.cache/linux-blob-second-full-transport-20261114.log`保留。该状态码和工具断连时间
+只能作为进程终止证据，不能证明具体终止者。执行器Job允许显式breakaway，但短生命
+周期探针的子进程仍属于Job，已终止该探针，不尝试绕过其余限制。完整验证、发布门
+及新head的托管状态必须独立核对，不能用专项、旧持久化验证或部分前缀冒充通过。
+
+旧9c24275持久化预检和暂停检查点保留。未进入main的P1改动已在工作区内部独立检出
+准备，作者内核/Linux启动代码保持，但尚未测试、未推送；本轮先完成独立CI构建修复。
 
 ## Linux 兼容 S0/S1：有界 ELF 装载核心（E1 通过）
 

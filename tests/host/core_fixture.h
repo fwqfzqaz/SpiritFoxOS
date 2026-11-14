@@ -44,6 +44,9 @@ void ipc_cleanup(Task*t){(void)t;}int ipc_grant(Task*a,Task*b,uint32_t c,uint32_
 long pci_read(uint64_t a,uint64_t b){(void)a;(void)b;return SF_DENIED;}long device_io(Task*t,uint64_t a,uint64_t b,uint64_t c){(void)t;(void)a;(void)b;(void)c;return SF_DENIED;}
 int device_grant(Task*t,uint32_t a,uint32_t b,SfBootArgs*c){(void)t;(void)a;(void)b;(void)c;return SF_DENIED;}int device_release(Task*t){(void)t;return 0;}void device_forget(Task*t){(void)t;}
 void device_init(SfBootInfo*b){(void)b;}void device_poll(void){}int device_status(SfDmaStatus*s){memset(s,0,sizeof(*s));return 0;}
+/* Core policy tests have no hardware controller; actual USB input is covered
+ * by qemu_usb_test.py. COFF still resolves the unused boot/timer references. */
+void usb_init(void){}void usb_poll(void){}
 void device_irq_init(void){}int device_irq_acquire(Task*t){(void)t;return SF_DENIED;}int device_irq_release(Task*t){(void)t;return SF_DENIED;}
 int device_irq_wait(Task*t,uint32_t n){(void)t;(void)n;return SF_DENIED;}void device_irq_vector(void){}
 uint8_t kernel_end[1];

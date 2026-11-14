@@ -3,7 +3,7 @@ import concurrent.futures
 import hashlib
 import json
 import os
-from pathlib import Path
+from pathlib import Path, PurePath
 import subprocess
 import struct
 import sys
@@ -158,6 +158,22 @@ def elf_section_size(path, name):
     return elf_section(path, name)[1]
 
 
+def linux_blob_source(blobs):
+    """Emit assembler paths portably while binding its cache key to payloads."""
+    blobs = [(symbol, path if isinstance(path, PurePath) else Path(path))
+             for symbol, path in blobs]
+    lines = ['.section .rodata,"a"', '.balign 4096']
+    digest = hashlib.sha256()
+    for _, path in blobs:
+        digest.update(Path(path).read_bytes())
+    lines.insert(0, '# blobs sha256 ' + digest.hexdigest())
+    for symbol, path in blobs:
+        lines += [f'.global __sf_linux_{symbol}_start', f'.global __sf_linux_{symbol}_end',
+                  f'__sf_linux_{symbol}_start:', f'.incbin "{path.as_posix()}"',
+                  f'__sf_linux_{symbol}_end:', '.balign 4096']
+    return '\n'.join(lines) + '\n'
+
+
 def build_linux_compat_blobs():
     """生成 S3 翻译器、S2 stub/探针、Linux 静态 PIE 工具与 syscall 探针。
 
@@ -214,23 +230,14 @@ def build_linux_compat_blobs():
     fixtures['sysprobe'] = build_linux_fixture('tool-sysprobe',
                                                ['tests/fixtures/linux_syscall_probe.c'], [])
 
-    lines = ['.section .rodata,"a"', '.balign 4096']
     blobs = [('hello', 'build/linux_hello.elf'),
              ('stub', 'build/linux_compat_stub.bin'),
              ('probe', 'build/linux_compat_probe.bin'),
-             ('translator', str(blob))]
+             ('translator', blob)]
     blobs += [(name, fixtures[name]) for name in fixtures]
     # Zig 的编译缓存只按源文件内容做键；incbin 的外部文件变化不会使缓存失效。
     # 把嵌入内容的摘要写进源文件，确保 blob/夹具更新后一定重新汇编。
-    digest = hashlib.sha256()
-    for _, path in blobs:
-        digest.update(Path(path).read_bytes())
-    lines.insert(0, '# blobs sha256 ' + digest.hexdigest())
-    for symbol, path in blobs:
-        lines += [f'.global __sf_linux_{symbol}_start', f'.global __sf_linux_{symbol}_end',
-                  f'__sf_linux_{symbol}_start:', f'.incbin "{path}"',
-                  f'__sf_linux_{symbol}_end:', '.balign 4096']
-    (ROOT / 'build' / 'linux_blobs.S').write_text('\n'.join(lines) + '\n')
+    (ROOT / 'build' / 'linux_blobs.S').write_text(linux_blob_source(blobs))
     header = ['#ifndef SF_LINUX_BLOBS_H', '#define SF_LINUX_BLOBS_H',
               f'#define SF_LINUX_STUB_TEXT_BYTES {texts["stub"]}u',
               f'#define SF_LINUX_PROBE_TEXT_BYTES {texts["probe"]}u',
