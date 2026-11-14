@@ -134,8 +134,8 @@ def build_accounts_table():
     (ROOT / 'build' / 'accounts_table.h').write_text(header)
 
 
-def elf_section_size(path, name):
-    """读取 ELF64 小端映像中指定节的字节数（用于精确追加 stub/probe 代码段）。"""
+def elf_section(path, name, optional=False):
+    """读取 ELF64 小端映像中指定节的 (addr, size)。"""
     data = Path(path).read_bytes()
     shoff = struct.unpack_from('<Q', data, 40)[0]
     shentsize = struct.unpack_from('<H', data, 58)[0]
@@ -147,16 +147,23 @@ def elf_section_size(path, name):
         name_off = struct.unpack_from('<I', data, off)[0]
         end = data.index(b'\0', strtab_off + name_off)
         if data[strtab_off + name_off:end] == name.encode():
-            return struct.unpack_from('<Q', data, off + 32)[0]
+            return struct.unpack_from('<Q', data, off + 16)[0], struct.unpack_from('<Q', data, off + 32)[0]
+    if optional:
+        return 0, 0
     raise RuntimeError(f'{path}: missing section {name}')
 
 
-def build_linux_compat_blobs():
-    """生成 S2 兼容启动 stub、负例探针与 Linux 静态 PIE 夹具。
+def elf_section_size(path, name):
+    """读取 ELF64 小端映像中指定节的字节数（用于精确追加 stub/probe 代码段）。"""
+    return elf_section(path, name)[1]
 
-    stub/probe 固定布局（.text@0、.data@0x1000），由 sf-init 按 RX/RW 两段
-    追加到 Linux 映像计划；hello 是只含一个 RX 段的 ET_DYN。这里同时输出
-    incbin 汇编和精确 .text 长度，避免 init 里硬编码二进制尺寸。
+
+def build_linux_compat_blobs():
+    """生成 S3 翻译器、S2 stub/探针、Linux 静态 PIE 工具与 syscall 探针。
+
+    翻译器编译为位置无关 blob：.text/.rodata 在 0，.data/.bss 固定在 0x10000。
+    sf-init 按 RX/RW 两段追加，因此必须保证链接结果不含动态重定位，且数据页
+    不超过一页；任一条不满足即构建失败，而不是在运行期静默出错。
     """
     print('Building Linux compatibility blobs', flush=True)
     run(['-target', 'x86_64-freestanding-none', '-nostdlib', '-fpie', '-pie',
@@ -171,10 +178,55 @@ def build_linux_compat_blobs():
         subprocess.run([ZIG, 'objcopy', '-O', 'binary', elf,
                         'build/linux_compat_' + name + '.bin'], check=True)
         texts[name] = elf_section_size(elf, '.text')
+
+    translator_flags = ['-fpie', '-fno-jump-tables', '-fvisibility=hidden',
+                        '-DSF_FILE_SYSCALL=lx_sys']
+    translator = objects('linux-translator',
+                         ['services/linux_compat.c', 'services/linux_errno.c',
+                          'services/file_client.c', 'services/linux_translator_entry.S'],
+                         extra=translator_flags)
+    translator_elf = 'build/linux_compat_translator.elf'
+    run(['-target', 'x86_64-freestanding-none', '-nostdlib', '-pie', '-Wl,-Bsymbolic',
+         '-Wl,-e,_sf_linux_translator_start', '-Wl,-T,services/linux_translator.ld',
+         '-Wl,--build-id=none',
+         *translator, '-o', translator_elf])
+    for name in ('.rela.dyn', '.rela.plt', '.rel.dyn', '.rel.plt'):
+        if elf_section(translator_elf, name, optional=True)[1]:
+            raise RuntimeError(f'Linux translator must not require {name}')
+    data_offset, data_size = elf_section(translator_elf, '.data')
+    if data_offset != 0x10000 or data_size > 4096:
+        raise RuntimeError(f'Linux translator data layout invalid: offset {data_offset} '
+                           f'size {data_size}')
+    subprocess.run([ZIG, 'objcopy', '-O', 'binary', translator_elf,
+                    'build/linux_compat_translator.bin'], check=True)
+    blob = Path('build/linux_compat_translator.bin')
+    image = blob.read_bytes()
+    if len(image) > data_offset + 4096:
+        raise RuntimeError('Linux translator binary exceeds code page + data page')
+    blob.write_bytes(image + bytes(data_offset + 4096 - len(image)))
+
+    fixtures = {}
+    for name, define in [('true', 'TOOL_TRUE'), ('false', 'TOOL_FALSE'),
+                         ('echo', 'TOOL_ECHO'), ('seq', 'TOOL_SEQ'),
+                         ('cat', 'TOOL_CAT'), ('wc', 'TOOL_WC'), ('ls', 'TOOL_LS')]:
+        fixtures[name] = build_linux_fixture('tool-' + name,
+                                             ['tests/fixtures/linux_tool.c'], ['-D' + define])
+    fixtures['sysprobe'] = build_linux_fixture('tool-sysprobe',
+                                               ['tests/fixtures/linux_syscall_probe.c'], [])
+
     lines = ['.section .rodata,"a"', '.balign 4096']
-    for symbol, path in [('hello', 'build/linux_hello.elf'),
-                         ('stub', 'build/linux_compat_stub.bin'),
-                         ('probe', 'build/linux_compat_probe.bin')]:
+    blobs = [('hello', 'build/linux_hello.elf'),
+             ('stub', 'build/linux_compat_stub.bin'),
+             ('probe', 'build/linux_compat_probe.bin'),
+             ('translator', str(blob))]
+    blobs += [(name, fixtures[name]) for name in fixtures]
+    # Zig 的编译缓存只按源文件内容做键；incbin 的外部文件变化不会使缓存失效。
+    # 把嵌入内容的摘要写进源文件，确保 blob/夹具更新后一定重新汇编。
+    digest = hashlib.sha256()
+    for _, path in blobs:
+        digest.update(Path(path).read_bytes())
+    lines.insert(0, '# blobs sha256 ' + digest.hexdigest())
+    for symbol, path in blobs:
         lines += [f'.global __sf_linux_{symbol}_start', f'.global __sf_linux_{symbol}_end',
                   f'__sf_linux_{symbol}_start:', f'.incbin "{path}"',
                   f'__sf_linux_{symbol}_end:', '.balign 4096']
@@ -182,8 +234,49 @@ def build_linux_compat_blobs():
     header = ['#ifndef SF_LINUX_BLOBS_H', '#define SF_LINUX_BLOBS_H',
               f'#define SF_LINUX_STUB_TEXT_BYTES {texts["stub"]}u',
               f'#define SF_LINUX_PROBE_TEXT_BYTES {texts["probe"]}u',
+              f'#define SF_LINUX_TRANSLATOR_TEXT_BYTES {data_offset}u',
+              f'#define SF_LINUX_TRANSLATOR_DATA_OFFSET {data_offset}u',
               '#endif']
     (ROOT / 'build' / 'linux_blobs.h').write_text('\n'.join(header) + '\n')
+
+
+def strip_elf_program_headers(path, keep=(1, 2)):
+    """只保留 PT_LOAD/PT_DYNAMIC，移除 lld 默认生成的 PT_GNU_STACK 等。
+
+    Linux 装载器（services/linux_image.c）只接受加载相关段；夹具由 C 编译时
+    lld 会附加 PT_GNU_STACK，必须在交给装载器前去掉。"""
+    data = bytearray(Path(path).read_bytes())
+    phoff = struct.unpack_from('<Q', data, 32)[0]
+    phentsize = struct.unpack_from('<H', data, 54)[0]
+    phnum = struct.unpack_from('<H', data, 56)[0]
+    kept = []
+    for i in range(phnum):
+        offset = phoff + i * phentsize
+        kind = struct.unpack_from('<I', data, offset)[0]
+        if kind in keep:
+            kept.append(bytes(data[offset:offset + phentsize]))
+    for i, header in enumerate(kept):
+        data[phoff + i * phentsize:phoff + (i + 1) * phentsize] = header
+    struct.pack_into('<H', data, 56, len(kept))
+    Path(path).write_bytes(data)
+
+
+def build_linux_fixture(name, sources, defines):
+    """把静态 PIE 工具/探针链接为 ELF，返回 ELF 路径。
+
+    sf_init 对工具夹具走 sf_linux_elf_load，因此内嵌产物必须是完整 ELF；
+    objcopy -O binary 会丢掉 ELF 头与程序头，装载器会以 SF_BAD_FORMAT 拒绝。
+    """
+    elf = 'build/linux_fixture_' + name + '.elf'
+    objs = objects('fixture-' + name,
+                   sources + ['tests/fixtures/linux_tool_start.S'],
+                   defines=defines, extra=['-fpie', '-fno-jump-tables'])
+    run(['-target', 'x86_64-freestanding-none', '-nostdlib', '-pie', '-Wl,-Bsymbolic',
+         '-Wl,-e,_start', '-Wl,-T,tests/fixtures/linux_tool.ld', '-Wl,--build-id=none',
+         *objs, '-o', elf])
+    strip_elf_program_headers(elf)
+    return elf
+
 
 
 def compile_one(item):

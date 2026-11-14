@@ -61,6 +61,8 @@ M6 新增 `/persist/notes` 的 16 KiB 有界读写适配器，每次成功 write
 
 Linux 兼容入口是同一 `int 0x80` 路径上的可选分支：进程经 `SYS_COMPAT_SET` 注册后，内核把完整 `Frame` 写入其 RW NX 帧页并跳到 RX handler，翻译器用新增的 `int 0x81`（IDT 向量 129，DPL3）调用原生系统调用，最后以 `SYS_COMPAT_RET` 从内核保留副本恢复寄存器。未注册进程的 `int 0x81` 返回 `SF_DENIED`；嵌套计数不为 1 时终止进程。帧页内容只作为参数副本，恢复路径不信任 CPL3 可写内存。
 
+S3 的翻译器是独立位置无关 blob，随 sf-init 追加为 RX/RW 两段：`.text`+`.rodata` 位于段基址，静态数据固定在偏移 `0x10000` 的 RW 页，入口必须位于 blob 偏移 0。构建期拒绝任何 `.rela*`/`.rel*`、校验数据页不超过 4 KiB，并用内容摘要打破 Zig 对 `.incbin` 外部文件的缓存盲区。翻译器无动态分配：fd 表 32 项、pipe 槽 4 个（各 4 KiB 环形缓冲）、1 MiB 有界 `brk`，文件 RPC 沿用 `SfFileClient` 并通过 `int 0x81` 到达 sf-init。sf-init 为每次工具运行打开只读磁盘根、创建私有回复端点、以既有 `SfLoadPlan` 装载 ELF 并登记子进程，退出统一回收；内核与 BootArgs ABI 未新增字段。
+
 本开发版本保持 BootArgs 固定头 96 字节，把尾部设备 BDF 的高 16 位定义为 device_rights；装载计划相应字段传递显式写权。只读驱动模式和带 FLUSH 的可写模式分别协商。尚未冻结 ABI，不承诺兼容此前构建的设备驱动包。
 
 设备释放先复位并确认状态、禁用 PCI Bus Master，再撤销 I/O 权和可选 IOMMU context。DMA 页始终保留；只有旧地址空间销毁后才允许新驱动使用。复位或失效不能确认时进入隔离状态并禁止新授权。默认无 DMAR 时是 legacy 可信驱动模式；QEMU q35 可选 Intel VT-d + modern virtio ACCESS_PLATFORM，实际把未授权 RAM DMA 阻止在设备页表之外。完整限制见 `IOMMU.md`。

@@ -1,6 +1,6 @@
 # 规划：Linux 应用兼容模块（有界兼容层）
 
-状态：S0 已评审 / S1 通过（E1）/ S2 完成（E2）
+状态：S0 已评审 / S1 通过（E1）/ S2 完成（E2）/ S3 完成（E1+E2，工具夹具）
 日期：2026-11-13
 适用项目：SpiritFoxOS（x86_64 UEFI 微内核原型）
 
@@ -183,6 +183,7 @@ Core 0
 - 交付：约 35 个调用的翻译与测试：`read/write/openat/close/lseek/fstat/newfstatat/brk/mmap/munmap/mprotect/exit/exit_group/clock_gettime/gettimeofday/nanosleep/getpid/gettid/getuid/uname/getrandom/arch_prctl/set_tid_address/ioctl(TIOCGWINSZ)/poll/ppoll/pipe2/dup/dup2/dup3/fcntl/getcwd/readlinkat/prlimit64/sysinfo/sched_yield`。
 - 验收（E1+E2）：宿主 errno 表全覆盖；QEMU 运行 `busybox` 子集（cat/ls/echo/true/false/seq/wc）并比对输出；未知调用返回 `ENOSYS`，危险调用（`ptrace/mount/io_uring/bpf`）按白名单拒绝。
 - 回退：翻译器按调用号分发表，未实现的号显式拒绝，不影响已交付调用。
+- 实现（2026-11-14）：`include/linux_abi.h` 固定调用号/errno/结构体；`services/linux_errno.c` 把原生负状态映射为 Linux errno；`services/linux_compat.c` 作为位置无关翻译器（`int 0x80` 上行、`int 0x81` 下行），提供有界 fd 表、4 个 pipe 槽、1 MiB `brk` 与只读文件/目录 RPC（复用 `services/file_client.c`）。实际交付 36 项：计划中的 35 项加 `getdents64`。E2 载荷为自建静态 PIE 工具集（true/false/echo/seq/cat/wc/ls）与覆盖 36 个调用号的 syscall 探针；真实 `busybox` 需要 S4 的 TLS/FSBASE 与 S5 的 musl 适配，验收推迟到 S4/S5，当前偏差已记录在 §12。
 
 ### S4 TLS、线程与 futex
 
@@ -276,3 +277,30 @@ S1 只做纯用户态装载核心，不修改内核、ABI 或任何构建产物�
 - 初始栈按 SysV 布局提供 `argc/argv/envp/auxv`，并要求程序头由某个 `PT_LOAD` 文件范围映射；缺失时校验仍可通过（`phdr_rva=0`），但 `sf_linux_stack_init` 返回 `SF_BAD_FORMAT`。
 
 S1 证据等级为 E1（宿主与集成测试）；S2 起静态 PIE 已可在 QEMU 内经兼容入口运行（E2），动态链接、完整 syscall 子集与真机仍属后续阶段。
+
+## 12 S3 实施记录（syscall 子集 v1）
+
+| 交付 | 位置 |
+| --- | --- |
+| 调用号、errno、结构体与静态布局断言 | `include/linux_abi.h` |
+| 原生状态 → Linux errno 映射 | `services/linux_errno.c`、`tests/host/test_linux_errno.c` |
+| 位置无关翻译器与入口 | `services/linux_compat.c`、`services/linux_translator_entry.S`、`services/linux_translator.ld` |
+| 静态 PIE 工具与 syscall 探针 | `tests/fixtures/linux_tool.c`、`tests/fixtures/linux_syscall_probe.c`、`tests/fixtures/linux_tool_start.S` |
+| 构建期布局校验与内嵌 | `tools/build.py`（零动态重定位、数据页 ≤ 4 KiB、入口位于 blob 偏移 0） |
+| QEMU 验收 | `tests/qemu/qemu_linux_compat_test.py` |
+
+实现要点与边界：
+
+- 翻译器是独立的 RX blob（`.text`+`.rodata` 位于 0），静态数据固定在 `0x10000` 的 RW 页；blob 偏移 0 即入口，sf-init 以追加段基址作为 `plan.entry`。数据页前 16 字节由入口写入口地址与翻译器栈顶，C 静态变量从偏移 16 开始。
+- 每次 `int 0x80` 上行把完整帧复制到用户帧页并切到 64 KiB 翻译器栈；`SYS_COMPAT_RET(42)` 只从内核保存副本恢复，返回路径不经过调度器。
+- fd 表 32 项（0/1/2 为 stdin/console）、pipe 槽 4 个（每槽 4 KiB 环形缓冲）、`brk` 1 MiB；单次文件 RPC 受 `SfMessage` 4 KiB 限制，较大读写由翻译器分块。无动态内存分配。
+- 文件与目录操作通过 `SfFileClient` 走 `int 0x81` 到达 sf-init 的文件服务；sf-init 为每次工具运行打开只读磁盘根 `/disk`、创建私有回复端点并登记为子进程，退出后统一回收。
+- 危险调用（`ptrace/setuid/setgid/setresuid/setresgid/mount/umount2/swapon/swapoff/reboot/*_module/kexec_load/process_vm_*/bpf/userfaultfd/io_uring_*`）在分派前返回 `EPERM`；未实现的调用返回 `ENOSYS`。
+
+阶段性偏差（经评审确认）：
+
+- E2 未使用真实 `busybox`。`busybox` 的静态构建依赖 TLS/`arch_prctl(ARCH_SET_FS)`（S4）与 musl 运行时（S5），在 S3 交付时会被拒绝或崩溃。S3 改用同一份源码生成 7 个静态 PIE 工具与一个覆盖 36 个调用号的 syscall 探针，覆盖相同的文件/输出行为；真实 `busybox` 的验收顺延到 S4/S5 完成之后。
+- `getdents64` 不在最初的 35 项清单内，但 `ls` 的最小可用实现需要目录枚举，因此作为第 36 项追加；它只读、受 fd 表与单次 4 KiB 缓冲约束。
+- `arch_prctl(ARCH_SET_FS)` 与 `getrandom` 在 S3 明确返回 `ENOSYS`，避免在缺少 TLS 与内核熵源时给出错误语义。
+
+S3 证据等级为 E1（宿主 errno 表，26 项断言）+ E2（QEMU 内 7 个工具、覆盖 36 个调用号的探针与既有原生回归）；真机与真实 `busybox` 仍未验收。

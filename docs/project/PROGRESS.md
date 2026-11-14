@@ -18,6 +18,18 @@ E1：`tests/host/test_linux_elf.c` 5652 项断言（含 2000 次固定种子变�
 
 验证：`tests/host/test_compat.c` 28 项断言通过；`python3 tools/test.py --host-only` 全绿（ABI 660→662，旧 660 项无删改）；`tests/qemu/qemu_linux_compat_test.py` 真实启动确认 `LINUX COMPAT HELLO` 输出、hello 退出 0、四组负例按预期拒绝/终止，且原生 `run hello.sfk` 路径不受影响。完整 `python3 tools/test.py` 3497.59 秒、79 次 VM 启动全绿，无 `[FAIL]`/`[PANIC]`，结果 `build/test-results.json`。
 
+## Linux 兼容 S3：syscall 子集 v1 与 errno 映射（E1+E2 通过）
+
+`include/linux_abi.h` 固定 36 个调用号、Linux errno、`open/fcntl/stat/mmap/poll/ioctl/rlimit` 常量与 `LxStat/LxDirent64/LxSysinfo` 等结构体，并用 `_Static_assert` 校验布局；`services/linux_errno.c` 把原生负状态映射为 Linux errno，未知状态回退 `EIO`。`services/linux_compat.c` 是位置无关翻译器：`int 0x80` 上行取完整帧、`int 0x81` 下行调原生系统调用，`SYS_COMPAT_RET=42` 从内核权威副本恢复。
+
+翻译器的 `.text`+`.rodata` 位于 blob 偏移 0，`.data/.bss` 固定在 `0x10000` 的 RW 页，入口由独立 `.text.start` 段保证位于偏移 0；数据页前 16 字节由入口写入口地址与翻译器栈顶。构建期拒绝任何动态重定位、校验数据页 ≤ 4 KiB，并把内嵌内容的 SHA-256 写入 `build/linux_blobs.S`，避免 Zig 对 `.incbin` 外部文件沿用旧缓存。`services/init.c` 为每次工具运行打开只读磁盘根 `/disk`、创建私有回复端点、以既有 `SfLoadPlan` 装载 ELF 并登记子进程，退出经 `app_reap` 统一回收；内核与 BootArgs ABI 未新增字段（ABI 仍 662）。
+
+有界性：fd 表 32 项、pipe 槽 4 个（各 4 KiB 环形缓冲）、`brk` 1 MiB、单次文件 RPC 4 KiB 分块，无动态分配；危险调用（`ptrace/setuid/mount/module/bpf/io_uring` 等）返回 `EPERM`，未实现调用返回 `ENOSYS`，`arch_prctl(ARCH_SET_FS)` 与 `getrandom` 在 S3 明确拒绝。
+
+E1：`tests/host/test_linux_errno.c` 26 项断言通过。E2：`tests/qemu/qemu_linux_compat_test.py` 确认 7 个静态 PIE 工具（true/false/echo/seq/cat/wc/ls）与覆盖 36 个调用号的 syscall 探针全部通过，`cat` 输出磁盘原文、`wc` 为 `WC 66 7 1`、`ls` 列出 `readme.txt`，并保留 hello、注册边界、未注册 `0x81`、嵌套上行终止与原生回归断言。完整 `python3 tools/test.py` 3833.83 秒、170 次 VM 启动全绿（退出码 0），ABI 仍 662，结果见 `build/test-results.json`。
+
+阶段性偏差：E2 未使用真实 `busybox`（依赖 S4 的 TLS/FSBASE 与 S5 的 musl），改用自建静态 PIE 工具集；`getdents64` 作为第 36 项追加以支撑 `ls`。详见 [Linux 兼容规划](../specs/linux-compat/spec.md) §12。
+
 ## P1 未登记文件对端的附加能力清理（本地完整通过）
 
 Root 接收文件请求时，内核已把附加能力安装到接收方。旧 `serve_once` 先查询应用 Child

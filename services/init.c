@@ -1192,20 +1192,30 @@ static void command(char*line){
 extern const uint8_t __sf_linux_hello_start[],__sf_linux_hello_end[];
 extern const uint8_t __sf_linux_stub_start[],__sf_linux_stub_end[];
 extern const uint8_t __sf_linux_probe_start[],__sf_linux_probe_end[];
+extern const uint8_t __sf_linux_translator_start[],__sf_linux_translator_end[];
+extern const uint8_t __sf_linux_true_start[],__sf_linux_true_end[];
+extern const uint8_t __sf_linux_false_start[],__sf_linux_false_end[];
+extern const uint8_t __sf_linux_echo_start[],__sf_linux_echo_end[];
+extern const uint8_t __sf_linux_seq_start[],__sf_linux_seq_end[];
+extern const uint8_t __sf_linux_cat_start[],__sf_linux_cat_end[];
+extern const uint8_t __sf_linux_wc_start[],__sf_linux_wc_end[];
+extern const uint8_t __sf_linux_ls_start[],__sf_linux_ls_end[];
+extern const uint8_t __sf_linux_sysprobe_start[],__sf_linux_sysprobe_end[];
 static uint64_t lx_stage,lx_stage_bytes;
 static uint8_t lx_data[SF_PAGE] __attribute__((aligned(4096)));
-/* 追加 stub/probe 的两段：代码段紧接 Linux 映像，数据页固定在其后一页。
- * 数据页首两个 qword 由调用方写入（hello 入口绝对地址或探针参数）。 */
+/* 追加兼容代码段与数据页：代码段紧接 Linux 映像，数据页固定在其后一页。
+ * 数据页首两个 qword 由调用方写入（入口绝对地址、或探针参数）；blob 的
+ * 数据段偏移由构建期从链接结果读出，S2 stub 使用 0x1000，S3 翻译器使用 0x10000。 */
 static int linux_compat_append(SfLoadPlan*plan,const uint8_t*blob,uint64_t text_bytes,
-                               uint64_t data0,uint64_t data1){
+                               uint64_t data_offset,uint64_t data0,uint64_t data1){
  uint64_t span=0;
  for(unsigned i=0;i<plan->count;i++){uint64_t end=plan->segments[i].rva+plan->segments[i].bytes;if(end>span)span=end;}
  uint64_t code=(span+SF_PAGE-1)&~(SF_PAGE-1);
- if(plan->count+2>8||code+2*SF_PAGE>SF_IMAGE_MAX)return SF_NO_SPACE;
- memcpy(lx_data,blob+SF_PAGE,SF_PAGE);
+ if(plan->count+2>8||code+data_offset+SF_PAGE>SF_IMAGE_MAX)return SF_NO_SPACE;
+ memcpy(lx_data,blob+data_offset,SF_PAGE);
  uint64_t*words=(uint64_t*)lx_data;words[0]=data0;words[1]=data1;
  plan->segments[plan->count++]=(SfLoadSegment){code,text_bytes,(uint64_t)blob,5,0};
- plan->segments[plan->count++]=(SfLoadSegment){code+SF_PAGE,SF_PAGE,(uint64_t)lx_data,3,0};
+ plan->segments[plan->count++]=(SfLoadSegment){code+data_offset,SF_PAGE,(uint64_t)lx_data,3,0};
  plan->entry=code;
  return SF_OK;
 }
@@ -1221,13 +1231,72 @@ static int linux_compat_spawn(const uint8_t*blob,uint64_t text_bytes,int mode,ui
  /* 无 ELF 的探针计划只含追加段，必须自行给出合法映像基址与计划尺寸。 */
  if(!r&&!image_bytes){plan.size=sizeof(plan);plan.image_base=SF_PIE_MIN;}
  /* mode<0 表示 hello 启动 stub：数据页写入映像入口的绝对地址。 */
- if(!r)r=linux_compat_append(&plan,blob,text_bytes,mode<0?SF_PIE_MIN+info.entry_rva:(uint64_t)mode,foreign);
+ if(!r)r=linux_compat_append(&plan,blob,text_bytes,SF_PAGE,
+                             mode<0?SF_PIE_MIN+info.entry_rva:(uint64_t)mode,foreign);
  if(r){sf_log(label);sf_log(": load failed code=");sf_number(-r);sf_log("\n");return r;}
  long pid=sf_sys(SYS_SPAWN,(uint64_t)&plan,0,0);
  if(pid<0){sf_log(label);sf_log(": spawn failed code=");sf_number(-pid);sf_log("\n");}
  return (int)pid;
 }
-static void linux_compat_tests(void){
+/* S3：Linux 静态 PIE 工具。文件 RPC 需要 (fs_ep SEND, 私有 reply RECV) 两个能力，
+ * 因此为每次运行创建独立端点，子进程退出后撤销 init 侧句柄。 */
+static int linux_compat_spawn_tool(const uint8_t*image,size_t image_bytes,const char*label){
+ if(!image_bytes)return SF_BAD_FORMAT;
+ int slot=-1;for(unsigned i=0;i<SF_MAX_TASKS;i++)if(!children[i].pid){slot=i;break;}
+ if(slot<0)return SF_NO_SPACE;
+ uint32_t uid,gid,owner;int ir=session_identity(&uid,&gid,&owner);if(ir)return ir;
+ /* 工具以只读磁盘为根：文件 RPC 与普通应用使用同一份命名空间策略。 */
+ int directory=sf_ns_open_as(ns,owner,"/","/disk",OPEN_READ|OPEN_DIRECTORY,uid,gid);
+ if(directory<0)return directory;
+ SfLoadPlan plan={0};SfLinuxInfo info={0};
+ void*staging=stage_grow(&lx_stage,&lx_stage_bytes,SF_IMAGE_MAX);
+ if(!staging){sf_ns_close(ns,owner,directory);return SF_NO_SPACE;}
+ int r=sf_linux_elf_load(image,image_bytes,SF_PIE_MIN,staging,SF_IMAGE_MAX,&plan,&info,
+                         SF_LINUX_FLAG_REWRITE_SYSCALLS);
+ long pid=0,ep=0;
+ if(!r){
+  ep=sf_sys(SYS_EP_CREATE,0,0,0);
+  if(ep<0)r=(int)ep;
+ }
+ if(!r){
+  plan.grant_manager=fs_ep;
+  plan.grant_service=(uint32_t)ep;
+  plan.service_rights=RIGHT_RECV;
+  r=linux_compat_append(&plan,__sf_linux_translator_start,SF_LINUX_TRANSLATOR_TEXT_BYTES,
+                        SF_LINUX_TRANSLATOR_DATA_OFFSET,SF_PIE_MIN+info.entry_rva,0);
+ }
+ if(!r){
+  pid=sf_sys(SYS_SPAWN,(uint64_t)&plan,0,0);
+  if(pid<0)r=(int)pid;
+ }
+ if(!r)r=sf_ns_handoff(ns,owner,directory,(uint32_t)pid);
+ if(r){
+  if(pid>0)sf_sys(SYS_KILL,pid,r,0);
+  if(ep>0)sf_sys(SYS_CAP_REVOKE,(uint64_t)ep,0,0);
+  sf_ns_close(ns,owner,directory);
+  sf_log(label);sf_log(": linux load failed code=");sf_number(-r);sf_log("\n");
+  return r;
+ }
+ /* wait_app_for 退出时经 app_reap 撤销回复端点并释放命名空间引用。 */
+ children[slot]=(Child){(uint32_t)pid,(uint32_t)ep,directory,0,uid,gid,{0,0}};
+ return (int)pid;
+}
+static void linux_compat_tool(const uint8_t*start,const uint8_t*end,const char*label,int expected){
+ int pid=linux_compat_spawn_tool(start,(size_t)(end-start),label);
+ if(pid<=0||wait_app(pid)!=expected)sf_assert(0,label);
+ sf_log(label);sf_log(" PASSED\n");
+}
+static void linux_compat_tool_tests(void){
+ linux_compat_tool(__sf_linux_true_start,__sf_linux_true_end,"linux tool true",0);
+ linux_compat_tool(__sf_linux_false_start,__sf_linux_false_end,"linux tool false",1);
+ linux_compat_tool(__sf_linux_echo_start,__sf_linux_echo_end,"linux tool echo",0);
+ linux_compat_tool(__sf_linux_seq_start,__sf_linux_seq_end,"linux tool seq",0);
+ linux_compat_tool(__sf_linux_cat_start,__sf_linux_cat_end,"linux tool cat",0);
+ linux_compat_tool(__sf_linux_wc_start,__sf_linux_wc_end,"linux tool wc",0);
+ linux_compat_tool(__sf_linux_ls_start,__sf_linux_ls_end,"linux tool ls",0);
+ linux_compat_tool(__sf_linux_sysprobe_start,__sf_linux_sysprobe_end,"linux syscall probe",0);
+}
+static void linux_compat_tests(int with_disk){
  int pid=linux_compat_spawn(__sf_linux_stub_start,SF_LINUX_STUB_TEXT_BYTES,-1,0,
                             __sf_linux_hello_start,
                             (uint64_t)(__sf_linux_hello_end-__sf_linux_hello_start),"linux hello");
@@ -1242,6 +1311,8 @@ static void linux_compat_tests(void){
  pid=linux_compat_spawn(__sf_linux_probe_start,SF_LINUX_PROBE_TEXT_BYTES,2,0,0,0,"linux probe 2");
  if(pid<=0||wait_app(pid)!=SF_DENIED)sf_assert(0,"nested upcall terminates the process");
  if(foreign>0)sf_munmap((uint64_t)foreign,2*SF_PAGE);
+ /* 工具类用例以只读磁盘为根，无磁盘的启动只保留入口机制自检。 */
+ if(with_disk)linux_compat_tool_tests();
  sf_log("LINUX COMPAT TESTS PASSED\n");
 }
 /* 启动 Logo：移植自宏内核阶段 shell_init 的开机画面，自检完成后显示 2 秒。 */
@@ -1286,7 +1357,7 @@ long sf_main(const SfBootArgs*a,size_t size){
  {int net=net_start();if(!net)sf_log("net: READY\n");else if(net!=SF_NOT_FOUND){sf_log("NET UNAVAILABLE code=");sf_number(-net);sf_log("\n");}}
  sf_assert(!sf_supervisor_init(&echo_watch,3,25,1000),"echo restart policy configured");sf_supervisor_enable(&echo_watch,sf_ticks(),1);echo_health_at=echo_after(sf_ticks(),100);
  sf_assert(!sf_supervisor_init(&native_watch,3,25,1000),"native restart policy configured");sf_supervisor_enable(&native_watch,sf_ticks(),1);native_health_at=echo_after(sf_ticks(),100);
- linux_compat_tests();
+ linux_compat_tests(storage==0);
  boot_splash();
  sf_log("BOOT TESTS PASSED\nSpiritFoxOS ready. Type help.\n");prompt();char line[192]={0};unsigned used=0;
  for(;;){echo_supervise();native_supervise();manager_serve();long c=sf_sys(SYS_CONSOLE_READ,0,0,0);
