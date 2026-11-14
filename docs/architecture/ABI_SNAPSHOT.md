@@ -99,3 +99,7 @@ SMP/线程/配额追加SYS_THREAD_CREATE=26、SYS_THREAD_LIMIT=27、SYS_TASK_CPU
 旧660项无删改；实际编译采集、check-additions只允许该常量及九组漂移阴性测试通过，
 审阅 `.cache/persist-quiescence-abi-review-20261113.json`。消息大小、字段/编号和盘格式
 保持；新请求不支持的旧peer应返回既有负错误，Root不能把它当成静默或停止确认。
+
+2026-11-14整合草稿：基于作者含SYS_COMPAT_SET/RET的662项目录，只追加
+OP_PERSIST_QUIESCENT=104至663，静态目录旧662项无删改。当前仅离线核对，实际
+编译采集、漂移阴性、完整及新head托管尚待执行；不能沿用旧661项预检证明。
