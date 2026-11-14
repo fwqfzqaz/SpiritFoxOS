@@ -858,6 +858,23 @@ static int transaction_fingerprint(uint8_t out[96]){
   sf_sha256(out+group*32,buffer,count*512);first+=count;
  }return first==end?0:SF_INVALID;
 }
+static void persist_quiescence_test(void){
+ sf_assert(!sf_persist_quiescent(),"quiescence diagnostic starts with drained PENDING volume");
+ uint8_t before[96],after[96];SfRuntimeTrust trust=sf_trust;
+ sf_assert(!transaction_fingerprint(before),"quiescence fingerprints PENDING bytes");
+ int notes=sf_ns_open(ns,1,"/","/persist/notes",1);
+ sf_assert(notes>0&&sf_persist_quiescent()==SF_BUSY,"open mounted description refuses preflight");
+ sf_assert(!sf_ns_close(ns,1,(uint32_t)notes)&&!sf_persist_quiescent(),"last close restores preflight");
+ sf_assert(!sf_storage_transaction(1)&&sf_persist_quiescent()==SF_BUSY,"dirty ledger refuses preflight");
+ sf_assert(!sf_storage_transaction(0)&&!sf_persist_quiescent(),"known completed lease drains explicitly");
+ sf_assert(!transaction_fingerprint(after)&&!memcmp(before,after,sizeof(before)),"idle and busy observations preserve PENDING sectors");
+ sf_assert(sf_persist_begin()==1,"quiescence enters actual signed TRYING");
+ sf_assert(!transaction_fingerprint(before),"quiescence fingerprints live trial");
+ for(unsigned i=0;i<4;i++)sf_assert(sf_persist_quiescent()==SF_BUSY,"live trial refuses preflight without recovery");
+ sf_assert(!transaction_fingerprint(after)&&!memcmp(before,after,sizeof(before))&&!memcmp(&trust,&sf_trust,sizeof(trust)),"trial observations preserve all sectors and Root trust");
+ sf_assert(!sf_persist_finish(0)&&!sf_persist_quiescent(),"only explicit trial rollback restores idle observation");
+ sf_log("PERSIST QUIESCENCE TEST PASSED\n");
+}
 static void namespace_recovery_test(void){
  sf_assert(sf_storage_writable()&&sf_ns_client_healthy(),"namespace recovery test requires mounted writable volume");
  uint32_t original=sf_storage_namespace_pid();
@@ -1103,6 +1120,8 @@ static void command(char*line){
  else if(!strcmp(line,"rmdir")||!memcmp(line,"rmdir ",6))namespace_mutate_line(line+5,2);
  else if(!strcmp(line,"stat")||!memcmp(line,"stat ",5))namespace_stat_line(line+4);
  else if(!strcmp(line,"namespace-recovery-test"))namespace_recovery_test();
+ else if(!strcmp(line,"persist-quiescence-test"))persist_quiescence_test();
+ else if(!strcmp(line,"persist-quiescent")){int r=sf_persist_quiescent();if(!r)sf_log("persist: QUIESCENT preflight only\n");else{sf_log("persist: preflight refused code=");sf_number(-r);sf_log("\n");}}
  else if(!strcmp(line,"file-peer-test"))file_peer_test();
  else if(!strcmp(line,"namespace-status"))namespace_status();
  else if(!strcmp(line,"namespace-crash")){int r=sf_storage_namespace_crash();sf_log(r?"namespace: crash refused\n":"namespace: crash injected\n");}

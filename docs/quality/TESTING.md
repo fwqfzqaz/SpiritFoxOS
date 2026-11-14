@@ -661,3 +661,13 @@ ABI九组/660、实际归属四组保持。故障包仅测试，finally/额度�
 零RPC检查后，当前初始构建冻结复验770.12秒/实际52VM通过；11次签名故障及真实
 QEMU EIO的未知完成检查要求新包/卸载拒绝，原盘/银行/重启断言保持。完整重新从
 初始构建执行；此前999/18VM属于诊断补丁前的独立证据，不能替代当前复验。
+
+## Persist静默预检分层验证
+
+`python tools/test.py` 包含 `test_persist_quiescence.c` 的实际Root客户端/解析器386项、
+实际事务卷22713项（保留原16821项测试）和 `test_persist_quiescence.py` 提取生产
+Root账本函数的104项。宿主畸形/发送者/能力回收验证不冒充真实跨进程恶意发送者。
+`qemu_persist_quiescence_test.py` 在legacy/modern两次真实启动中执行PENDING/STABLE
+观察、活TRYING/打开描述/DIRTY拒绝和账户管理员门；BEGIN/FINISH各一次之外代次
+及数据不变。既有真实EIO未知完成用例还要求预检返回20，不释放DIRTY或重放。
+这只是只读前置观察，并未验证Persist停止/重启。当前完整/发布/托管结果见PROGRESS。

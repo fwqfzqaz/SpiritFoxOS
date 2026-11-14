@@ -50,6 +50,7 @@ static int pf_call(SfMessage*m){
  }
  if(metadata&&(m->offset||m->length||m->mode||
     (m->status?m->handle!=0:m->handle>SF_TXN_FILE_BYTES)))return SF_BAD_FORMAT;
+ if(opcode==OP_PERSIST_QUIESCENT&&(m->handle||m->offset||m->length||m->mode))return SF_BAD_FORMAT;
  return(int)m->status;
 }
 static int pf_send_cap(uint64_t opcode,uint32_t cap,uint64_t offset,uint32_t mode){
@@ -90,6 +91,11 @@ void sf_persist_attach(void){attach();}
 int sf_persist_ready(void){return ready();}
 int sf_persist_uncertain(void){return uncertain_commit;}
 int sf_persist_security_error(void){return uncertain_commit?SF_COMMIT_UNCERTAIN:trust_error;}
+int sf_persist_quiescent(void){
+ int r=sf_persist_security_error();if(r)return r;
+ r=sf_storage_quiescent();if(r)return r;
+ SfMessage m;sf_message(&m,OP_PERSIST_QUIESCENT,0);return pf_call(&m);
+}
 void sf_persist_driver_down(void){
  if(!ready())return;SfMessage m;sf_message(&m,OP_PERSIST_DRIVER_DOWN,0);pf_call(&m);
 }

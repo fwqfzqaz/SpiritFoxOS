@@ -39,6 +39,7 @@ static long sf_send_cap(uint32_t h,SfMessage*m,uint64_t c){
  cap_sends++;exchanges++;if(send_error)return send_error;reply=*m;reply.h.flags=12;reply.handle=0x444;reply.status=semantic;return 0;
 }
 int sf_storage_driver(uint32_t*a,uint32_t*b,uint32_t*c,uint64_t*d,int*e){(void)a;(void)b;(void)c;(void)d;(void)e;return SF_DEVICE_GONE;}
+int sf_storage_quiescent(void){return SF_DEVICE_GONE;}
 uint8_t*sf_storage_scratch(void){return 0;}
 long sf_storage_load(const char*n,void*p,size_t c){(void)n;(void)p;(void)c;return SF_DEVICE_GONE;}
 static long sf_send(uint32_t h,SfMessage*m){
@@ -194,7 +195,7 @@ int main(void){
  CHECK(persist_metadata_dispatch(1,0)==SF_INVALID);
  for(unsigned i=0;i<14;i++){
   m=before;switch(i){case 0:m.h.size--;break;case 1:m.h.protocol_major++;break;case 2:m.h.protocol_minor++;break;
-   case 3:m.h.opcode++;break;case 4:m.h.flags=2;break;case 5:m.h.request_id=0;break;case 6:m.h.cap_count=1;break;
+   case 3:m.h.opcode=OP_PERSIST_QUIESCENT+1;break;case 4:m.h.flags=2;break;case 5:m.h.request_id=0;break;case 6:m.h.cap_count=1;break;
    case 7:m.h.payload_bytes--;break;case 8:m.status=1;break;case 9:m.handle=1;break;case 10:m.offset=1;break;
    case 11:m.length=1;break;case 12:m.mode=1;break;case 13:m.h.cap_count=2;break;}
   SfMessage old=m;CHECK(persist_metadata_dispatch(1,&m)==SF_INVALID);CHECK(!memcmp(&m,&old,sizeof(m)));

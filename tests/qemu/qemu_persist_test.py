@@ -123,6 +123,7 @@ class VM:
 def unknown_completion(vm):
     """An authenticated uncertain commit retains Root admission and DIRTY."""
     vm.command('persist','persist: UNAVAILABLE code=20')
+    vm.command('persist-quiescent','persist: preflight refused code=20')
     vm.command('run hello.sfk','sfexec: failed code=20')
     vm.command('unmount /disk','disk: unmount refused')
     print('ROOT UNKNOWN COMPLETION PRESERVED: '+vm.name,flush=True)

@@ -89,7 +89,7 @@ long sf_main(const SfBootArgs*a,size_t size){
  sf_log("[PERSIST] transactional volume service in ring 3\n");
  for(;;){
   SfMessage m;long from=sf_recv(a->service,&m,0);if(from<0)return from;
-  if(m.h.opcode==OP_PERSIST_NOTES_SIZE){
+  if(m.h.opcode==OP_PERSIST_NOTES_SIZE||m.h.opcode==OP_PERSIST_QUIESCENT){
    /* A metadata request never consumes a transferred capability. Close the
     * installed handle even when its sender or request is refused. */
    if(m.h.cap_count==1)sf_cap_close(m.handle);

@@ -81,6 +81,18 @@ int persist_mount(uint64_t*notes){
  sf_log("PERSIST READY generation=");sf_number(volume.generation);sf_log("\n");return 0;
 }
 int persist_volume_ready(void){return volume.ready&&sf_storage_writable();}
+int persist_quiescent(void){
+ if(!persist_volume_ready())return SF_DEVICE_GONE;
+ /* Inspect only the already verified mounted table. state_read uses scratch;
+  * MOUNT can recover a live trial. Neither belongs in an idle observation. */
+ for(unsigned i=0;i<SF_TXN_FILES;i++)if(!strcmp(volume.files[i].path,"/boot/current")){
+  const SfTxnFile*f=&volume.files[i];
+  if(f->bytes==1&&(f->data[0]=='a'||f->data[0]=='b'))return 0;
+  SfUpdate state;int r=sf_update_decode(&state,f->data,f->bytes);
+  return r?r:state.phase==SF_UPDATE_TRYING?SF_BUSY:0;
+ }
+ return 0;
+}
 int persist_notes_size(uint64_t*out){
  if(!out)return SF_INVALID;
  if(!persist_volume_ready())return SF_DEVICE_GONE;

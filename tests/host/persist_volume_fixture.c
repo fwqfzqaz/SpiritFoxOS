@@ -73,3 +73,37 @@ unsigned persist_volume_tests(void){
  volume.ready=0;n=UINT64_MAX;CHECK(persist_notes_size(&n)==SF_DEVICE_GONE&&n==UINT64_MAX);volume.ready=1;
  persist_fixture_snapshot();return checks;
 }
+static void quiescent_readonly(int expected){
+ persist_fixture_snapshot();
+ for(unsigned i=0;i<128;i++)CHECK(persist_quiescent()==expected);
+ CHECK(persist_fixture_unchanged());
+}
+unsigned persist_quiescence_volume_tests(void){
+ persist_volume_tests();unsigned start=checks;
+ /* Actual signed TRYING remains live, then explicit FINISH transitions to
+  * STABLE. A subsequent authenticated install creates actual PENDING. */
+ quiescent_readonly(SF_BUSY);CHECK(!persist_finish(0));quiescent_readonly(0);
+ static uint8_t bytes[SF_TXN_FILE_BYTES];size_t n=package("build/diskupdate.sfk",bytes);
+ CHECK(!persist_stage(0,bytes,n)&&!persist_install());CHECK(persist_export(1)>0);
+ CHECK(!persist_stage(0,"quiescent-stage",15));quiescent_readonly(0);
+ CHECK(persist_begin()==1);quiescent_readonly(SF_BUSY);CHECK(!persist_finish(0));quiescent_readonly(0);
+ SfTxn saved=volume;
+ unsigned selector=SF_TXN_FILES;
+ for(unsigned i=0;i<SF_TXN_FILES;i++)if(!strcmp(volume.files[i].path,"/boot/current"))selector=i;
+ CHECK(selector<SF_TXN_FILES);
+ /* Cached structural corruption is injected only in this host fixture. */
+ for(unsigned i=0;i<SF_UPDATE_BYTES;i++){
+  volume=saved;volume.files[selector].data[i]^=0xff;
+  SfUpdate decoded;int expected=sf_update_decode(&decoded,volume.files[selector].data,SF_UPDATE_BYTES);
+  quiescent_readonly(expected?expected:decoded.phase==SF_UPDATE_TRYING?SF_BUSY:0);
+ }
+ const uint32_t lengths[]={0,1,159,161,SF_TXN_FILE_BYTES,UINT32_MAX};
+ for(unsigned i=0;i<sizeof(lengths)/sizeof(*lengths);i++){
+  volume=saved;volume.files[selector].bytes=lengths[i];quiescent_readonly(SF_BAD_FORMAT);
+ }
+ for(unsigned i=0;i<2;i++){volume=saved;volume.files[selector].bytes=1;volume.files[selector].data[0]='a'+i;quiescent_readonly(0);}
+ volume=saved;volume.files[selector].path[0]=0;quiescent_readonly(0);
+ volume=saved;volume.ready=0;quiescent_readonly(SF_DEVICE_GONE);
+ volume=saved;device=0;quiescent_readonly(SF_DEVICE_GONE);device=1;
+ volume=saved;persist_fixture_snapshot();return checks-start;
+}

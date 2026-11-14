@@ -94,3 +94,8 @@ SMP/线程/配额追加SYS_THREAD_CREATE=26、SYS_THREAD_LIMIT=27、SYS_TASK_CPU
 设备中断投递追加 SYS_IRQ_ACQUIRE=29、SYS_IRQ_RELEASE=30、SYS_IRQ_WAIT=31 三个常量，当前600项，旧597项无删改；系统调用参数沿用固定宽度寄存器值，没有新增 wire 结构。
 
 匿名映射与共享内存追加 SYS_MMAP=35、SYS_MUNMAP=36、SYS_SHM_CREATE=37、SYS_SHM_MAP=38、SYS_SHM_GRANT=39、SYS_SHM_CLOSE=40 与 SF_HEAP/SF_HEAP_BYTES/SF_SHM/SF_SHM_BYTES/SF_SHM_SLOTS/SF_SHM_SLOT_BYTES 六个窗口常量，共12项；当前612项，旧600项无删改。同一批次把 SF_IMAGE_MAX 由 2 MiB 提至 8 MiB、SF_MSG_BYTES 由 256 提至 4096、SF_MAX_TASKS 12→32、SF_MAX_THREADS 32→64、SF_THREAD_LIMIT_MAX 8→32；SfMessage 布局随数据区扩至 4096 字节，其余成员偏移不变。
+
+2026-11-13：Persist静默预检仅追加 `OP_PERSIST_QUIESCENT=104`，当前661项。
+旧660项无删改；实际编译采集、check-additions只允许该常量及九组漂移阴性测试通过，
+审阅 `.cache/persist-quiescence-abi-review-20261113.json`。消息大小、字段/编号和盘格式
+保持；新请求不支持的旧peer应返回既有负错误，Root不能把它当成静默或停止确认。

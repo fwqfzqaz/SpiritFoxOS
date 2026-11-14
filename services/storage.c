@@ -195,6 +195,15 @@ int sf_storage_transaction(int begin){
  if(!sf_storage_writable())return SF_READ_ONLY;
  return sfmod_acquire(manager,fs_slot,RES_DIRTY);
 }
+int sf_storage_quiescent(void){
+ if(!manager||fs_slot<0||!sf_storage_writable()||!fs_pid||
+    sf_sys(SYS_TASK_STATUS,fs_pid,0,0)!=SF_TASK_RUNNING)return SF_DEVICE_GONE;
+ const SfModule*book=&manager->modules[fs_slot];
+ if(book->state!=MOD_ACTIVE)return SF_DRAINING;
+ if(fs_transport.inflight||namespace_descriptions)return SF_BUSY;
+ for(unsigned i=0;i<RES_COUNT;i++)if(book->resources[i])return SF_BUSY;
+ return 0;
+}
 static int mount_open(unsigned tag){
  if(tag!=1||fs_slot<0)return SF_STALE_HANDLE;
  if(!mounted||!mount_admission)return SF_DRAINING;

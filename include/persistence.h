@@ -18,6 +18,8 @@ int sf_persist_mount(SfNamespace*);
 /* Existing mounted volume only. Neither operation mounts, recovers a trial,
  * synchronizes trust, nor writes storage. Reprojection needs an empty target. */
 int sf_persist_notes_size(uint64_t*);
+/* Point-in-time preflight only: no admission fence, drain, or stop. */
+int sf_persist_quiescent(void);
 int sf_persist_reproject(SfNamespace*);
 /* 0 stages an update; 1 means the exact confirmed package is already present. */
 int sf_persist_install(const char*);

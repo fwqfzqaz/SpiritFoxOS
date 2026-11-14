@@ -24,6 +24,7 @@ int main(void){
  const char *ordinary[]={"run hello.sfk","runat /home/alice app.sfk","runenv X=1 -- hello.sfk","ls /home/alice","cat /home/alice/x","write /home/alice/x hi","stat /tmp","rm /tmp/x","mkdir /tmp/x","rmdir /tmp/x","echo","ifconfig","ping 10.0.2.2","udp 10.0.2.2 1 hi","tcp 10.0.2.2 1 hi","open 10.0.2.2 1","send 1 hi","recv 1","close 1","conns","","shutdownx","persistx","installx x","start nativex"};
  for(unsigned i=0;i<sizeof(admin)/sizeof(*admin);i++)CHECK(!sf_console_authorize(p,admin[i]));
  CHECK(!sf_console_authorize(p,"file-peer-test"));
+ CHECK(!sf_console_authorize(p,"persist-quiescent")&&!sf_console_authorize(p,"persist-quiescence-test"));
  CHECK(!sf_console_login(p,"alice","alice",&id)&&id==2);
  CHECK(!sf_console_identity(p,&uid,&gid,&owner)&&uid==1000&&gid==1000&&owner==0x80000002u);
  /* Independent command vectors check the policy before handlers run. A
@@ -31,6 +32,7 @@ int main(void){
  SfSessionTable before=*sf_console_sessions(p);
  for(unsigned i=0;i<sizeof(admin)/sizeof(*admin);i++)CHECK(sf_console_authorize(p,admin[i])==SF_DENIED);
  CHECK(sf_console_authorize(p,"file-peer-test")==SF_DENIED);
+ CHECK(sf_console_authorize(p,"persist-quiescent")==SF_DENIED&&sf_console_authorize(p,"persist-quiescence-test")==SF_DENIED);
  for(unsigned i=0;i<sizeof(ordinary)/sizeof(*ordinary);i++)CHECK(!sf_console_authorize(p,ordinary[i]));
  CHECK(!memcmp(&before,sf_console_sessions(p),sizeof(before)));
  CHECK(sf_console_login(p,"alice","wrong",&id)==SF_DENIED&&id==2);

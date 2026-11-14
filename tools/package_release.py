@@ -32,7 +32,7 @@ if result.get('namespace_handle_map_host_assertions') != 502975 or result.get('n
 if result.get('namespace_rpc_host_assertions') != [5506,30,52,2638,48065] or result.get('namespace_rpc_host_groups') != 5 or not result.get('namespace_recovery_qemu') or result.get('namespace_recovery_qemu_boots') != 2 or result.get('namespace_recovery_qemu_deaths') != 6:
     raise SystemExit('Run trusted namespace transport/control, real Fs incarnation loss, dirty drain, stale app/Root and TRYING preservation regressions before packaging')
 ownership=result.get('namespace_ownership',{})
-if result.get('console_policy_host_assertions') != 665 or result.get('launch_policy_host_assertions') != 2152 or result.get('policy_compile_boundary_tests') != 7:
+if result.get('console_policy_host_assertions') != 667 or result.get('launch_policy_host_assertions') != 2152 or result.get('policy_compile_boundary_tests') != 7:
     raise SystemExit('Run manager console/launch admission and real compile-boundary regressions before packaging')
 if result.get('file_ingress_host_checks') != 20001 or result.get('file_ingress_host_groups') != 1 or result.get('file_peer_qemu') is not True or result.get('file_peer_qemu_boots') != 2 or result.get('file_peer_transferred_caps') != 384:
     raise SystemExit('Run actual manager ingress cap cleanup and live rejected-peer budget regressions before packaging')
@@ -120,7 +120,16 @@ if result.get('manifest_schema_sha256') != hashlib.sha256(schema_path.read_bytes
     raise SystemExit('Manifest schema changed since source validation')
 abi_reference = ROOT/'abi/x86_64-current.json'
 abi_capture = BUILD/'abi-current.json'
-if result.get('abi_snapshot_host_tests') != 9 or result.get('abi_snapshot_entries') != 673:
+quiescence=result.get('persist_quiescence_qemu',{})
+if (result.get('persist_quiescence_client_checks')!=386 or result.get('persist_quiescence_volume_checks')!=22713 or
+    result.get('persist_quiescence_guard')!={'passed':True,'checks':104} or not quiescence.get('passed') or
+    quiescence.get('guest_boots')!=2 or quiescence.get('live_trial_busy')!=2 or
+    quiescence.get('open_description_busy')!=2 or quiescence.get('dirty_ledger_busy')!=2 or
+    quiescence.get('user_denials')!=4 or not quiescence.get('stable_pending_byte_preserved') or
+    not quiescence.get('base_disk_unchanged') or not quiescence.get('advisory_only') or
+    quiescence.get('service_stop_restart_tested') is not False):
+    raise SystemExit('Run authenticated Persist quiescence client/volume/ledger and actual trial/busy QEMU regressions before packaging')
+if result.get('abi_snapshot_host_tests') != 9 or result.get('abi_snapshot_entries') != 674:
     raise SystemExit('Run compiled ABI capture, offline comparison and header-drift regressions before packaging')
 if result.get('ipc_copy_host_checks') != 10041 or result.get('ipc_stats_control_host_checks') != 6001 or result.get('ipc_copy_profile') != 'successful-user-copy-bytes-v1' or not result.get('ipc_stats_qemu') or result.get('ipc_stats_qemu_boots') != 2:
     raise SystemExit('Run actual IPC copy event/control oracles and both production stats VM transports before packaging')
