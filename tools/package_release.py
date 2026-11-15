@@ -10,6 +10,17 @@ result = json.loads((BUILD/'test-results.json').read_text(encoding='utf-8'))
 if result.get('linux_blob_assembly') != {'passed':True,'payloads':3,'windows_and_posix_paths':True,
                                       'space_in_path':True,'actual_assembler_bytes':True,'cache_refresh':True}:
     raise SystemExit('Run production Linux blob assembler path/byte/cache regression before packaging')
+if (result.get('linux_compat_qemu') is not True or type(result.get('linux_compat_qemu_boots')) is not int or
+    result['linux_compat_qemu_boots'] != 1):
+    raise SystemExit('Run the existing Linux compatibility tool/syscall/native QEMU regression before packaging')
+usb = result.get('usb_qemu',{})
+usb_counts = {'guest_boots':1,'keyboard_enumerations':2,'mouse_enumerations':1,
+              'keyboard_shell_inputs':2,'keyboard_removals':1,'shutdown_exit_code':1}
+if (not isinstance(usb,dict) or usb.get('passed') is not True or usb.get('evidence') != 'E2-qemu' or
+    usb.get('xhci_initialized') is not True or
+    any(type(usb.get(key)) is not int or usb[key] != count for key,count in usb_counts.items()) or
+    type(usb.get('pointer_updates')) is not int or usb['pointer_updates'] < 1):
+    raise SystemExit('Run actual USB xHCI/HID/keyboard/pointer/hotplug/shutdown QEMU assertions before packaging')
 cases = {'missing','badheader','badhash','badsignature','writable','ioerror'}
 if result.get('passed') is not True or result.get('version_policy_host') is not True or result.get('version_policy_qemu') is not True or result.get('update_health_qemu') is not True or result.get('update_fault_scenarios') != 3132 or result.get('iommu_qemu') is not True or result.get('persistence_qemu') is not True or result.get('qemu_memory_mib') != [128,256,512] or set(result.get('storage_failure_cases',[])) != cases:
     raise SystemExit('Run the full test suite before packaging')

@@ -1,6 +1,7 @@
 """USB 输入回归：QEMU qemu-xhci + USB HID 键盘/鼠标。
 验证 xHCI 初始化、HID 枚举、USB 键盘向串口 shell 输入、USB 鼠标驱动
 合成器指针，以及运行期热插拔后的重新枚举。"""
+import json
 import os
 from pathlib import Path
 import queue
@@ -51,6 +52,8 @@ def command(qmp_endpoint):
 
 
 def main():
+    result_path = ROOT / 'build/usb-results.json'
+    result_path.unlink(missing_ok=True)
     if not QEMU or not FIRMWARE:
         raise RuntimeError('Linux needs qemu-system-x86_64 and OVMF (ovmf package) installed')
     os.chdir(ROOT)
@@ -75,6 +78,10 @@ def main():
     threading.Thread(target=read, daemon=True).start()
     output = bytearray()
     log = ROOT / 'build/qemu-usb.log'
+    evidence = {'passed': False, 'evidence': 'E2-qemu', 'guest_boots': 0,
+                'xhci_initialized': False, 'keyboard_enumerations': 0,
+                'mouse_enumerations': 0, 'keyboard_shell_inputs': 0,
+                'pointer_updates': 0, 'keyboard_removals': 0}
 
     def expect(text, timeout=60):
         until = time.monotonic() + timeout
@@ -102,9 +109,13 @@ def main():
     try:
         expect('BOOT TESTS PASSED', 60)
         expect('Type help.', 30)
+        evidence['guest_boots'] += 1
         expect('[USB] ports=', 10)
+        evidence['xhci_initialized'] = True
         expect('[USB] HID keyboard', 20)
+        evidence['keyboard_enumerations'] += 1
         expect('[USB] HID mouse', 20)
+        evidence['mouse_enumerations'] += 1
         qmp = qmp_endpoint.accept()
 
         # USB 键盘：按键经 xHCI 中断端点进入内核控制台输入缓冲。
@@ -113,6 +124,7 @@ def main():
         expect('help | login', 20)
         if b'help' not in output:
             raise RuntimeError('USB keyboard keystrokes missing from shell echo')
+        evidence['keyboard_shell_inputs'] += 1
 
         # USB 鼠标：合成器从 SYS_POINTER_READ 拿到注入后的绝对坐标。
         output.clear()
@@ -131,14 +143,17 @@ def main():
                 output.extend(chunks.get(timeout=.1))
             except queue.Empty:
                 continue
+        evidence['pointer_updates'] = pointer_count() - before
 
         # 热插拔：移除后重新插入键盘，必须重新枚举并继续输入。
         output.clear()
         qmp.execute('device_del', {'id': 'ukbd'})
         expect('[USB] device removed', 20)
+        evidence['keyboard_removals'] += 1
         output.clear()
         qmp.execute('device_add', {'driver': 'usb-kbd', 'id': 'ukbd2', 'bus': 'xhci.0'})
         expect('[USB] HID keyboard', 20)
+        evidence['keyboard_enumerations'] += 1
 
         send(b'\x1d')
         expect('GUI: stopped', 30)
@@ -147,13 +162,14 @@ def main():
         output.clear()
         qmp.execute('human-monitor-command', {'command-line': 'sendkey h-e-l-p-ret'})
         expect('help | login', 20)
+        evidence['keyboard_shell_inputs'] += 1
 
         send(b'shutdown\n')
         expect('SHUTDOWN OK', 30)
         code = process.wait(timeout=10)
         if code != 1:
             raise RuntimeError('Unexpected QEMU exit code ' + str(code))
-        print('USB TEST PASSED', flush=True)
+        evidence['shutdown_exit_code'] = code
     finally:
         log.write_bytes(output)
         if qmp:
@@ -162,6 +178,11 @@ def main():
             process.kill()
             process.wait(timeout=5)
         qmp_endpoint.close()
+    # Publish only after every guest assertion and cleanup succeeds. A failed
+    # run removed its previous report before starting, so it cannot reuse it.
+    evidence['passed'] = True
+    result_path.write_text(json.dumps(evidence, indent=2) + '\n', encoding='utf-8')
+    print('USB TEST PASSED: ' + json.dumps(evidence), flush=True)
 
 
 if __name__ == '__main__':

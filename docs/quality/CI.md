@@ -1,5 +1,14 @@
 # GitHub Actions 配置与排错
 
+2026-11-15：独立的 Linux/USB 发布证据补充草稿基于作者 `ff5733c`，保留其 S4
+TLS/线程/futex 与 ABI673。USB 脚本仅在原有启动、HID、两次键盘输入、鼠标指针、热插拔、
+正常退出及清理全部完成后写 `build/usb-results.json`，失败先清除旧报告。完整汇总读取
+该文件；`--host-only` 保留 `usb_qemu={}` 和 Linux 兼容 false/0，不冒充真实启动。
+发布门新增要求作者已有 Linux 兼容单次启动和完整 USB 观察值。新增五组纯 Python
+源代码/模拟传输测试不调用工具链、签名或 QEMU；这不是 E2。本分支尚未执行真实 USB、
+Linux 兼容、完整回归或发布验证，须由最终提交的完整套件生成发布证据；既有工作流
+和作者 S4 访客断言保持。本分支只接续这项测试/发布门补充。
+
 2026-11-14：作者 `2650385` 的 Windows 检查在 Linux translator blob 的 `.incbin`
 路径上报 `invalid escape sequence`。生成器使用路径对象的 POSIX 表示，避免 Windows
 反斜杠进入汇编字符串；内容摘要仍参与缓存键，路径规范化不改变嵌入二进制、段布局

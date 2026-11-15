@@ -557,3 +557,26 @@ Root 占用等于原值加一个控制端点，结束恢复；普通 hello/echo�
 改写必须刷新源摘要及实际输出。两平台宿主入口和发布门均要求该结果。Core宿主
 夹具补齐USB硬件桩，驱动行为仍以实际USB QEMU为证，Linux兼容保持原七工具及
 系统调用探针。完整验证状态独立记录，不能用专项或被中断的部分结果代替。
+
+## Linux/USB 发布证据补充草稿（2026-11-15）
+
+此独立分支基于作者 `ff5733c`，本补充尚未运行真实访客、完整套件或发布验证。
+作者 `qemu_linux_compat_test.py` 的 hello、七个工具、syscall/注册/负例、S4 TLS/
+线程/互斥/上限/futex、原生回归及盘字节断言保持，发布门现在要求其已有
+`linux_compat_qemu=true`、一次启动字段。
+
+`qemu_usb_test.py` 保留原有 xHCI/HID、shell 键盘输入、GUI 指针、拔出/重新枚举、
+第二次键盘输入及正常退出检查。仅在这些断言和进程/QMP清理都成功后，生成
+`build/usb-results.json`：实际观察的一次启动、控制器初始化、两次键盘枚举/输入、
+一次鼠标枚举/键盘移除、正数指针更新及退出码1。启动前删除旧报告，失败不会发布成功。
+`tools/test.py` 完整模式读取该报告，host-only不读取任何旧USB报告并写空对象；发布门
+拒绝缺失、不完整或host-only的Linux/USB证据。作者ABI673与其余门禁保持。
+
+`python -B tests/integration/test_linux_usb_evidence.py` 的五组检查提取实际USB入口、
+汇总表达式与发布条件，用模拟串口/QMP/时钟/子进程和临时JSON验证成功发布、各阶段
+失败清除旧成功、证据缺项/坏值拒绝，以及host/full区别和运行注册。模拟结果仅在
+独立临时目录内存在，不读密钥、不编译、不启动VM，不是设备或兼容运行时证据。
+
+后续在下一次必需的完整套件中各执行一次现有USB与Linux兼容脚本即可，无需额外
+重复独立启动。正式发布仍须最终源码的 `python tools/test.py` 及
+`python tools/package_release.py`；真实验证状态按最终提交单独记录。

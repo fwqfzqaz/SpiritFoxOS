@@ -114,6 +114,7 @@ subprocess.run([sys.executable,'tests/integration/test_namespace_ownership.py'],
 subprocess.run([sys.executable,'tests/integration/test_policy_boundary.py'],check=True)
 subprocess.run([sys.executable,'tests/integration/test_file_ingress.py'],check=True)
 subprocess.run([sys.executable,'tests/integration/test_linux_blob_assembly.py'],check=True)
+subprocess.run([sys.executable,'tests/integration/test_linux_usb_evidence.py'],check=True)
 abi_reference_sha256 = hashlib.sha256((ROOT/'abi/x86_64-current.json').read_bytes()).hexdigest()
 abi_capture_sha256 = hashlib.sha256((ROOT/'build/abi-current.json').read_bytes()).hexdigest()
 if not args.host_only:
@@ -320,6 +321,7 @@ result['txn_compat_qemu'] = not args.host_only
 result['txn_compat_qemu_boots'] = 0 if args.host_only else 6
 result['linux_compat_qemu'] = not args.host_only
 result['linux_compat_qemu_boots'] = 0 if args.host_only else 1
+result['usb_qemu'] = {} if args.host_only else json.loads((ROOT/'build/usb-results.json').read_text(encoding='utf-8'))
 result['artifacts_sha256'] = {name: hashlib.sha256((ROOT/'build'/name).read_bytes()).hexdigest() for name in ['esp/EFI/BOOT/BOOTX64.EFI', 'storage.img', 'persistent.img', 'development.pub', 'application.pub', 'backup.pub', 'trust-policy.json']}
 (ROOT / 'build/test-results.json').write_text(json.dumps(result, indent=2)+'\n')
 print(json.dumps(result, indent=2))
