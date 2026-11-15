@@ -111,4 +111,5 @@ OP_PERSIST_QUIESCENT=104至663，静态目录旧662项无删改。当前仅离�
 `constant.OP_PERSIST_QUIESCENT=104`，当前674项。作者S4自身已有
 `size.SfThreadRequest:24→40`与11项新增；内核按size兼容接收24/40字节请求。
 因此“仅追加”只描述本整合相对673项的差异，不声称旧662项所有值从未变化。
-静态目录审阅已过，编译采集/九组比较、实际QEMU和新head CI须按PROGRESS核对。
+静态目录审阅、编译采集/九组比较及当前八个QEMU脚本已通过；新head完整CI/发布
+仍须按PROGRESS独立核对，不能用专项结果代替。

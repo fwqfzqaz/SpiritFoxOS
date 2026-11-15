@@ -1,6 +1,6 @@
 # SpiritFoxOS 实施进度
 
-更新日期：2026-11-15（Asia/Shanghai）。
+更新日期：2026-11-16（Asia/Shanghai）。
 
 ## 当前 P1 整合：作者 S4 基线，完整验证未完成
 
@@ -29,9 +29,23 @@ DIRTY/新包/卸载锁定及还原生产服务读回保持。它不模拟物理E
 `.cache/persist-integration-first-focused-interrupted-20261115.json` / `.log`。
 没有存活的本聊天测试/VM，两种签名夹具均已还原，未把部分结果作为完整通过推送。
 
-当前在 ff5733c 上重新构建/全宿主和专项验证，完整与发布尚未完成。用户已允许草稿PR
-由GitHub完成完整验证；草稿必须标明未完成，只有精确新head的Windows/Linux及实际
-发布产物核验通过后才能转待审。旧9c24275和79基线结果不能代替新组合。
+### 作者S4组合的新证据（完整托管验证待完成）
+
+0f5a254源码的初始构建/全宿主171.65秒通过；随后八个实际QEMU脚本均通过：
+作者S4工具/syscall/TLS/线程/futex、USB、WRITE坏ACK与恢复八启动、只读预检、块回复、
+权威信任修复、命名空间死亡恢复和SMP。新674项参考与编译采集逐字相同，作者673项
+全部保留，签名夹具还原，原盘保持，非Markdown源全程冻结。证明
+`.cache/persist-integration-s4-focused-proof-20261115.json`，日志
+`build/persist-integration-s4-retry-focused-20261115.log`。SMP场景跨越较长实际时间间隔，
+这里记录功能断言结果，不把总墙钟时间作为性能结论。
+
+首套宿主在Rust适配库复制处出现OSError22，原日志保留为
+`.cache/persist-integration-s4-host-copy-failure-20261115.log`；该次不计通过。未改动源码
+的后续新构建/宿主及专项取得上述通过，未据此认定具体占用者或修改构建逻辑。
+
+完整与发布尚未完成。用户已允许草稿PR由GitHub完成完整验证；草稿标明未完成，只有
+精确新head的Windows/Linux及实际发布产物核验通过后才能转待审，不自行合并。旧9c/
+79基线与作者main的绿色结果不能代替本组合的完整/托管/发布证明。
 
 ## Linux 兼容 S0/S1：有界 ELF 装载核心（E1 通过）
 
