@@ -7,6 +7,9 @@ import zipfile
 ROOT = Path(__file__).resolve().parents[1]
 BUILD = ROOT/'build'
 result = json.loads((BUILD/'test-results.json').read_text(encoding='utf-8'))
+if result.get('linux_blob_assembly') != {'passed':True,'payloads':3,'windows_and_posix_paths':True,
+                                      'space_in_path':True,'actual_assembler_bytes':True,'cache_refresh':True}:
+    raise SystemExit('Run production Linux blob assembler path/byte/cache regression before packaging')
 cases = {'missing','badheader','badhash','badsignature','writable','ioerror'}
 if result.get('passed') is not True or result.get('version_policy_host') is not True or result.get('version_policy_qemu') is not True or result.get('update_health_qemu') is not True or result.get('update_fault_scenarios') != 3132 or result.get('iommu_qemu') is not True or result.get('persistence_qemu') is not True or result.get('qemu_memory_mib') != [128,256,512] or set(result.get('storage_failure_cases',[])) != cases:
     raise SystemExit('Run the full test suite before packaging')
@@ -102,7 +105,7 @@ if result.get('manifest_schema_sha256') != hashlib.sha256(schema_path.read_bytes
     raise SystemExit('Manifest schema changed since source validation')
 abi_reference = ROOT/'abi/x86_64-current.json'
 abi_capture = BUILD/'abi-current.json'
-if result.get('abi_snapshot_host_tests') != 9 or result.get('abi_snapshot_entries') != 660:
+if result.get('abi_snapshot_host_tests') != 9 or result.get('abi_snapshot_entries') != 662:
     raise SystemExit('Run compiled ABI capture, offline comparison and header-drift regressions before packaging')
 if result.get('ipc_copy_host_checks') != 10041 or result.get('ipc_stats_control_host_checks') != 6001 or result.get('ipc_copy_profile') != 'successful-user-copy-bytes-v1' or not result.get('ipc_stats_qemu') or result.get('ipc_stats_qemu_boots') != 2:
     raise SystemExit('Run actual IPC copy event/control oracles and both production stats VM transports before packaging')

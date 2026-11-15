@@ -113,6 +113,7 @@ subprocess.run([sys.executable,'tests/integration/test_namespace_boundary.py'],c
 subprocess.run([sys.executable,'tests/integration/test_namespace_ownership.py'],check=True)
 subprocess.run([sys.executable,'tests/integration/test_policy_boundary.py'],check=True)
 subprocess.run([sys.executable,'tests/integration/test_file_ingress.py'],check=True)
+subprocess.run([sys.executable,'tests/integration/test_linux_blob_assembly.py'],check=True)
 abi_reference_sha256 = hashlib.sha256((ROOT/'abi/x86_64-current.json').read_bytes()).hexdigest()
 abi_capture_sha256 = hashlib.sha256((ROOT/'build/abi-current.json').read_bytes()).hexdigest()
 if not args.host_only:
@@ -194,6 +195,7 @@ result['posix_import_bindings'] = 19
 result['net_qemu'] = not args.host_only
 result['net_qemu_boots'] = 0 if args.host_only else 2
 result['memory_host_assertions'] = 48
+result['linux_blob_assembly'] = json.loads((ROOT/'build/linux-blob-assembly-results.json').read_text(encoding='utf-8'))
 result['openat_host_assertions'] = 140
 result['namespace_mount_host_assertions'] = 256
 result['namespace_opaque_host_assertions'] = 22
