@@ -46,6 +46,8 @@ if result.get('persist_read_reply_bounds') is not True or result.get('persist_re
     raise SystemExit('Run bounded persistence READ replies and full-width sequential guest read/EOF regressions before packaging')
 if result.get('persist_write_reply_host') != {'passed':True,'evidence':'E1-host','checks':693161,'malformed_cases':120,'known_errors':60,'unknown_cases':33,'transport_cases':8}:
     raise SystemExit('Run exact persistence WRITE ACK, admitted-chunk progress and retained unknown DIRTY host regressions before packaging')
+if result.get('persist_admission_fence_host') != {'passed':True,'evidence':'E1-host-only','non_destructive':True,'provider_lifecycle':False}:
+    raise SystemExit('Run non-destructive Root admission fence/token/cancel host regressions before packaging')
 write_reply=result.get('persist_write_reply_qemu',{})
 write_cases=write_reply.get('cases',[])
 if (write_reply.get('passed') is not True or write_reply.get('evidence')!='E2-signed-provider' or
@@ -69,7 +71,7 @@ block_guest=result.get('block_reply_qemu',{})
 if block_host.get('passed') is not True or block_host.get('checks')!=3968 or block_host.get('clients')!=[{'owner':'persist','checks':1984},{'owner':'storage','checks':1984}] or block_guest.get('passed') is not True or block_guest.get('guest_boots')!=4 or block_guest.get('malformed_reads_rejected')!=4 or block_guest.get('explicit_recoveries')!=4 or not all(block_guest.get(k) is True for k in ('root_degraded_to_bundle','persist_required_trust_fail_closed','committed_notes_unchanged','production_artifacts_restored','base_disk_unchanged')):
     raise SystemExit('Complete authenticated block-client host/guest recovery evidence required')
 trust_sync=result.get('trust_sync_qemu',{})
-if result.get('trust_sync_host_checks')!=1003 or result.get('trust_admission_host_tests')!=1 or result.get('trust_admission_host_checks')!=76 or trust_sync.get('passed') is not True or trust_sync.get('guest_boots')!=2 or trust_sync.get('malformed_snapshots')!=4 or trust_sync.get('denied_new_authority')!=8 or trust_sync.get('valid_resyncs')!=4 or not all(trust_sync.get(k) is True for k in ('pending_and_known_commit_preserved','ordinary_standby_app','production_artifacts_restored','base_disk_unchanged')):
+if result.get('trust_sync_host_checks')!=1003 or result.get('trust_admission_host_tests')!=1 or result.get('trust_admission_host_checks')!=92 or trust_sync.get('passed') is not True or trust_sync.get('guest_boots')!=2 or trust_sync.get('malformed_snapshots')!=4 or trust_sync.get('denied_new_authority')!=8 or trust_sync.get('valid_resyncs')!=4 or not all(trust_sync.get(k) is True for k in ('pending_and_known_commit_preserved','ordinary_standby_app','production_artifacts_restored','base_disk_unchanged')):
     raise SystemExit('Run atomic runtime trust/actual Root admission and signed-provider fault/resync regressions before packaging')
 if result.get('projection_width_host_assertions') != 9130 or result.get('projection_sdk_qemu') is not True or result.get('projection_sdk_qemu_boots') != 2:
     raise SystemExit('Run projection metadata/full-width seek host and both transport SDK regressions before packaging')

@@ -34,6 +34,8 @@ static long sf_cap_close(uint64_t cap){CHECK(cap>0);closes++;return 0;}
 static long sf_cap_derive(uint64_t cap,uint64_t rights){CHECK(cap>0&&(rights==(RIGHT_SEND|RIGHT_DELEGATE)||rights==(RIGHT_RECV|RIGHT_DELEGATE)));return (long)(cap+0x1000);}
 int sf_storage_writable(void){return device_up;}
 int sf_storage_quiescent(void){return SF_DEVICE_GONE;}
+uint64_t sf_storage_admission_instance(void){return 0;}
+uint32_t sf_storage_namespace_pid(void){return 0;}
 int sf_storage_transaction(int begin){if(begin){dirty_begins++;dirty_active++;}else{CHECK(dirty_active>0);dirty_active--;dirty_ends++;}return 0;}
 int sf_storage_driver(uint32_t*ep,uint32_t*back,uint32_t*pid,uint64_t*bytes,int*write){if(!driver_up)return SF_DEVICE_GONE;*ep=0x501;*back=0x502;*pid=33;*bytes=2097152;*write=1;return 0;}
 uint8_t*sf_storage_scratch(void){return scratch;}

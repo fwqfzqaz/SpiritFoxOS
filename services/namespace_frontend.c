@@ -1,5 +1,6 @@
 #include "namespace_frontend.h"
 #include "namespace_client.h"
+#include "persistence.h"
 /* Root-side representation. The large namespace tables exist only at the
  * service. This adapter is linked instead of namespace.c, never with it. */
 struct SfNamespace {
@@ -17,6 +18,7 @@ static void lost(void*context){(void)context;sf_init_namespace_lost();}
 void sf_ns_peer_lost(void){sf_nsc_lost(&frontend.client);}
 int sf_ns_client_healthy(void){return frontend.client.ready!=0;}
 void sf_ns_init(SfNamespace*n,long(*console)(const void*,size_t)){
+ if(sf_persist_fenced())return;
  n->console=console;n->read=n->projection=0;n->write=0;n->truncate=0;n->mount_open=0;n->mount_close=0;
  int pid=sf_storage_namespace_start();if(pid<0){sf_nsc_lost(&n->client);return;}
  sf_nsc_connect(&n->client,(uint32_t)pid,sf_storage_namespace_exchange,n,lost,console?SF_NS_B_CONSOLE:0);
@@ -38,7 +40,7 @@ int sf_ns_assign(SfNamespace*n,const char*p,uint32_t uid,uint32_t gid,unsigned m
 int sf_ns_project(SfNamespace*n,const char*p,unsigned id){return sf_nsc_project(&n->client,p,id);}
 int sf_ns_protect(SfNamespace*n,const char*p){return sf_nsc_protect(&n->client,p);}
 int sf_ns_mount_check(SfNamespace*n,const char*p){return sf_nsc_mount_check(&n->client,p);}
-int sf_ns_mount_publish(SfNamespace*n,const SfMountEntry*entries,unsigned count,unsigned tag){return sf_nsc_mount_publish(&n->client,entries,count,tag);}
+int sf_ns_mount_publish(SfNamespace*n,const SfMountEntry*entries,unsigned count,unsigned tag){if(sf_persist_fenced())return SF_DRAINING;return sf_nsc_mount_publish(&n->client,entries,count,tag);}
 int sf_ns_open_as(SfNamespace*n,uint32_t owner,const char*root,const char*p,unsigned mode,uint32_t uid,uint32_t gid){return sf_nsc_open(&n->client,owner,root,p,mode,uid,gid);}
 int sf_ns_open(SfNamespace*n,uint32_t owner,const char*root,const char*p,unsigned mode){return sf_ns_open_as(n,owner,root,p,mode,0,0);}
 int sf_ns_openat_as(SfNamespace*n,uint32_t owner,uint32_t parent,const char*p,unsigned mode,uint32_t uid,uint32_t gid){return sf_nsc_openat(&n->client,owner,parent,p,mode,uid,gid);}
@@ -60,7 +62,7 @@ long sf_ns_enumerate(SfNamespace*n,uint32_t owner,uint32_t h,char*out,size_t byt
 long sf_ns_enumerate_at(SfNamespace*n,uint32_t owner,uint32_t h,uint32_t index,char*out,size_t bytes){return(long)sf_nsc_enumerate_at(&n->client,owner,h,index,out,bytes);}
 void sf_ns_reap(SfNamespace*n,uint32_t owner){sf_nsc_reap(&n->client,owner);}
 int sf_ns_handoff(SfNamespace*n,uint32_t owner,uint32_t h,uint32_t next){return sf_nsc_handoff(&n->client,owner,h,next);}
-int sf_ns_unmount(SfNamespace*n,unsigned tag){return sf_nsc_unmount(&n->client,tag);}
+int sf_ns_unmount(SfNamespace*n,unsigned tag){if(sf_persist_fenced())return SF_DRAINING;return sf_nsc_unmount(&n->client,tag);}
 static int64_t callback(SfNamespace*n,SfMessage*m){
  if(m->handle||m->length>sizeof(m->data))return SF_INVALID;
  switch(m->h.opcode){

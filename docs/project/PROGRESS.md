@@ -2,6 +2,20 @@
 
 更新日期：2026-11-16（Asia/Shanghai）。
 
+## 下一段 Persist admission fence（独立 E1 草稿）
+
+独立分支 `codex/persist-fence-20261115` 从79d30c3接续，仅增加不停止进程的
+Root admission fence/drain/cancel。所有者令牌有界且不复用，打开、装载、事务、
+原始块控制、驱动/挂载/命名空间恢复及管理诊断均在实际入口拒绝；取消须核对
+原实例、端点、代次、健康账本和信任快照，未知 DIRTY 与信任错误不清除。
+104仍是只读诊断，没有停止/启动、公共新操作码或 bootstrap 绕过。
+隔离宿主 E1 3016项、前端33项、实际 package_get92项及原有写确认、元数据、
+静默查询、信任同步回归通过；最终复核仅链接已校验的私有 Rust 适配库副本，
+编译与缓存全部位于该工作树 `.cache`。
+E2、初始构建完整套件、发布与托管均未执行，不能引用当前整合批次证明此草稿。
+完整边界和后续阻塞见 `docs/quality/PERSIST_FENCE.md`；不宣称 Persist 生命周期、
+整个 P1/G0 或真机验收完成。
+
 ## 当前 P1 整合：作者 S4 基线，完整验证未完成
 
 当前基于作者 main ff5733c，保留其 M7、USB/xHCI/HID、Linux S0–S4、TLS/clone/futex、

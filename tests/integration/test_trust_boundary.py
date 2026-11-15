@@ -15,12 +15,13 @@ PREFIX=r'''
 #include "sf.h"
 #include "package.h"
 #include "persistence.h"
-static int fault,bad;
+static int fault,bad,fenced;
 static unsigned queries,maps,reads,bundles,auth;
 static uint8_t scratch[1];
 static const SfBootArgs args={.bundle=0x55,.bundle_bytes=9};
 static const SfBootArgs*boot=&args;
 SfRuntimeTrust sf_trust;
+int sf_persist_fenced(void){return fenced;}
 int sf_persist_security_error(void){queries++;return fault;}
 static void*stage_grow(uint64_t*base,uint64_t*have,uint64_t bytes){(void)base;(void)have;if(bytes!=SF_STORAGE_SNAPSHOT_BYTES)bad=1;maps++;return scratch;}
 long sf_storage_load(const char*name,void*out,size_t bytes){(void)name;if(out!=scratch||bytes!=SF_STORAGE_SNAPSHOT_BYTES)bad=1;reads++;return SF_NOT_FOUND;}
@@ -35,6 +36,12 @@ static unsigned checks;
 int main(void){
  const char*paths[]={"hello.sfk","sf-native.sfmod","/disk/bin/app.sfk","/installed.sfk"};
  const int errors[]={SF_BAD_FORMAT,SF_NO_SPACE,SF_DEVICE_GONE,SF_COMMIT_UNCERTAIN};
+ for(unsigned i=0;i<4;i++){
+  queries=maps=reads=bundles=auth=0;bad=0;fault=0;fenced=1;uint64_t base=0x99,have=0x33;SfPackage p,before;memset(&p,0xa5,sizeof(p));before=p;
+  CHECK(package_get(paths[i],&p,&base,&have)==SF_DRAINING);
+  CHECK(!queries&&!maps&&!reads&&!bundles&&!auth&&!bad);
+  CHECK(base==0x99&&have==0x33);CHECK(!memcmp(&p,&before,sizeof(p)));
+ }fenced=0;
  for(unsigned i=0;i<4;i++)for(unsigned j=0;j<4;j++){
   queries=maps=reads=bundles=auth=0;bad=0;fault=errors[j];uint64_t base=0x99,have=0x33;SfPackage p,before;memset(&p,0xa5,sizeof(p));before=p;
   CHECK(package_get(paths[i],&p,&base,&have)==fault);
@@ -62,7 +69,7 @@ class TrustBoundary(unittest.TestCase):
             build.run(['-target',build.HOST,'-g0','-O2','-Wall','-Wextra','-Werror','-Wno-unused-parameter','-DSF_HOST_TEST','-Iinclude',str(path.relative_to(ROOT)),'-o',str(binary.relative_to(ROOT))])
             result=subprocess.run([str(binary)],capture_output=True,text=True)
             self.assertEqual(result.returncode,0,result.stdout+result.stderr)
-            self.assertRegex(result.stdout,r'TRUST ADMISSION PASS: 76 checks')
+            self.assertRegex(result.stdout,r'TRUST ADMISSION PASS: 92 checks')
 
 
 if __name__=='__main__':unittest.main(verbosity=2)

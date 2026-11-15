@@ -63,6 +63,7 @@ static int echo_request(uint32_t,uint32_t,unsigned);
 static uint64_t echo_after(uint64_t now,uint64_t delay){return delay>UINT64_MAX-now?UINT64_MAX:now+delay;}
 static long console_write(const void*p,size_t n){return sf_sys(SYS_LOG,(uint64_t)p,n,0);}
 static int package_get(const char*name,SfPackage*p,uint64_t*base,uint64_t*have){
+ if(sf_persist_fenced())return SF_DRAINING;
  int secure=sf_persist_security_error();if(secure)return secure;
  const uint8_t*d;uint64_t n;
  if(name[0]=='/'){
@@ -125,9 +126,11 @@ static int spawn_package_policy_inner(const char*name,uint32_t service,uint32_t 
  return spawned;
 }
 static int spawn_package_policy(const char*name,uint32_t service,uint32_t rights,uint32_t device,uint32_t device_rights,int directory,const SfArguments*arguments,uint32_t reply,uint16_t expected_kind){
- if(loader_depth)return SF_BUSY;loader_depth++;
+ if(loader_depth)return SF_BUSY;
+ uint64_t load;int admitted=sf_persist_load_begin(&load);if(admitted)return admitted;
+ loader_depth++;
  int r=spawn_package_policy_inner(name,service,rights,device,device_rights,directory,arguments,reply,expected_kind);
- loader_depth--;return r;
+ loader_depth--;int released=sf_persist_load_end(load);return r?r:released;
 }
 static int spawn_package_device(const char*name,uint32_t service,uint32_t rights,uint32_t device,uint32_t device_rights){return spawn_package_policy(name,service,rights,device,device_rights,0,0,0,1);}
 static int spawn_storage_package(const char*name,uint32_t service,uint32_t rights,uint32_t device,uint32_t device_rights,uint32_t reply){return spawn_package_policy(name,service,rights,device,device_rights,0,0,reply,1);}
@@ -623,6 +626,7 @@ static void identity_setup(void){
  sf_assert(sf_session_is_root(sessions),"console boot session is authenticated root");
 }
 static int namespace_recover(void){
+ if(sf_persist_fenced())return SF_DRAINING;
  if(!namespace_lost&&sf_ns_client_healthy())return SF_BUSY;
  if(loader_depth)return SF_BUSY;
  sf_ns_peer_lost();int r=sf_storage_namespace_reset();if(r)return r;
@@ -859,6 +863,7 @@ static int transaction_fingerprint(uint8_t out[96]){
  }return first==end?0:SF_INVALID;
 }
 static void persist_quiescence_test(void){
+ if(sf_persist_fenced()){sf_log("persist: diagnostic refused while fenced\n");return;}
  sf_assert(!sf_persist_quiescent(),"quiescence diagnostic starts with drained PENDING volume");
  uint8_t before[96],after[96];SfRuntimeTrust trust=sf_trust;
  sf_assert(!transaction_fingerprint(before),"quiescence fingerprints PENDING bytes");
@@ -876,6 +881,7 @@ static void persist_quiescence_test(void){
  sf_log("PERSIST QUIESCENCE TEST PASSED\n");
 }
 static void namespace_recovery_test(void){
+ if(sf_persist_fenced()){sf_log("namespace: diagnostic refused while fenced\n");return;}
  sf_assert(sf_storage_writable()&&sf_ns_client_healthy(),"namespace recovery test requires mounted writable volume");
  uint32_t original=sf_storage_namespace_pid();
  sf_assert(!sf_ns_create(ns,"/tmp/ns-held",NODE_FILE,0),"recovery test creates volatile RAM file");

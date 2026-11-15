@@ -3,7 +3,8 @@
 #include "namespace_protocol.h"
 static unsigned checks,reads,writes,opens,closes,losses,exchanges;
 static uint64_t last_offset;
-static int live=1,fail_close;
+static int live=1,fail_close,fenced;
+int sf_persist_fenced(void){return fenced;}
 #define CHECK(x) do{checks++;if(!(x)){printf("NS CALLBACK FAIL line %d: %s\n",__LINE__,#x);return 1;}}while(0)
 int sf_storage_namespace_start(void){return 77;}
 int64_t sf_storage_namespace_exchange(void*context,SfMessage*m){
@@ -30,6 +31,10 @@ static long project(unsigned id,uint64_t offset,void*out,size_t bytes){
 static void request(SfMessage*m,unsigned op){memset(m,0,sizeof(*m));m->h.size=40;m->h.protocol_major=1;m->h.flags=77;m->h.payload_bytes=sizeof(*m)-40;m->h.opcode=op;m->h.request_id=123;}
 int main(void){
  SfNamespace*ns=sf_ns_default();sf_ns_init(ns,console);CHECK(sf_ns_client_healthy()&&exchanges==1);
+ unsigned previous_exchanges=exchanges;fenced=1;
+ sf_ns_init(ns,0);CHECK(sf_ns_client_healthy()&&exchanges==previous_exchanges);
+ CHECK(sf_ns_mount_publish(ns,0,0,1)==SF_DRAINING&&exchanges==previous_exchanges&&sf_ns_client_healthy());
+ CHECK(sf_ns_unmount(ns,1)==SF_DRAINING&&exchanges==previous_exchanges&&sf_ns_client_healthy());fenced=0;
  CHECK(!sf_ns_external(ns,notes,write_notes,truncate_notes));sf_ns_mount_hooks(ns,mount_open,mount_close);sf_ns_projection_backend(ns,project);
  SfMessage m;request(&m,OP_NS_CB_CONSOLE);m.length=4;memcpy(m.data,"text",4);
  CHECK(sf_ns_client_callback(77,&m)==4&&m.status==4&&m.length==0);
