@@ -9,7 +9,7 @@ static inline long sf_spawn_limited(const SfLoadPlan*plan,uint64_t pages){return
 static inline long sf_task_page_limit(uint64_t pid,uint64_t pages,uint64_t op){return sf_sys(SYS_TASK_PAGE_LIMIT,pid,pages,op);}
 static inline long sf_task_page_usage(uint64_t pid){return sf_task_page_limit(pid,0,SF_LIMIT_USED);}
 static inline long sf_ipc_stats(SfIpcStats*out){return sf_sys(SYS_IPC_STATS,(uint64_t)out,sizeof(*out),0);}
-static inline long sf_thread_create(void*entry,uint64_t argument){SfThreadRequest r={sizeof(r),0,(uint64_t)entry,argument};return sf_sys(SYS_THREAD_CREATE,(uint64_t)&r,0,0);}
+static inline long sf_thread_create(void*entry,uint64_t argument){SfThreadRequest r={sizeof(r),0,(uint64_t)entry,argument,0,0};return sf_sys(SYS_THREAD_CREATE,(uint64_t)&r,0,0);}
 static inline long sf_thread_limit(uint64_t pid,uint64_t limit,uint64_t op){return sf_sys(SYS_THREAD_LIMIT,pid,limit,op);}
 static inline long sf_task_cpu_budget(uint64_t pid,uint64_t ticks,uint64_t op){return sf_sys(SYS_TASK_CPU_BUDGET,pid,ticks,op);}
 static inline void sf_log(const char*s){sf_sys(SYS_LOG,(uint64_t)s,strlen(s),0);}

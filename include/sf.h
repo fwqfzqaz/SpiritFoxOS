@@ -81,6 +81,12 @@ enum { SYS_EXIT, SYS_YIELD, SYS_LOG, SYS_TICKS, SYS_EP_CREATE,
 /* Linux 兼容入口：注册一次性的兼容描述符，以及在兼容上行调用内恢复保存帧。 */
 #define SYS_COMPAT_SET 41
 #define SYS_COMPAT_RET 42
+/* 每线程 FS 基址与 futex 等待/唤醒；op&~128 只接受 0=WAIT、1=WAKE。 */
+#define SYS_SET_FSBASE 43
+#define SYS_FUTEX 44
+#define SF_FUTEX_WAIT 0u
+#define SF_FUTEX_WAKE 1u
+#define SF_FUTEX_PRIVATE 128u
 enum { SF_PRIORITY_MIN=0, SF_PRIORITY_DEFAULT=1, SF_PRIORITY_MAX=3, SF_PRIORITY_AGING_TICKS=4,
  SF_PRIORITY_QUERY=0, SF_PRIORITY_SET=1 };
 enum { SF_CAP_LIMIT_MAX=32, SF_LIMIT_QUERY=0, SF_LIMIT_SET=1, SF_LIMIT_USED=2 };
@@ -129,8 +135,19 @@ typedef struct {uint32_t size,version;uint64_t send_bytes,receive_bytes;} SfIpcS
 _Static_assert(sizeof(SfIpcStats)==24,"IPC counters ABI");
 typedef struct { SfIpcHeader h; int64_t status; uint64_t handle,offset;
  uint32_t length,mode; uint8_t data[SF_MSG_BYTES]; } SfMessage;
-typedef struct {uint32_t size,flags;uint64_t entry,argument;} SfThreadRequest;
-_Static_assert(sizeof(SfThreadRequest)==24,"thread request ABI");
+/* 线程标志：TLS 表示 tls 字段生效，COMPAT 表示继承进程的 Linux 兼容入口。 */
+#define SF_THREAD_FLAG_TLS 1u
+#define SF_THREAD_FLAG_COMPAT 2u
+/* 兼容线程帧页固定窗口：主线程由翻译器 mmap，同级线程用 +slot 页。 */
+#define SF_COMPAT_FRAME_BASE 0x40500000ull
+/* 前 24 字节与旧布局一致；size==24 的旧调用仍被接受。 */
+typedef struct {
+ uint32_t size,flags;uint64_t entry,argument;
+ uint64_t tls;        /* flags&TLS 时作为新线程 FS 基址，否则继承创建者 */
+ uint64_t clear_tid;  /* 线程退出时清零并唤醒的 futex 地址，0 表示无 */
+} SfThreadRequest;
+_Static_assert(sizeof(SfThreadRequest)==40,"thread request ABI");
+_Static_assert(offsetof(SfThreadRequest,entry)==8&&offsetof(SfThreadRequest,argument)==16,"thread request legacy prefix");
 /* Framebuffer 查询结果（SYS_FB_MAP 返回；pitch 为字节步长）。 */
 typedef struct {
  uint32_t size,width,height,pitch,bpp,reserved;

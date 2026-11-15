@@ -80,8 +80,9 @@ void ipc_cleanup(Task*t){
  for(unsigned i=0;i<ENDPOINTS;i++)if(endpoints[i].owner==t->pid)invalidate(i);
  for(unsigned i=0;i<32;i++)if(m->caps[i].endpoint)close_cap(&m->caps[i]);
 }
-/* IPC 截止时间：时钟滴答推进后唤醒已过期的阻塞任务（返回 SF_TIMEOUT）。 */
-void ipc_deadlines(void){for(unsigned i=0;i<SF_MAX_THREADS;i++){Task*t=&tasks[i];if(t->state==T_BLOCKED&&t->wait_deadline&&ticks*10000000ull>=t->wait_deadline){t->frame->rax=SF_TIMEOUT;t->irq_waiting=0;task_wake(t);}}}
+/* IPC 截止时间：时钟滴答推进后唤醒已过期的阻塞任务（返回 SF_TIMEOUT）。
+ * futex 等待复用同一字段，超时同样在这里结束。 */
+void ipc_deadlines(void){for(unsigned i=0;i<SF_MAX_THREADS;i++){Task*t=&tasks[i];if(t->state==T_BLOCKED&&t->wait_deadline&&ticks*10000000ull>=t->wait_deadline){t->frame->rax=SF_TIMEOUT;t->irq_waiting=0;t->wait_futex=0;task_wake(t);}}}
 /* IPC 系统调用：EP_CREATE/CAP_CLOSE/CAP_DERIVE/CAP_REVOKE/SEND_CANCEL/SEND/RECV。
  * 消息头校验（尺寸、协议版本 1.0、载荷上界、至多一条随附能力）在内核完成；
  * 队列满返回 SF_WOULD_BLOCK，deadline 过期返回 SF_TIMEOUT。 */

@@ -148,7 +148,7 @@ static int probe(void){
 
  /* 拒绝策略 */
  check(&failures,lx_raw(LX_SYS_GETRANDOM,(long)buffer,16,0,0,0,0)==-LX_ENOSYS,"getrandom");
- check(&failures,lx_raw(LX_SYS_ARCH_PRCTL,LX_ARCH_SET_FS,0,0,0,0,0)==-LX_ENOSYS,"arch_prctl fs");
+ check(&failures,lx_raw(LX_SYS_ARCH_PRCTL,LX_ARCH_SET_FS,0,0,0,0,0)==0,"arch_prctl set fs");
  check(&failures,lx_raw(LX_SYS_ARCH_PRCTL,0xdead,0,0,0,0,0)==-LX_EINVAL,"arch_prctl invalid");
  check(&failures,lx_raw(999,0,0,0,0,0,0)==-LX_ENOSYS,"unknown syscall");
  check(&failures,lx_raw(LX_SYS_PTRACE,0,0,0,0,0,0)==-LX_EPERM,"ptrace denied");

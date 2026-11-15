@@ -17,10 +17,21 @@ _sf_linux_probe_start:
 	test	%rax,%rax
 	js	.Lfail_pre
 	mov	%rax,%r12
+	/* compat stack = mmap(0, 64 KiB)，栈顶经 r10 传给 SYS_COMPAT_SET */
+	xor	%edi,%edi
+	mov	$65536,%esi
+	xor	%edx,%edx
+	mov	$35,%eax
+	int	$0x80
+	test	%rax,%rax
+	js	.Lfail_pre
+	add	$65536,%rax
+	mov	%rax,%r13
 	/* 1: handler 在 RW/NX 帧页 -> SF_DENIED */
 	mov	%r12,%rdi
 	mov	%r12,%rsi
 	xor	%edx,%edx
+	mov	%r13,%r10
 	mov	$41,%eax
 	int	$0x80
 	cmp	$-2,%rax
@@ -29,6 +40,7 @@ _sf_linux_probe_start:
 	lea	_sf_linux_probe_start(%rip),%rdi
 	lea	1(%r12),%rsi
 	xor	%edx,%edx
+	mov	%r13,%r10
 	mov	$41,%eax
 	int	$0x80
 	cmp	$-1,%rax
@@ -37,6 +49,7 @@ _sf_linux_probe_start:
 	lea	_sf_linux_probe_start(%rip),%rdi
 	lea	_sf_linux_probe_start(%rip),%rsi
 	xor	%edx,%edx
+	mov	%r13,%r10
 	mov	$41,%eax
 	int	$0x80
 	cmp	$-2,%rax
@@ -45,6 +58,7 @@ _sf_linux_probe_start:
 	lea	_sf_linux_probe_start(%rip),%rdi
 	mov	4104(%rbx),%rsi
 	xor	%edx,%edx
+	mov	%r13,%r10
 	mov	$41,%eax
 	int	$0x80
 	cmp	$-2,%rax
@@ -53,6 +67,7 @@ _sf_linux_probe_start:
 	lea	_sf_linux_probe_start(%rip),%rdi
 	mov	%r12,%rsi
 	mov	$1,%edx
+	mov	%r13,%r10
 	mov	$41,%eax
 	int	$0x80
 	cmp	$-1,%rax
@@ -61,6 +76,7 @@ _sf_linux_probe_start:
 	lea	_sf_linux_probe_start(%rip),%rdi
 	mov	%r12,%rsi
 	xor	%edx,%edx
+	mov	%r13,%r10
 	mov	$41,%eax
 	int	$0x80
 	test	%rax,%rax
@@ -69,6 +85,7 @@ _sf_linux_probe_start:
 	lea	_sf_linux_probe_start(%rip),%rdi
 	mov	%r12,%rsi
 	xor	%edx,%edx
+	mov	%r13,%r10
 	mov	$41,%eax
 	int	$0x81
 	cmp	$-7,%rax
@@ -89,9 +106,19 @@ _sf_linux_probe_start:
 	test	%rax,%rax
 	js	.Lfail_pre
 	mov	%rax,%r12
+	xor	%edi,%edi
+	mov	$65536,%esi
+	xor	%edx,%edx
+	mov	$35,%eax
+	int	$0x80
+	test	%rax,%rax
+	js	.Lfail_pre
+	add	$65536,%rax
+	mov	%rax,%r13
 	lea	_sf_probe_handler(%rip),%rdi
 	mov	%r12,%rsi
 	xor	%edx,%edx
+	mov	%r13,%r10
 	mov	$41,%eax
 	int	$0x80
 	test	%rax,%rax

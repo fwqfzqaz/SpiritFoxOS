@@ -12,26 +12,29 @@ int main(void){
  CHECK(!space_map(&a,SF_BASE+4096,(uint64_t)ro,1));
  CHECK(!space_map(&a,SF_HEAP,(uint64_t)rw,3));
  CHECK(!space_map(&a,SF_HEAP+4096,(uint64_t)rw2,3));
- CHECK(sf_compat_register(&a,SF_BASE,SF_HEAP,0)==SF_OK);
- CHECK(tasks[0].compat_handler==SF_BASE&&tasks[0].compat_frame==SF_HEAP);
- CHECK(sf_compat_register(&a,SF_BASE,SF_HEAP,0)==SF_BUSY);
+ CHECK(sf_compat_register(&a,SF_BASE,SF_HEAP,0,SF_HEAP+4096)==SF_OK);
+ /* 帧页是每线程属性；主线程槽位只镜像入口，供后续线程创建判定。 */
+ CHECK(a.compat_handler==SF_BASE&&a.compat_frame==SF_HEAP&&tasks[0].compat_handler==SF_BASE);
+ CHECK(sf_compat_register(&a,SF_BASE,SF_HEAP,0,SF_HEAP+4096)==SF_BUSY);
  reset(&a);
- CHECK(sf_compat_register(&a,SF_HEAP,SF_HEAP,0)==SF_DENIED);      /* 入口在 RW/NX 页 */
- CHECK(sf_compat_register(&a,SF_BASE+4096,SF_HEAP,0)==SF_DENIED); /* 入口只读不可执行 */
- CHECK(sf_compat_register(&a,SF_BASE,SF_BASE+4096,0)==SF_DENIED); /* 帧页不可写 */
- CHECK(sf_compat_register(&a,SF_BASE,SF_HEAP+1,0)==SF_INVALID);    /* 帧页未对齐 */
- CHECK(sf_compat_register(&a,SF_BASE,SF_HEAP,1)==SF_INVALID);      /* flags 必须为零 */
- CHECK(sf_compat_register(&a,SF_BASE,SF_HEAP+8192,0)==SF_DENIED);  /* 帧页未映射 */
+ CHECK(sf_compat_register(&a,SF_HEAP,SF_HEAP,0,SF_HEAP+4096)==SF_DENIED);      /* 入口在 RW/NX 页 */
+ CHECK(sf_compat_register(&a,SF_BASE+4096,SF_HEAP,0,SF_HEAP+4096)==SF_DENIED); /* 入口只读不可执行 */
+ CHECK(sf_compat_register(&a,SF_BASE,SF_BASE+4096,0,SF_HEAP+4096)==SF_DENIED); /* 帧页不可写 */
+ CHECK(sf_compat_register(&a,SF_BASE,SF_HEAP+1,0,SF_HEAP+4096)==SF_INVALID);    /* 帧页未对齐 */
+ CHECK(sf_compat_register(&a,SF_BASE,SF_HEAP,1,SF_HEAP+4096)==SF_INVALID);      /* flags 必须为零 */
+ CHECK(sf_compat_register(&a,SF_BASE,SF_HEAP+8192,0,SF_HEAP+4096)==SF_DENIED);  /* 帧页未映射 */
+ CHECK(sf_compat_register(&a,SF_BASE,SF_HEAP,0,0)==SF_DENIED);                  /* 栈顶必须存在 */
+ CHECK(sf_compat_register(&a,SF_BASE,SF_HEAP,0,SF_HEAP+1)==SF_DENIED);          /* 栈顶需 16 字节对齐 */
  CHECK(!tasks[0].compat_handler);
- CHECK(sf_compat_register(&a,SF_BASE,SF_HEAP,0)==SF_OK);
+ CHECK(sf_compat_register(&a,SF_BASE,SF_HEAP,0,SF_HEAP+4096)==SF_OK);
  /* 线程不持有描述符，注册必须拒绝，避免共享帧页。 */
  Task th=a;th.tid=2;th.main=0;th.thread_slot=1;
- CHECK(sf_compat_register(&th,SF_BASE,SF_HEAP,0)==SF_DENIED);
+ CHECK(sf_compat_register(&th,SF_BASE,SF_HEAP,0,SF_HEAP+4096)==SF_DENIED);
  /* 另一进程的帧页地址在本进程未映射，必须拒绝。 */
  Task b={0};b.pid=22;b.main=1;b.main_slot=1;b.page_limit=SF_PAGE_LIMIT_MAX;tasks[1].pid=22;tasks[1].main=1;tasks[1].main_slot=1;tasks[1].page_limit=SF_PAGE_LIMIT_MAX;b.cr3=space_new(b.pid);CHECK(b.cr3);
  uint8_t*foreign=page_alloc(b.pid);CHECK(foreign);CHECK(!space_map(&b,SF_HEAP+8192,(uint64_t)foreign,3));
  reset(&a);
- CHECK(sf_compat_register(&a,SF_BASE,SF_HEAP+8192,0)==SF_DENIED);
+ CHECK(sf_compat_register(&a,SF_BASE,SF_HEAP+8192,0,SF_HEAP+4096)==SF_DENIED);
  Frame f={0};f.cs=0x1b;f.ss=0x23;f.rip=SF_BASE;f.rsp=SF_STACK-8;
  CHECK(sf_compat_frame_valid(&f));
  f.cs=0x08;CHECK(!sf_compat_frame_valid(&f));f.cs=0x1b;

@@ -17,10 +17,13 @@ typedef struct {
  uint32_t priority,cap_limit,page_limit,page_count;uint64_t ready_since;
  uint32_t tid,main,main_slot,thread_slot;int32_t cpu;
  uint32_t thread_limit,thread_count,thread_slots,next_tid,cpu_budget;uint64_t cpu_used;
+ /* TLS、兼容线程栈、退出时清零的 futex 与 futex 等待地址。 */
+ uint64_t fs_base,compat_stack,clear_tid,wait_futex;
  Cap caps[32];uint8_t fxstate[512] __attribute__((aligned(16)));
  uint8_t kstack[16384] __attribute__((aligned(16)));
- /* Linux 兼容描述符（仅主线程）与当前线程的保存帧。帧页写入用户页供
-  * 翻译器读取参数，但恢复只使用这里的权威副本，避免 CPL3 篡改 iretq。 */
+ /* Linux 兼容描述符（主线程注册一次，每线程持有入口与帧页）与当前线程的
+  * 保存帧。帧页写入用户页供翻译器读取参数，但恢复只使用这里的权威副本，
+  * 避免 CPL3 篡改 iretq。 */
  Frame compat_saved;uint64_t compat_handler,compat_frame;
  uint32_t compat_nested,compat_flags,compat_pad[2];
 } Task;
@@ -60,7 +63,7 @@ void console_fb_init(uint64_t,uint64_t,uint32_t,uint32_t,uint32_t,uint32_t);
 void ps2_mouse_init(uint32_t,uint32_t);long ps2_mouse_read(int);void ps2_irq(void);
 void ps2_pointer_report(int32_t,int32_t,uint8_t);
 void usb_init(void);void usb_poll(void);
-void arch_init(void);void arch_cpu_init(unsigned);void arch_load_idt(void);void arch_task(Task*);void arch_save(Task*);void arch_enter(Frame*) __attribute__((noreturn));
+void arch_init(void);void arch_cpu_init(unsigned);void arch_load_idt(void);void arch_task(Task*);void arch_set_fs(uint64_t);void arch_save(Task*);void arch_enter(Frame*) __attribute__((noreturn));
 /* 空闲等待：enter_idle 切换到每 CPU 独立栈并释放全局锁，idle_loop 在
  * sti;hlt 后重新抢占全局锁调度；两者都不返回。 */
 void idle_loop(void) __attribute__((noreturn));
@@ -76,7 +79,7 @@ void space_apic_init(void);uint64_t space_ap_cr3(void);int space_ioapic_init(voi
 int space_fb_init(uint64_t,uint64_t);
 int task_new(const SfLoadPlan*,int);int task_new_limited(const SfLoadPlan*,int,uint32_t);void task_dead(Task*,int);Frame *schedule(void);
 /* Linux 兼容入口的注册与保存帧校验；注册只允许在主线程进行一次。 */
-int sf_compat_register(Task*,uint64_t,uint64_t,uint64_t);int sf_compat_frame_valid(const Frame*);
+int sf_compat_register(Task*,uint64_t,uint64_t,uint64_t,uint64_t);int sf_compat_frame_valid(const Frame*);
 int task_schedulable(const Task*);void task_wake(Task*);void task_kill(uint32_t,int);void cpu_account(void);void cpu_window_reset(void);
 long ipc_syscall(uint64_t,uint64_t,uint64_t,uint64_t);void ipc_cleanup(Task*);
 void ipc_stats_snapshot(SfIpcStats*);

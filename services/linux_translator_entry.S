@@ -36,10 +36,11 @@ _sf_linux_translator_start:
 	js	.Lfail
 	add	$65536,%rax
 	mov	%rax,%r13
-	/* SYS_COMPAT_SET(handler, frame, 0) */
+	/* SYS_COMPAT_SET(handler, frame, 0, translator_stack_top) */
 	lea	_sf_compat_handler(%rip),%rdi
 	mov	%r12,%rsi
 	xor	%edx,%edx
+	mov	8(%rbx),%r10
 	mov	$41,%eax
 	int	$0x80
 	test	%rax,%rax
@@ -66,17 +67,38 @@ _sf_linux_translator_start:
 	xor	%eax,%eax
 	int	$0x80
 	ud2
-/* int 0x80 上行入口：rdi 指向帧页，先切换到翻译器栈再调用 C 分派器。 */
+/* int 0x80 上行入口：rdi 指向帧页，r10 是该线程的翻译器栈顶。 */
 .section .text
 _sf_compat_handler:
-	lea	__sf_linux_translator_data(%rip),%rax
-	mov	8(%rax),%rsp
+	mov	%r10,%rsp
 	call	sf_linux_dispatch
 	mov	%rax,%rdi
 	xor	%esi,%esi
 	mov	$42,%eax
 	int	$0x81
 	ud2
+/* clone 子线程首条指令：rdi 指向子栈顶−256 的启动块（帧 176 字节 +
+ * 子栈顶）。恢复全部通用寄存器后切到子栈并跳到 syscall 后的返回地址；
+ * 恢复期间用 rsp 作基址，rdi 在切栈后再从块内恢复。 */
+.global _sf_thread_trampoline
+_sf_thread_trampoline:
+	mov	0(%rdi),%r15
+	mov	8(%rdi),%r14
+	mov	16(%rdi),%r13
+	mov	24(%rdi),%r12
+	mov	32(%rdi),%r11
+	mov	40(%rdi),%r10
+	mov	48(%rdi),%r9
+	mov	56(%rdi),%r8
+	mov	72(%rdi),%rsi
+	mov	80(%rdi),%rbp
+	mov	88(%rdi),%rbx
+	mov	96(%rdi),%rdx
+	mov	104(%rdi),%rcx
+	mov	112(%rdi),%rax
+	mov	176(%rdi),%rsp
+	mov	-192(%rsp),%rdi
+	jmp	*-120(%rsp)
 .section .rodata
 .Lapp:
 .asciz "app"

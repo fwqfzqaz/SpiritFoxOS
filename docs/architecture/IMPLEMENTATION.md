@@ -63,6 +63,8 @@ Linux 兼容入口是同一 `int 0x80` 路径上的可选分支：进程经 `SYS
 
 S3 的翻译器是独立位置无关 blob，随 sf-init 追加为 RX/RW 两段：`.text`+`.rodata` 位于段基址，静态数据固定在偏移 `0x10000` 的 RW 页，入口必须位于 blob 偏移 0。构建期拒绝任何 `.rela*`/`.rel*`、校验数据页不超过 4 KiB，并用内容摘要打破 Zig 对 `.incbin` 外部文件的缓存盲区。翻译器无动态分配：fd 表 32 项、pipe 槽 4 个（各 4 KiB 环形缓冲）、1 MiB 有界 `brk`，文件 RPC 沿用 `SfFileClient` 并通过 `int 0x81` 到达 sf-init。sf-init 为每次工具运行打开只读磁盘根、创建私有回复端点、以既有 `SfLoadPlan` 装载 ELF 并登记子进程，退出统一回收；内核与 BootArgs ABI 未新增字段。
 
+S4 把兼容上行改为每线程：主线程经 `SYS_COMPAT_SET` 注册入口与帧页并登记进程级标记，`SfThreadRequest.flags` 的 `COMPAT` 位让新线程继承入口、分配到 `SF_COMPAT_FRAME_BASE` 起按槽位递增的独立帧页，并把该线程用户栈顶作为翻译器栈（入口在 `int 0x80` 时由 `r10` 传入，handler 直接 `mov %r10,%rsp`）。`TLS` 位把 `tls` 写入新线程的 `fs_base`，`arch_task` 每次切换写 `IA32_FS_BASE`，`SYS_SET_FSBASE` 立即生效。`clone` 在子栈顶 −256 处构造启动块（完整帧 + 子栈顶），新线程首条指令 `_sf_thread_trampoline` 恢复寄存器、切栈并以 `rax=0` 跳回 syscall 返回点，从而仿真 clone 的双返回；`clear_tid` 在就绪前写入 tid、退出时清零并 `futex_wake`。`SYS_FUTEX` 提供 WAIT/WAKE（忽略 private 位），超时复用 `ipc_deadlines`，10 ms tick 决定精度。
+
 本开发版本保持 BootArgs 固定头 96 字节，把尾部设备 BDF 的高 16 位定义为 device_rights；装载计划相应字段传递显式写权。只读驱动模式和带 FLUSH 的可写模式分别协商。尚未冻结 ABI，不承诺兼容此前构建的设备驱动包。
 
 设备释放先复位并确认状态、禁用 PCI Bus Master，再撤销 I/O 权和可选 IOMMU context。DMA 页始终保留；只有旧地址空间销毁后才允许新驱动使用。复位或失效不能确认时进入隔离状态并禁止新授权。默认无 DMAR 时是 legacy 可信驱动模式；QEMU q35 可选 Intel VT-d + modern virtio ACCESS_PLATFORM，实际把未授权 RAM DMA 阻止在设备页表之外。完整限制见 `IOMMU.md`。

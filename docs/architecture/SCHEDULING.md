@@ -10,6 +10,8 @@
 
 任务槽同时承载线程。创建任务时首线程 `tid=1` 且标记 `main=1`，承载进程级状态（CR3、PID、能力表、页/能力/线程/CPU 配额）；`SF_THREAD_CREATE` 创建的同进程线程共享主线程的 CR3 与 PID，各自拥有 16 KiB 内核栈和独立的 FXSAVE64 状态，用户栈固定映射在 `SF_THREAD_STACK_BASE(0x40300000)` 起每线程 64 KiB 的槽位。线程数上限为每进程 `SF_THREAD_LIMIT_MAX=32`（含主线程），槽位位图防止复用未回收的栈空间。线程独立参与优先级老化与 CPU 预算，但配额、能力和页计数始终记在主线程上。
 
+每个线程还持有自己的 `fs_base`（切换时写入 `IA32_FS_BASE`）、兼容入口/帧页/翻译器栈，以及 `clear_tid`（退出时写 0 并唤醒的 futex 地址）。兼容线程的帧页固定在 `SF_COMPAT_FRAME_BASE(0x40500000)` 起每槽 4 KiB 的窗口内，翻译器栈复用该线程用户栈顶；因此多线程可同时停留在上行调用中而互不覆盖。线程退出先把 tid 清零并 `futex_wake`，再解映射用户栈与帧页并释放物理页。
+
 `smp_preempt_all()` 只在在线 CPU 数大于 1 时发送 LAPIC 广播 IPI（vector 33）；BSP 的 PIT 仍只在自己的核上推进 `ticks` 并调用预算窗口重置，AP 由 IPI 进入调度。所有 CPU 的调度、任务表修改、能力的授予/回收都在全局 ticket 自旋锁 `kernel_lock` 内完成；获取锁先 `cli`，因此临界区不可被同核中断重入。
 
 ### 选择与唤醒
@@ -46,7 +48,7 @@ cpu-budget 1 60      # 设置窗口内 tick 上限
 threads-test         # 创建/回收线程并检查配额与预算
 ```
 
-`priority` 命令保持原有语义。没有新增 wire 结构：线程请求复用既有系统调用编号 26–28，`SfThreadRequest` 为 24 字节（size/flags/entry/argument），ABI 快照只追加。
+`priority` 命令保持原有语义。没有新增 wire 结构：线程请求复用既有系统调用编号 26–28，`SfThreadRequest` 为 40 字节（size/flags/entry/argument/tls/clear_tid），前 24 字节与旧布局一致，旧调用方仍可按 `size=24` 使用；ABI 快照只追加。
 
 ### 验证与限制
 

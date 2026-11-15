@@ -229,6 +229,8 @@ def build_linux_compat_blobs():
                                              ['tests/fixtures/linux_tool.c'], ['-D' + define])
     fixtures['sysprobe'] = build_linux_fixture('tool-sysprobe',
                                                ['tests/fixtures/linux_syscall_probe.c'], [])
+    fixtures['thread'] = build_linux_fixture('tool-thread',
+                                             ['tests/fixtures/linux_thread.c'], [])
 
     blobs = [('hello', 'build/linux_hello.elf'),
              ('stub', 'build/linux_compat_stub.bin'),

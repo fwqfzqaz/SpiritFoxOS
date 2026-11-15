@@ -1,6 +1,6 @@
 # SpiritFoxOS 实施进度
 
-更新日期：2026-11-14（Asia/Shanghai）。
+更新日期：2026-11-15（Asia/Shanghai）。
 
 ## 当前 main 的 Windows Linux-blob 构建修复（完整验证尚未完成）
 
@@ -51,6 +51,14 @@ E1：`tests/host/test_linux_elf.c` 5652 项断言（含 2000 次固定种子变�
 E1：`tests/host/test_linux_errno.c` 26 项断言通过。E2：`tests/qemu/qemu_linux_compat_test.py` 确认 7 个静态 PIE 工具（true/false/echo/seq/cat/wc/ls）与覆盖 36 个调用号的 syscall 探针全部通过，`cat` 输出磁盘原文、`wc` 为 `WC 66 7 1`、`ls` 列出 `readme.txt`，并保留 hello、注册边界、未注册 `0x81`、嵌套上行终止与原生回归断言。完整 `python3 tools/test.py` 3833.83 秒、170 次 VM 启动全绿（退出码 0），ABI 仍 662，结果见 `build/test-results.json`。
 
 阶段性偏差：E2 未使用真实 `busybox`（依赖 S4 的 TLS/FSBASE 与 S5 的 musl），改用自建静态 PIE 工具集；`getdents64` 作为第 36 项追加以支撑 `ls`。详见 [Linux 兼容规划](../specs/linux-compat/spec.md) §12。
+
+## Linux 兼容 S4：TLS、线程与 futex（E1+E2 通过）
+
+`include/sf.h` 追加 `SYS_SET_FSBASE=43`、`SYS_FUTEX=44` 与 `SF_FUTEX_WAIT/WAKE/PRIVATE`；`SfThreadRequest` 由 24 增至 40 字节，追加 `tls` 与 `clear_tid`，前 24 字节与 `entry/argument` 偏移不变，内核按首 4 字节 `size` 同时接受两种布局。`kernel/arch.c` 在每次任务切换时写 `IA32_FS_BASE`；`kernel/core.c` 为每个线程维护 `fs_base/compat_stack/clear_tid/wait_futex`，兼容帧页固定在 `SF_COMPAT_FRAME_BASE+ts*4 KiB`，`SYS_THREAD_CREATE` 支持 `TLS/COMPAT` 标志、就绪前写入 `clear_tid`（等价 `CLONE_CHILD_SETTID`），线程退出清零并 `futex_wake`；`interrupt_dispatch` 的 `int 0x80` 上行与 `int 0x81` 下行改为每线程，去掉主线程限制。
+
+`services/linux_compat.c` 把 `clone` 映射为 `SYS_THREAD_CREATE`（子栈顶−256 布置启动块，`_sf_thread_trampoline` 恢复寄存器后以 `rax=0` 返回 syscall 之后），`futex` 相对超时换算为绝对纳秒，`arch_prctl(ARCH_SET_FS)` 转发 `SYS_SET_FSBASE`。`tests/fixtures/linux_thread.c` 提供 pthread 风格垫片并覆盖 TLS 逐线程独立、4×1000 futex 互斥计数、32 线程上限 `EAGAIN`、值不匹配 `EAGAIN`、无等待者 `WAKE=0` 与 20 ms 超时负例。
+
+验证：构建通过；`python3 tools/test.py --skip-build --host-only` 全绿（`THREADS PASS: 372 checks`、`Compat tests passed`），ABI 快照 662→673 且旧项无删改；`tests/qemu/qemu_linux_compat_test.py` 真实启动确认 `LINUX THREAD TLS/MUTEX/LIMIT/FUTEX OK` → `LINUX THREAD TESTS PASSED`，原有 7 个工具、syscall 探针与原生回归不受影响。实施中发现并修复两处旧夹具滞后：S2 `stub/probe` 与 S3 探针需按新 ABI 传翻译器栈顶（`r10`），且 `arch_prctl(SET_FS)` 断言由 `ENOSYS` 改为成功。完整 `python3 tools/test.py` 未跑完即按请求先行推送，完整门禁结果待补。
 
 ## P1 未登记文件对端的附加能力清理（本地完整通过）
 

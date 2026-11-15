@@ -4,8 +4,11 @@
 static long invoke(int task,long number,uint64_t a,uint64_t b,uint64_t c){
  current=task;Frame f={0};f.rax=number;f.rdi=a;f.rsi=b;f.rdx=c;return syscall(&f);
 }
+static long invoke4(int task,long number,uint64_t a,uint64_t b,uint64_t c,uint64_t d){
+ current=task;Frame f={0};f.rax=number;f.rdi=a;f.rsi=b;f.rdx=c;f.r10=d;return syscall(&f);
+}
 static long create(int task,uint64_t entry,uint64_t argument){
- SfThreadRequest r={sizeof(r),0,entry,argument};return invoke(task,SYS_THREAD_CREATE,(uint64_t)(uintptr_t)&r,0,0);
+ SfThreadRequest r={sizeof(r),0,entry,argument,0,0};return invoke(task,SYS_THREAD_CREATE,(uint64_t)(uintptr_t)&r,0,0);
 }
 static void process(uint32_t slot,uint32_t pid){
  Task*t=&tasks[slot];t->pid=pid;t->state=T_READY;t->main=1;t->main_slot=slot;t->tid=1;t->thread_limit=SF_THREAD_LIMIT_MAX;t->thread_count=1;t->thread_slots=1;t->next_tid=1;t->cpu=-1;t->cr3=0x1000u+slot*0x1000u;t->cap_limit=SF_CAP_LIMIT_MAX;t->page_limit=SF_PAGE_LIMIT_MAX;t->priority=SF_PRIORITY_DEFAULT;
@@ -16,9 +19,45 @@ int main(void){
  /* 参数校验：尺寸/标志/保留参数/入口可执行性。 */
  reset(2);tasks[0].cr3=0x2000;tasks[0].page_limit=SF_PAGE_LIMIT_MAX;
  SfThreadRequest bad={0};CHECK(invoke(0,SYS_THREAD_CREATE,(uint64_t)(uintptr_t)&bad,1,0)==SF_INVALID);
- bad=(SfThreadRequest){sizeof(bad),1,entry,0};CHECK(invoke(0,SYS_THREAD_CREATE,(uint64_t)(uintptr_t)&bad,0,0)==SF_INVALID);
- bad=(SfThreadRequest){20,0,entry,0};CHECK(invoke(0,SYS_THREAD_CREATE,(uint64_t)(uintptr_t)&bad,0,0)==SF_INVALID);
+ bad=(SfThreadRequest){sizeof(bad),4,entry,0,0,0};CHECK(invoke(0,SYS_THREAD_CREATE,(uint64_t)(uintptr_t)&bad,0,0)==SF_INVALID);
+ bad=(SfThreadRequest){20,0,entry,0,0,0};CHECK(invoke(0,SYS_THREAD_CREATE,(uint64_t)(uintptr_t)&bad,0,0)==SF_INVALID);
  CHECK(invoke(0,SYS_THREAD_CREATE,(uint64_t)(uintptr_t)&bad,0,1)==SF_INVALID);
+ /* 旧 24 字节布局、TLS/clear_tid、兼容线程与 futex。 */
+ reset(2);tasks[0].cr3=0x2000;
+ SfThreadRequest legacy={24,0,entry,0,0,0};
+ CHECK(invoke(0,SYS_THREAD_CREATE,(uint64_t)(uintptr_t)&legacy,0,0)==2&&tasks[1].fs_base==0&&tasks[1].clear_tid==0);
+ SfThreadRequest compat={0};compat=(SfThreadRequest){sizeof(compat),SF_THREAD_FLAG_COMPAT,entry,0,0,0};
+ CHECK(invoke(0,SYS_THREAD_CREATE,(uint64_t)(uintptr_t)&compat,0,0)==SF_INVALID);
+ int32_t clear=1;
+ SfThreadRequest tls={0};tls=(SfThreadRequest){sizeof(tls),SF_THREAD_FLAG_TLS,entry,0x55,0x60000000,(uint64_t)(uintptr_t)&clear};
+ CHECK(invoke(0,SYS_THREAD_CREATE,(uint64_t)(uintptr_t)&tls,0,0)==3&&tasks[2].fs_base==0x60000000&&tasks[2].clear_tid==(uint64_t)(uintptr_t)&clear);
+ /* CHILD_SETTID：内核在就绪前写入 tid，避免子线程先退出清零再被覆盖。 */
+ CHECK(clear==3&&core_copy_out_calls==1);
+ current=2;CHECK(invoke(2,SYS_EXIT,0,0,0)==0);current=0;
+ CHECK(clear==0&&core_copy_out_calls==2);
+ /* 兼容线程：内核分配独立帧页与翻译器栈；退出时两者一并归还。 */
+ reset(2);tasks[0].cr3=0x2000;tasks[0].compat_handler=entry;
+ SfThreadRequest ct={0};ct=(SfThreadRequest){sizeof(ct),SF_THREAD_FLAG_COMPAT,entry,0,0,0};
+ CHECK(invoke(0,SYS_THREAD_CREATE,(uint64_t)(uintptr_t)&ct,0,0)==2);
+ CHECK(tasks[1].compat_handler==entry&&tasks[1].compat_frame==SF_COMPAT_FRAME_BASE+SF_PAGE);
+ CHECK(tasks[1].compat_stack==SF_THREAD_STACK_BASE+2*SF_THREAD_STACK_BYTES-16);
+ CHECK(tasks[0].page_count==17&&allocation_calls==17);
+ unsigned ubefore=core_unmap_calls;current=1;CHECK(invoke(1,SYS_EXIT,0,0,0)==0);current=0;
+ CHECK(core_unmap_calls==ubefore+2&&core_unmap_bytes==SF_THREAD_STACK_BYTES+SF_PAGE);
+ /* futex：值不匹配/无等待者/过期截止/阻塞/唤醒；FS 基址设置与清除。 */
+ reset(2);tasks[0].cr3=0x2000;CHECK(create(0,entry,0)==2);
+ volatile int32_t word=1;ticks=100;
+ CHECK(invoke4(1,SYS_FUTEX,(uint64_t)(uintptr_t)&word,SF_FUTEX_WAIT,0,0)==SF_WOULD_BLOCK);
+ CHECK(invoke4(1,SYS_FUTEX,(uint64_t)(uintptr_t)&word,SF_FUTEX_WAKE,1,0)==0);
+ CHECK(invoke4(1,SYS_FUTEX,(uint64_t)(uintptr_t)&word,SF_FUTEX_WAIT,1,ticks*10000000ull)==SF_TIMEOUT);
+ CHECK(invoke4(1,SYS_FUTEX,(uint64_t)(uintptr_t)&word,SF_FUTEX_WAIT,1,0)==SF_OK);
+ CHECK(tasks[1].state==T_BLOCKED&&tasks[1].wait_futex==(uint64_t)(uintptr_t)&word);
+ CHECK(invoke4(0,SYS_FUTEX,(uint64_t)(uintptr_t)&word,SF_FUTEX_WAKE,1,0)==1);
+ CHECK(tasks[1].state==T_READY&&tasks[1].wait_futex==0&&tasks[1].wait_deadline==0);
+ CHECK(invoke(0,SYS_SET_FSBASE,0x60000000,0,0)==SF_OK&&tasks[0].fs_base==0x60000000);
+ CHECK(invoke(0,SYS_SET_FSBASE,0x60000000,1,0)==SF_INVALID);
+ CHECK(invoke(0,SYS_SET_FSBASE,0,0,0)==SF_OK&&tasks[0].fs_base==0);
+ reset(2);tasks[0].cr3=0x2000;ticks=0;
  CHECK(create(0,0x100000,0)==SF_DENIED&&create(0,SF_BASE+0x2000,0)==SF_DENIED);
  CHECK(tasks[0].thread_count==1&&tasks[0].thread_slots==1&&core_unmap_calls==0);
  /* 七个同级线程：共享 cr3/pid/优先级，独立栈域与内核栈，能力槽为空。 */

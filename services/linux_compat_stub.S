@@ -14,10 +14,21 @@ _sf_linux_stub_start:
 	test	%rax,%rax
 	js	.Lstub_fail
 	mov	%rax,%r12
-	/* SYS_COMPAT_SET(handler, frame, 0) */
+	/* compat stack = mmap(0, 64 KiB)，栈顶经 r10 交给 SYS_COMPAT_SET */
+	xor	%edi,%edi
+	mov	$65536,%esi
+	xor	%edx,%edx
+	mov	$35,%eax
+	int	$0x80
+	test	%rax,%rax
+	js	.Lstub_fail
+	add	$65536,%rax
+	mov	%rax,%r13
+	/* SYS_COMPAT_SET(handler, frame, 0, stack_top) */
 	lea	_sf_compat_handler(%rip),%rdi
 	mov	%r12,%rsi
 	xor	%edx,%edx
+	mov	%r13,%r10
 	mov	$41,%eax
 	int	$0x80
 	test	%rax,%rax

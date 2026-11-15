@@ -10,6 +10,7 @@ static uint32_t next_pid=1;static uint64_t bundle_phys,bundle_bytes,boot_cr3;
 static uint64_t fb_physical,fb_bytes,fb_width,fb_height,fb_pitch;
 static uint32_t fb_bpp,fb_grant_pid;
 static void kill_process(uint32_t,int);
+static int futex_wake(uint32_t,uint64_t,uint32_t);
 /* UEFI 传递的内存描述符（与 boot/efi_stub 的 SfBootInfo.memory_map 对齐）。 */
 typedef struct {uint64_t physical,virtual_address,pages,attribute;uint32_t type,reserved;} BootMemory;
 extern uint8_t kernel_end[];
@@ -53,6 +54,7 @@ int task_new_limited(const SfLoadPlan*p,int bootstrap,uint32_t pages){
  t->tid=1;t->main=1;t->main_slot=(uint32_t)slot;t->thread_slot=0;t->cpu=-1;
  t->thread_limit=SF_THREAD_LIMIT_MAX;t->thread_count=1;t->thread_slots=1;t->next_tid=1;t->cpu_budget=0;t->cpu_used=0;
  t->compat_handler=0;t->compat_frame=0;t->compat_nested=0;t->compat_flags=0;
+ t->fs_base=0;t->compat_stack=0;t->clear_tid=0;t->wait_futex=0;
  /* FXSAVE64 layout: empty x87 tags, zero physical payloads/XMM/pointers,
   * default round-to-nearest controls. FNINIT alone leaves data registers. */
  /* The admitted/reused slot is not the live parent kernel stack.
@@ -83,10 +85,13 @@ void task_dead(Task*t,int status){/* 先撤销共享内存引用，再归还页�
 #endif
  pages_free(t->pid);device_forget(t);}
 static uint64_t thread_stack(const Task*t){return SF_THREAD_STACK_BASE+(uint64_t)t->thread_slot*SF_THREAD_STACK_BYTES;}
-/* 同级线程退出：释放自己的栈映射与线程槽，主线程/其他线程继续运行。 */
+/* 同级线程退出：按 clear_tid 清零并唤醒等待者，再释放自己的栈、兼容帧页
+ * 与线程槽，主线程/其他线程继续运行。 */
 static void thread_exit(Task*t,int status){
  Task*m=task_main(t);
+ if(t->clear_tid&&user_range(t,t->clear_tid,4,1)){uint32_t zero=0;if(!copy_out(t,t->clear_tid,&zero,4))futex_wake(t->pid,t->clear_tid,1);}
  space_unmap_range(t,thread_stack(t),SF_THREAD_STACK_BYTES);
+ if(t->compat_frame)space_unmap_range(t,t->compat_frame,SF_PAGE);
  t->state=T_DEAD;t->exit_status=status;t->cpu=-1;
  if(m->thread_count)m->thread_count--;
  m->thread_slots&=~(1u<<t->thread_slot);
@@ -114,7 +119,7 @@ static void kill_process(uint32_t pid,int status){
   }
  }
  for(unsigned k=0;k<nk;k++){
-  if(!killed[k]->main){space_unmap_range(killed[k],thread_stack(killed[k]),SF_THREAD_STACK_BYTES);m->thread_slots&=~(1u<<killed[k]->thread_slot);if(m->thread_count)m->thread_count--;}
+  if(!killed[k]->main){space_unmap_range(killed[k],thread_stack(killed[k]),SF_THREAD_STACK_BYTES);if(killed[k]->compat_frame)space_unmap_range(killed[k],killed[k]->compat_frame,SF_PAGE);m->thread_slots&=~(1u<<killed[k]->thread_slot);if(m->thread_count)m->thread_count--;}
  }
  m->thread_slots=1;m->thread_count=1;task_dead(m,status);
 }
@@ -124,7 +129,7 @@ int task_schedulable(const Task*t){
  return m->cpu_budget==0||m->cpu_used<m->cpu_budget;
 }
 void task_kill(uint32_t pid,int status){kill_process(pid,status);}
-void task_wake(Task*t){t->state=T_READY;t->ready_since=ticks;smp_preempt_all();}
+void task_wake(Task*t){t->state=T_READY;t->wait_futex=0;t->wait_deadline=0;t->ready_since=ticks;smp_preempt_all();}
 void cpu_account(void){int c=cpu_currents[cpu_index()];if(c<0)return;Task*m=task_main(&tasks[c]);if(m->cpu_budget&&m->cpu_used<UINT64_MAX)m->cpu_used++;}
 void cpu_window_reset(void){if(ticks<cpu_window_end)return;for(unsigned i=0;i<SF_MAX_THREADS;i++)if(tasks[i].main)tasks[i].cpu_used=0;cpu_window_end=ticks+SF_CPU_WINDOW_TICKS;}
 #ifndef SF_HOST_TEST
@@ -165,6 +170,16 @@ Frame *schedule(void){
  * 大多数管理类调用仅限 PID 1（sf-init）；参数用 copy_in 从用户空间校验复制，
  * 返回值写回 rax。default 分支转入 IPC 系统调用（send/recv/grant 等）。 */
 static Task *pid_main(uint64_t pid,int alive){for(unsigned i=0;i<SF_MAX_THREADS;i++){Task*x=&tasks[i];if(!x->main||x->pid!=pid||x->state==T_EMPTY)continue;if(!alive||x->state==T_READY||x->state==T_BLOCKED)return x;}return 0;}
+/* 唤醒同进程内阻塞在同一 futex 地址上的至多 count 个线程；0 表示不限量。
+ * 内核锁在系统调用期间持有，因此“比较值—阻塞”与 WAKE 之间没有竞争窗口。 */
+static int futex_wake(uint32_t pid,uint64_t addr,uint32_t count){
+ int woken=0;
+ for(unsigned i=0;i<SF_MAX_THREADS&&(!count||woken<(int)count);i++){
+  Task*x=&tasks[i];if(x->pid!=pid||x->state!=T_BLOCKED||x->wait_futex!=addr)continue;
+  x->wait_futex=0;x->wait_deadline=0;x->frame->rax=SF_OK;task_wake(x);woken++;
+ }
+ return woken;
+}
 static long syscall(Frame*f){Task*t=&tasks[current];uint64_t a=f->rdi,b=f->rsi,c=f->rdx;
  switch(f->rax){
  case SYS_EXIT:
@@ -214,8 +229,15 @@ static long syscall(Frame*f){Task*t=&tasks[current];uint64_t a=f->rdi,b=f->rsi,c
   return x->cpu_budget;
  }
  case SYS_THREAD_CREATE:{
-  if(b||c)return SF_INVALID;SfThreadRequest r;if(copy_in(t,&r,a,sizeof(r)))return SF_DENIED;
-  if(r.size!=sizeof(r)||r.flags)return SF_INVALID;Task*m=task_main(t);
+  if(b||c)return SF_INVALID;uint32_t size;if(copy_in(t,&size,a,sizeof(size)))return SF_DENIED;
+  if(size!=24&&size!=sizeof(SfThreadRequest))return SF_INVALID;
+  /* 旧调用方只传前 24 字节；tls/clear_tid 缺失时按 0 处理。 */
+  SfThreadRequest r;memset(&r,0,sizeof(r));if(copy_in(t,&r,a,size))return SF_DENIED;
+  if(r.flags&~(SF_THREAD_FLAG_TLS|SF_THREAD_FLAG_COMPAT))return SF_INVALID;
+  Task*m=task_main(t);
+  if((r.flags&SF_THREAD_FLAG_COMPAT)&&!m->compat_handler)return SF_INVALID;
+  if(r.flags&SF_THREAD_FLAG_TLS&&(r.tls>=0x0000800000000000ull||(r.tls&&!user_range(m,r.tls,1,0))))return SF_INVALID;
+  if(r.clear_tid&&((r.clear_tid&3)||!user_range(m,r.clear_tid,4,1)))return SF_INVALID;
   if(m->thread_limit>SF_THREAD_LIMIT_MAX)m->thread_limit=SF_THREAD_LIMIT_MAX;
   if(m->thread_count>=m->thread_limit)return SF_NO_SPACE;
   unsigned ts=1;while(ts<SF_THREAD_LIMIT_MAX&&(m->thread_slots&(1u<<ts)))ts++;
@@ -228,10 +250,25 @@ static long syscall(Frame*f){Task*t=&tasks[current];uint64_t a=f->rdi,b=f->rsi,c
   n->tid=++m->next_tid;n->main=0;n->main_slot=m->main_slot;n->thread_slot=ts;n->cpu=-1;
   n->thread_limit=n->thread_count=n->thread_slots=n->next_tid=n->cpu_budget=0;n->cpu_used=0;n->ready_since=ticks;
   n->compat_handler=0;n->compat_frame=0;n->compat_nested=0;n->compat_flags=0;
+  n->compat_stack=0;n->clear_tid=r.clear_tid;n->wait_futex=0;
+  n->fs_base=(r.flags&SF_THREAD_FLAG_TLS)?r.tls:t->fs_base;
   memset(n->kstack,0,sizeof(n->kstack));memset(n->fxstate,0,sizeof(n->fxstate));n->fxstate[0]=0x7f;n->fxstate[1]=3;n->fxstate[24]=0x80;n->fxstate[25]=0x1f;
   uint64_t base=thread_stack(n);unsigned mapped=0;
   for(uint64_t off=0;off<SF_THREAD_STACK_BYTES;off+=4096){void*p=page_alloc(n->pid);if(!p){space_unmap_range(n,base,mapped);n->state=T_DEAD;return SF_NO_SPACE;}if(space_map(n,base+off,(uint64_t)p,3)){page_free_phys(n->pid,(uint64_t)p);space_unmap_range(n,base,mapped);n->state=T_DEAD;return SF_NO_SPACE;}mapped+=4096;}
+  /* 兼容线程各有一页帧页与一段翻译器栈；主线程由翻译器自行注册。 */
+  if(r.flags&SF_THREAD_FLAG_COMPAT){
+   void*p=page_alloc(n->pid);if(!p){space_unmap_range(n,base,mapped);n->state=T_DEAD;return SF_NO_SPACE;}
+   uint64_t page=SF_COMPAT_FRAME_BASE+(uint64_t)ts*SF_PAGE;
+   if(space_map(n,page,(uint64_t)p,3)){page_free_phys(n->pid,(uint64_t)p);space_unmap_range(n,base,mapped);n->state=T_DEAD;return SF_NO_SPACE;}
+   n->compat_handler=m->compat_handler;n->compat_frame=page;n->compat_stack=base+SF_THREAD_STACK_BYTES-16;
+  }
   n->frame=(Frame*)(n->kstack+sizeof(n->kstack)-sizeof(Frame));memset(n->frame,0,sizeof(Frame));n->frame->rip=r.entry;n->frame->cs=0x1b;n->frame->ss=0x23;n->frame->rflags=0x202;n->frame->rsp=base+SF_THREAD_STACK_BYTES-8;n->frame->rdi=r.argument;
+  /* 与 Linux CLONE_CHILD_SETTID 一致：新线程就绪前把 tid 写入 clear_tid，
+   * 调用方无需返回后再写，避免子线程先退出清零又被覆盖的竞态。 */
+  if(r.clear_tid){int32_t tid=(int32_t)n->tid;if(copy_out(t,r.clear_tid,&tid,4)){
+   if(n->compat_frame)space_unmap_range(n,n->compat_frame,SF_PAGE);
+   space_unmap_range(n,base,SF_THREAD_STACK_BYTES);n->state=T_DEAD;return SF_DENIED;
+  }}
   m->thread_slots|=1u<<ts;m->thread_count++;n->state=T_READY;n->exit_status=0;task_wake(n);return (long)n->tid;
  }
  case SYS_SPAWN_LIMITED:{
@@ -287,9 +324,28 @@ static long syscall(Frame*f){Task*t=&tasks[current];uint64_t a=f->rdi,b=f->rsi,c
  }
  case SYS_SHM_CREATE:case SYS_SHM_MAP:case SYS_SHM_GRANT:case SYS_SHM_CLOSE:
   return shm_syscall(f->rax,a,b,c);
+ /* 每线程 TLS：base=0 清除，否则必须指向本进程可读的一页用户内存。 */
+ case SYS_SET_FSBASE:{
+  if(b||a>=0x0000800000000000ull||(a&&!user_range(t,a,1,0)))return SF_INVALID;
+  t->fs_base=a;arch_set_fs(a);return SF_OK;
+ }
+ /* futex 子集：WAIT 在值匹配时阻塞（d=r10 为绝对 ns 截止时间，0 表示无限），
+  * WAKE 唤醒同地址等待者并返回数量。private 位只影响语义命名，按私有处理。 */
+ case SYS_FUTEX:{
+  uint64_t op=b&~SF_FUTEX_PRIVATE;
+  if(op==SF_FUTEX_WAKE){if((a&3)||!user_range(t,a,4,1))return SF_INVALID;return futex_wake(t->pid,a,(uint32_t)c);}
+  if(op!=SF_FUTEX_WAIT)return SF_INVALID;
+  if((a&3)||!user_range(t,a,4,0))return SF_INVALID;
+  int32_t value;if(copy_in(t,&value,a,4))return SF_DENIED;
+  if(value!=(int32_t)c)return SF_WOULD_BLOCK;
+  uint64_t deadline=f->r10;
+  if(deadline&&ticks*10000000ull>=deadline)return SF_TIMEOUT;
+  t->state=T_BLOCKED;t->wait_futex=a;t->wait_deadline=deadline;t->wait_endpoint=0;t->recv_buffer=0;
+  return SF_OK;
+ }
  /* 兼容描述符由启动 stub 经普通 int 0x80 注册；返回只能由 dispatch 在
   * int 0x81 内完成，未经上行的 RET 一律拒绝。 */
- case SYS_COMPAT_SET:return sf_compat_register(t,a,b,c);
+ case SYS_COMPAT_SET:return sf_compat_register(t,a,b,c,f->r10);
  case SYS_COMPAT_RET:return SF_DENIED;
  default:return ipc_syscall(f->rax,a,b,c);
  }
@@ -327,21 +383,21 @@ Frame *interrupt_dispatch(Frame*f){
   * 让 idle_loop 重新加锁调度即可。 */
  if((f->cs&3)==0){if(f->vector<32){serial("[CORE] kernel exception ");hex(f->vector);serial(" at ");hex(f->rip);panic("kernel exception");}kernel_lock_release();return f;}
  Task*t=&tasks[current];arch_save(t);t->frame=f;device_poll();if(t->state==T_DEAD){Frame*r=schedule();kernel_lock_release();return r;}
- Task*m=task_main(t);
  /* 兼容上行调用：把完整帧写入该线程的帧页供翻译器读取，保存帧另存内核
-  * 副本；返回用户 handler 时不经过 schedule，与 0x71 路径同一契约。 */
- if(f->vector==128&&m->compat_handler){
-  if(!t->main||t->compat_nested||!sf_compat_frame_valid(f)||copy_out(t,m->compat_frame,f,sizeof(*f)))return compat_deny(t);
+  * 副本；返回用户 handler 时不经过 schedule，与 0x71 路径同一契约。
+  * 帧页与翻译器栈都是每线程的，r10 携带该线程的栈顶。 */
+ if(f->vector==128&&t->compat_handler){
+  if(t->compat_nested||!sf_compat_frame_valid(f)||copy_out(t,t->compat_frame,f,sizeof(*f)))return compat_deny(t);
   t->compat_saved=*f;t->compat_nested=1;
-  f->rip=m->compat_handler;f->rsp=m->compat_frame+SF_PAGE;f->rdi=m->compat_frame;
+  f->rip=t->compat_handler;f->rsp=t->compat_stack;f->rdi=t->compat_frame;f->r10=t->compat_stack;
   kernel_lock_release();return f;
  }
  if(f->vector==0x81){
   /* 非兼容任务没有描述符：拒绝本次原生调用，不改变现有任务行为。 */
-  if(!m->compat_handler)f->rax=SF_DENIED;
+  if(!t->compat_handler)f->rax=SF_DENIED;
   else if(f->rax==SYS_COMPAT_RET){
    uint64_t value=f->rdi;
-   if(f->rsi||!t->main||t->compat_nested!=1)return compat_deny(t);
+   if(f->rsi||t->compat_nested!=1)return compat_deny(t);
    *f=t->compat_saved;f->rax=value;t->compat_nested=0;t->frame=f;
    kernel_lock_release();return f;
   }else f->rax=syscall(f);

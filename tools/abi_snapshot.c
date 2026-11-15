@@ -36,9 +36,11 @@ int main(void){
  U(SYS_TASK_CAP_LIMIT);U(SF_CAP_LIMIT_MAX);U(SF_LIMIT_QUERY);U(SF_LIMIT_SET);U(SF_LIMIT_USED);U(SYS_SPAWN_LIMITED);U(SYS_TASK_PAGE_LIMIT);U(SF_PAGE_LIMIT_MAX);
  U(SYS_SEND_CANCEL);U(SYS_MMAP);U(SYS_MUNMAP);U(SYS_SHM_CREATE);U(SYS_SHM_MAP);
  U(SYS_SHM_GRANT);U(SYS_SHM_CLOSE);U(SYS_COMPAT_SET);U(SYS_COMPAT_RET);
+ U(SYS_SET_FSBASE);U(SYS_FUTEX);U(SF_FUTEX_WAIT);U(SF_FUTEX_WAKE);
  U(SYS_THREAD_CREATE);U(SYS_THREAD_LIMIT);U(SYS_TASK_CPU_BUDGET);
  U(SF_MAX_THREADS);U(SF_MAX_CPUS);U(SF_THREAD_LIMIT_MAX);
  U(SF_THREAD_STACK_BASE);U(SF_THREAD_STACK_BYTES);U(SF_CPU_WINDOW_TICKS);
+ U(SF_THREAD_FLAG_TLS);U(SF_THREAD_FLAG_COMPAT);U(SF_COMPAT_FRAME_BASE);
  U(RIGHT_SEND);U(RIGHT_RECV);U(RIGHT_DELEGATE);
  S(SF_OK);S(SF_INVALID);S(SF_DENIED);S(SF_BAD_FORMAT);S(SF_BAD_SIGNATURE);S(SF_ABI_MISMATCH);
  S(SF_DEPENDENCY);S(SF_BUSY);S(SF_DRAINING);S(SF_TIMEOUT);S(SF_DEVICE_GONE);S(SF_NOT_SEEKABLE);
@@ -100,6 +102,10 @@ int main(void){
  value("width.SfThreadRequest.entry",sizeof(((SfThreadRequest*)0)->entry));
  value("offset.SfThreadRequest.argument",offsetof(SfThreadRequest,argument));
  value("width.SfThreadRequest.argument",sizeof(((SfThreadRequest*)0)->argument));
+ value("offset.SfThreadRequest.tls",offsetof(SfThreadRequest,tls));
+ value("width.SfThreadRequest.tls",sizeof(((SfThreadRequest*)0)->tls));
+ value("offset.SfThreadRequest.clear_tid",offsetof(SfThreadRequest,clear_tid));
+ value("width.SfThreadRequest.clear_tid",sizeof(((SfThreadRequest*)0)->clear_tid));
  U(SYS_IPC_STATS);U(SF_IPC_STATS_VERSION);L(SfIpcStats);F(SfIpcStats,size);F(SfIpcStats,version);F(SfIpcStats,send_bytes);F(SfIpcStats,receive_bytes);
  puts("}}");return 0;
 }

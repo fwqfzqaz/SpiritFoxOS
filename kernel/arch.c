@@ -115,9 +115,12 @@ void arch_init(void){
 }
 /* 保存当前任务的浮点状态（FXSAVE 到任务私有区域）。 */
 void arch_save(Task*t){__asm__ volatile("fxsave64 %0":"=m"(t->fxstate)::"memory");}
+/* 每线程 FS 基址：TLS 的 %fs 访问由 IA32_FS_BASE 决定，切换任务时必须恢复。 */
+void arch_set_fs(uint64_t base){__asm__ volatile("wrmsr"::"a"((uint32_t)base),"d"((uint32_t)(base>>32)),"c"(0xc0000100):"memory");}
 /* 切换到目标任务：更新本 CPU TSS.rsp0、切换 CR3 地址空间、恢复浮点状态
  * （先 fninit+fldenv 清除挂起 x87 异常与遗留指针元数据，再 FXRSTOR）。 */
 void arch_task(Task*t){
  tss[cpu_index()].rsp0=(uint64_t)(t->kstack+sizeof(t->kstack));__asm__ volatile("mov %0,%%cr3"::"r"(t->cr3):"memory");
+ arch_set_fs(t->fs_base);
  __asm__ volatile("fninit; fldenv %1; fxrstor64 %0"::"m"(t->fxstate),"m"(empty_fpenv):"memory");
 }

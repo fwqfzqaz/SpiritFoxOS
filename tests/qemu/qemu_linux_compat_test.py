@@ -1,4 +1,4 @@
-"""Linux 兼容 S2/S3：静态 PIE 上行调用、负例边界与 7 个工具 + syscall 探针。"""
+"""Linux 兼容 S2/S3/S4：静态 PIE 上行调用、负例边界、7 个工具 + syscall 探针与线程夹具。"""
 from qemu_persist_test import VM,ROOT
 
 
@@ -21,13 +21,19 @@ def run():
         vm.expect('LS readme.txt')
         vm.expect('LINUX TOOL LS OK')
         vm.expect('LINUX SYSCALL PROBE PASSED')
+        vm.expect('LINUX THREAD TLS OK')
+        vm.expect('LINUX THREAD MUTEX OK')
+        vm.expect('LINUX THREAD LIMIT OK')
+        vm.expect('LINUX THREAD FUTEX OK')
+        vm.expect('LINUX THREAD OK')
+        vm.expect('LINUX THREAD TESTS PASSED')
         vm.expect('LINUX COMPAT TESTS PASSED')
         # 原生路径不受 0x81/0x80 新语义影响。
         vm.command('run hello.sfk','sfexec: exit 0')
     finally:
         vm.close()
     assert disk.read_bytes()==source,'Linux compat path changed persistent bytes'
-    print('LINUX COMPAT QEMU PASS: hello, 7 tools, syscall probe, registration bounds, denied 0x81, nested upcall termination, native regression',flush=True)
+    print('LINUX COMPAT QEMU PASS: hello, 7 tools, syscall probe, threads/TLS/futex, registration bounds, denied 0x81, nested upcall termination, native regression',flush=True)
 
 
 if __name__=='__main__':

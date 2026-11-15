@@ -19,6 +19,12 @@ Linux 兼容上行调用追加 `SYS_COMPAT_SET=41`、`SYS_COMPAT_RET=42` 两个�
 当前 662 项，旧 660 项无删改；两者只使用既有 rdi/rsi/rdx 参数与 rax 返回值，
 没有新增消息或结构体布局。
 
+TLS/线程/futex 追加 `SYS_SET_FSBASE=43`、`SYS_FUTEX=44`、`SF_FUTEX_WAIT/SF_FUTEX_WAKE`
+与 `SF_THREAD_FLAG_TLS/SF_THREAD_FLAG_COMPAT/SF_COMPAT_FRAME_BASE`，以及
+`SfThreadRequest` 的 `tls/clear_tid` 偏移与宽度，共 11 项；当前 673 项，旧 662 项
+无删改。`SfThreadRequest` 由 24 增至 40 字节，前 24 字节与 `entry/argument` 偏移不变，
+`size==24` 的旧调用方继续按旧布局解释（`tls/clear_tid` 视为 0）。
+
 ## 采集与离线比较
 
 在源码仓库根目录执行：

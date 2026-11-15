@@ -45,7 +45,7 @@ class AbiSnapshot(unittest.TestCase):
     def test_capture_and_independent_wire_sizes(self):
         self.assertEqual(self.current,self.reference)
         values=self.current['values']
-        self.assertEqual(len(values),662)
+        self.assertEqual(len(values),673)
         self.assertEqual(values['constant.OP_NS_INIT'],200)
         self.assertEqual(values['constant.OP_NS_UNMOUNT'],227)
         self.assertEqual(values['constant.OP_NS_ENUMERATE_AT'],228)
@@ -71,6 +71,13 @@ class AbiSnapshot(unittest.TestCase):
         self.assertEqual(values['constant.SYS_TASK_CPU_BUDGET'],28)
         self.assertEqual(values['constant.SYS_COMPAT_SET'],41)
         self.assertEqual(values['constant.SYS_COMPAT_RET'],42)
+        self.assertEqual(values['constant.SYS_SET_FSBASE'],43)
+        self.assertEqual(values['constant.SYS_FUTEX'],44)
+        self.assertEqual(values['constant.SF_FUTEX_WAIT'],0)
+        self.assertEqual(values['constant.SF_FUTEX_WAKE'],1)
+        self.assertEqual(values['constant.SF_THREAD_FLAG_TLS'],1)
+        self.assertEqual(values['constant.SF_THREAD_FLAG_COMPAT'],2)
+        self.assertEqual(values['constant.SF_COMPAT_FRAME_BASE'],0x40500000)
         self.assertEqual(values['constant.SYS_IRQ_ACQUIRE'],29)
         self.assertEqual(values['constant.SYS_IRQ_RELEASE'],30)
         self.assertEqual(values['constant.SYS_IRQ_WAIT'],31)
@@ -80,11 +87,15 @@ class AbiSnapshot(unittest.TestCase):
         self.assertEqual(values['constant.SF_THREAD_STACK_BASE'],0x40300000)
         self.assertEqual(values['constant.SF_THREAD_STACK_BYTES'],65536)
         self.assertEqual(values['constant.SF_CPU_WINDOW_TICKS'],100)
-        self.assertEqual(values['size.SfThreadRequest'],24)
+        self.assertEqual(values['size.SfThreadRequest'],40)
         self.assertEqual(values['offset.SfThreadRequest.entry'],8)
         self.assertEqual(values['width.SfThreadRequest.entry'],8)
         self.assertEqual(values['offset.SfThreadRequest.argument'],16)
         self.assertEqual(values['width.SfThreadRequest.argument'],8)
+        self.assertEqual(values['offset.SfThreadRequest.tls'],24)
+        self.assertEqual(values['width.SfThreadRequest.tls'],8)
+        self.assertEqual(values['offset.SfThreadRequest.clear_tid'],32)
+        self.assertEqual(values['width.SfThreadRequest.clear_tid'],8)
         # These fixed little-endian formats are independent of C sizeof/offsetof.
         formats={'SfIpcStats':'<IIQQ','SfIpcHeader':'<IHHIIQIIQ','SfMessage':'<IHHIIQIIQqQQII4096s',
                  'SfBootArgs':'<IHHQQ12IQQIHH','SfFileStat':'<IIIIQQ',

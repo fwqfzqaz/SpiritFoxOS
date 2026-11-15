@@ -53,6 +53,16 @@ int64_t lx_sys(uint64_t number,uint64_t a,uint64_t b,uint64_t c){
  return(int64_t)rax;
 }
 
+/* 原生系统调用（4 参数）：第 4 参数走 r10，与 Linux syscall 约定一致。 */
+int64_t lx_sys4(uint64_t number,uint64_t a,uint64_t b,uint64_t c,uint64_t d){
+ register uint64_t rax __asm__("rax")=number;
+ register uint64_t rdi __asm__("rdi")=a;
+ register uint64_t rsi __asm__("rsi")=b;
+ register uint64_t rdx __asm__("rdx")=c;
+ register uint64_t r10 __asm__("r10")=d;
+ __asm__ volatile("int $0x81":"+a"(rax):"D"(rdi),"S"(rsi),"d"(rdx),"r"(r10):"memory","cc");
+ return(int64_t)rax;
+}
 /* ---- 状态 ---- */
 enum { K_NONE=0,K_STDIN,K_CONSOLE,K_FILE,K_DIR,K_PIPE_R,K_PIPE_W };
 #define LX_FD_MAX 32u
@@ -417,6 +427,52 @@ static int64_t lx_clock_gettime(int clock,LxTimespec *out){
  return 0;
 }
 
+/* ---- 线程 / TLS / futex ---- */
+#define LX_TICK_NS 10000000ull
+#define LX_THREAD_START_BYTES 256u
+extern void _sf_thread_trampoline(void);
+/* clone 映射为 SYS_THREAD_CREATE：在子栈顶−256 布置启动块（完整帧 176 字节 +
+ * 子栈顶），子线程首条指令由 trampoline 恢复全部通用寄存器、把 rax 置 0，
+ * 再跳回 syscall 的返回地址，实现与 Linux 相同的父子双返回。 */
+static int64_t lx_clone(LxFrame *frame,uint64_t flags,uint64_t stack,int32_t *ptid,int32_t *ctid,uint64_t tls){
+ const uint64_t supported=LX_CLONE_VM|LX_CLONE_FS|LX_CLONE_FILES|LX_CLONE_SIGHAND|LX_CLONE_THREAD|LX_CLONE_SYSVSEM|LX_CLONE_SETTLS|LX_CLONE_PARENT_SETTID|LX_CLONE_CHILD_CLEARTID|LX_CLONE_CHILD_SETTID;
+ if(!frame||(flags&~supported)||(flags&(LX_CLONE_VFORK|LX_CLONE_NEWNS)))return-LX_EINVAL;
+ if(!(flags&LX_CLONE_VM)||!(flags&LX_CLONE_THREAD)||!stack||(stack&7))return-LX_EINVAL;
+ uint64_t block=stack-LX_THREAD_START_BYTES;
+ if(block<0x10000)return-LX_EINVAL;
+ LxFrame *saved=(LxFrame*)(uintptr_t)block;
+ memcpy(saved,frame,sizeof(*saved));
+ saved->rax=0;
+ *(uint64_t*)(uintptr_t)(block+176)=stack;
+ SfThreadRequest r;memset(&r,0,sizeof(r));
+ r.size=sizeof(r);
+ r.flags=SF_THREAD_FLAG_COMPAT|((flags&LX_CLONE_SETTLS)?SF_THREAD_FLAG_TLS:0);
+ r.entry=(uint64_t)(uintptr_t)&_sf_thread_trampoline;
+ r.argument=block;
+ r.tls=(flags&LX_CLONE_SETTLS)?tls:0;
+ r.clear_tid=(flags&(LX_CLONE_CHILD_CLEARTID|LX_CLONE_CHILD_SETTID))?(uint64_t)(uintptr_t)ctid:0;
+ int64_t tid=lx_sys(SYS_THREAD_CREATE,(uint64_t)(uintptr_t)&r,0,0);
+ if(tid<0)return tid==SF_NO_SPACE?-LX_EAGAIN:-LX_EINVAL;
+ /* CHILD_SETTID 由内核在就绪前完成；仅当父指针是另一个地址时才需要补写。 */
+ if((flags&LX_CLONE_PARENT_SETTID)&&ptid&&(uint64_t)(uintptr_t)ptid!=r.clear_tid)*(volatile int32_t*)ptid=(int32_t)tid;
+ return tid;
+}
+/* futex 子集：WAIT 的相对超时换算为内核绝对 ns；值不匹配映射 EAGAIN。 */
+static int64_t lx_futex(int32_t *uaddr,int op,int32_t value,const LxTimespec *timeout){
+ int cmd=op&~LX_FUTEX_PRIVATE_FLAG;
+ if(cmd==LX_FUTEX_WAKE)return lx_sys4(SYS_FUTEX,(uint64_t)(uintptr_t)uaddr,SF_FUTEX_WAKE,(uint32_t)value,0);
+ if(cmd!=LX_FUTEX_WAIT)return-LX_ENOSYS;
+ uint64_t deadline=0;
+ if(timeout){
+  if(timeout->tv_sec<0||timeout->tv_nsec<0||timeout->tv_nsec>=1000000000)return-LX_EINVAL;
+  deadline=current_ticks()*LX_TICK_NS+(uint64_t)timeout->tv_sec*1000000000ull+(uint64_t)timeout->tv_nsec;
+ }
+ int64_t r=lx_sys4(SYS_FUTEX,(uint64_t)(uintptr_t)uaddr,SF_FUTEX_WAIT,(uint32_t)value,deadline);
+ if(r==SF_WOULD_BLOCK)return-LX_EAGAIN;
+ if(r==SF_TIMEOUT)return-LX_ETIMEDOUT;
+ return r<0?fail(r):0;
+}
+
 static int64_t lx_gettimeofday(LxTimeval *out,void *timezone){
  (void)timezone;
  if(!out)return-LX_EFAULT;
@@ -660,8 +716,12 @@ int64_t sf_linux_dispatch(LxFrame *frame){
   case LX_SYS_PPOLL:result=lx_poll((LxPollfd*)(uintptr_t)a,(uint64_t)b,c);break;
   case LX_SYS_PIPE2:result=lx_pipe2((int*)(uintptr_t)a,(int)b);break;
   case LX_SYS_PRLIMIT64:result=lx_prlimit64(a,(int)b,(const LxRlimit*)(uintptr_t)c,(LxRlimit*)(uintptr_t)d);break;
+  case LX_SYS_CLONE:result=lx_clone(frame,(uint64_t)a,(uint64_t)b,(int32_t*)(uintptr_t)c,(int32_t*)(uintptr_t)d,(uint64_t)e);break;
+  case LX_SYS_FUTEX:result=lx_futex((int32_t*)(uintptr_t)a,(int)b,(int32_t)c,(const LxTimespec*)(uintptr_t)d);break;
   case LX_SYS_ARCH_PRCTL:
-   result=(a==LX_ARCH_SET_FS||a==LX_ARCH_GET_FS)?-LX_ENOSYS:-LX_EINVAL;
+   if(a==LX_ARCH_SET_FS){int64_t r=lx_sys(SYS_SET_FSBASE,(uint64_t)b,0,0);result=r<0?fail(r):0;}
+   else if(a==LX_ARCH_GET_FS)result=-LX_ENOSYS;
+   else result=-LX_EINVAL;
    break;
   case LX_SYS_GETRANDOM:result=-LX_ENOSYS;break;
   case LX_SYS_READLINKAT:result=-LX_EINVAL;break;

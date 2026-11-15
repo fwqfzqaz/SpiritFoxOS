@@ -1,6 +1,6 @@
 # 规划：Linux 应用兼容模块（有界兼容层）
 
-状态：S0 已评审 / S1 通过（E1）/ S2 完成（E2）/ S3 完成（E1+E2，工具夹具）
+状态：S0 已评审 / S1 通过（E1）/ S2 完成（E2）/ S3 完成（E1+E2，工具夹具）/ S4 完成（TLS、线程与 futex）
 日期：2026-11-13
 适用项目：SpiritFoxOS（x86_64 UEFI 微内核原型）
 
@@ -304,3 +304,30 @@ S1 证据等级为 E1（宿主与集成测试）；S2 起静态 PIE 已可在 QE
 - `arch_prctl(ARCH_SET_FS)` 与 `getrandom` 在 S3 明确返回 `ENOSYS`，避免在缺少 TLS 与内核熵源时给出错误语义。
 
 S3 证据等级为 E1（宿主 errno 表，26 项断言）+ E2（QEMU 内 7 个工具、覆盖 36 个调用号的探针与既有原生回归）；真机与真实 `busybox` 仍未验收。
+
+## 13 S4 实施记录（TLS、线程与 futex）
+
+| 交付 | 位置 |
+| --- | --- |
+| `SYS_SET_FSBASE=43`、`SYS_FUTEX=44`、线程标志与帧页窗口 | `include/sf.h` |
+| 每线程 FS 基址、兼容帧页/翻译器栈、futex 等待与超时 | `kernel/core.c`、`kernel/arch.c`、`kernel/compat.c`、`kernel/ipc.c` |
+| `clone`/`futex`/`arch_prctl` 映射与 trampoline | `services/linux_compat.c`、`services/linux_translator_entry.S` |
+| 线程夹具（pthread 风格垫片、TLS、互斥、上限、超时负例） | `tests/fixtures/linux_thread.c` |
+| 宿主与 QEMU 验收 | `tests/host/test_threads.c`、`tests/qemu/qemu_linux_compat_test.py` |
+
+实现要点与边界：
+
+- `SfThreadRequest` 从 24 增至 40 字节，追加 `tls` 与 `clear_tid`；前 24 字节及 `entry/argument` 偏移不变，内核按首 4 字节 `size` 接受 24 或 40。
+- 兼容帧页固定在 `SF_COMPAT_FRAME_BASE=0x40500000` 起每槽 4 KiB（仅槽 1–31），翻译器栈复用该线程用户栈顶；主线程注册一次入口，`COMPAT` 线程继承。
+- `clone` 只接受线程组合（必须含 `VM|THREAD`），拒绝 `NEW*`/`VFORK`；子线程在 `rax=0` 下从 syscall 返回点继续，`PARENT_SETTID/CHILD_SETTID` 由内核或翻译器按需写入，`CHILD_CLEARTID` 走 `clear_tid`。
+- `SYS_COMPAT_SET` 新增第 4 参数（翻译器栈顶，经 `r10` 传入）；S2 的 stub/probe 与 S3 翻译器入口一样先 `mmap` 64 KiB 并传栈顶，`arch_prctl(ARCH_SET_FS)` 也从 S3 的 `ENOSYS` 改为成功。
+- `SYS_FUTEX` 的 WAIT 做「比较值—阻塞」的原子判定，WAKE 只唤醒同 PID、同地址的阻塞线程；超时复用 `ipc_deadlines`，`private` 位被忽略。
+- 线程上限仍为每进程 32（含主线程），第 32 个 `clone` 返回 `EAGAIN`；线程退出解映射用户栈与帧页并归还页计数。
+
+阶段性偏差（经评审确认）：
+
+- futex 精度受 100 Hz tick 限制，夹具只断言「≥ 请求值且 < 200 ms」，不承诺毫秒级。
+- 未实现 robust/PI futex、进程间共享 futex、`clone3`、`fork`；`gettid` 仍返回进程 PID，真实 musl pthread/TLS 认证留待 S5。
+- QEMU 门禁使用 `-smp 1`；SMP 下父线程补写 `PARENT_SETTID` 的顺序未做原子保证（`CHILD_SETTID` 由内核在就绪前完成）。
+
+S4 证据等级为 E1（宿主线程/ABI 断言）+ E2（QEMU 内线程夹具的 TLS、互斥计数、上限、超时与丢失唤醒负例）；真机与真实 `pthread` 仍未验收。

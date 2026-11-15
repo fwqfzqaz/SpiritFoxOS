@@ -1201,6 +1201,7 @@ extern const uint8_t __sf_linux_cat_start[],__sf_linux_cat_end[];
 extern const uint8_t __sf_linux_wc_start[],__sf_linux_wc_end[];
 extern const uint8_t __sf_linux_ls_start[],__sf_linux_ls_end[];
 extern const uint8_t __sf_linux_sysprobe_start[],__sf_linux_sysprobe_end[];
+extern const uint8_t __sf_linux_thread_start[],__sf_linux_thread_end[];
 static uint64_t lx_stage,lx_stage_bytes;
 static uint8_t lx_data[SF_PAGE] __attribute__((aligned(4096)));
 /* 追加兼容代码段与数据页：代码段紧接 Linux 映像，数据页固定在其后一页。
@@ -1295,6 +1296,7 @@ static void linux_compat_tool_tests(void){
  linux_compat_tool(__sf_linux_wc_start,__sf_linux_wc_end,"linux tool wc",0);
  linux_compat_tool(__sf_linux_ls_start,__sf_linux_ls_end,"linux tool ls",0);
  linux_compat_tool(__sf_linux_sysprobe_start,__sf_linux_sysprobe_end,"linux syscall probe",0);
+ linux_compat_tool(__sf_linux_thread_start,__sf_linux_thread_end,"linux thread",0);
 }
 static void linux_compat_tests(int with_disk){
  int pid=linux_compat_spawn(__sf_linux_stub_start,SF_LINUX_STUB_TEXT_BYTES,-1,0,
