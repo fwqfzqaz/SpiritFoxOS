@@ -49,10 +49,13 @@ def packages(data):
 
 
 @contextmanager
-def provider(source='tests/fixtures/persist_trust_fault.c',revoke_error=-10):
+def provider(source='tests/fixtures/persist_trust_fault.c',revoke_error=-10,write_reply='zero'):
     assert Path.cwd().resolve()==ROOT
-    assert source in ('tests/fixtures/persist_trust_fault.c','tests/fixtures/persist_revoke_failure.c')
+    assert source in ('tests/fixtures/persist_trust_fault.c','tests/fixtures/persist_revoke_failure.c','tests/fixtures/persist_write_reply_fault.c')
     assert revoke_error in (-10,-20)
+    assert write_reply in ('zero','excess')
+    other=ROOT/'.cache/block-reply-fixture-state.json'
+    assert not other.exists() or not json.loads(other.read_text(encoding='utf-8'))['active'],'Do not overlap signed fixtures'
     restore();BACKUP.mkdir(parents=True,exist_ok=True)
     hashes={}
     for i,name in enumerate(FILES):
@@ -61,7 +64,10 @@ def provider(source='tests/fixtures/persist_trust_fault.c',revoke_error=-10):
     try:
         shared=build.objects('trust-fault-common',['services/start.S','services/memory.c','services/libsf.c','services/arguments.c'],extra=build.USER_SECTIONS)
         sources=[source,'services/persist_metadata.c','services/persistence.c','services/txn.c','services/update.c','services/version.c',*build.CRYPTO]
-        definitions=[] if source.endswith('persist_trust_fault.c') else ['-DSF_REVOKE_FAILURE_STATUS='+str(revoke_error)]
+        if source.endswith('persist_write_reply_fault.c'):
+            definitions=['-DSF_WRITE_REPLY_EXCESS='+str(int(write_reply=='excess'))]
+        else:
+            definitions=[] if source.endswith('persist_trust_fault.c') else ['-DSF_REVOKE_FAILURE_STATUS='+str(revoke_error)]
         image=build.link_elf('trust-fault-persist',shared+build.objects('trust-fault-persist',sources,extra=[*build.USER_SECTIONS,*definitions]),'services/user.ld')
         build.check_rw_budget('sf-persist',ROOT/'build/trust-fault-persist.elf')
         replacement=pack({'module_id':'org.spiritfox.persist','version':'0.1.0','category':'service','requested_caps':[],'resource_limits':{'memory':524288}},image,1,(ROOT/'.keys/development.seed').read_bytes())

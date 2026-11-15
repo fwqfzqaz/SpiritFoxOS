@@ -44,6 +44,20 @@ if result.get('persist_metadata_host_assertions') != 16821 or result.get('persis
     raise SystemExit('Run read-only TRYING metadata/reprojection and real persistence IPC regressions before packaging')
 if result.get('persist_read_reply_bounds') is not True or result.get('persist_read_qemu_boots') != 2 or result.get('persist_read_qemu_bytes') != 8192:
     raise SystemExit('Run bounded persistence READ replies and full-width sequential guest read/EOF regressions before packaging')
+if result.get('persist_write_reply_host') != {'passed':True,'evidence':'E1-host','checks':693161,'malformed_cases':120,'known_errors':60,'unknown_cases':33,'transport_cases':8}:
+    raise SystemExit('Run exact persistence WRITE ACK, admitted-chunk progress and retained unknown DIRTY host regressions before packaging')
+write_reply=result.get('persist_write_reply_qemu',{})
+write_cases=write_reply.get('cases',[])
+if (write_reply.get('passed') is not True or write_reply.get('evidence')!='E2-signed-provider' or
+    write_reply.get('guest_boots')!=8 or write_reply.get('malformed_acks_rejected')!=4 or
+    write_reply.get('fresh_boot_recovery')!=4 or write_reply.get('query_latch_checks')!=8 or
+    write_reply.get('unknown_dirty_unmount_refusals')!=8 or write_reply.get('denied_new_authority')!=12 or
+    write_reply.get('blocked_mutation_commands')!=12 or len(write_cases)!=4 or
+    {(c.get('transport'),c.get('length')) for c in write_cases}!={(t,n) for t in ('legacy','modern') for n in ('zero','excess')} or
+    not all(c.get('passed') is True and c.get('generation_delta')==1 and c.get('recovery_generation_unchanged') is True and
+            0<c.get('requested',0)<=4096 and c.get('reply_length')==(0 if c.get('length')=='zero' else c['requested']+1) for c in write_cases) or
+    not all(write_reply.get(k) is True for k in ('single_commit_preserved','no_post_fault_provider_rpc','production_artifacts_restored','base_disk_unchanged'))):
+    raise SystemExit('Run signed Persist zero/excess WRITE ACK faults, unknown DIRTY/query gates and fresh production recovery on both transports before packaging')
 chunks=result.get('persist_chunk_qemu',{})
 if chunks.get('passed') is not True or chunks.get('guest_boots')!=2 or chunks.get('empty_file_rejections')!=32 or chunks.get('driver_reattach_cycles')!=4 or chunks.get('base_disk_unchanged') is not True or not 8192<chunks.get('stage_bytes',0)<=16384 or chunks.get('package_chunks')!=(chunks.get('stage_bytes',0)+4095)//4096:
     raise SystemExit('Run actual chunked STAGE/preview/export, empty-path stale-stage refusal and driver reattach regressions before packaging')

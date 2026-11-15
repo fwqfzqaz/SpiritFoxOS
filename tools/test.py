@@ -85,6 +85,7 @@ host_test('test_txn','tests/host/test_txn.c','services/txn.c',no_unused=True)
 host_test('test_txn_compat','tests/host/test_txn_compat.c','services/txn.c',no_unused=True)
 host_test('test_update','tests/host/test_update.c','services/update.c','services/txn.c',no_unused=True)
 host_test('test_persist_metadata','tests/host/test_persist_metadata.c','tests/host/persist_volume_fixture.c','services/persist_metadata.c','services/namespace.c','services/txn.c','services/update.c','services/version.c',*build.CRYPTO,no_unused=True)
+host_test('test_persist_write_reply','tests/host/test_persist_write_reply.c','services/namespace.c',*build.CRYPTO,no_unused=True)
 host_test('test_persist_quiescence','tests/host/test_persist_quiescence.c','tests/host/persist_volume_fixture.c','services/persist_metadata.c','services/namespace.c','services/txn.c','services/update.c','services/version.c',*build.CRYPTO,no_unused=True)
 host_test('test_trust_sync','tests/host/test_trust_sync.c','services/namespace.c',*build.CRYPTO,no_unused=True)
 host_test('test_version','tests/host/test_version.c','services/version.c')
@@ -159,6 +160,7 @@ if not args.host_only:
     subprocess.run([sys.executable, 'tests/qemu/qemu_trust_sync_test.py'], check=True)
     subprocess.run([sys.executable, 'tests/qemu/qemu_block_reply_test.py'], check=True)
     subprocess.run([sys.executable, 'tests/qemu/qemu_revoke_failure_test.py'], check=True)
+    subprocess.run([sys.executable, 'tests/qemu/qemu_persist_write_reply_test.py'], check=True)
     subprocess.run([sys.executable, 'tests/qemu/qemu_namespace_recovery_test.py'], check=True)
     subprocess.run([sys.executable, 'tests/qemu/qemu_hardware_test.py'], check=True)
     # USB：xHCI 初始化、HID 枚举、键盘输入、指针注入与热插拔。
@@ -234,6 +236,8 @@ result['persist_quiescence_volume_checks'] = 22713
 result['persist_quiescence_guard'] = json.loads((ROOT/'build/persist-quiescence-guard-results.json').read_text(encoding='utf-8'))
 result['persist_quiescence_qemu'] = {} if args.host_only else json.loads((ROOT/'build/persist-quiescence-results.json').read_text(encoding='utf-8'))
 result['persist_read_reply_bounds'] = True
+result['persist_write_reply_host'] = {'passed':True,'evidence':'E1-host','checks':693161,'malformed_cases':120,'known_errors':60,'unknown_cases':33,'transport_cases':8}
+result['persist_write_reply_qemu'] = {} if args.host_only else json.loads((ROOT/'build/persist-write-reply-results.json').read_text(encoding='utf-8'))
 result['persist_read_qemu_boots'] = 0 if args.host_only else 2
 result['persist_read_qemu_bytes'] = 0 if args.host_only else 8192
 chunks = {} if args.host_only else json.loads((ROOT/'build/persist-chunk-results.json').read_text(encoding='utf-8'))

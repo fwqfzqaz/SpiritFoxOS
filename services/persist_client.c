@@ -36,7 +36,10 @@ static int pf_call(SfMessage*m){
  if(m->h.size!=40||m->h.protocol_major!=1||m->h.protocol_minor||m->h.opcode!=opcode||
      m->h.flags!=persist_pid||m->h.cap_count||m->h.payload_bytes!=sizeof(*m)-40||m->h.deadline_ns!=deadline||
      m->status<SF_VERSION_REJECTED||m->status>(int64_t)maximum||
-     (opcode==OP_PERSIST_WRITE&&m->status>=0&&m->status!=requested)||
+     /* A WRITE completion authenticates the exact admitted request, even
+      * for a known error. Reject malformed echoes before releasing DIRTY. */
+     (opcode==OP_PERSIST_WRITE&&(m->length!=requested||m->offset!=offset||m->handle||m->mode||
+       (m->status>=0&&m->status!=requested)))||
      (opcode==OP_PERSIST_READ&&(m->length>requested||m->length>sizeof(m->data)||m->offset!=offset||m->handle||m->mode))||
      (opcode==OP_PERSIST_STAGE&&!m->status&&(m->length!=requested||m->offset!=offset||m->handle||m->mode))){
   if(dirty)uncertain_commit=1;return SF_BAD_FORMAT;
@@ -165,8 +168,9 @@ static long ext_write(uint64_t offset,const void*data,size_t bytes){
  const uint8_t*src=data;long total=0;
  while(bytes){
   SfMessage m;sf_message(&m,OP_PERSIST_WRITE,0);m.offset=offset;m.length=bytes>chunk?chunk:(uint32_t)bytes;
-  memcpy(m.data,src,m.length);int r=pf_call(&m);if(r<0)return r;
-  uint32_t sent=m.length;offset+=sent;src+=sent;bytes-=sent;total+=(long)sent;
+  uint32_t sent=m.length;memcpy(m.data,src,sent);int r=pf_call(&m);if(r<0)return r;
+  /* Progress follows our admitted chunk, never a mutable reply field. */
+  offset+=sent;src+=sent;bytes-=sent;total+=(long)sent;
  }
  return total;
 }
