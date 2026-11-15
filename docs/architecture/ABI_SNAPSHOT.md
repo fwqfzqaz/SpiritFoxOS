@@ -103,3 +103,12 @@ SMP/线程/配额追加SYS_THREAD_CREATE=26、SYS_THREAD_LIMIT=27、SYS_TASK_CPU
 2026-11-14整合草稿：基于作者含SYS_COMPAT_SET/RET的662项目录，只追加
 OP_PERSIST_QUIESCENT=104至663，静态目录旧662项无删改。当前仅离线核对，实际
 编译采集、漂移阴性、完整及新head托管尚待执行；不能沿用旧661项预检证明。
+
+
+## 2026-11-15 当前作者 S4 上的 Persist 预检整合
+
+以 ff5733c 的673项为基线，保留其全部键和值，仅新增
+`constant.OP_PERSIST_QUIESCENT=104`，当前674项。作者S4自身已有
+`size.SfThreadRequest:24→40`与11项新增；内核按size兼容接收24/40字节请求。
+因此“仅追加”只描述本整合相对673项的差异，不声称旧662项所有值从未变化。
+静态目录审阅已过，编译采集/九组比较、实际QEMU和新head CI须按PROGRESS核对。

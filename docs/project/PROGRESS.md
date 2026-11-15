@@ -2,45 +2,36 @@
 
 更新日期：2026-11-15（Asia/Shanghai）。
 
-## P1 持久化整合（宿主与WRITE专项通过，完整待验证）
+## 当前 P1 整合：作者 S4 基线，完整验证未完成
 
-基于作者2650385，在工作区内部独立检出中整理先前未进入main的P1持久化修复。
-读取/attach/stage/export回复认证与有界进度、权威撤销缓存、撤销负结果同步、未知
-完成DIRTY保持、块回复认证和只读静默预检104一并接续。旧PR19/21/23关闭未合并，
-PR20/22只合入对应父分支；未找到评论/评审，不能把它们说成已进入main。
+当前基于作者 main ff5733c，保留其 M7、USB/xHCI/HID、Linux S0–S4、TLS/clone/futex、
+内核及新 ABI。先前未进入 main 的 READ/STAGE/attach/export 回复、权威撤销缓存、
+撤销负结果、未知完成 DIRTY、块回复和只读静默预检一并接续，并补 WRITE ACK 精确
+回显与按已发送块推进。旧 PR19/21/23 未合并，PR20/22 只进入父分支，不能称 main 已有。
 
-作者USB/xHCI/HID、Linux S0–S3、内核和新需求保持；Linux启动/编排尾部与2650385
-逐字相同。ABI目录保留作者662项，仅追加104至663；整合源码初始构建和全宿主已通过，
-其余QEMU、完整和发布验证未完成，原基线9c24275的4932.45秒证明不能代替本轮。
-预检只做时点观察，不提供原子围栏、排空或停止/重启，通用生命周期继续保留为后续。
+相对作者673项参考，本轮仅追加 OP_PERSIST_QUIESCENT=104 至674，原673项逐值保持。
+作者 S4 已把 SfThreadRequest 大小由24改40，并按请求size接受两种布局；这是作者
+基线的既有变化，不能称从旧662项完全不变。本轮不改其线程布局、TLS、futex或装载代码，
+init 的 Linux 启动尾部与 ff5733c 逐字相同。预检仍只是时点观察，没有围栏或停止/重启。
 
-独立CI前置PR #25（f73d89d）的Windows/Linux push及PR四项托管检查全部成功；
-Windows PR完整QEMU3997.2秒，下载产物的CRC、45项清单、七项运行时摘要、ABI662、
-三公钥和30份固定提交文档均已核对，实际ZIP离线14项通过，已转待审。其本地完整曾被
-外部终止，不能称本地完整通过；用户已授权草稿PR先由GitHub完成完整验证。
+CI前置 PR #25 的 f73d89d 四项检查、3997.2秒Windows完整、发布45项摘要/七产物/
+ABI662/三公钥/30份文档与ZIP离线14项已核对；作者已合并为3340e22。作者最新 ff5733c
+的 Windows push43703874109、Linux push43703874151 均成功。这些通过不代表当前P1组合。
 
-本轮另发现WRITE ACK长度缺少校验：旧客户端可能按坏回复长度重发或错误推进。现在
-校验精确回显，异常在DIRTY释放前拒绝，调用者按发送前固定分块推进。新E1宿主693161
-项通过；相关元数据16821、预检386/22713、信任1003及发布证据缺失拒绝检查通过。
-独立宿主结果已由新初始构建/全宿主216.23秒复核。真实提交后坏ACK的签名服务E2八次
-启动通过：双传输×零/过长ACK四次拒绝、四次还原生产服务的新启动恢复；八轮重复查询、
-八次卸载拒绝、十二次新包拒绝及十二次变更拒绝保持锁定。generation仅增加一次，
-故障后无Persist RPC，原盘与默认产物保持。结果 `build/persist-write-reply-results.json`。
-此草稿已接上f73d89d前置，保留旧分支备份后重放；只解决附加文档和ABI门的冲突，
-保留作者662项并追加104至663。真实坏ACK测试源码、双方夹具互斥与源级检查准备完成，
-其中WRITE E2已取得上述结果；其余串行专项正在运行，完整和发布仍未完成。
+### 已保留的旧基线证据与中断
 
-### 2026-11-15 晚间接续保存点
+79d30c3基线的初始构建/全宿主216.23秒、WRITE宿主693161项及八次真实故障/恢复启动
+通过；其余元数据、分块、预检、信任、块回复、撤销、文件RPC、Fs恢复、硬件与普通撤销
+也通过，共十二个命令。WRITE覆盖双传输×零/过长ACK，唯一提交、重复查询零RPC、
+DIRTY/新包/卸载锁定及还原生产服务读回保持。它不模拟物理EIO或掉电。
 
-上述79d30c3源码的专项在IOMMU场景以1073807364终止，没有测试断言失败栈，也没有
-整套通过结果。此前初始构建/宿主及WRITE、元数据、分块、预检、信任、块回复、撤销、
-文件RPC、命名空间恢复、硬件、普通撤销共十二个命令已通过；这不替代未完成的IOMMU、
-Linux/USB或完整回归。原日志与逐命令证明保存为
-`.cache/persist-integration-first-focused-interrupted-20261115.log` / `.json`。
-没有存活的本聊天测试/VM，两种签名夹具均已还原，未推送此未完成整合。
+该专项在IOMMU中以1073807364终止，没有整套通过结果。原逐命令证明和日志保留在
+`.cache/persist-integration-first-focused-interrupted-20261115.json` / `.log`。
+没有存活的本聊天测试/VM，两种签名夹具均已还原，未把部分结果作为完整通过推送。
 
-作者已将PR #25合并为3340e22，随后main ff5733c新增Linux S4 TLS/线程/futex及ABI
-变更。接续先保留并整合作者最新代码，再对新组合重新验证；旧79基线结果保留为历史。
+当前在 ff5733c 上重新构建/全宿主和专项验证，完整与发布尚未完成。用户已允许草稿PR
+由GitHub完成完整验证；草稿必须标明未完成，只有精确新head的Windows/Linux及实际
+发布产物核验通过后才能转待审。旧9c24275和79基线结果不能代替新组合。
 
 ## Linux 兼容 S0/S1：有界 ELF 装载核心（E1 通过）
 
@@ -76,7 +67,7 @@ E1：`tests/host/test_linux_errno.c` 26 项断言通过。E2：`tests/qemu/qemu_
 
 `services/linux_compat.c` 把 `clone` 映射为 `SYS_THREAD_CREATE`（子栈顶−256 布置启动块，`_sf_thread_trampoline` 恢复寄存器后以 `rax=0` 返回 syscall 之后），`futex` 相对超时换算为绝对纳秒，`arch_prctl(ARCH_SET_FS)` 转发 `SYS_SET_FSBASE`。`tests/fixtures/linux_thread.c` 提供 pthread 风格垫片并覆盖 TLS 逐线程独立、4×1000 futex 互斥计数、32 线程上限 `EAGAIN`、值不匹配 `EAGAIN`、无等待者 `WAKE=0` 与 20 ms 超时负例。
 
-验证：构建通过；`python3 tools/test.py --skip-build --host-only` 全绿（`THREADS PASS: 372 checks`、`Compat tests passed`），ABI 快照 662→673 且旧项无删改；`tests/qemu/qemu_linux_compat_test.py` 真实启动确认 `LINUX THREAD TLS/MUTEX/LIMIT/FUTEX OK` → `LINUX THREAD TESTS PASSED`，原有 7 个工具、syscall 探针与原生回归不受影响。实施中发现并修复两处旧夹具滞后：S2 `stub/probe` 与 S3 探针需按新 ABI 传翻译器栈顶（`r10`），且 `arch_prctl(SET_FS)` 断言由 `ENOSYS` 改为成功。完整 `python3 tools/test.py` 未跑完即按请求先行推送，完整门禁结果待补。
+验证：构建通过；`python3 tools/test.py --skip-build --host-only` 全绿（`THREADS PASS: 372 checks`、`Compat tests passed`），ABI 快照662→673，新增11项且SfThreadRequest大小值24→40（内核同时接受旧/新请求布局）；`tests/qemu/qemu_linux_compat_test.py` 真实启动确认 `LINUX THREAD TLS/MUTEX/LIMIT/FUTEX OK` → `LINUX THREAD TESTS PASSED`，原有 7 个工具、syscall 探针与原生回归不受影响。实施中发现并修复两处旧夹具滞后：S2 `stub/probe` 与 S3 探针需按新 ABI 传翻译器栈顶（`r10`），且 `arch_prctl(SET_FS)` 断言由 `ENOSYS` 改为成功。完整 `python3 tools/test.py` 未跑完即按请求先行推送，完整门禁结果待补。
 
 ## P1 未登记文件对端的附加能力清理（本地完整通过）
 

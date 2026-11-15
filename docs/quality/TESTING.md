@@ -690,3 +690,7 @@ finally用摘要备份还原。真实结果 `build/persist-write-reply-results.j
 `persist_write_reply_qemu`，发布门同时要求完整E1/E2字段和四组实际案例。未模拟真实
 硬盘EIO或掉电，不替代E3/E4。
 当前main整合的初始构建、QEMU、完整与新head托管结果见PROGRESS。
+
+
+2026-11-15基线说明：上述WRITE E1/E2结果属于79d30c3。现已接上作者ff5733c的Linux S4，
+新组合须重新取得证据；当前状态以PROGRESS为准，不沿用旧基线完整或托管结果。
