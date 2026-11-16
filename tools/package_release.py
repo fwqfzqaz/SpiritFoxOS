@@ -32,7 +32,7 @@ if result.get('namespace_handle_map_host_assertions') != 502975 or result.get('n
 if result.get('namespace_rpc_host_assertions') != [5506,30,52,2638,48065] or result.get('namespace_rpc_host_groups') != 5 or not result.get('namespace_recovery_qemu') or result.get('namespace_recovery_qemu_boots') != 2 or result.get('namespace_recovery_qemu_deaths') != 6:
     raise SystemExit('Run trusted namespace transport/control, real Fs incarnation loss, dirty drain, stale app/Root and TRYING preservation regressions before packaging')
 ownership=result.get('namespace_ownership',{})
-if result.get('console_policy_host_assertions') != 665 or result.get('launch_policy_host_assertions') != 2152 or result.get('policy_compile_boundary_tests') != 7:
+if result.get('console_policy_host_assertions') != 667 or result.get('launch_policy_host_assertions') != 2152 or result.get('policy_compile_boundary_tests') != 7:
     raise SystemExit('Run manager console/launch admission and real compile-boundary regressions before packaging')
 if result.get('file_ingress_host_checks') != 20001 or result.get('file_ingress_host_groups') != 1 or result.get('file_peer_qemu') is not True or result.get('file_peer_qemu_boots') != 2 or result.get('file_peer_transferred_caps') != 384:
     raise SystemExit('Run actual manager ingress cap cleanup and live rejected-peer budget regressions before packaging')
@@ -40,8 +40,37 @@ if result.get('emergency_console_host_assertions') != 33016:
     raise SystemExit('Run bounded emergency console SDK/ownership/generation regressions before packaging')
 if result.get('namespace_ownership_host_tests') != 4 or ownership.get('passed') is not True or ownership.get('root_has_namespace_tables') is not False or ownership.get('root_has_transaction_state') is not False:
     raise SystemExit('Verify actual linked ELF namespace/transaction state ownership before packaging')
-if result.get('persist_metadata_host_assertions') != 13867 or result.get('persist_metadata_qemu') is not True or result.get('persist_metadata_qemu_boots') != 2:
+if result.get('persist_metadata_host_assertions') != 16821 or result.get('persist_metadata_qemu') is not True or result.get('persist_metadata_qemu_boots') != 2:
     raise SystemExit('Run read-only TRYING metadata/reprojection and real persistence IPC regressions before packaging')
+if result.get('persist_read_reply_bounds') is not True or result.get('persist_read_qemu_boots') != 2 or result.get('persist_read_qemu_bytes') != 8192:
+    raise SystemExit('Run bounded persistence READ replies and full-width sequential guest read/EOF regressions before packaging')
+if result.get('persist_write_reply_host') != {'passed':True,'evidence':'E1-host','checks':693161,'malformed_cases':120,'known_errors':60,'unknown_cases':33,'transport_cases':8}:
+    raise SystemExit('Run exact persistence WRITE ACK, admitted-chunk progress and retained unknown DIRTY host regressions before packaging')
+write_reply=result.get('persist_write_reply_qemu',{})
+write_cases=write_reply.get('cases',[])
+if (write_reply.get('passed') is not True or write_reply.get('evidence')!='E2-signed-provider' or
+    write_reply.get('guest_boots')!=8 or write_reply.get('malformed_acks_rejected')!=4 or
+    write_reply.get('fresh_boot_recovery')!=4 or write_reply.get('query_latch_checks')!=8 or
+    write_reply.get('unknown_dirty_unmount_refusals')!=8 or write_reply.get('denied_new_authority')!=12 or
+    write_reply.get('blocked_mutation_commands')!=12 or len(write_cases)!=4 or
+    {(c.get('transport'),c.get('length')) for c in write_cases}!={(t,n) for t in ('legacy','modern') for n in ('zero','excess')} or
+    not all(c.get('passed') is True and c.get('generation_delta')==1 and c.get('recovery_generation_unchanged') is True and
+            0<c.get('requested',0)<=4096 and c.get('reply_length')==(0 if c.get('length')=='zero' else c['requested']+1) for c in write_cases) or
+    not all(write_reply.get(k) is True for k in ('single_commit_preserved','no_post_fault_provider_rpc','production_artifacts_restored','base_disk_unchanged'))):
+    raise SystemExit('Run signed Persist zero/excess WRITE ACK faults, unknown DIRTY/query gates and fresh production recovery on both transports before packaging')
+chunks=result.get('persist_chunk_qemu',{})
+if chunks.get('passed') is not True or chunks.get('guest_boots')!=2 or chunks.get('empty_file_rejections')!=32 or chunks.get('driver_reattach_cycles')!=4 or chunks.get('base_disk_unchanged') is not True or not 8192<chunks.get('stage_bytes',0)<=16384 or chunks.get('package_chunks')!=(chunks.get('stage_bytes',0)+4095)//4096:
+    raise SystemExit('Run actual chunked STAGE/preview/export, empty-path stale-stage refusal and driver reattach regressions before packaging')
+revoke_failure=result.get('revoke_failure_qemu',{})
+if revoke_failure.get('passed') is not True or revoke_failure.get('guest_boots')!=6 or revoke_failure.get('negative_policy_reconciled')!=2 or revoke_failure.get('explicit_unknown_latched')!=2 or revoke_failure.get('harmless_semantic_rejections')!=4 or revoke_failure.get('unknown_dirty_unmount_refusals')!=2 or revoke_failure.get('fresh_boot_recovery')!=2 or not all(revoke_failure.get(k) is True for k in ('remaining_signer_available','committed_disk_preserved','production_artifacts_restored','base_disk_unchanged')):
+    raise SystemExit('Complete revoke reconciliation/explicit unknown-completion evidence required')
+block_host=result.get('block_reply_host',{})
+block_guest=result.get('block_reply_qemu',{})
+if block_host.get('passed') is not True or block_host.get('checks')!=3968 or block_host.get('clients')!=[{'owner':'persist','checks':1984},{'owner':'storage','checks':1984}] or block_guest.get('passed') is not True or block_guest.get('guest_boots')!=4 or block_guest.get('malformed_reads_rejected')!=4 or block_guest.get('explicit_recoveries')!=4 or not all(block_guest.get(k) is True for k in ('root_degraded_to_bundle','persist_required_trust_fail_closed','committed_notes_unchanged','production_artifacts_restored','base_disk_unchanged')):
+    raise SystemExit('Complete authenticated block-client host/guest recovery evidence required')
+trust_sync=result.get('trust_sync_qemu',{})
+if result.get('trust_sync_host_checks')!=1003 or result.get('trust_admission_host_tests')!=1 or result.get('trust_admission_host_checks')!=76 or trust_sync.get('passed') is not True or trust_sync.get('guest_boots')!=2 or trust_sync.get('malformed_snapshots')!=4 or trust_sync.get('denied_new_authority')!=8 or trust_sync.get('valid_resyncs')!=4 or not all(trust_sync.get(k) is True for k in ('pending_and_known_commit_preserved','ordinary_standby_app','production_artifacts_restored','base_disk_unchanged')):
+    raise SystemExit('Run atomic runtime trust/actual Root admission and signed-provider fault/resync regressions before packaging')
 if result.get('projection_width_host_assertions') != 9130 or result.get('projection_sdk_qemu') is not True or result.get('projection_sdk_qemu_boots') != 2:
     raise SystemExit('Run projection metadata/full-width seek host and both transport SDK regressions before packaging')
 if result.get('host_poll_deadline_host_tests') != 8:
@@ -105,7 +134,16 @@ if result.get('manifest_schema_sha256') != hashlib.sha256(schema_path.read_bytes
     raise SystemExit('Manifest schema changed since source validation')
 abi_reference = ROOT/'abi/x86_64-current.json'
 abi_capture = BUILD/'abi-current.json'
-if result.get('abi_snapshot_host_tests') != 9 or result.get('abi_snapshot_entries') != 673:
+quiescence=result.get('persist_quiescence_qemu',{})
+if (result.get('persist_quiescence_client_checks')!=386 or result.get('persist_quiescence_volume_checks')!=22713 or
+    result.get('persist_quiescence_guard')!={'passed':True,'checks':104} or not quiescence.get('passed') or
+    quiescence.get('guest_boots')!=2 or quiescence.get('live_trial_busy')!=2 or
+    quiescence.get('open_description_busy')!=2 or quiescence.get('dirty_ledger_busy')!=2 or
+    quiescence.get('user_denials')!=4 or not quiescence.get('stable_pending_byte_preserved') or
+    not quiescence.get('base_disk_unchanged') or not quiescence.get('advisory_only') or
+    quiescence.get('service_stop_restart_tested') is not False):
+    raise SystemExit('Run authenticated Persist quiescence client/volume/ledger and actual trial/busy QEMU regressions before packaging')
+if result.get('abi_snapshot_host_tests') != 9 or result.get('abi_snapshot_entries') != 674:
     raise SystemExit('Run compiled ABI capture, offline comparison and header-drift regressions before packaging')
 if result.get('ipc_copy_host_checks') != 10041 or result.get('ipc_stats_control_host_checks') != 6001 or result.get('ipc_copy_profile') != 'successful-user-copy-bytes-v1' or not result.get('ipc_stats_qemu') or result.get('ipc_stats_qemu_boots') != 2:
     raise SystemExit('Run actual IPC copy event/control oracles and both production stats VM transports before packaging')

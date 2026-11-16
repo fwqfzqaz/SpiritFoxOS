@@ -1,28 +1,51 @@
 # SpiritFoxOS 实施进度
 
-更新日期：2026-11-15（Asia/Shanghai）。
+更新日期：2026-11-16（Asia/Shanghai）。
 
-## 当前 main 的 Windows Linux-blob 构建修复（完整验证尚未完成）
+## 当前 P1 整合：作者 S4 基线，完整验证未完成
 
-基于作者2650385，保留其USB/xHCI/HID与Linux S0–S3。实际Windows作业
-132332765985在translator的反斜杠.incbin路径上报非法转义；生成器现输出POSIX路径，
-保持内容摘要缓存键及4096字节对齐。真实汇编器逐字节核对Windows/POSIX/含空格路径
-的三个载荷，并验证同名同长二进制改写后的实际输出更新。发布门同时对齐作者已有
-ABI662，未修改编号、布局或内核运行时代码。
+当前基于作者 main ff5733c，保留其 M7、USB/xHCI/HID、Linux S0–S4、TLS/clone/futex、
+内核及新 ABI。先前未进入 main 的 READ/STAGE/attach/export 回复、权威撤销缓存、
+撤销负结果、未知完成 DIRTY、块回复和只读静默预检一并接续，并补 WRITE ACK 精确
+回显与按已发送块推进。旧 PR19/21/23 未合并，PR20/22 只进入父分支，不能称 main 已有。
 
-首套完整在COFF链接Core宿主夹具缺少usb_init/usb_poll时失败，已按原device/console
-策略补齐硬件桩；真实USB验证仍由原QEMU用例负责。修正后的初始构建、全宿主及真实
-Linux七工具/syscall探针和USB专项213.88秒通过，证明
-`.cache/linux-blob-focused-proof-20261114.json`。
+相对作者673项参考，本轮仅追加 OP_PERSIST_QUIESCENT=104 至674，原673项逐值保持。
+作者 S4 已把 SfThreadRequest 大小由24改40，并按请求size接受两种布局；这是作者
+基线的既有变化，不能称从旧662项完全不变。本轮不改其线程布局、TLS、futex或装载代码，
+init 的 Linux 启动尾部与 ff5733c 逐字相同。预检仍只是时点观察，没有围栏或停止/重启。
 
-后续本地完整进程以1073807364退出，当前未取得完整通过结果；日志
-`.cache/linux-blob-second-full-transport-20261114.log`保留。该状态码和工具断连时间
-只能作为进程终止证据，不能证明具体终止者。执行器Job允许显式breakaway，但短生命
-周期探针的子进程仍属于Job，已终止该探针，不尝试绕过其余限制。完整验证、发布门
-及新head的托管状态必须独立核对，不能用专项、旧持久化验证或部分前缀冒充通过。
+CI前置 PR #25 的 f73d89d 四项检查、3997.2秒Windows完整、发布45项摘要/七产物/
+ABI662/三公钥/30份文档与ZIP离线14项已核对；作者已合并为3340e22。作者最新 ff5733c
+的 Windows push43703874109、Linux push43703874151 均成功。这些通过不代表当前P1组合。
 
-旧9c24275持久化预检和暂停检查点保留。未进入main的P1改动已在工作区内部独立检出
-准备，作者内核/Linux启动代码保持，但尚未测试、未推送；本轮先完成独立CI构建修复。
+### 已保留的旧基线证据与中断
+
+79d30c3基线的初始构建/全宿主216.23秒、WRITE宿主693161项及八次真实故障/恢复启动
+通过；其余元数据、分块、预检、信任、块回复、撤销、文件RPC、Fs恢复、硬件与普通撤销
+也通过，共十二个命令。WRITE覆盖双传输×零/过长ACK，唯一提交、重复查询零RPC、
+DIRTY/新包/卸载锁定及还原生产服务读回保持。它不模拟物理EIO或掉电。
+
+该专项在IOMMU中以1073807364终止，没有整套通过结果。原逐命令证明和日志保留在
+`.cache/persist-integration-first-focused-interrupted-20261115.json` / `.log`。
+没有存活的本聊天测试/VM，两种签名夹具均已还原，未把部分结果作为完整通过推送。
+
+### 作者S4组合的新证据（完整托管验证待完成）
+
+0f5a254源码的初始构建/全宿主171.65秒通过；随后八个实际QEMU脚本均通过：
+作者S4工具/syscall/TLS/线程/futex、USB、WRITE坏ACK与恢复八启动、只读预检、块回复、
+权威信任修复、命名空间死亡恢复和SMP。新674项参考与编译采集逐字相同，作者673项
+全部保留，签名夹具还原，原盘保持，非Markdown源全程冻结。证明
+`.cache/persist-integration-s4-focused-proof-20261115.json`，日志
+`build/persist-integration-s4-retry-focused-20261115.log`。SMP场景跨越较长实际时间间隔，
+这里记录功能断言结果，不把总墙钟时间作为性能结论。
+
+首套宿主在Rust适配库复制处出现OSError22，原日志保留为
+`.cache/persist-integration-s4-host-copy-failure-20261115.log`；该次不计通过。未改动源码
+的后续新构建/宿主及专项取得上述通过，未据此认定具体占用者或修改构建逻辑。
+
+完整与发布尚未完成。用户已允许草稿PR由GitHub完成完整验证；草稿标明未完成，只有
+精确新head的Windows/Linux及实际发布产物核验通过后才能转待审，不自行合并。旧9c/
+79基线与作者main的绿色结果不能代替本组合的完整/托管/发布证明。
 
 ## Linux 兼容 S0/S1：有界 ELF 装载核心（E1 通过）
 
@@ -58,7 +81,7 @@ E1：`tests/host/test_linux_errno.c` 26 项断言通过。E2：`tests/qemu/qemu_
 
 `services/linux_compat.c` 把 `clone` 映射为 `SYS_THREAD_CREATE`（子栈顶−256 布置启动块，`_sf_thread_trampoline` 恢复寄存器后以 `rax=0` 返回 syscall 之后），`futex` 相对超时换算为绝对纳秒，`arch_prctl(ARCH_SET_FS)` 转发 `SYS_SET_FSBASE`。`tests/fixtures/linux_thread.c` 提供 pthread 风格垫片并覆盖 TLS 逐线程独立、4×1000 futex 互斥计数、32 线程上限 `EAGAIN`、值不匹配 `EAGAIN`、无等待者 `WAKE=0` 与 20 ms 超时负例。
 
-验证：构建通过；`python3 tools/test.py --skip-build --host-only` 全绿（`THREADS PASS: 372 checks`、`Compat tests passed`），ABI 快照 662→673 且旧项无删改；`tests/qemu/qemu_linux_compat_test.py` 真实启动确认 `LINUX THREAD TLS/MUTEX/LIMIT/FUTEX OK` → `LINUX THREAD TESTS PASSED`，原有 7 个工具、syscall 探针与原生回归不受影响。实施中发现并修复两处旧夹具滞后：S2 `stub/probe` 与 S3 探针需按新 ABI 传翻译器栈顶（`r10`），且 `arch_prctl(SET_FS)` 断言由 `ENOSYS` 改为成功。完整 `python3 tools/test.py` 未跑完即按请求先行推送，完整门禁结果待补。
+验证：构建通过；`python3 tools/test.py --skip-build --host-only` 全绿（`THREADS PASS: 372 checks`、`Compat tests passed`），ABI 快照662→673，新增11项且SfThreadRequest大小值24→40（内核同时接受旧/新请求布局）；`tests/qemu/qemu_linux_compat_test.py` 真实启动确认 `LINUX THREAD TLS/MUTEX/LIMIT/FUTEX OK` → `LINUX THREAD TESTS PASSED`，原有 7 个工具、syscall 探针与原生回归不受影响。实施中发现并修复两处旧夹具滞后：S2 `stub/probe` 与 S3 探针需按新 ABI 传翻译器栈顶（`r10`），且 `arch_prctl(SET_FS)` 断言由 `ENOSYS` 改为成功。完整 `python3 tools/test.py` 未跑完即按请求先行推送，完整门禁结果待补。
 
 ## P1 未登记文件对端的附加能力清理（本地完整通过）
 

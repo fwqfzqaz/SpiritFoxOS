@@ -125,3 +125,27 @@ M5 的 151 条宿主 C 断言和九组 QEMU 回归继续保留，所有只读场
 `tests/integration/test_readfs.py` 通过宿主 `sf_fs_check_auto` 覆盖自动探测、SFRFS2 空文件/嵌套目录、构建器上限、目录表损坏、越界/重叠/未排序记录和文件作为父目录的拒绝。`tests/qemu/qemu_test.py --storage v2` 使用 `build/storage-v2.img` 启动产品镜像，断言 `[STORAGE] format 2` 并重复挂载、只读拒绝、卸载/再挂载和从盘运行签名包等命令；默认 `normal` 继续覆盖 SFRFS1。
 
 接口实现依据 [OASIS virtio 1.1 legacy 规范](https://docs.oasis-open.org/virtio/virtio/v1.1/virtio-v1.1.html)、[QEMU PCI ID 定义](https://www.qemu.org/docs/master/specs/pci-ids.html)和 [QEMU blkdebug 文档](https://www.qemu.org/docs/master/devel/testing/blkdebug.html)。SFRFS1、SFRFS2、RPC 和授权策略由本项目定义。
+
+## 块回复的客户端契约
+
+Root与Persist共用私有 `services/block_rpc.h`，不增加公开ABI。回复必须匹配实际
+发送者、请求号、完整协议头、操作码与期限，offset/handle/mode 保持请求关联值；
+状态在64位上先检查为既有非正错误范围。未知/正成功状态不窄化后接受。这些回复均不
+消耗附加能力，收到的单个安装能力在验证前关闭。编号耗尽返回NO_SPACE且不发送零号。
+
+| 成功操作 | 回复长度 |
+| --- | --- |
+| INFO | `sizeof(SfBlockInfo)`，当前16字节 |
+| READ、WRITE | 精确256字节半块，匹配本次请求 |
+| FLUSH、WRITE_RANGE、STOP、DMA_PROBE | 0 |
+| 认证的负错误 | 0，保留原错误码与会话 |
+
+关联错误/畸形回复停止该客户端会话；Root沿用超时的驱动终止路径，Persist将本地
+driver_alive清零，不获得根进程的终止/设备检查权限。READ未通过验证的半块不复制，
+第二半块失败时此前有效前缀可能保留。INFO的容量/扇区/只读语义仍由原启动代码检查。
+作者AHCI/NVMe的512–4096字节逻辑扇区桥与256字节RPC协议不变。
+
+真实签名故障驱动验证两种传输的Root/Persist READ拒绝和显式恢复。Root失败时bundle
+应用及控制台保持，Persist必需的挂载信任失败时新包权限关闭，修复同步后恢复。缓存
+元数据可保持可读，不等于设备健康。协议拒绝、进程终止或超时都不等于取消已经发生
+的磁盘写；本轮只在真实访客注入READ故障，未知写完成/事务传播仍须独立审阅。

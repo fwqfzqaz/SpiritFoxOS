@@ -28,6 +28,8 @@ int sf_storage_sector_write(void*,uint64_t,const uint8_t[512]);
 int sf_storage_flush(void*);
 int sf_storage_write_range(uint64_t,uint64_t);
 int sf_storage_transaction(int);
+/* Observe Root's live storage ledger without changing admission or leases. */
+int sf_storage_quiescent(void);
 /* Serve one sf-fs block request; called by sf-init whenever it waits for IPC. */
 int sf_storage_broker(unsigned);
 /* 供 sf-persist 客户端派生能力并转交块端点所有权。 */

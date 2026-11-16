@@ -111,7 +111,9 @@ enum { OP_ECHO=1, OP_ECHO_DIAGNOSTIC=2, OP_OPEN=10, OP_READ, OP_WRITE, OP_CLOSE,
  OP_FS_ATTACH_SEND=95, OP_FS_ATTACH_REPLY, OP_FS_MOUNT, OP_FS_ENTRY,
  OP_FS_FIND, OP_FS_READ, OP_FS_STOP, OP_FS_BLOCK_READ,
  /* Read-only mounted-volume metadata; never repeats trial recovery. */
- OP_PERSIST_NOTES_SIZE=103 };
+ OP_PERSIST_NOTES_SIZE=103,
+ /* Advisory, read-only lifecycle preflight; does not fence or stop a service. */
+ OP_PERSIST_QUIESCENT=104 };
 /* 合成器输入与生命周期：sf-init 把串口按键转发给 sf-wm。
  * OP_WM_REGISTER 供 GUI 应用登记目录，data 为 id\0title\0。
  * OP_WM_POINTER 的 handle 携带 SYS_POINTER_READ 的打包指针状态。 */

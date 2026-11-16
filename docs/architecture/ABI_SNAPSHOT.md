@@ -94,3 +94,22 @@ SMP/线程/配额追加SYS_THREAD_CREATE=26、SYS_THREAD_LIMIT=27、SYS_TASK_CPU
 设备中断投递追加 SYS_IRQ_ACQUIRE=29、SYS_IRQ_RELEASE=30、SYS_IRQ_WAIT=31 三个常量，当前600项，旧597项无删改；系统调用参数沿用固定宽度寄存器值，没有新增 wire 结构。
 
 匿名映射与共享内存追加 SYS_MMAP=35、SYS_MUNMAP=36、SYS_SHM_CREATE=37、SYS_SHM_MAP=38、SYS_SHM_GRANT=39、SYS_SHM_CLOSE=40 与 SF_HEAP/SF_HEAP_BYTES/SF_SHM/SF_SHM_BYTES/SF_SHM_SLOTS/SF_SHM_SLOT_BYTES 六个窗口常量，共12项；当前612项，旧600项无删改。同一批次把 SF_IMAGE_MAX 由 2 MiB 提至 8 MiB、SF_MSG_BYTES 由 256 提至 4096、SF_MAX_TASKS 12→32、SF_MAX_THREADS 32→64、SF_THREAD_LIMIT_MAX 8→32；SfMessage 布局随数据区扩至 4096 字节，其余成员偏移不变。
+
+2026-11-13：Persist静默预检仅追加 `OP_PERSIST_QUIESCENT=104`，当前661项。
+旧660项无删改；实际编译采集、check-additions只允许该常量及九组漂移阴性测试通过，
+审阅 `.cache/persist-quiescence-abi-review-20261113.json`。消息大小、字段/编号和盘格式
+保持；新请求不支持的旧peer应返回既有负错误，Root不能把它当成静默或停止确认。
+
+2026-11-14整合草稿：基于作者含SYS_COMPAT_SET/RET的662项目录，只追加
+OP_PERSIST_QUIESCENT=104至663，静态目录旧662项无删改。当前仅离线核对，实际
+编译采集、漂移阴性、完整及新head托管尚待执行；不能沿用旧661项预检证明。
+
+
+## 2026-11-15 当前作者 S4 上的 Persist 预检整合
+
+以 ff5733c 的673项为基线，保留其全部键和值，仅新增
+`constant.OP_PERSIST_QUIESCENT=104`，当前674项。作者S4自身已有
+`size.SfThreadRequest:24→40`与11项新增；内核按size兼容接收24/40字节请求。
+因此“仅追加”只描述本整合相对673项的差异，不声称旧662项所有值从未变化。
+静态目录审阅、编译采集/九组比较及当前八个QEMU脚本已通过；新head完整CI/发布
+仍须按PROGRESS独立核对，不能用专项结果代替。

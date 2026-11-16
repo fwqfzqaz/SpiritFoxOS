@@ -2,6 +2,7 @@
 #include "storage.h"
 #include "persistence.h"
 #include "virtio.h"
+#include "block_rpc.h"
 #include "txn.h"
 #include "namespace_frontend.h"
 #include "namespace_transport.h"
@@ -53,9 +54,13 @@ int sf_storage_driver(uint32_t*ep,uint32_t*reply,uint32_t*pid,uint64_t*bytes,int
 static int writable,write_grant;
 static int call(SfMessage*m){
  if(!driver_pid||sf_sys(SYS_TASK_STATUS,driver_pid,0,0)!=SF_TASK_RUNNING)return SF_DEVICE_GONE;
- uint64_t id=++sequence;m->h.request_id=id;int r=sf_send(driver_ep,m);if(r)return r;
+ if(sequence==UINT64_MAX)return SF_NO_SPACE;
+ m->h.request_id=++sequence;SfBlockRequest request=sf_block_request(m);
+ int r=sf_send(driver_ep,m);if(r){if(r>0)sf_sys(SYS_KILL,driver_pid,SF_DEVICE_GONE,0);return r>0?SF_BAD_FORMAT:r;}
  long from=sf_recv(driver_reply,m,sf_deadline(2000));if(from<0){sf_sys(SYS_KILL,driver_pid,SF_DEVICE_GONE,0);return from;}
- if(from!=driver_pid||m->h.request_id!=id)return SF_STALE_HANDLE;return m->status;
+ if(m->h.cap_count==1)sf_cap_close(m->handle);
+ r=sf_block_reply(&request,m,from,driver_pid);if(r){sf_sys(SYS_KILL,driver_pid,SF_DEVICE_GONE,0);return r;}
+ return(int)m->status;
 }
 static int sector(void*context,uint64_t lba,uint8_t out[512]){
  if(lba>=capacity/512)return SF_INVALID;
@@ -189,6 +194,15 @@ int sf_storage_transaction(int begin){
  if(!begin)return fs_slot>=0?sfmod_release(manager,fs_slot,RES_DIRTY):SF_STALE_HANDLE;
  if(!sf_storage_writable())return SF_READ_ONLY;
  return sfmod_acquire(manager,fs_slot,RES_DIRTY);
+}
+int sf_storage_quiescent(void){
+ if(!manager||fs_slot<0||!sf_storage_writable()||!fs_pid||
+    sf_sys(SYS_TASK_STATUS,fs_pid,0,0)!=SF_TASK_RUNNING)return SF_DEVICE_GONE;
+ const SfModule*book=&manager->modules[fs_slot];
+ if(book->state!=MOD_ACTIVE)return SF_DRAINING;
+ if(fs_transport.inflight||namespace_descriptions)return SF_BUSY;
+ for(unsigned i=0;i<RES_COUNT;i++)if(book->resources[i])return SF_BUSY;
+ return 0;
 }
 static int mount_open(unsigned tag){
  if(tag!=1||fs_slot<0)return SF_STALE_HANDLE;

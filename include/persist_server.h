@@ -9,6 +9,7 @@
 int persist_mount(uint64_t*notes_bytes);
 int persist_volume_ready(void);
 int persist_notes_size(uint64_t*);
+int persist_quiescent(void);
 int persist_metadata_dispatch(int64_t sender,SfMessage*);
 long persist_notes_read(uint64_t offset,void*out,size_t bytes);
 long persist_notes_write(uint64_t offset,const void*data,size_t bytes);
