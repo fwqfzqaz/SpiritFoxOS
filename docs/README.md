@@ -43,6 +43,7 @@
 - [安全审查与修复](quality/SECURITY.md)：权限边界、已修复缺陷与回归范围。
 - [测试记录](quality/TESTING.md)：各阶段的宿主与 QEMU 验证结果。
 - [Persist 准入围栏](quality/PERSIST_FENCE.md)：非破坏性围栏、令牌与取消；宿主和四启动 E2 专项通过，完整套件及发布独立验证。
+- [Persist terminal 服务端契约](quality/PERSIST_TERMINAL.md)：105 的认证、串行缓存检查与有界 ACK 后退出；目前仅服务端原型和宿主 E1。
 - [GitHub Actions 配置与排错](quality/CI.md)：Windows/Linux 两个工作流的完整 YAML、Rust 目标、手动命令和失败定位。
 
 ## 项目

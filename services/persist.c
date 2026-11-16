@@ -3,6 +3,7 @@
 #include "txn.h"
 #include "trust.h"
 #include "block_rpc.h"
+#include "persist_terminal.h"
 /* sf-persist.sfmod: the transaction volume, update state machine and block
  * access live in this process. sf-init owns the virtio-blk process and transfers
  * derived endpoint capabilities here; the block service accepts any holder of
@@ -87,18 +88,5 @@ long sf_main(const SfBootArgs*a,size_t size){
  if(size!=sizeof(*a)||a->abi_major!=1||!a->service||!a->manager)return SF_ABI_MISMATCH;
  if(sf_trust_init(&sf_trust,&sf_trust_store))return SF_INVALID;
  sf_log("[PERSIST] transactional volume service in ring 3\n");
- for(;;){
-  SfMessage m;long from=sf_recv(a->service,&m,0);if(from<0)return from;
-  if(m.h.opcode==OP_PERSIST_NOTES_SIZE||m.h.opcode==OP_PERSIST_QUIESCENT){
-   /* A metadata request never consumes a transferred capability. Close the
-    * installed handle even when its sender or request is refused. */
-   if(m.h.cap_count==1)sf_cap_close(m.handle);
-   m.status=persist_metadata_dispatch(from,&m);
-  }else m.status=from==1?dispatch(&m):SF_DENIED;
-  /* The received message reports cap_count=1 while the newly installed handle
-   * stays in m.handle. Replying with the same header would delegate that
-   * driver capability back to the manager on every attach. */
-  m.h.cap_count=0;
-  sf_send(a->manager,&m);
- }
+ return persist_serve(a,dispatch,sf_send);
 }

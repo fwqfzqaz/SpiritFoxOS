@@ -63,7 +63,7 @@ def provider(source='tests/fixtures/persist_trust_fault.c',revoke_error=-10,writ
     write_state({'active':True,'restored':False,'files':hashes})
     try:
         shared=build.objects('trust-fault-common',['services/start.S','services/memory.c','services/libsf.c','services/arguments.c'],extra=build.USER_SECTIONS)
-        sources=[source,'services/persist_metadata.c','services/persistence.c','services/txn.c','services/update.c','services/version.c',*build.CRYPTO]
+        sources=[source,'services/persist_terminal.c','services/persist_metadata.c','services/persistence.c','services/txn.c','services/update.c','services/version.c',*build.CRYPTO]
         if source.endswith('persist_write_reply_fault.c'):
             definitions=['-DSF_WRITE_REPLY_EXCESS='+str(int(write_reply=='excess'))]
         else:

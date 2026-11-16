@@ -82,6 +82,7 @@
     "constant.OP_OPENAT": 19,
     "constant.OP_PERSIST_NOTES_SIZE": 103,
     "constant.OP_PERSIST_QUIESCENT": 104,
+    "constant.OP_PERSIST_STOP": 105,
     "constant.OP_POLL": 15,
     "constant.OP_PREAD": 26,
     "constant.OP_READ": 11,

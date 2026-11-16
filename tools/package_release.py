@@ -166,7 +166,7 @@ if (result.get('persist_quiescence_client_checks')!=386 or result.get('persist_q
     not quiescence.get('base_disk_unchanged') or not quiescence.get('advisory_only') or
     quiescence.get('service_stop_restart_tested') is not False):
     raise SystemExit('Run authenticated Persist quiescence client/volume/ledger and actual trial/busy QEMU regressions before packaging')
-if result.get('abi_snapshot_host_tests') != 9 or result.get('abi_snapshot_entries') != 674:
+if result.get('abi_snapshot_host_tests') != 9 or result.get('abi_snapshot_entries') != 675:
     raise SystemExit('Run compiled ABI capture, offline comparison and header-drift regressions before packaging')
 if result.get('ipc_copy_host_checks') != 10041 or result.get('ipc_stats_control_host_checks') != 6001 or result.get('ipc_copy_profile') != 'successful-user-copy-bytes-v1' or not result.get('ipc_stats_qemu') or result.get('ipc_stats_qemu_boots') != 2:
     raise SystemExit('Run actual IPC copy event/control oracles and both production stats VM transports before packaging')

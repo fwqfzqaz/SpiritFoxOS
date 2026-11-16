@@ -86,6 +86,7 @@ host_test('test_txn_compat','tests/host/test_txn_compat.c','services/txn.c',no_u
 host_test('test_update','tests/host/test_update.c','services/update.c','services/txn.c',no_unused=True)
 host_test('test_persist_metadata','tests/host/test_persist_metadata.c','tests/host/persist_volume_fixture.c','services/persist_metadata.c','services/namespace.c','services/txn.c','services/update.c','services/version.c',*build.CRYPTO,no_unused=True)
 host_test('test_persist_write_reply','tests/host/test_persist_write_reply.c','services/namespace.c',*build.CRYPTO,no_unused=True)
+host_test('test_persist_terminal','tests/host/test_persist_terminal.c','services/persist_metadata.c',no_unused=True)
 host_test('test_persist_fence','tests/host/test_persist_fence.c','services/manager.c','services/namespace.c','services/namespace_control.c','services/namespace_transport.c',*build.CRYPTO,no_unused=True,include_services=True)
 host_test('test_persist_quiescence','tests/host/test_persist_quiescence.c','tests/host/persist_volume_fixture.c','services/persist_metadata.c','services/namespace.c','services/txn.c','services/update.c','services/version.c',*build.CRYPTO,no_unused=True)
 host_test('test_trust_sync','tests/host/test_trust_sync.c','services/namespace.c',*build.CRYPTO,no_unused=True)
@@ -202,7 +203,7 @@ result['manifest_source_profile'] = 'native-source-v1'
 result['manifest_profile_host_tests'] = 12
 result['manifest_schema_sha256'] = manifest_schema_sha256
 result['abi_snapshot_host_tests'] = 9
-result['abi_snapshot_entries'] = 674
+result['abi_snapshot_entries'] = 675
 result['abi_reference_sha256'] = abi_reference_sha256
 result['abi_capture_sha256'] = abi_capture_sha256
 result['posix_qemu'] = not args.host_only
