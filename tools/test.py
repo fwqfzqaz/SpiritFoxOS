@@ -162,6 +162,7 @@ if not args.host_only:
     subprocess.run([sys.executable, 'tests/qemu/qemu_block_reply_test.py'], check=True)
     subprocess.run([sys.executable, 'tests/qemu/qemu_revoke_failure_test.py'], check=True)
     subprocess.run([sys.executable, 'tests/qemu/qemu_persist_write_reply_test.py'], check=True)
+    subprocess.run([sys.executable, 'tests/qemu/qemu_persist_fence_test.py'], check=True)
     subprocess.run([sys.executable, 'tests/qemu/qemu_namespace_recovery_test.py'], check=True)
     subprocess.run([sys.executable, 'tests/qemu/qemu_hardware_test.py'], check=True)
     # USB：xHCI 初始化、HID 枚举、键盘输入、指针注入与热插拔。
@@ -223,7 +224,7 @@ result['namespace_ownership'] = json.loads((ROOT/'build/namespace-ownership.json
 result['namespace_recovery_qemu'] = not args.host_only
 result['namespace_recovery_qemu_boots'] = 0 if args.host_only else 2
 result['namespace_recovery_qemu_deaths'] = 0 if args.host_only else 6
-result['console_policy_host_assertions'] = 667
+result['console_policy_host_assertions'] = 676
 result['launch_policy_host_assertions'] = 2152
 result['policy_compile_boundary_tests'] = 7
 result['file_ingress_host_checks'] = 20001
@@ -239,6 +240,7 @@ result['persist_quiescence_qemu'] = {} if args.host_only else json.loads((ROOT/'
 result['persist_read_reply_bounds'] = True
 result['persist_write_reply_host'] = {'passed':True,'evidence':'E1-host','checks':693161,'malformed_cases':120,'known_errors':60,'unknown_cases':33,'transport_cases':8}
 result['persist_admission_fence_host'] = {'passed':True,'evidence':'E1-host-only','checks':3318,'frontend_checks':243,'raw_control_refusals':43,'namespace_peer_operations':34,'non_destructive':True,'provider_lifecycle':False}
+result['persist_admission_fence_qemu'] = {} if args.host_only else json.loads((ROOT/'build/persist-fence-results.json').read_text(encoding='utf-8'))
 result['persist_write_reply_qemu'] = {} if args.host_only else json.loads((ROOT/'build/persist-write-reply-results.json').read_text(encoding='utf-8'))
 result['persist_read_qemu_boots'] = 0 if args.host_only else 2
 result['persist_read_qemu_bytes'] = 0 if args.host_only else 8192

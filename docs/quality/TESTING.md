@@ -695,3 +695,18 @@ finally用摘要备份还原。真实结果 `build/persist-write-reply-results.j
 2026-11-15基线说明：上述WRITE E1/E2结果属于79d30c3。现已接上作者ff5733c的Linux S4，
 新组合已取得初始构建/全宿主及八个QEMU脚本通过（含新WRITE八启动）。完整、发布与
 新head托管仍待完成，按PROGRESS核对，不沿用旧基线的完整或托管结果。
+
+## Persist 围栏 E2 源码待执行（2026-11-16）
+
+`qemu_persist_fence_test.py` 已登记为独立串行客户机回归；**本批未运行 E2 或完整
+构建/测试**。执行前须组合经独立审阅的 setter、raw exchange、CREATE 类型和
+磁盘回调拥有者修复，并从冻结整合 head 新构建。双传输各在签名真实 Persist 上先
+测 STABLE/PENDING 健康 acquire/104/cancel、真实 Fs 引用排空、令牌、后端/原始
+控制拒绝和 RAM/bundle 行为，然后触发已有签名 WRITE 的真实未知 DIRTY。默认
+EFI finally 恢复后各新启动一次；总计计划四次启动，结果仅由真实运行产生。
+
+CLI 检查使用每次新输出偏移、完整结果行及新提示符；整盘、代次、选择器、槽和
+笔记分别比较。共享 EFI/OVMF/夹具禁止重叠，失败走 VM 关闭和持久 finally 恢复。
+健康阶段不终止 provider，未知状态不由测试标志制造或解除。新独立发布门拒绝
+缺失状态/传输、真实 DIRTY、默认恢复或整盘保持证据。控制台宿主预期676项尚待
+组合后全量测量；私人小门验证不替代它。边界和接口见 PERSIST_FENCE.md。
