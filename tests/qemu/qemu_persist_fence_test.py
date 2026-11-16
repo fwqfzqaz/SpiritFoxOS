@@ -56,13 +56,13 @@ def run():
     with provider('tests/fixtures/persist_write_reply_fault.c',write_reply='zero'):
         for modern in (False,True):
             transport='modern' if modern else 'legacy';disk=ROOT/'build'/('persist-fence-'+transport+'.img')
-            disk.write_bytes(source);vm=VM(disk,'fence-'+transport,iommu=modern)
+            disk.write_bytes(source);vm=VM(disk,'fence-'+transport,iommu=modern);clean=False
             try:
                 vm.boot('PERSIST READY');vm.expect('fox> ',0);check_transport(vm,modern);boots+=1
-                command(vm,'login alice alice','login: alice uid=1000')
+                command(vm,'login alice alice','login: alice uid=1000 gid=1000 session=2 home=/home/alice')
                 for mode in ('healthy','unknown'):
                     command(vm,'persist-fence-test '+mode,'denied: root session required');user_denials+=1
-                command(vm,'login root fox-root','login: root uid=0')
+                command(vm,'login root fox-root','login: root uid=0 gid=0 session=3 home=/home/root')
                 command(vm,'persist-fence-test','persist-fence: refused code=1')
                 command(vm,'write /persist/notes FENCE-NOTE','write: OK')
                 command(vm,'install /disk/bin/diskhello.sfk','install: COMMITTED')
@@ -92,8 +92,9 @@ def run():
                 command(vm,'cat /persist/notes','cat: error')
                 diagnostic(vm,'unknown');command(vm,'echo','echo: ping')
                 assert disk.read_bytes()==committed and generation(disk)==gen,'Unknown fence admission replayed or repaired a write'
+                clean=True
             finally:
-                vm.close()
+                vm.close(clean)
             assert vm.output.count(b'[WRITE-ACK] committed requested=')==1
             assert b'[WRITE-ACK] post-fault request opcode=' not in vm.output,'Unknown query/cancel sent a provider RPC'
             assert disk.read_bytes()==committed,'Shutdown changed the fault commit'
@@ -103,7 +104,7 @@ def run():
     assert artifact_hashes()==products and not json.loads(STATE.read_text(encoding='utf-8'))['active']
     # The production service is restored before either fresh recovery boot.
     for modern,transport,disk,payload,committed,gen in pending:
-        vm=VM(disk,'fence-recovery-'+transport,iommu=modern)
+        vm=VM(disk,'fence-recovery-'+transport,iommu=modern);clean=False
         try:
             vm.boot('PERSIST READY generation='+str(gen));vm.expect('fox> ',0);check_transport(vm,modern);boots+=1
             command(vm,'persist','persist: ACTIVE generation='+str(gen))
@@ -116,8 +117,9 @@ def run():
             command(vm,'persist-quiescent','persist: QUIESCENT preflight only')
             assert b'[WRITE-ACK]' not in vm.output,'Recovery is using a fault provider'
             assert disk.read_bytes()==committed and generation(disk)==gen,'Fresh recovery rewrote/replayed PENDING state'
+            clean=True
         finally:
-            vm.close()
+            vm.close(clean)
         assert disk.read_bytes()==committed
         recoveries.append({'transport':transport,'passed':True,'new_healthy_fence':True,'pending_bytes_preserved':True})
     assert boots==4 and user_denials==4 and len(cases)==4 and len(unknown)==len(recoveries)==2
