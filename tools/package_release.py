@@ -46,7 +46,7 @@ if result.get('persist_read_reply_bounds') is not True or result.get('persist_re
     raise SystemExit('Run bounded persistence READ replies and full-width sequential guest read/EOF regressions before packaging')
 if result.get('persist_write_reply_host') != {'passed':True,'evidence':'E1-host','checks':693161,'malformed_cases':120,'known_errors':60,'unknown_cases':33,'transport_cases':8}:
     raise SystemExit('Run exact persistence WRITE ACK, admitted-chunk progress and retained unknown DIRTY host regressions before packaging')
-if result.get('persist_admission_fence_host') != {'passed':True,'evidence':'E1-host-only','non_destructive':True,'provider_lifecycle':False}:
+if result.get('persist_admission_fence_host') != {'passed':True,'evidence':'E1-host-only','checks':3318,'frontend_checks':243,'raw_control_refusals':43,'namespace_peer_operations':34,'non_destructive':True,'provider_lifecycle':False}:
     raise SystemExit('Run non-destructive Root admission fence/token/cancel host regressions before packaging')
 write_reply=result.get('persist_write_reply_qemu',{})
 write_cases=write_reply.get('cases',[])

@@ -93,6 +93,23 @@ static int transport_pump(void*c,unsigned ms){(void)c;return sf_storage_broker(m
 static void transport_close(void*c,uint64_t cap){(void)c;sf_cap_close(cap);}
 int64_t sf_storage_namespace_exchange(void*context,SfMessage*m){
  (void)context;
+ if(!m)return SF_INVALID;
+ if(sf_persist_fenced()){
+  /* Only ordinary namespace/file traffic may cross the held fence. Deny
+   * backend/lifecycle/configuration and disk-control frames even when a Root
+   * caller bypasses the frontend, before changing transport state or IPC. */
+  switch(m->h.opcode){
+  case OP_NS_CREATE:
+   if(m->mode!=NODE_FILE&&m->mode!=NODE_DIR&&m->mode!=NODE_PIPE&&m->mode!=NODE_CONSOLE)return SF_DRAINING;
+   break;
+  case OP_NS_MOUNT_CHECK:case OP_NS_OPEN:case OP_NS_OPENAT:
+  case OP_NS_UNLINK:case OP_NS_RMDIR:case OP_NS_STAT:case OP_NS_DUP:case OP_NS_CLOSE:
+  case OP_NS_READ:case OP_NS_PREAD:case OP_NS_WRITE:case OP_NS_TRUNCATE:case OP_NS_SEEK:
+  case OP_NS_POLL:case OP_NS_ENUMERATE:case OP_NS_ENUMERATE_AT:case OP_NS_HANDOFF:case OP_NS_REAP:
+   break;
+  default:return SF_DRAINING;
+  }
+ }
  fs_transport.ops=(SfNsTransportOps){transport_send,transport_receive,transport_ticks,transport_alive,transport_pump,transport_close};
  fs_transport.service=fs_service_ep;fs_transport.reply=fs_service_reply;fs_transport.peer=fs_pid;
  return sf_nst_exchange(&fs_transport,m);
@@ -162,7 +179,7 @@ fail:
 }
 int sf_storage_namespace_start(void){int r=fs_start();return r?r:(int)fs_pid;}
 uint32_t sf_storage_namespace_pid(void){return fs_pid;}
-int sf_storage_namespace_disk_live(void){return mounted&&driver_pid&&sf_sys(SYS_TASK_STATUS,driver_pid,0,0)==SF_TASK_RUNNING?0:SF_DEVICE_GONE;}
+int sf_storage_namespace_disk_live(void){if(sf_persist_fenced())return SF_DRAINING;return mounted&&driver_pid&&sf_sys(SYS_TASK_STATUS,driver_pid,0,0)==SF_TASK_RUNNING?0:SF_DEVICE_GONE;}
 int sf_storage_namespace_reset(void){
  if(sf_persist_fenced())return SF_DRAINING;
  if(fs_transport.inflight||fs_slot<0)return SF_BUSY;
@@ -232,6 +249,7 @@ static void mount_close(unsigned tag){
  namespace_descriptions--;
 }
 static long external_read(unsigned index,uint64_t offset,void*out,size_t bytes){
+ if(sf_persist_fenced())return SF_DRAINING;
  if(!mounted||!fs_pid||sf_sys(SYS_TASK_STATUS,driver_pid,0,0)!=SF_TASK_RUNNING)return SF_DEVICE_GONE;
  if(!bytes)return 0;
  long total=0;uint8_t*dst=out;

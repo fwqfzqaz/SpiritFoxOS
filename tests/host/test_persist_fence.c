@@ -22,6 +22,7 @@ static void sf_assert(int,const char*);
 #include "../../services/storage.c"
 #include "../../services/persist_client.c"
 #include "../../services/namespace_state.h"
+#include "../../services/namespace_control.h"
 
 static unsigned checks,sends,receives,closes,losses,reenter,mutation,variant;
 static unsigned guard_runs,preflight_cases,context_cases,reply_cases;
@@ -29,15 +30,20 @@ static int namespace_alive,send_error,recv_error,semantic;
 static uint32_t dead_pid;
 static uint64_t clock_ticks;
 static SfMessage wire;
+static SfMessage namespace_wire;
+static SfNsControl namespace_control;
+static unsigned raw_transport,raw_sends,raw_receives,raw_control_cases,ram_cases;
+static uint64_t raw_requests;
 static SfManager book,book_before,other_book;
 static SfNamespace space,space_before,other_space;
 static SfNode guard_nodes[SF_NS_NODE_MAX];
 static SfTrustKey policy_keys[2];
 static SfRuntimeTrust trust_before;
-#define CHECK(c) do{checks++;if(!(c)){fprintf(stderr,"PERSIST FENCE FAIL line %d variant%u mutation%u: %s\n",__LINE__,variant,mutation,#c);exit(1);}}while(0)
+#define CHECK(c) do{checks++;if(!(c)){fprintf(stderr,"PERSIST FENCE FAIL line %d variant%u mutation%u raw%u/%u: %s\n",__LINE__,variant,mutation,raw_sends,raw_receives,#c);exit(1);}}while(0)
 
 static void guarded_calls(void);
 static void mutate_context(unsigned);
+static void blocked_exchange_tests(void);
 static int no_spawn(const char*p,uint32_t a,uint32_t b,uint32_t c,uint32_t d,uint32_t e){(void)p;(void)a;(void)b;(void)c;(void)d;(void)e;CHECK(0);return SF_DENIED;}
 static int64_t sf_sys(long op,uint64_t a,uint64_t b,uint64_t c){
  (void)b;(void)c;
@@ -57,12 +63,18 @@ int sf_ns_client_healthy(void){return namespace_alive;}
 void sf_ns_peer_lost(void){namespace_alive=0;losses++;}
 int64_t sf_ns_client_callback(uint32_t from,SfMessage*m){(void)from;(void)m;CHECK(0);return SF_DENIED;}
 static long sf_send(uint32_t ep,SfMessage*m){
+ if(raw_transport&&ep==fs_service_ep){
+  raw_sends++;namespace_wire=*m;namespace_wire.h.flags=1;
+  sf_nsr_dispatch(&namespace_control,1,&namespace_wire);
+  namespace_wire.h.flags=fs_pid;namespace_wire.h.deadline_ns=0;return 0;
+ }
  CHECK(ep==0x101&&m->h.opcode==OP_PERSIST_QUIESCENT);
  CHECK(!m->handle&&!m->offset&&!m->length&&!m->mode&&!m->status&&!m->h.cap_count);
  sends++;CHECK(sends<=1);if(send_error)return send_error;
  wire=*m;wire.h.flags=12;wire.status=semantic;return 0;
 }
 static long sf_recv(uint32_t ep,SfMessage*m,uint64_t deadline){
+ if(raw_transport&&ep==fs_service_reply){raw_receives++;*m=namespace_wire;return fs_pid;}
  CHECK(ep==0x102&&deadline==sf_deadline(10000));receives++;CHECK(receives<=1);
  if(reenter)guarded_calls();
  if(mutation)mutate_context(mutation);
@@ -108,6 +120,10 @@ static void reset(void){
  const SfMountEntry disk[]={ {"/disk",NODE_DIR,1,0,0},{"/disk/file",NODE_DISK,1,0,4} };
  CHECK(!sf_ns_mount_publish(ns,disk,2,1)&&!project_notes(ns,4));
  CHECK(!sf_ns_create(ns,"/ram",NODE_FILE,0));
+ const SfNsBackends bindings={0,notes_read,notes_write,notes_truncate,mount_open,mount_close,0};
+ sf_nsr_init(&namespace_control,ns,&bindings);namespace_control.ready=1;
+ namespace_control.mask=SF_NS_B_READ|SF_NS_B_WRITE|SF_NS_B_TRUNCATE|SF_NS_B_MOUNT_OPEN|SF_NS_B_MOUNT_CLOSE;
+ raw_transport=raw_sends=raw_receives=0;raw_requests=0x900000000ull;
  CHECK(sf_storage_admission_instance()==(((uint64_t)book.modules[fs_slot].generation<<32)|book.modules[driver_slot].generation));
  CHECK(!sf_storage_quiescent()&&!sf_persist_fenced());
 }
@@ -131,6 +147,7 @@ static void guarded_calls(void){
  CHECK(sf_ns_openat(ns,7,(uint32_t)root,"persist/notes",OPEN_READ)==SF_DRAINING);
  CHECK(!sf_ns_close(ns,7,(uint32_t)root));
  CHECK(sf_storage_load("/disk/file",output,sizeof(output))==SF_DRAINING);
+ CHECK(sf_storage_namespace_disk_live()==SF_DRAINING&&external_read(0,0,output,1)==SF_DRAINING);
  CHECK(sf_storage_transaction(1)==SF_DRAINING);
  CHECK(sf_storage_sector_write(0,SF_TXN_BANK,bytes)==SF_DRAINING);
  CHECK(sf_storage_flush(0)==SF_DRAINING&&sf_storage_write_range(SF_TXN_BANK,SF_TXN_BANK+1)==SF_DRAINING);
@@ -159,10 +176,105 @@ static void guarded_calls(void){
  for(unsigned i=0;i<sizeof(persist_ops)/sizeof(*persist_ops);i++){SfMessage m;sf_message(&m,persist_ops[i],0);CHECK(pf_call(&m)==SF_DRAINING);}
  CHECK(pf_send_cap(OP_PERSIST_ATTACH_SEND,0x777,22,0)==SF_DRAINING&&closes==old_closes+1);
  CHECK(sf_persist_load_begin(&untouched)==SF_DRAINING&&untouched==UINT64_MAX);
+ blocked_exchange_tests();
  CHECK(sends==sent&&receives==received&&!load_owner&&!namespace_descriptions&&!book.modules[fs_slot].resources[RES_DIRTY]);
  CHECK(!memcmp(guard_nodes,space.nodes,sizeof(guard_nodes)));
  for(unsigned i=0;i<sizeof(output);i++)CHECK(output[i]==0xa5);
  guard_runs++;
+}
+static void raw_message(SfMessage*m,unsigned op){sf_message(m,op,++raw_requests);m->h.deadline_ns=0;m->h.flags=1;}
+static void raw_path(SfMessage*m,uint32_t owner,const char*a,const char*b,uint32_t value){
+ const uint32_t fields[]={owner,0,0,value};memcpy(m->data,fields,sizeof(fields));
+ size_t n=strlen(a)+1;memcpy(m->data+16,a,n);m->length=(uint32_t)(16+n);
+ if(b){n=strlen(b)+1;memcpy(m->data+m->length,b,n);m->length+=(uint32_t)n;}
+}
+static void blocked_exchange_tests(void){
+ const unsigned controls[]={OP_NS_UNMOUNT,OP_NS_INIT,OP_NS_BACKENDS,OP_NS_ASSIGN,OP_NS_PROJECT,OP_NS_PROTECT,
+  OP_NS_MOUNT_BEGIN,OP_NS_MOUNT_ENTRY,OP_NS_MOUNT_COMMIT,OP_NS_MOUNT_ABORT,
+  OP_FS_ATTACH_SEND,OP_FS_ATTACH_REPLY,OP_FS_MOUNT,OP_FS_STOP,OP_FS_ENTRY,OP_FS_FIND,OP_FS_READ,OP_FS_BLOCK_READ,0xffff};
+ unsigned transport_before=raw_transport,sent=raw_sends,received=raw_receives,closed=closes;raw_transport=1;
+ SfNamespace before=space;SfNsControl control_before=namespace_control;SfNsTransport transport=fs_transport;SfManager ledger=book;
+ for(unsigned i=0;i<sizeof(controls)/sizeof(*controls);i++){
+  SfMessage m;raw_message(&m,controls[i]);
+  if(m.h.opcode==OP_NS_UNMOUNT)m.mode=1; /* Valid tag1 destructive reproducer. */
+  if(m.h.opcode==OP_NS_INIT||m.h.opcode==OP_NS_BACKENDS)m.mode=0;
+  if(m.h.opcode==OP_NS_ASSIGN)raw_path(&m,0,"/persist/notes",0,0777);
+  if(m.h.opcode==OP_NS_PROJECT){m.mode=17;raw_path(&m,0,"/new-projection",0,0);}
+  if(m.h.opcode==OP_NS_PROTECT)raw_path(&m,0,"/",0,0);
+  if(m.h.opcode==OP_NS_MOUNT_BEGIN){m.handle=1;m.mode=1;}
+  if(m.h.opcode==OP_FS_ATTACH_SEND||m.h.opcode==OP_FS_ATTACH_REPLY){m.h.cap_count=1;m.handle=0x777;}
+  SfMessage original=m;
+  CHECK(sf_storage_namespace_exchange(0,&m)==SF_DRAINING&&!memcmp(&m,&original,sizeof(m)));
+  CHECK(raw_sends==sent&&raw_receives==received&&closes==closed&&!memcmp(&transport,&fs_transport,sizeof(transport)));
+  CHECK(!memcmp(&before,&space,sizeof(before))&&!memcmp(&control_before,&namespace_control,sizeof(control_before)));
+  CHECK(!memcmp(&ledger,&book,sizeof(ledger))&&sf_persist_fenced());raw_control_cases++;
+ }
+ for(unsigned type=NODE_DISK;type<=NODE_PROJECTION;type++){
+  if(type!=NODE_DISK&&type!=NODE_PROJECTION)continue;
+  SfMessage m;raw_message(&m,OP_NS_CREATE);m.mode=type;raw_path(&m,0,"/backend-alias",0,0600);SfMessage original=m;
+  CHECK(sf_storage_namespace_exchange(0,&m)==SF_DRAINING&&!memcmp(&m,&original,sizeof(m)));
+  CHECK(raw_sends==sent&&raw_receives==received&&closes==closed&&!memcmp(&transport,&fs_transport,sizeof(transport)));
+  CHECK(!memcmp(&before,&space,sizeof(before))&&!memcmp(&control_before,&namespace_control,sizeof(control_before)));
+  CHECK(!memcmp(&ledger,&book,sizeof(ledger))&&sf_persist_fenced());raw_control_cases++;
+ }
+ CHECK(sf_storage_namespace_exchange(0,0)==SF_INVALID);
+ raw_transport=transport_before;
+}
+static void raw_ok(SfMessage*m){
+ unsigned sent=raw_sends,received=raw_receives;
+ CHECK(sf_storage_namespace_exchange(0,m)==fs_pid&&raw_sends==sent+1&&raw_receives==received+1);
+ CHECK(m->status>=0&&namespace_alive&&!fs_transport.inflight);ram_cases++;
+}
+static void ordinary_ram_tests(void){
+ reset();CHECK(!sf_ns_create(ns,"/preexisting-disk",NODE_DISK,0));
+ uint64_t token=0;CHECK(!sf_persist_fence_begin(&token));raw_transport=1;
+ SfNode tagged[SF_NS_NODE_MAX];memcpy(tagged,space.nodes,sizeof(tagged));SfManager ledger=book;SfRuntimeTrust trust=sf_trust;
+ SfNsBackends bindings=namespace_control.backends;uint32_t mask=namespace_control.mask;
+ SfMessage m;raw_message(&m,OP_NS_CREATE);m.mode=NODE_FILE;raw_path(&m,0,"/fenced-ram",0,0600);raw_ok(&m);
+ raw_message(&m,OP_NS_OPEN);m.mode=OPEN_READ|OPEN_WRITE;raw_path(&m,7,"/","/fenced-ram",0);raw_ok(&m);uint32_t file=(uint32_t)m.handle;CHECK(file);
+ raw_message(&m,OP_NS_WRITE);m.mode=7;m.handle=file;m.length=3;memcpy(m.data,"ram",3);raw_ok(&m);CHECK(m.status==3);
+ raw_message(&m,OP_NS_PREAD);m.mode=7;m.handle=file;m.offset=1;m.length=2;raw_ok(&m);CHECK(m.status==2&&!memcmp(m.data,"am",2));
+ raw_message(&m,OP_NS_SEEK);m.mode=7;m.handle=file;raw_ok(&m);
+ raw_message(&m,OP_NS_READ);m.mode=7;m.handle=file;m.length=3;raw_ok(&m);CHECK(m.status==3&&!memcmp(m.data,"ram",3));
+ raw_message(&m,OP_NS_STAT);m.mode=7;m.handle=file;raw_ok(&m);SfFileStat info;memcpy(&info,m.data,sizeof(info));CHECK(info.size==3);
+ raw_message(&m,OP_NS_DUP);m.mode=7;m.handle=file;raw_ok(&m);uint32_t copy=(uint32_t)m.handle;CHECK(copy&&copy!=file);
+ raw_message(&m,OP_NS_HANDOFF);m.mode=7;m.handle=copy;m.offset=8;raw_ok(&m);
+ raw_message(&m,OP_NS_REAP);m.mode=8;raw_ok(&m);
+ raw_message(&m,OP_NS_TRUNCATE);m.mode=7;m.handle=file;m.offset=1;raw_ok(&m);
+ raw_message(&m,OP_NS_POLL);m.mode=7;m.handle=file;raw_ok(&m);
+ raw_message(&m,OP_NS_CLOSE);m.mode=7;m.handle=file;raw_ok(&m);
+ raw_message(&m,OP_NS_OPEN);m.mode=OPEN_READ|OPEN_WRITE|OPEN_DIRECTORY;raw_path(&m,7,"/","/",0);raw_ok(&m);uint32_t directory=(uint32_t)m.handle;CHECK(directory);
+ raw_message(&m,OP_NS_ENUMERATE);m.mode=7;m.handle=directory;m.length=sizeof(m.data);raw_ok(&m);
+ raw_message(&m,OP_NS_ENUMERATE_AT);m.mode=7;m.handle=directory;m.length=sizeof(m.data);raw_ok(&m);
+ raw_message(&m,OP_NS_UNLINK);m.handle=directory;raw_path(&m,7,"fenced-ram",0,0);raw_ok(&m);
+ raw_message(&m,OP_NS_CREATE);m.mode=NODE_DIR;raw_path(&m,0,"/fenced-dir",0,0700);raw_ok(&m);
+ raw_message(&m,OP_NS_RMDIR);m.handle=directory;raw_path(&m,7,"fenced-dir",0,0);raw_ok(&m);
+ raw_message(&m,OP_NS_CREATE);m.mode=NODE_PIPE;raw_path(&m,0,"/fenced-pipe",0,0600);raw_ok(&m);
+ raw_message(&m,OP_NS_OPEN);m.mode=OPEN_READ|OPEN_WRITE;raw_path(&m,7,"/","/fenced-pipe",0);raw_ok(&m);uint32_t pipe=(uint32_t)m.handle;CHECK(pipe);
+ raw_message(&m,OP_NS_WRITE);m.mode=7;m.handle=pipe;m.length=4;memcpy(m.data,"pipe",4);raw_ok(&m);CHECK(m.status==4);
+ raw_message(&m,OP_NS_READ);m.mode=7;m.handle=pipe;m.length=4;raw_ok(&m);CHECK(m.status==4&&!memcmp(m.data,"pipe",4));
+ raw_message(&m,OP_NS_CLOSE);m.mode=7;m.handle=pipe;raw_ok(&m);
+ raw_message(&m,OP_NS_CREATE);m.mode=NODE_CONSOLE;raw_path(&m,0,"/fenced-console",0,0600);raw_ok(&m);
+ raw_message(&m,OP_NS_OPEN);m.mode=OPEN_READ|OPEN_WRITE;raw_path(&m,7,"/","/fenced-console",0);raw_ok(&m);uint32_t console=(uint32_t)m.handle;CHECK(console);
+ raw_message(&m,OP_NS_STAT);m.mode=7;m.handle=console;raw_ok(&m);memcpy(&info,m.data,sizeof(info));CHECK(info.type==NODE_CONSOLE);
+ raw_message(&m,OP_NS_CLOSE);m.mode=7;m.handle=console;raw_ok(&m);
+ raw_message(&m,OP_NS_MOUNT_CHECK);raw_path(&m,0,"/unused-mount",0,0);raw_ok(&m);
+ raw_message(&m,OP_NS_OPEN);m.mode=OPEN_READ;raw_path(&m,7,"/","/persist/notes",0);
+ CHECK(sf_storage_namespace_exchange(0,&m)==fs_pid&&m.status==SF_DRAINING&&namespace_alive&&!namespace_descriptions);
+ raw_message(&m,OP_NS_OPEN);m.mode=OPEN_READ;raw_path(&m,7,"/","/preexisting-disk",0);raw_ok(&m);uint32_t alias=(uint32_t)m.handle;CHECK(alias);
+ raw_message(&m,OP_NS_READ);m.mode=7;m.handle=alias;m.length=1;
+ CHECK(sf_storage_namespace_exchange(0,&m)==fs_pid&&m.status==SF_DRAINING&&namespace_alive&&!namespace_descriptions);
+ raw_message(&m,OP_NS_CLOSE);m.mode=7;m.handle=alias;raw_ok(&m);
+ raw_message(&m,OP_NS_REAP);m.mode=7;raw_ok(&m);
+ CHECK(!memcmp(&ledger,&book,sizeof(ledger))&&!memcmp(&trust,&sf_trust,sizeof(trust)));
+ CHECK(!memcmp(&bindings,&namespace_control.backends,sizeof(bindings))&&mask==namespace_control.mask);
+ CHECK(space.external_read==notes_read&&space.external_write==notes_write&&space.external_truncate==notes_truncate&&space.mount_open==mount_open&&space.mount_close==mount_close);
+ for(unsigned i=0;i<SF_NS_NODE_MAX;i++)if(tagged[i].mount_tag)CHECK(!memcmp(&tagged[i],&space.nodes[i],sizeof(tagged[i])));
+ CHECK(!sf_persist_fence_cancel(token)&&!sf_persist_fenced()&&!namespace_descriptions&&!book.modules[fs_slot].resources[RES_OPEN]);
+ /* The real peer applies these controls outside a fence. These positive
+  * controls make the destructive denied cases more than a no-op transport. */
+ raw_message(&m,OP_NS_BACKENDS);raw_ok(&m);CHECK(!space.mount_open&&!space.mount_close&&!space.external_read&&!namespace_control.mask);
+ raw_message(&m,OP_NS_UNMOUNT);m.mode=1;raw_ok(&m);CHECK(sf_ns_open(ns,7,"/","/persist/notes",OPEN_READ)==SF_NOT_FOUND);
 }
 static void healthy_tests(void){
  reset();snapshot_state();uint64_t token=0;
@@ -267,8 +379,19 @@ static void changed_context_tests(void){
   CHECK(admission_fence.token==token&&sf_persist_fence_cancel(token)<0&&sends==1&&receives==1);context_cases++;
  }
 }
-int main(void){
- healthy_tests();preflight_tests();load_tests();reply_tests();changed_context_tests();
- printf("PERSIST FENCE PASS %u checks; %u guarded passes, %u local refusals, %u reply cases, %u changed contexts; E1 actual Root admission only\n",checks,guard_runs,preflight_cases,reply_cases,context_cases);
+static void raw_unmount_reproducer(void){
+ reset();uint64_t token=0;CHECK(!sf_persist_fence_begin(&token));raw_transport=1;
+ SfNamespace before=space;SfNsControl control=namespace_control;SfNsTransport transport=fs_transport;SfManager ledger=book;SfRuntimeTrust trust=sf_trust;
+ SfMessage m;raw_message(&m,OP_NS_UNMOUNT);m.mode=1;SfMessage original=m;
+ CHECK(sf_storage_namespace_exchange(0,&m)==SF_DRAINING&&raw_sends==0&&raw_receives==0);
+ CHECK(!memcmp(&m,&original,sizeof(m))&&!memcmp(&transport,&fs_transport,sizeof(transport)));
+ CHECK(!memcmp(&before,&space,sizeof(before))&&!memcmp(&control,&namespace_control,sizeof(control)));
+ CHECK(!memcmp(&ledger,&book,sizeof(ledger))&&!memcmp(&trust,&sf_trust,sizeof(trust)));
+ CHECK(!sf_persist_fence_cancel(token)&&!sf_persist_fenced());raw_control_cases++;
+}
+int main(int argc,char**argv){
+ if(argc==2&&!strcmp(argv[1],"--raw-unmount-only")){raw_unmount_reproducer();printf("RAW UNMOUNT FENCE PASS %u checks; no control IPC or state changes\n",checks);return 0;}
+ CHECK(argc==1);healthy_tests();preflight_tests();load_tests();reply_tests();changed_context_tests();ordinary_ram_tests();raw_unmount_reproducer();
+ printf("PERSIST FENCE PASS %u checks; %u guarded passes, %u local refusals, %u reply cases, %u changed contexts; %u raw controls refused, %u actual peer RAM/control operations; E1 actual Root admission only\n",checks,guard_runs,preflight_cases,reply_cases,context_cases,raw_control_cases,ram_cases);
  return 0;
 }

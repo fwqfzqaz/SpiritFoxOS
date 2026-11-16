@@ -24,21 +24,26 @@ void sf_ns_init(SfNamespace*n,long(*console)(const void*,size_t)){
  sf_nsc_connect(&n->client,(uint32_t)pid,sf_storage_namespace_exchange,n,lost,console?SF_NS_B_CONSOLE:0);
 }
 static void backends(SfNamespace*n){
+ if(sf_persist_fenced())return;
  uint32_t mask=(n->console?SF_NS_B_CONSOLE:0)|(n->read?SF_NS_B_READ:0)|(n->write?SF_NS_B_WRITE:0)|
   (n->truncate?SF_NS_B_TRUNCATE:0)|(n->mount_open?SF_NS_B_MOUNT_OPEN:0)|
   (n->mount_close?SF_NS_B_MOUNT_CLOSE:0)|(n->projection?SF_NS_B_PROJECTION:0);
  if(n->client.ready)sf_nsc_backends(&n->client,mask);
 }
 SfNsRead sf_ns_external(SfNamespace*n,SfNsRead read,long(*write)(unsigned,uint64_t,const void*,size_t),int(*truncate)(unsigned,uint64_t)){
- SfNsRead old=n->read;n->read=read;n->write=write;n->truncate=truncate;backends(n);return old;
+ SfNsRead old=n->read;if(sf_persist_fenced())return old;
+ n->read=read;n->write=write;n->truncate=truncate;backends(n);return old;
 }
-void sf_ns_mount_hooks(SfNamespace*n,int(*open)(unsigned),void(*close)(unsigned)){n->mount_open=open;n->mount_close=close;backends(n);}
-void sf_ns_projection_backend(SfNamespace*n,SfNsRead read){n->projection=read;backends(n);}
-int sf_ns_create_owned(SfNamespace*n,const char*p,unsigned type,int readonly,uint32_t uid,uint32_t gid,unsigned mode){return sf_nsc_create(&n->client,p,type,readonly,uid,gid,mode);}
+void sf_ns_mount_hooks(SfNamespace*n,int(*open)(unsigned),void(*close)(unsigned)){if(sf_persist_fenced())return;n->mount_open=open;n->mount_close=close;backends(n);}
+void sf_ns_projection_backend(SfNamespace*n,SfNsRead read){if(sf_persist_fenced())return;n->projection=read;backends(n);}
+int sf_ns_create_owned(SfNamespace*n,const char*p,unsigned type,int readonly,uint32_t uid,uint32_t gid,unsigned mode){
+ if(sf_persist_fenced()&&type!=NODE_FILE&&type!=NODE_DIR&&type!=NODE_PIPE&&type!=NODE_CONSOLE)return SF_DRAINING;
+ return sf_nsc_create(&n->client,p,type,readonly,uid,gid,mode);
+}
 int sf_ns_create(SfNamespace*n,const char*p,unsigned type,int readonly){return sf_ns_create_owned(n,p,type,readonly,0,0,type==NODE_DIR?0755:0644);}
-int sf_ns_assign(SfNamespace*n,const char*p,uint32_t uid,uint32_t gid,unsigned mode){return sf_nsc_assign(&n->client,p,uid,gid,mode);}
-int sf_ns_project(SfNamespace*n,const char*p,unsigned id){return sf_nsc_project(&n->client,p,id);}
-int sf_ns_protect(SfNamespace*n,const char*p){return sf_nsc_protect(&n->client,p);}
+int sf_ns_assign(SfNamespace*n,const char*p,uint32_t uid,uint32_t gid,unsigned mode){if(sf_persist_fenced())return SF_DRAINING;return sf_nsc_assign(&n->client,p,uid,gid,mode);}
+int sf_ns_project(SfNamespace*n,const char*p,unsigned id){if(sf_persist_fenced())return SF_DRAINING;return sf_nsc_project(&n->client,p,id);}
+int sf_ns_protect(SfNamespace*n,const char*p){if(sf_persist_fenced())return SF_DRAINING;return sf_nsc_protect(&n->client,p);}
 int sf_ns_mount_check(SfNamespace*n,const char*p){return sf_nsc_mount_check(&n->client,p);}
 int sf_ns_mount_publish(SfNamespace*n,const SfMountEntry*entries,unsigned count,unsigned tag){if(sf_persist_fenced())return SF_DRAINING;return sf_nsc_mount_publish(&n->client,entries,count,tag);}
 int sf_ns_open_as(SfNamespace*n,uint32_t owner,const char*root,const char*p,unsigned mode,uint32_t uid,uint32_t gid){return sf_nsc_open(&n->client,owner,root,p,mode,uid,gid);}
