@@ -48,12 +48,15 @@ if result.get('persist_write_reply_host') != {'passed':True,'evidence':'E1-host'
     raise SystemExit('Run exact persistence WRITE ACK, admitted-chunk progress and retained unknown DIRTY host regressions before packaging')
 if result.get('persist_admission_fence_host') != {'passed':True,'evidence':'E1-host-only','checks':3318,'frontend_checks':243,'raw_control_refusals':43,'namespace_peer_operations':34,'non_destructive':True,'provider_lifecycle':False}:
     raise SystemExit('Run non-destructive Root admission fence/token/cancel host regressions before packaging')
+fence_source_paths = ('tests/qemu/qemu_persist_fence_test.py', 'tests/fixtures/persist_write_reply_fault.c', 'tests/qemu/qemu_persist_test.py', 'tests/qemu/qemu_persist_write_reply_test.py', 'tests/qemu/trust_sync_fixture.py', 'services/init.c', 'services/persist_client.c', 'services/storage.c', 'services/namespace_frontend.c')
+fence_source_sha256 = {p:hashlib.sha256((ROOT/p).read_bytes()).hexdigest() for p in fence_source_paths}
 fence_guest=result.get('persist_admission_fence_qemu',{})
 fence_healthy=fence_guest.get('healthy_cases',[])
 fence_unknown=fence_guest.get('unknown_cases',[])
 fence_recoveries=fence_guest.get('recoveries',[])
 fence_markers=['PERSIST FENCE DRAIN PASSED','PERSIST FENCE OWNER GUARDS PASSED','PERSIST FENCE RAM AND BUNDLE PASSED','PERSIST FENCE TOKENS PASSED','PERSIST FENCE HEALTHY PASSED']
 if (fence_guest.get('passed') is not True or fence_guest.get('evidence')!='E2-actual-root-fs-persist' or
+    fence_guest.get('source_sha256')!=fence_source_sha256 or
     len(fence_guest.get('source_head',''))!=40 or any(c not in '0123456789abcdef' for c in fence_guest.get('source_head','')) or
     fence_guest.get('production_efi_sha256')!=hashlib.sha256((BUILD/'esp/EFI/BOOT/BOOTX64.EFI').read_bytes()).hexdigest() or
     fence_guest.get('guest_boots')!=4 or fence_guest.get('user_denials')!=4 or

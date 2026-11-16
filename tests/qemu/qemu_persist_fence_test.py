@@ -16,6 +16,11 @@ HEALTHY_MARKERS=('PERSIST FENCE DRAIN PASSED','PERSIST FENCE OWNER GUARDS PASSED
                  'PERSIST FENCE HEALTHY PASSED')
 
 
+FENCE_EVIDENCE_SOURCES = ('tests/qemu/qemu_persist_fence_test.py', 'tests/fixtures/persist_write_reply_fault.c', 'tests/qemu/qemu_persist_test.py', 'tests/qemu/qemu_persist_write_reply_test.py', 'tests/qemu/trust_sync_fixture.py', 'services/init.c', 'services/persist_client.c', 'services/storage.c', 'services/namespace_frontend.c')
+
+def evidence_hashes():
+    return {p:hashlib.sha256((ROOT/p).read_bytes()).hexdigest() for p in FENCE_EVIDENCE_SOURCES}
+
 def diagnostic(vm,mode):
     markers=HEALTHY_MARKERS if mode=='healthy' else ('PERSIST FENCE UNKNOWN DIRTY PASSED',)
     start=vm.send('persist-fence-test '+mode)
@@ -43,6 +48,7 @@ def healthy(vm,disk,transport,state):
 
 def run():
     result_path=ROOT/'build/persist-fence-results.json';result_path.unlink(missing_ok=True)
+    source_hashes=evidence_hashes()
     source=(ROOT/'build/persistent.img').read_bytes();products=artifact_hashes()
     head=subprocess.check_output(['git','rev-parse','HEAD'],cwd=ROOT,text=True).strip()
     cases=[];unknown=[];recoveries=[];pending=[];boots=user_denials=0
@@ -117,7 +123,8 @@ def run():
     assert boots==4 and user_denials==4 and len(cases)==4 and len(unknown)==len(recoveries)==2
     assert artifact_hashes()==products and not json.loads(STATE.read_text(encoding='utf-8'))['active']
     assert (ROOT/'build/persistent.img').read_bytes()==source
-    result={'passed':True,'evidence':'E2-actual-root-fs-persist','source_head':head,
+    assert evidence_hashes()==source_hashes,'Fence evidence sources changed during the run'
+    result={'passed':True,'evidence':'E2-actual-root-fs-persist','source_head':head,'source_sha256':source_hashes,
             'production_efi_sha256':products['build/esp/EFI/BOOT/BOOTX64.EFI'],'guest_boots':boots,
             'healthy_cases':cases,'unknown_cases':unknown,'recoveries':recoveries,'user_denials':user_denials,
             'production_artifacts_restored':True,'base_disk_unchanged':True,

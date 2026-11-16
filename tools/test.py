@@ -119,6 +119,7 @@ subprocess.run([sys.executable,'tests/integration/test_policy_boundary.py'],chec
 subprocess.run([sys.executable,'tests/integration/test_trust_boundary.py'],check=True)
 subprocess.run([sys.executable,'tests/integration/test_block_reply.py'],check=True)
 subprocess.run([sys.executable,'tests/integration/test_persist_quiescence.py'],check=True)
+subprocess.run([sys.executable,'tests/integration/test_persist_fence_evidence.py'],check=True)
 subprocess.run([sys.executable,'tests/integration/test_file_ingress.py'],check=True)
 subprocess.run([sys.executable,'tests/integration/test_linux_blob_assembly.py'],check=True)
 abi_reference_sha256 = hashlib.sha256((ROOT/'abi/x86_64-current.json').read_bytes()).hexdigest()
