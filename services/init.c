@@ -890,7 +890,7 @@ static int persist_fence_healthy_test(void){
  FenceView before,after;SfRuntimeTrust trust=sf_trust;uint8_t digest[96],end[96];char text[96];
 #define FENCE_CHECK(c) do{if(!(c)){sf_log("persist-fence: failed line=");sf_number(__LINE__);sf_log("\n");goto done;}}while(0)
  FENCE_CHECK(!sf_persist_quiescent()&&!fence_view(&before)&&before.instance&&before.writable&&!transaction_fingerprint(digest));
- h[0]=sf_ns_open(ns,1,"/","/tmp",OPEN_READ|OPEN_DIRECTORY);FENCE_CHECK(h[0]>0);
+ h[0]=sf_ns_open(ns,1,"/","/tmp",OPEN_READ|OPEN_WRITE|OPEN_DIRECTORY);FENCE_CHECK(h[0]>0);
  const char*mounted[]={"/persist/notes","/disk/etc/readme.txt"};
  for(unsigned i=0;i<2;i++){
   h[1]=sf_ns_open(ns,1,"/",mounted[i],OPEN_READ);FENCE_CHECK(h[1]>0);
