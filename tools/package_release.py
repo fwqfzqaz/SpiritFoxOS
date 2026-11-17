@@ -199,6 +199,28 @@ if (result.get('persist_hold_host')!={'passed':True,'evidence':'E1-held-owner-mo
     not all(hold_guest.get(k)is False for k in ('candidate_activation','driver_grants','mount_requested','physical_hardware'))):
     raise SystemExit('Run actual live prepared ownership across Root commands, refreshed explicit discard and retained unknown ACK guest evidence before packaging')
 
+
+revoke_source_paths = ('kernel/ipc.c','kernel/core.c','kernel/kernel.h','include/sf.h','include/libsf.h','services/init.c','services/console_policy.c','services/revocation_probe.c','tools/build.py','tests/qemu/qemu_ipc_revocation_test.py','tests/qemu/qemu_persist_test.py','tests/qemu/qemu_persist_write_reply_test.py','tests/host/test_ipc.c','tests/host/test_ipc_revocation.c')
+revoke_source_sha256 = {p:hashlib.sha256((ROOT/p).read_bytes()).hexdigest() for p in revoke_source_paths}
+revoke_guest = result.get('ipc_revocation_qemu',{})
+revoke_host = result.get('ipc_revocation_host',{})
+revoke_cases = revoke_guest.get('cases',[])
+def revoke_case_valid(c):
+    return (c.get('passed') is True and type(c.get('cpus'))is int and c['cpus'] in (1,2) and
+            type(c.get('app_checks'))is int and c['app_checks']==204 and
+            all(c.get(k)is True for k in ('alice_denied','root_caps_preserved','ordinary_service_retained','disk_bytes_preserved')))
+if (revoke_host!={'passed':True,'evidence':'E1-real-kernel-mocked-user-copy','checks':9151} or
+    revoke_host.get('passed') is not True or type(revoke_host.get('checks'))is not int or
+    revoke_guest.get('passed') is not True or revoke_guest.get('evidence')!='E2-real-queued-and-closed-parent-cap-revocation' or
+    revoke_guest.get('source_sha256')!=revoke_source_sha256 or revoke_guest.get('production_sha256')!=terminal_artifact_sha256 or
+    len(revoke_guest.get('source_head',''))!=40 or any(c not in '0123456789abcdef'for c in revoke_guest.get('source_head','')) or
+    type(revoke_guest.get('guest_boots'))is not int or revoke_guest['guest_boots']!=4 or len(revoke_cases)!=4 or
+    {(c.get('transport'),c.get('cpus'))for c in revoke_cases}!={(t,n)for t in ('legacy','modern')for n in (1,2)} or
+    not all(revoke_case_valid(c)for c in revoke_cases) or
+    not all(revoke_guest.get(k)is True for k in ('production_artifacts_preserved','base_disk_unchanged')) or
+    not all(revoke_guest.get(k)is False for k in ('driver_authority_handoff','physical_hardware'))):
+    raise SystemExit('Run real queued/closed-parent capability revocation with preserved sibling/owner references and 1/2-CPU legacy/modern guest evidence before packaging')
+
 write_reply=result.get('persist_write_reply_qemu',{})
 write_cases=write_reply.get('cases',[])
 if (write_reply.get('passed') is not True or write_reply.get('evidence')!='E2-signed-provider' or

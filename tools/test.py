@@ -42,6 +42,7 @@ host_test('test_memory_quota','tests/host/test_memory_quota.c','kernel/memory.c'
 host_test('test_page_limit','tests/host/test_page_limit.c','kernel/pid.c','kernel/compat.c','services/arguments.c',no_unused=True)
 host_test('test_ipc_budget','tests/host/test_ipc_budget.c')
 host_test('test_ipc_cancel','tests/host/test_ipc_cancel.c')
+host_test('test_ipc_revocation','tests/host/test_ipc_revocation.c','kernel/ipc.c')
 host_test('test_ipc_stats','tests/host/test_ipc_stats.c')
 host_test('test_threads','tests/host/test_threads.c','kernel/pid.c','kernel/compat.c','services/arguments.c',no_unused=True)
 host_test('test_shm','tests/host/test_shm.c','kernel/memory.c','kernel/shm.c',no_unused=True)
@@ -136,6 +137,7 @@ subprocess.run([sys.executable,'tests/integration/test_persist_idle_evidence.py'
 subprocess.run([sys.executable,'tests/integration/test_persist_snapshot_evidence.py'],check=True)
 subprocess.run([sys.executable,'tests/integration/test_persist_verify_evidence.py'],check=True)
 subprocess.run([sys.executable,'tests/integration/test_persist_hold_evidence.py'],check=True)
+subprocess.run([sys.executable,'tests/integration/test_ipc_revocation_evidence.py'],check=True)
 subprocess.run([sys.executable,'tests/integration/test_persist_candidate_image.py'],check=True)
 subprocess.run([sys.executable,'tests/integration/test_trust_fingerprint.py'],check=True)
 subprocess.run([sys.executable,'tests/integration/test_persist_snapshot_volume.py'],check=True)
@@ -150,6 +152,7 @@ if not args.host_only:
     subprocess.run([sys.executable, 'tests/qemu/qemu_cap_limit_test.py'], check=True)
     subprocess.run([sys.executable, 'tests/qemu/qemu_page_quota_test.py'], check=True)
     subprocess.run([sys.executable, 'tests/qemu/qemu_ipc_cancel_test.py'], check=True)
+    subprocess.run([sys.executable, 'tests/qemu/qemu_ipc_revocation_test.py'], check=True)
     subprocess.run([sys.executable, 'tests/qemu/qemu_ipc_stats_test.py'], check=True)
     subprocess.run([sys.executable, 'tests/qemu/qemu_file_client_test.py'], check=True)
     subprocess.run([sys.executable, 'tests/qemu/qemu_rmdir_test.py'], check=True)
@@ -271,6 +274,8 @@ result['persist_candidate_host'] = {'passed':True,'evidence':'E1-host-real-signa
 result['persist_idle_host'] = {'passed':True,'evidence':'E1-host-mocked-kernel','parser_checks':4173,'owner_checks':437812}
 result['persist_snapshot_host'] = {'passed':True,'evidence':'E1-host-independent-canonical-vectors','parser_checks':8197,'volume_checks':87,'owner_checks':170613,'trust_checks':95}
 result['persist_verify_host'] = {'passed':True,'evidence':'E1-real-txn-and-mocked-IPC','volume_checks':5907,'parser_checks':4441242,'parser_cases':66,'owner_checks':751802,'owner_cases':58}
+result['ipc_revocation_host'] = {'passed':True,'evidence':'E1-real-kernel-mocked-user-copy','checks':9151}
+result['ipc_revocation_qemu'] = {} if args.host_only else json.loads((ROOT/'build/ipc-revocation-results.json').read_text(encoding='utf-8'))
 result['persist_hold_host'] = {'passed':True,'evidence':'E1-held-owner-mocked-kernel-transport','checks':247421,'cases':14}
 result['persist_terminal_qemu'] = {} if args.host_only else json.loads((ROOT/'build/persist-terminal-results.json').read_text(encoding='utf-8'))
 result['persist_idle_qemu'] = {} if args.host_only else json.loads((ROOT/'build/persist-idle-results.json').read_text(encoding='utf-8'))

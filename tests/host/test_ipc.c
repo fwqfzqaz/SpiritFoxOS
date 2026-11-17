@@ -162,4 +162,7 @@ static void attached_capability(void){
  current=1;message();CHECK(send(received)==0);current=0;CHECK(receive(owner,0)==2);
 }
 
-int main(void){canonical_width();churn_and_capacity();derived_references();cross_task_references();revoke_and_owner_exit();deadlines_and_validation();retired_slot();derived_subtree_revoke();transferred_subtree();attached_capability();reset();printf("IPC tests passed: %u assertions\n",checks);return 0;}
+#ifndef IPC_TEST_ENTRY
+#define IPC_TEST_ENTRY main
+#endif
+int IPC_TEST_ENTRY(void){canonical_width();churn_and_capacity();derived_references();cross_task_references();revoke_and_owner_exit();deadlines_and_validation();retired_slot();derived_subtree_revoke();transferred_subtree();attached_capability();reset();printf("IPC tests passed: %u assertions\n",checks);return 0;}

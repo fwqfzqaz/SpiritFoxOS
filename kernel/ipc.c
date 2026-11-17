@@ -42,8 +42,38 @@ int ipc_grant(Task*from,Task*to,uint32_t handle,uint32_t rights){Cap*c=cap(from,
 /* 端点失效：epoch 递增吊销全部旧句柄，唤醒阻塞在端点上的任务（返回
  * SF_REVOKED），并清空所有任务对该端点的能力引用。 */
 static void invalidate(unsigned i){Endpoint*e=&endpoints[i];e->owner=0;e->count=0;e->epoch++;for(unsigned j=0;j<SF_MAX_THREADS;j++){Task*t=&tasks[j];if(t->state==T_BLOCKED&&t->wait_endpoint==i+1){t->frame->rax=SF_REVOKED;task_wake(t);}Cap*caps=task_main(t)->caps;for(unsigned k=0;k<32;k++)if(caps[k].endpoint==i+1)caps[k].endpoint=0;}}
-static void close_cap(Cap*c){
- unsigned ep=c->endpoint-1;c->endpoint=0;
+/* Queued transfers retain an anchor even before a receiving cap exists.
+ * Closing an intermediate cap splices that edge to its parent; revocation
+ * removes the attachment, but keeps its message body for REVOKED delivery. */
+static int anchored(const Cap*c,uint32_t pid,unsigned slot,uint32_t generation){
+ return c->parent_pid==pid&&c->parent_slot==slot&&c->parent_generation==generation;
+}
+static void queued_anchor(uint32_t pid,unsigned slot,uint32_t generation,const Cap*parent){
+ for(unsigned e=0;e<ENDPOINTS;e++){
+  Endpoint*q=&endpoints[e];
+  for(unsigned n=0;n<q->count&&n<QUEUE;n++){
+   unsigned i=(q->head+n)%QUEUE;
+   if(!q->cap_ep[i]||q->cap_parent_pid[i]!=pid||q->cap_parent_slot[i]!=slot||q->cap_parent_generation[i]!=generation)continue;
+   if(!parent){q->cap_ep[i]=0;continue;}
+   q->cap_parent_pid[i]=parent->parent_pid;q->cap_parent_slot[i]=parent->parent_slot;
+   q->cap_parent_generation[i]=parent->parent_generation;
+  }
+ }
+}
+static void close_cap(Task*t,unsigned slot){
+ Task*m=task_main(t);Cap*c=&m->caps[slot];unsigned ep=c->endpoint-1;
+ /* Derive, grant and attached SEND all require DELEGATE: an attenuated
+  * nondelegating leaf cannot have an installed or queued child. */
+ if(c->rights&RIGHT_DELEGATE){
+  for(unsigned i=0;i<SF_MAX_THREADS;i++)if(tasks[i].pid&&tasks[i].main){
+   for(unsigned k=0;k<32;k++){Cap*child=&tasks[i].caps[k];
+    if(!child->endpoint||!anchored(child,m->pid,slot,c->generation))continue;
+    child->parent_pid=c->parent_pid;child->parent_slot=c->parent_slot;child->parent_generation=c->parent_generation;
+   }
+  }
+  queued_anchor(m->pid,slot,c->generation,c);
+ }
+ c->endpoint=0;
  /* Closing a handle drops one reference; other tasks and derived handles
     keep the endpoint alive until its final reference is released. */
  for(unsigned j=0;j<SF_MAX_THREADS;j++){const Cap*caps=task_main_c(&tasks[j])->caps;for(unsigned k=0;k<32;k++)if(caps[k].endpoint==ep+1)return;}
@@ -53,6 +83,10 @@ static void close_cap(Cap*c){
  * 唯一的接收权，则按端点撤销语义唤醒。 */
 static int holds_right(const Task*t,unsigned ep,unsigned right){const Cap*caps=task_main_c(t)->caps;for(unsigned i=0;i<32;i++)if(caps[i].endpoint==ep+1&&(caps[i].rights&right))return 1;return 0;}
 static void wake_if_lost(Task*t,unsigned ep){if(t->state!=T_BLOCKED||t->wait_endpoint!=ep+1)return;if(holds_right(t,ep,RIGHT_RECV))return;t->frame->rax=SF_REVOKED;task_wake(t);}
+static void wake_process_if_lost(Task*t,unsigned ep){
+ Task*m=task_main(t);
+ for(unsigned i=0;i<SF_MAX_THREADS;i++)if(task_main(&tasks[i])==m)wake_if_lost(&tasks[i],ep);
+}
 static int has_refs(unsigned ep){for(unsigned j=0;j<SF_MAX_THREADS;j++){const Cap*caps=task_main_c(&tasks[j])->caps;for(unsigned k=0;k<32;k++)if(caps[k].endpoint==ep+1)return 1;}return 0;}
 /* 递归撤销 parent 槽的全部后代能力。父锚点同时比对 PID、槽位和代数，
  * 因此槽位复用不会把新的派生关系错误地并入旧树。 */
@@ -61,7 +95,8 @@ static void revoke_descendants(uint32_t pid,unsigned slot,uint32_t generation){
   for(unsigned s=0;s<32;s++){Cap*c=&t->caps[s];
    if(!c->endpoint||c->parent_pid!=pid||c->parent_slot!=slot||c->parent_generation!=generation)continue;
    unsigned ep=c->endpoint-1;uint32_t child_generation=c->generation;
-   c->endpoint=0;wake_if_lost(t,ep);
+   queued_anchor(t->pid,s,child_generation,0);
+   c->endpoint=0;wake_process_if_lost(t,ep);
    revoke_descendants(t->pid,s,child_generation);
    if(!has_refs(ep))invalidate(ep);
   }
@@ -71,14 +106,15 @@ static void revoke_descendants(uint32_t pid,unsigned slot,uint32_t generation){
 static void revoke_cap(Task*t,unsigned slot){
  Task*m=task_main(t);Cap*c=&m->caps[slot];if(!c->endpoint)return;
  unsigned ep=c->endpoint-1;uint32_t generation=c->generation;
- c->endpoint=0;wake_if_lost(t,ep);
+ queued_anchor(m->pid,slot,generation,0);
+ c->endpoint=0;wake_process_if_lost(t,ep);
  revoke_descendants(m->pid,slot,generation);
  if(!has_refs(ep))invalidate(ep);
 }
 void ipc_cleanup(Task*t){
  Task*m=task_main(t);
  for(unsigned i=0;i<ENDPOINTS;i++)if(endpoints[i].owner==t->pid)invalidate(i);
- for(unsigned i=0;i<32;i++)if(m->caps[i].endpoint)close_cap(&m->caps[i]);
+ for(unsigned i=0;i<32;i++)if(m->caps[i].endpoint)close_cap(t,i);
 }
 /* IPC 截止时间：时钟滴答推进后唤醒已过期的阻塞任务（返回 SF_TIMEOUT）。
  * futex 等待复用同一字段，超时同样在这里结束。 */
@@ -89,7 +125,7 @@ void ipc_deadlines(void){for(unsigned i=0;i<SF_MAX_THREADS;i++){Task*t=&tasks[i]
 long ipc_syscall(uint64_t call,uint64_t a,uint64_t b,uint64_t c){
  Task*t=&tasks[current];
  if(call==SYS_EP_CREATE){if(cap_slot(t)<0)return SF_NO_SPACE;for(unsigned i=0;i<ENDPOINTS;i++)if(!endpoints[i].owner){Endpoint*e=&endpoints[i];e->owner=t->pid;e->epoch++;e->head=e->count=0;int h=install(t,i,7,0,0,0);if(h<0)e->owner=0;return h;}return SF_NO_SPACE;}
- if(call==SYS_CAP_CLOSE){Cap*x=cap(t,a,0);if(!x)return SF_STALE_HANDLE;close_cap(x);return 0;}
+ if(call==SYS_CAP_CLOSE){Cap*x=cap(t,a,0);if(!x)return SF_STALE_HANDLE;close_cap(t,(unsigned)(a&255)-1);return 0;}
  if(call==SYS_CAP_DERIVE){Cap*x=cap(t,a,RIGHT_DELEGATE);if(!x||(b&~7)||(b&x->rights)!=b)return SF_DENIED;return install(t,x->endpoint-1,b,t->pid,(unsigned)(a&255)-1,x->generation);}
  if(call==SYS_CAP_REVOKE){
   Cap*x=cap(t,a,RIGHT_DELEGATE);if(!x)return SF_DENIED;
@@ -149,7 +185,7 @@ long ipc_syscall(uint64_t call,uint64_t a,uint64_t b,uint64_t c){
     else m->handle=(uint64_t)(unsigned)installed;
     e->cap_ep[idx]=0;
    }
-   if(copy_out(t,b,m,sizeof(*m))){if(installed>=0)close_cap(&task_main(t)->caps[(installed&255)-1]);return SF_DENIED;}
+   if(copy_out(t,b,m,sizeof(*m))){if(installed>=0)close_cap(t,(unsigned)(installed&255)-1);return SF_DENIED;}
    copied(&receive_bytes,sizeof(*m));e->head=(e->head+1)%8;e->count--;return sender;
   }
   if(c&&ticks*10000000ull>=c)return SF_TIMEOUT;
