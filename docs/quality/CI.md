@@ -173,3 +173,11 @@ Linux 如需完整 VM 验证，改用 `python3 tools/test.py`；只有完整测�
 额度阶段改为先申请一块含 32 个独立 16 KiB 访客栈的测试 arena，循环中只调用 clone。每个栈都有独立区域，最后一次被拒绝的尝试也使用独立栈；要求 31 个子线程成功、下一次 clone 精确返回 EAGAIN。原 TLS/互斥测试仍使用 64 KiB 访客栈，内核为兼容线程分配的 64 KiB 栈和原有 ABI 均未修改。所有已启动线程退出后才整体释放 arena；mmap 失败与其他 clone 错误仍使测试失败，日志保留错误码和创建数。
 
 复现和验证入口为 `python tests/qemu/qemu_posix_test.py`（只读 storage 盘启动）与 `python tests/qemu/qemu_linux_compat_test.py`（持久盘副本启动）。每次源码变化后先重新构建；本地专项与完整托管结果分别记录。
+
+## Persist 终止证据的原始产物
+
+Windows CI 的结果包须保留 `build/bundle.bin`、`build/payload.S` 和
+`build/kernel.elf`，以及原有 EFI、磁盘、测试报告和发布 ZIP。终止证据门会核对
+这三个文件的实际摘要；只有报告中的摘要不能替代原始字节。上传时逐项列出文件，
+避免通配上传签名种子或宿主工具。独立审核必须绑定同一提交和运行的产物，缺失时
+保留审核失败，不能用本地重建或其他提交的文件补作原始证据。

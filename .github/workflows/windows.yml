@@ -22,6 +22,9 @@ jobs:
           path: |
             build/*.log
             build/test-results.json
+            build/bundle.bin
+            build/payload.S
+            build/kernel.elf
             build/esp/EFI/BOOT/BOOTX64.EFI
             build/storage.img
             build/persistent.img
