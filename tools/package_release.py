@@ -71,7 +71,7 @@ if (fence_guest.get('passed') is not True or fence_guest.get('evidence')!='E2-ac
     raise SystemExit('Run actual Root/Fs admission fence, setter/raw/type guards, retained unknown DIRTY and fresh production recovery before packaging')
 
 # STOP evidence is distinct from non-destructive fencing and from restart.
-terminal_source_paths = ('tests/qemu/qemu_persist_terminal_test.py', 'tests/fixtures/persist_terminal_fault.c', 'tests/qemu/trust_sync_fixture.py', 'services/persist_terminal.c', 'services/persist.c', 'services/persist_client.c', 'services/init.c', 'services/console_policy.c', 'include/persistence.h', 'include/sf.h', 'include/libsf.h', 'services/persist_metadata.c', 'services/persistence.c', 'services/storage.c', 'kernel/core.c', 'kernel/ipc.c', 'tests/qemu/qemu_persist_test.py', 'tests/qemu/qemu_persist_write_reply_test.py')
+terminal_source_paths = ('tests/qemu/qemu_persist_terminal_test.py', 'tests/fixtures/persist_terminal_fault.c', 'tests/qemu/trust_sync_fixture.py', 'services/persist_terminal.c', 'services/persist.c', 'services/persist_client.c', 'services/init.c', 'services/console_policy.c', 'include/persistence.h', 'include/sf.h', 'include/libsf.h', 'services/persist_metadata.c', 'services/persistence.c', 'services/storage.c', 'kernel/core.c', 'kernel/ipc.c', 'tests/qemu/qemu_persist_test.py', 'tests/qemu/qemu_persist_write_reply_test.py', 'services/persist_candidate.c', 'services/persist_candidate.h')
 terminal_source_sha256 = {p:hashlib.sha256((ROOT/p).read_bytes()).hexdigest() for p in terminal_source_paths}
 terminal_artifact_paths = ('build/bundle.bin', 'build/payload.S', 'build/esp/EFI/BOOT/BOOTX64.EFI', 'build/kernel.elf', 'build/storage.img', 'build/persistent.img', 'build/trust-policy.json')
 terminal_artifact_sha256 = {p:hashlib.sha256((ROOT/p).read_bytes()).hexdigest() for p in terminal_artifact_paths}
@@ -87,10 +87,12 @@ def terminal_case_valid(c):
         type(status.get('phase')) is not int or type(status.get('observations')) is not int or
         not all(type(status.get(k)) is bool for k in ('ack_authenticated','death_confirmed','retired'))):
         return False
+    if status.get('candidate_inspected') is not (mode in ('healthy','delayed')):return False
     if tuple(status.get(k) for k in ('phase','ack_authenticated','death_confirmed','retired'))!=expected[mode]:
         return False
     return status['observations']==0 if mode=='busy' else status['observations']>=(2 if mode=='delayed' else 1)
 if (result.get('persist_terminal_host')!={'passed':True,'evidence':'E1-host-only','server_checks':550,'owner_checks':642533,'owner_cases':187} or
+    result.get('persist_candidate_host')!={'passed':True,'evidence':'E1-host-real-signatures','owner_checks':216690,'owner_cases':67,'image_checks':688,'signed_fixtures':8} or
     terminal_guest.get('passed') is not True or terminal_guest.get('evidence')!='E2-real-kernel-IPC-and-provider-exit' or
     terminal_guest.get('source_sha256')!=terminal_source_sha256 or terminal_guest.get('production_sha256')!=terminal_artifact_sha256 or
     len(terminal_guest.get('source_head',''))!=40 or any(c not in '0123456789abcdef' for c in terminal_guest.get('source_head','')) or

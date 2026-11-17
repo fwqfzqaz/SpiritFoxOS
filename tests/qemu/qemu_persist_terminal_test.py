@@ -15,7 +15,8 @@ SOURCES = ('tests/qemu/qemu_persist_terminal_test.py',
            'services/console_policy.c', 'include/persistence.h', 'include/sf.h',
            'include/libsf.h', 'services/persist_metadata.c', 'services/persistence.c',
            'services/storage.c', 'kernel/core.c', 'kernel/ipc.c',
-           'tests/qemu/qemu_persist_test.py', 'tests/qemu/qemu_persist_write_reply_test.py')
+           'tests/qemu/qemu_persist_test.py', 'tests/qemu/qemu_persist_write_reply_test.py',
+           'services/persist_candidate.c', 'services/persist_candidate.h')
 PRODUCTS = (*FILES, 'build/kernel.elf', 'build/storage.img',
             'build/persistent.img', 'build/trust-policy.json')
 
@@ -36,6 +37,8 @@ def terminal(vm, mode):
     rows = re.findall(pattern, text, re.MULTILINE)
     assert len(rows) == 1, 'Missing or duplicate terminal result'
     phase, pid, ack, death, retired, observations = map(int, rows[0])
+    inspected = mode in ('healthy', 'delayed')
+    assert text.splitlines().count('PERSIST CANDIDATE INSPECT PASSED') == int(inspected)
     assert pid > 1 and observations >= (0 if mode == 'busy' else 1)
     if mode in ('healthy', 'delayed'):
         assert (phase, ack, death, retired) == (3, 1, 1, 1)
@@ -47,7 +50,7 @@ def terminal(vm, mode):
         assert (phase, ack, death, retired) == (5, 1, 0, 0)
     return {'phase': phase, 'pid': pid, 'ack_authenticated': bool(ack),
             'death_confirmed': bool(death), 'retired': bool(retired),
-            'observations': observations}
+            'observations': observations, 'candidate_inspected': inspected}
 
 
 def run():
