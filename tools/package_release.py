@@ -48,13 +48,13 @@ if result.get('persist_write_reply_host') != {'passed':True,'evidence':'E1-host'
     raise SystemExit('Run exact persistence WRITE ACK, admitted-chunk progress and retained unknown DIRTY host regressions before packaging')
 if result.get('persist_admission_fence_host') != {'passed':True,'evidence':'E1-host-only','checks':3318,'frontend_checks':243,'raw_control_refusals':43,'namespace_peer_operations':34,'non_destructive':True,'provider_lifecycle':False}:
     raise SystemExit('Run non-destructive Root admission fence/token/cancel host regressions before packaging')
-fence_source_paths = ('tests/qemu/qemu_persist_fence_test.py', 'tests/fixtures/persist_write_reply_fault.c', 'tests/qemu/qemu_persist_test.py', 'tests/qemu/qemu_persist_write_reply_test.py', 'tests/qemu/trust_sync_fixture.py', 'services/init.c', 'services/persist_client.c', 'services/storage.c', 'services/namespace_frontend.c')
+fence_source_paths = ('tests/qemu/qemu_persist_fence_test.py', 'tests/fixtures/persist_write_reply_fault.c', 'tests/qemu/qemu_persist_test.py', 'tests/qemu/qemu_persist_write_reply_test.py', 'tests/qemu/trust_sync_fixture.py', 'services/init.c', 'services/persist_client.c', 'services/storage.c', 'services/namespace_frontend.c', 'services/persist_snapshot.c', 'services/persist_snapshot.h', 'services/trust_fingerprint.c', 'services/trust_fingerprint.h', 'services/persistence.c', 'services/persist_terminal.c', 'services/persist_terminal.h', 'services/persist.c', 'include/sf.h', 'include/persist_server.h', 'services/package.c', 'services/trust.c', 'include/package.h')
 fence_source_sha256 = {p:hashlib.sha256((ROOT/p).read_bytes()).hexdigest() for p in fence_source_paths}
 fence_guest=result.get('persist_admission_fence_qemu',{})
 fence_healthy=fence_guest.get('healthy_cases',[])
 fence_unknown=fence_guest.get('unknown_cases',[])
 fence_recoveries=fence_guest.get('recoveries',[])
-fence_markers=['PERSIST FENCE DRAIN PASSED','PERSIST FENCE OWNER GUARDS PASSED','PERSIST FENCE RAM AND BUNDLE PASSED','PERSIST FENCE TOKENS PASSED','PERSIST FENCE HEALTHY PASSED']
+fence_markers=['PERSIST FENCE DRAIN PASSED','PERSIST SNAPSHOT CAPTURE PASSED','PERSIST FENCE OWNER GUARDS PASSED','PERSIST FENCE RAM AND BUNDLE PASSED','PERSIST FENCE TOKENS PASSED','PERSIST FENCE HEALTHY PASSED']
 if (fence_guest.get('passed') is not True or fence_guest.get('evidence')!='E2-actual-root-fs-persist' or
     fence_guest.get('source_sha256')!=fence_source_sha256 or
     len(fence_guest.get('source_head',''))!=40 or any(c not in '0123456789abcdef' for c in fence_guest.get('source_head','')) or
@@ -71,7 +71,7 @@ if (fence_guest.get('passed') is not True or fence_guest.get('evidence')!='E2-ac
     raise SystemExit('Run actual Root/Fs admission fence, setter/raw/type guards, retained unknown DIRTY and fresh production recovery before packaging')
 
 # STOP evidence is distinct from non-destructive fencing and from restart.
-terminal_source_paths = ('tests/qemu/qemu_persist_terminal_test.py', 'tests/fixtures/persist_terminal_fault.c', 'tests/qemu/trust_sync_fixture.py', 'services/persist_terminal.c', 'services/persist.c', 'services/persist_client.c', 'services/init.c', 'services/console_policy.c', 'include/persistence.h', 'include/sf.h', 'include/libsf.h', 'services/persist_metadata.c', 'services/persistence.c', 'services/storage.c', 'kernel/core.c', 'kernel/ipc.c', 'tests/qemu/qemu_persist_test.py', 'tests/qemu/qemu_persist_write_reply_test.py', 'services/persist_candidate.c', 'services/persist_candidate.h', 'services/persist_idle.c', 'services/persist_idle.h')
+terminal_source_paths = ('tests/qemu/qemu_persist_terminal_test.py', 'tests/fixtures/persist_terminal_fault.c', 'tests/qemu/trust_sync_fixture.py', 'services/persist_terminal.c', 'services/persist.c', 'services/persist_client.c', 'services/init.c', 'services/console_policy.c', 'include/persistence.h', 'include/sf.h', 'include/libsf.h', 'services/persist_metadata.c', 'services/persistence.c', 'services/storage.c', 'kernel/core.c', 'kernel/ipc.c', 'tests/qemu/qemu_persist_test.py', 'tests/qemu/qemu_persist_write_reply_test.py', 'services/persist_candidate.c', 'services/persist_candidate.h', 'services/persist_idle.c', 'services/persist_idle.h', 'services/persist_snapshot.c', 'services/persist_snapshot.h', 'services/trust_fingerprint.c', 'services/trust_fingerprint.h', 'services/persist_terminal.h', 'include/persist_server.h', 'services/package.c', 'services/trust.c', 'include/package.h')
 terminal_source_sha256 = {p:hashlib.sha256((ROOT/p).read_bytes()).hexdigest() for p in terminal_source_paths}
 terminal_artifact_paths = ('build/bundle.bin', 'build/payload.S', 'build/esp/EFI/BOOT/BOOTX64.EFI', 'build/kernel.elf', 'build/storage.img', 'build/persistent.img', 'build/trust-policy.json')
 terminal_artifact_sha256 = {p:hashlib.sha256((ROOT/p).read_bytes()).hexdigest() for p in terminal_artifact_paths}
@@ -89,6 +89,7 @@ def terminal_case_valid(c):
         return False
     if status.get('candidate_inspected') is not (mode in ('healthy','delayed')):return False
     if status.get('candidate_idle') is not (mode in ('healthy','delayed')):return False
+    if status.get('snapshot_captured') is not True:return False
     if tuple(status.get(k) for k in ('phase','ack_authenticated','death_confirmed','retired'))!=expected[mode]:
         return False
     return status['observations']==0 if mode=='busy' else status['observations']>=(2 if mode=='delayed' else 1)
@@ -129,6 +130,21 @@ if (result.get('persist_idle_host')!={'passed':True,'evidence':'E1-host-mocked-k
     not all(idle_guest.get(k) is True for k in ('production_artifacts_restored','base_disk_unchanged')) or
     not all(idle_guest.get(k) is False for k in ('candidate_activation','driver_grants','mount_requested','physical_hardware'))):
     raise SystemExit('Run isolated Persist candidate identity, ordinary denial, normal discard/exit and conservative unknown reply guest evidence before packaging')
+
+snapshot_source_paths = terminal_source_paths + ('tests/qemu/qemu_persist_snapshot_test.py','tests/fixtures/persist_snapshot_fault.c')
+snapshot_source_sha256 = {p:hashlib.sha256((ROOT/p).read_bytes()).hexdigest() for p in snapshot_source_paths}
+snapshot_guest = result.get('persist_snapshot_qemu',{})
+snapshot_cases = snapshot_guest.get('cases',[])
+if (result.get('persist_snapshot_host')!={'passed':True,'evidence':'E1-host-independent-canonical-vectors','parser_checks':8197,'volume_checks':87,'owner_checks':170613,'trust_checks':95} or
+    snapshot_guest.get('passed') is not True or snapshot_guest.get('evidence')!='E2-real-snapshot-reply-quarantine' or
+    snapshot_guest.get('source_sha256')!=snapshot_source_sha256 or snapshot_guest.get('production_sha256')!=terminal_artifact_sha256 or
+    len(snapshot_guest.get('source_head',''))!=40 or any(c not in '0123456789abcdef' for c in snapshot_guest.get('source_head','')) or
+    snapshot_guest.get('guest_boots')!=4 or snapshot_guest.get('user_denials')!=4 or len(snapshot_cases)!=4 or
+    {(c.get('mode'),c.get('transport')) for c in snapshot_cases}!={(m,t) for m in ('snapshot-badreply','snapshot-dropped') for t in ('legacy','modern')} or
+    not all(all(c.get(k) is True for k in ('passed','capture_failed_closed','old_provider_alive','old_stop_unchanged','no_unknown_write','disk_bytes_preserved')) for c in snapshot_cases) or
+    not all(snapshot_guest.get(k) is True for k in ('production_artifacts_restored','base_disk_unchanged')) or
+    not all(snapshot_guest.get(k) is False for k in ('candidate_activation','provider_lifecycle','mount_requested','physical_hardware'))):
+    raise SystemExit('Run actual snapshot trust-reply corruption/loss with quarantined old live owner and unchanged disk/trust/dirty state before packaging')
 
 write_reply=result.get('persist_write_reply_qemu',{})
 write_cases=write_reply.get('cases',[])
@@ -227,7 +243,7 @@ if (result.get('persist_quiescence_client_checks')!=386 or result.get('persist_q
     not quiescence.get('base_disk_unchanged') or not quiescence.get('advisory_only') or
     quiescence.get('service_stop_restart_tested') is not False):
     raise SystemExit('Run authenticated Persist quiescence client/volume/ledger and actual trial/busy QEMU regressions before packaging')
-if result.get('abi_snapshot_host_tests') != 9 or result.get('abi_snapshot_entries') != 677:
+if result.get('abi_snapshot_host_tests') != 9 or result.get('abi_snapshot_entries') != 678:
     raise SystemExit('Run compiled ABI capture, offline comparison and header-drift regressions before packaging')
 if result.get('ipc_copy_host_checks') != 10041 or result.get('ipc_stats_control_host_checks') != 6001 or result.get('ipc_copy_profile') != 'successful-user-copy-bytes-v1' or not result.get('ipc_stats_qemu') or result.get('ipc_stats_qemu_boots') != 2:
     raise SystemExit('Run actual IPC copy event/control oracles and both production stats VM transports before packaging')

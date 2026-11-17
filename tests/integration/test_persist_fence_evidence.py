@@ -7,10 +7,7 @@ import tempfile
 
 ROOT=Path(__file__).resolve().parents[2]
 (ROOT/'build').mkdir(exist_ok=True)
-paths=('tests/qemu/qemu_persist_fence_test.py','tests/fixtures/persist_write_reply_fault.c',
-       'tests/qemu/qemu_persist_test.py','tests/qemu/qemu_persist_write_reply_test.py',
-       'tests/qemu/trust_sync_fixture.py','services/init.c','services/persist_client.c',
-       'services/storage.c','services/namespace_frontend.c')
+paths=('tests/qemu/qemu_persist_fence_test.py', 'tests/fixtures/persist_write_reply_fault.c', 'tests/qemu/qemu_persist_test.py', 'tests/qemu/qemu_persist_write_reply_test.py', 'tests/qemu/trust_sync_fixture.py', 'services/init.c', 'services/persist_client.c', 'services/storage.c', 'services/namespace_frontend.c', 'services/persist_snapshot.c', 'services/persist_snapshot.h', 'services/trust_fingerprint.c', 'services/trust_fingerprint.h', 'services/persistence.c', 'services/persist_terminal.c', 'services/persist_terminal.h', 'services/persist.c', 'include/sf.h', 'include/persist_server.h', 'services/package.c', 'services/trust.c', 'include/package.h')
 runner='tests/qemu/qemu_persist_fence_test.py';gate='tools/package_release.py'
 
 # Exercise the production pure hash function and complete real release IF.
@@ -30,7 +27,7 @@ with tempfile.TemporaryDirectory(prefix='fence-binding-',dir=ROOT/'build') as te
         f=root/p;f.parent.mkdir(parents=True,exist_ok=True);f.write_text('source '+str(i),encoding='utf-8')
     efi=root/'build/esp/EFI/BOOT/BOOTX64.EFI';efi.parent.mkdir(parents=True);efi.write_bytes(b'unit-efi')
     context={'ROOT':root,'hashlib':hashlib};exec(module(hash_nodes),context)
-    hashes=context['evidence_hashes']();assert tuple(hashes)==paths and len(hashes)==9
+    hashes=context['evidence_hashes']();assert tuple(hashes)==paths and len(hashes)==len(paths)
     markers=ast.literal_eval(assigns['fence_markers'].value)
     good={'passed':True,'evidence':'E2-actual-root-fs-persist','source_head':'a'*40,'source_sha256':hashes,
           'production_efi_sha256':hashlib.sha256(efi.read_bytes()).hexdigest(),'guest_boots':4,'user_denials':4,
@@ -60,5 +57,5 @@ with tempfile.TemporaryDirectory(prefix='fence-binding-',dir=ROOT/'build') as te
     (root/'docs').mkdir();(root/'docs/notes.md').write_text('docs-only commit',encoding='utf-8')
     docs=copy.deepcopy(good);docs['source_head']='b'*40;check(docs,True)
     exec(assert_code,{**context,'source_hashes':hashes});checks+=1
-assert checks==41
+assert checks==5+4*len(paths)
 print('PERSIST FENCE EVIDENCE PASS: '+str(checks)+' actual AST checks; stale/missing inputs refused, docs-only allowed')

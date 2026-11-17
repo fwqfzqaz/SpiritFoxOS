@@ -33,7 +33,7 @@ COMMON = ['-Iinclude', '-Ivendor/monocypher', '-Ibuild', '-g0', '-ffreestanding'
 # 这是 512 KiB 暂存区能够容纳 sf-persist（事务卷缓冲）的前提。
 USER_SECTIONS = ['-ffunction-sections', '-fdata-sections']
 # CRYPTO 移除 sha256.c：SHA-256 已由 rust/sfcore 提供（同符号 sf_sha256）。
-CRYPTO = ['services/trust.c', 'services/package.c', 'vendor/monocypher/monocypher.c', 'vendor/monocypher/monocypher-ed25519.c']
+CRYPTO = ['services/trust.c', 'services/trust_fingerprint.c', 'services/package.c', 'vendor/monocypher/monocypher.c', 'vendor/monocypher/monocypher-ed25519.c']
 # Rust 组件（rust/sfcore）：纯逻辑静态库，按链接目标选择编译变体。
 # - none : x86_64-unknown-none      内核与用户镜像（freestanding）
 # - host : 当前宿主 ABI             sfcrypto 动态库与宿主测试
@@ -483,7 +483,7 @@ def main(policy_path=None):
     image = link_elf('sf-virtio-net', shared + objects('virtio-net', ['services/virtio_net.c']), 'services/user.ld')
     packages.append(('sf-virtio-net.sfmod', pack({'module_id': 'org.spiritfox.virtio.net', 'version': '0.1.0', 'category': 'driver', 'requested_caps': ['device.virtio-net.trusted'], 'resource_limits': {'memory': 131072}}, image, 1, seed)))
     # sf-persist：事务卷 + 更新状态机 + 块客户端，独立地址空间（约 296 KiB 常驻）。
-    image = link_elf('sf-persist', shared + objects('persist', ['services/persist.c', 'services/persist_terminal.c', 'services/persist_idle.c', 'services/persist_metadata.c', 'services/persistence.c', 'services/txn.c', 'services/update.c', 'services/version.c', *CRYPTO], extra=USER_SECTIONS), 'services/user.ld')
+    image = link_elf('sf-persist', shared + objects('persist', ['services/persist.c', 'services/persist_terminal.c', 'services/persist_idle.c', 'services/persist_snapshot.c', 'services/persist_metadata.c', 'services/persistence.c', 'services/txn.c', 'services/update.c', 'services/version.c', *CRYPTO], extra=USER_SECTIONS), 'services/user.ld')
     packages.append(('sf-persist.sfmod', pack({'module_id': 'org.spiritfox.persist', 'version': '0.1.0', 'category': 'service', 'requested_caps': [], 'resource_limits': {'memory': 524288}}, image, 1, seed)))
     # sf-fs：通用磁盘格式层（SFRFS1/SFRFS2 探测与解析）+ 文件读取服务。
     # 块请求由 sf-init 的 broker 转发，模块自身不持有 virtio-blk 端点。

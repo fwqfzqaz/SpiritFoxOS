@@ -49,13 +49,14 @@ def packages(data):
 
 
 @contextmanager
-def provider(source='tests/fixtures/persist_trust_fault.c',revoke_error=-10,write_reply='zero',terminal_mode=1,idle_mode=1):
+def provider(source='tests/fixtures/persist_trust_fault.c',revoke_error=-10,write_reply='zero',terminal_mode=1,idle_mode=1,snapshot_mode=1):
     assert Path.cwd().resolve()==ROOT
-    assert source in ('tests/fixtures/persist_trust_fault.c','tests/fixtures/persist_revoke_failure.c','tests/fixtures/persist_write_reply_fault.c','tests/fixtures/persist_terminal_fault.c','tests/fixtures/persist_idle_fault.c')
+    assert source in ('tests/fixtures/persist_trust_fault.c','tests/fixtures/persist_revoke_failure.c','tests/fixtures/persist_write_reply_fault.c','tests/fixtures/persist_terminal_fault.c','tests/fixtures/persist_idle_fault.c','tests/fixtures/persist_snapshot_fault.c')
     assert revoke_error in (-10,-20)
     assert write_reply in ('zero','excess')
     assert terminal_mode in (1,2,3)
     assert idle_mode in (1,2,3)
+    assert snapshot_mode in (1,2)
     other=ROOT/'.cache/block-reply-fixture-state.json'
     assert not other.exists() or not json.loads(other.read_text(encoding='utf-8'))['active'],'Do not overlap signed fixtures'
     restore();BACKUP.mkdir(parents=True,exist_ok=True)
@@ -65,8 +66,10 @@ def provider(source='tests/fixtures/persist_trust_fault.c',revoke_error=-10,writ
     write_state({'active':True,'restored':False,'files':hashes})
     try:
         shared=build.objects('trust-fault-common',['services/start.S','services/memory.c','services/libsf.c','services/arguments.c'],extra=build.USER_SECTIONS)
-        sources=[source,'services/persist_terminal.c','services/persist_idle.c','services/persist_metadata.c','services/persistence.c','services/txn.c','services/update.c','services/version.c',*build.CRYPTO]
-        if source.endswith('persist_idle_fault.c'):
+        sources=[source,'services/persist_terminal.c','services/persist_idle.c','services/persist_snapshot.c','services/persist_metadata.c','services/persistence.c','services/txn.c','services/update.c','services/version.c',*build.CRYPTO]
+        if source.endswith('persist_snapshot_fault.c'):
+            definitions=['-DSNAPSHOT_FAULT_MODE='+str(snapshot_mode)]
+        elif source.endswith('persist_idle_fault.c'):
             definitions=['-DIDLE_FAULT_MODE='+str(idle_mode)]
         elif source.endswith('persist_terminal_fault.c'):
             definitions=['-DTERM_FAULT_MODE='+str(terminal_mode)]

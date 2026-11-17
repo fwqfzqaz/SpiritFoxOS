@@ -3,6 +3,8 @@
 #include "trust.h"
 #include "txn.h"
 #include "persist_candidate.h"
+#include "persist_snapshot.h"
+#include "trust_fingerprint.h"
 /* sf-init side of the persistence split: every volume operation is a bounded
  * RPC to sf-persist.sfmod. The block driver endpoints are derived here with
  * RIGHT_DELEGATE and transferred once, so the service needs no root-only task
@@ -21,6 +23,10 @@ static struct {
  SfRuntimeTrust trust;
 } admission_fence;
 static SfPersistStopStatus terminal_stop;
+static SfPersistCaptureStatus fence_capture;
+static int capture_locked(uint64_t token){
+ return token&&fence_capture.token==token&&(fence_capture.phase==SF_PERSIST_CAPTURE_REQUEST_UNKNOWN||fence_capture.phase==SF_PERSIST_CAPTURE_FAILED);
+}
 static int terminal_locked(void){
  return admission_fence.token&&terminal_stop.token==admission_fence.token&&
         terminal_stop.phase!=SF_PERSIST_TERMINAL_ACTIVE&&terminal_stop.phase!=SF_PERSIST_TERMINAL_REJECTED;
@@ -46,7 +52,7 @@ static int pf_call(SfMessage*m){
  if(!ready())return SF_DEVICE_GONE;
  if(uncertain_commit)return SF_COMMIT_UNCERTAIN;
  unsigned opcode=m->h.opcode;
- if(terminal_locked()||(sf_persist_fenced()&&opcode!=OP_PERSIST_QUIESCENT))return SF_DRAINING;
+ if(terminal_locked()||capture_locked(admission_fence.token)||(sf_persist_fenced()&&opcode!=OP_PERSIST_QUIESCENT))return SF_DRAINING;
  int metadata=opcode==OP_PERSIST_NOTES_SIZE;
  int dirty=opcode==OP_PERSIST_MOUNT||opcode==OP_PERSIST_WRITE||opcode==OP_PERSIST_TRUNCATE||
            opcode==OP_PERSIST_INSTALL||opcode==OP_PERSIST_BEGIN||opcode==OP_PERSIST_FINISH||opcode==OP_PERSIST_REVOKE;
@@ -148,7 +154,7 @@ static int fence_bindings(void){
 static int fence_context(void){int r=fence_bindings();return r?r:provider_alive()?0:SF_DEVICE_GONE;}
 int sf_persist_fence_cancel(uint64_t token){
  if(!token||token!=admission_fence.token)return SF_STALE_HANDLE;
- if(terminal_locked())return SF_DRAINING;
+ if(terminal_locked()||capture_locked(token))return SF_DRAINING;
  int r=fence_context();if(r)return r;
  memset(&admission_fence,0,sizeof(admission_fence));return 0;
 }
@@ -222,7 +228,7 @@ int sf_persist_fence_stop(uint64_t token){
  if(!token||token!=admission_fence.token||token!=terminal_stop.token)return SF_STALE_HANDLE;
  /* The first attempt owns the terminal decision even if SEND/RECV fail.
   * A refusal can be cancelled, but is never silently retried with a new ID. */
- if(terminal_stop.request_id)return SF_DRAINING;
+ if(terminal_stop.request_id||capture_locked(token))return SF_DRAINING;
  int r=fence_context();if(r)return r;
  if(requests==UINT64_MAX)return SF_NO_SPACE;
  uint64_t now=0;r=terminal_now(&now);if(r)return r;
@@ -272,6 +278,53 @@ int sf_persist_fence_stop(uint64_t token){
   return terminal_error(terminal_stop.revoke_ep_result?terminal_stop.revoke_ep_result:terminal_stop.revoke_reply_result);
  }
  terminal_stop.retired=1;terminal_stop.phase=SF_PERSIST_TERMINAL_STOPPED_CLOSED;return 0;
+}
+int sf_persist_fence_capture_status(uint64_t token,SfPersistCaptureStatus*out){
+ if(!out)return SF_INVALID;
+ if(!token||token!=fence_capture.token)return SF_STALE_HANDLE;
+ *out=fence_capture;return 0;
+}
+static int capture_failed(int r){fence_capture.error=r;fence_capture.phase=SF_PERSIST_CAPTURE_FAILED;return r;}
+int sf_persist_fence_capture(uint64_t token){
+ if(!token||token!=admission_fence.token||token!=terminal_stop.token)return SF_STALE_HANDLE;
+ if(terminal_stop.phase!=SF_PERSIST_TERMINAL_ACTIVE||terminal_stop.request_id)return SF_DRAINING;
+ if(fence_capture.token==token)return SF_DRAINING;
+ int r=fence_context();if(r)return r;
+ if(requests==UINT64_MAX)return SF_NO_SPACE;
+ uint8_t trust_digest[32];r=sf_trust_fingerprint(&admission_fence.trust,trust_digest);if(r)return r;
+ uint64_t now=0;r=terminal_now(&now);if(r)return r;
+ memset(&fence_capture,0,sizeof(fence_capture));fence_capture.token=token;fence_capture.pid=admission_fence.pid;
+ fence_capture.request_id=++requests;fence_capture.deadline_ns=now+3000000000ull;
+ /* A lost or contradictory readonly completion is not a mutating DIRTY
+  * transaction, but its reply channel is not safe to silently reuse. */
+ fence_capture.phase=SF_PERSIST_CAPTURE_REQUEST_UNKNOWN;
+ SfMessage m;memset(&m,0,sizeof(m));m.h=(SfIpcHeader){sizeof(SfIpcHeader),1,0,OP_PERSIST_SNAPSHOT,0,
+  fence_capture.request_id,sizeof(m)-sizeof(SfIpcHeader),0,fence_capture.deadline_ns};
+ fence_capture.send_result=sf_send(admission_fence.ep,&m);
+ if(fence_capture.send_result)return capture_failed(terminal_error(fence_capture.send_result));
+ fence_capture.receive_result=sf_recv(admission_fence.reply,&m,fence_capture.deadline_ns);
+ if(fence_capture.receive_result<0)return capture_failed(terminal_error(fence_capture.receive_result));
+ if(m.h.cap_count==1)sf_cap_close(m.handle);
+ fence_capture.peer_status=m.status;
+ if(fence_capture.receive_result!=(int64_t)fence_capture.pid||m.h.size!=sizeof(SfIpcHeader)||m.h.protocol_major!=1||
+    m.h.protocol_minor||m.h.opcode!=OP_PERSIST_SNAPSHOT||m.h.flags!=fence_capture.pid||m.h.request_id!=fence_capture.request_id||
+    m.h.cap_count||m.h.payload_bytes!=sizeof(m)-sizeof(SfIpcHeader)||m.h.deadline_ns!=fence_capture.deadline_ns||
+    m.handle||m.offset||m.mode||m.status<SF_VERSION_REJECTED||m.status>0||
+    m.length!=(m.status?0u:sizeof(SfPersistSnapshot)))return capture_failed(SF_BAD_FORMAT);
+ unsigned used=m.status?0u:sizeof(SfPersistSnapshot);
+ for(unsigned i=used;i<sizeof(m.data);i++)if(m.data[i])return capture_failed(SF_BAD_FORMAT);
+ fence_capture.authenticated=1;
+ if(m.status){
+  fence_capture.error=(int)m.status;
+  r=fence_context();
+  if(r||!terminal_safe_refusal(m.status))return capture_failed(r?r:(int)m.status);
+  fence_capture.phase=SF_PERSIST_CAPTURE_REFUSED;return(int)m.status;
+ }
+ SfPersistSnapshot snapshot;memcpy(&snapshot,m.data,sizeof(snapshot));
+ if(snapshot.size!=sizeof(snapshot)||snapshot.version!=1||!snapshot.generation||snapshot.notes_bytes>SF_TXN_FILE_BYTES||
+    memcmp(snapshot.trust_sha256,trust_digest,32))return capture_failed(SF_BAD_FORMAT);
+ r=fence_context();if(r)return capture_failed(r);
+ fence_capture.snapshot=snapshot;fence_capture.phase=SF_PERSIST_CAPTURE_CAPTURED;return 0;
 }
 static int candidate_bindings(uint64_t token){
  if(!token||token!=admission_fence.token||token!=terminal_stop.token)return SF_STALE_HANDLE;

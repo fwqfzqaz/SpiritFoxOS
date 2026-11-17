@@ -41,6 +41,7 @@ def run():
                     vm.expect('fox> ', start, timeout=45)
                     text = vm.output[start:].decode(errors='replace').replace('\r', '')
                     assert text.endswith('fox> ') and not any(s.startswith('persist-terminal: ') for s in text.splitlines())
+                    assert text.splitlines().count('PERSIST SNAPSHOT CAPTURE PASSED') == 1
                     old = re.findall(r'^PERSIST TERMINAL TEST PASSED mode='+mode+
                                      r' phase=3 pid=(\d+) ack=1 death=1 retired=1 observations=\d+$', text, re.M)
                     rows = re.findall(r'^PERSIST CANDIDATE IDLE RESULT phase=(\d+) pid=(\d+) probe=(\d+) guard=(\d+) discard=(\d+) death=(\d+) retired=(\d+) observations=(\d+)$', text, re.M)

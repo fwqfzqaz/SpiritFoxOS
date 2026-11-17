@@ -1,6 +1,7 @@
 #ifndef SF_PERSIST_TERMINAL_H
 #define SF_PERSIST_TERMINAL_H
 #include "sf.h"
+#include "persist_snapshot.h"
 
 /* Private provider state, never a wire structure or a Root restart permit.
  * A valid STOP consumes its monotonic nonce even when quiescence says BUSY. */
@@ -14,5 +15,5 @@ int persist_terminal_dispatch(SfPersistTerminal*,int64_t,SfMessage*,uint64_t now
 int64_t persist_serve(const SfBootArgs*,int(*ordinary)(SfMessage*),
                      int64_t(*reply_send)(uint32_t,SfMessage*));
 int64_t persist_serve_with_idle(const SfBootArgs*,int(*ordinary)(SfMessage*),
-                              int64_t(*reply_send)(uint32_t,SfMessage*),int(*unbound)(void));
+                              int64_t(*reply_send)(uint32_t,SfMessage*),int(*unbound)(void),SfPersistSnapshotGet);
 #endif

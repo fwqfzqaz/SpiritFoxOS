@@ -8,16 +8,7 @@ from qemu_persist_test import VM, ROOT, generation
 from qemu_persist_write_reply_test import command, check_transport
 from trust_sync_fixture import provider, STATE, FILES
 
-SOURCES = ('tests/qemu/qemu_persist_terminal_test.py',
-           'tests/fixtures/persist_terminal_fault.c',
-           'tests/qemu/trust_sync_fixture.py', 'services/persist_terminal.c',
-           'services/persist.c', 'services/persist_client.c', 'services/init.c',
-           'services/console_policy.c', 'include/persistence.h', 'include/sf.h',
-           'include/libsf.h', 'services/persist_metadata.c', 'services/persistence.c',
-           'services/storage.c', 'kernel/core.c', 'kernel/ipc.c',
-           'tests/qemu/qemu_persist_test.py', 'tests/qemu/qemu_persist_write_reply_test.py',
-           'services/persist_candidate.c', 'services/persist_candidate.h',
-           'services/persist_idle.c', 'services/persist_idle.h')
+SOURCES = ('tests/qemu/qemu_persist_terminal_test.py', 'tests/fixtures/persist_terminal_fault.c', 'tests/qemu/trust_sync_fixture.py', 'services/persist_terminal.c', 'services/persist.c', 'services/persist_client.c', 'services/init.c', 'services/console_policy.c', 'include/persistence.h', 'include/sf.h', 'include/libsf.h', 'services/persist_metadata.c', 'services/persistence.c', 'services/storage.c', 'kernel/core.c', 'kernel/ipc.c', 'tests/qemu/qemu_persist_test.py', 'tests/qemu/qemu_persist_write_reply_test.py', 'services/persist_candidate.c', 'services/persist_candidate.h', 'services/persist_idle.c', 'services/persist_idle.h', 'services/persist_snapshot.c', 'services/persist_snapshot.h', 'services/trust_fingerprint.c', 'services/trust_fingerprint.h', 'services/persist_terminal.h', 'include/persist_server.h', 'services/package.c', 'services/trust.c', 'include/package.h')
 PRODUCTS = (*FILES, 'build/kernel.elf', 'build/storage.img',
             'build/persistent.img', 'build/trust-policy.json')
 
@@ -33,6 +24,7 @@ def terminal(vm, mode):
     text = vm.output[start:].decode(errors='replace').replace('\r', '')
     assert text.endswith('fox> '), 'Missing diagnostic prompt'
     assert not any(line.startswith('persist-terminal: ') for line in text.splitlines())
+    assert text.splitlines().count('PERSIST SNAPSHOT CAPTURE PASSED') == 1
     pattern = (r'^PERSIST TERMINAL TEST PASSED mode=' + mode +
                r' phase=(\d+) pid=(\d+) ack=(\d+) death=(\d+) retired=(\d+) observations=(\d+)$')
     rows = re.findall(pattern, text, re.MULTILINE)
@@ -52,7 +44,7 @@ def terminal(vm, mode):
         assert (phase, ack, death, retired) == (5, 1, 0, 0)
     return {'phase': phase, 'pid': pid, 'ack_authenticated': bool(ack),
             'death_confirmed': bool(death), 'retired': bool(retired),
-            'observations': observations, 'candidate_inspected': inspected, 'candidate_idle': inspected}
+            'observations': observations, 'candidate_inspected': inspected, 'candidate_idle': inspected, 'snapshot_captured': True}
 
 
 def run():

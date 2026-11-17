@@ -117,7 +117,9 @@ enum { OP_ECHO=1, OP_ECHO_DIAGNOSTIC=2, OP_OPEN=10, OP_READ, OP_WRITE, OP_CLOSE,
  /* Root-authenticated, cached check-and-exit; ACK is not confirmed death. */
  OP_PERSIST_STOP=105,
  /* Root-only unbound candidate IPC; neither operation mounts or activates. */
- OP_PERSIST_CANDIDATE_PROBE=106, OP_PERSIST_CANDIDATE_DISCARD=107 };
+ OP_PERSIST_CANDIDATE_PROBE=106, OP_PERSIST_CANDIDATE_DISCARD=107,
+ /* Cached mounted state description; no recovery, writes or activation. */
+ OP_PERSIST_SNAPSHOT=108 };
 /* 合成器输入与生命周期：sf-init 把串口按键转发给 sf-wm。
  * OP_WM_REGISTER 供 GUI 应用登记目录，data 为 id\0title\0。
  * OP_WM_POINTER 的 handle 携带 SYS_POINTER_READ 的打包指针状态。 */

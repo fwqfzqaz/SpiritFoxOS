@@ -36,7 +36,7 @@ static void stop_reply(SfMessage*m,int status,uint64_t now,int accepted){
  for(unsigned i=0;i<sizeof(m->data);i++)m->data[i]=0;
 }
 int64_t persist_serve_with_idle(const SfBootArgs*a,int(*ordinary)(SfMessage*),
-                              int64_t(*reply_send)(uint32_t,SfMessage*),int(*unbound)(void)){
+                              int64_t(*reply_send)(uint32_t,SfMessage*),int(*unbound)(void),SfPersistSnapshotGet snapshot_get){
  if(!a||!a->service||!a->manager||!ordinary||!reply_send)return SF_INVALID;
  SfPersistTerminal terminal={0};
  SfPersistIdle idle={0};int ordinary_seen=0;
@@ -56,6 +56,13 @@ int64_t persist_serve_with_idle(const SfBootArgs*a,int(*ordinary)(SfMessage*),
    continue;
   }
   if(from==1)ordinary_seen=1;
+  if(m.h.opcode==OP_PERSIST_SNAPSHOT){
+   if(m.h.cap_count==1)sf_cap_close(m.handle);
+   uint64_t ticks=sf_ticks();if(ticks>UINT64_MAX/10000000ull)return SF_TIMEOUT;
+   uint64_t now=ticks*10000000ull;SfPersistSnapshot snapshot;
+   int r=persist_snapshot_dispatch(from,&m,now,snapshot_get,&snapshot);
+   persist_snapshot_reply(&m,r,now,r?0:&snapshot);reply_send(a->manager,&m);continue;
+  }
   if(m.h.opcode==OP_PERSIST_STOP){
    /* RECV installed this handle before parsing or sender authentication. */
    if(m.h.cap_count==1)sf_cap_close(m.handle);
@@ -75,5 +82,5 @@ int64_t persist_serve_with_idle(const SfBootArgs*a,int(*ordinary)(SfMessage*),
 }
 int64_t persist_serve(const SfBootArgs*a,int(*ordinary)(SfMessage*),
                      int64_t(*reply_send)(uint32_t,SfMessage*)){
- return persist_serve_with_idle(a,ordinary,reply_send,0);
+ return persist_serve_with_idle(a,ordinary,reply_send,0,0);
 }

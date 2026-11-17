@@ -124,3 +124,30 @@ DISCARD、准确新 PID 的正常零退出，以及新端点撤销；前后均�
 包含坏 PROBE ACK、丢 DISCARD ACK、真实延迟退出、普通用户拒绝与盘/产物保持。
 这些是 E1/E2；完整宿主、完整托管与发布包仍按 PROGRESS 独立核对，不代表一般
 持久化重启、挂载、候选激活或真机/掉电目标完成。
+
+## 只读缓存快照（2026-11-17）
+
+`OP_PERSIST_SNAPSHOT=108` 只读取已挂载的内存缓存，使用私有104字节版本化
+payload（`SfPersistSnapshot`），不增加公开结构布局 ABI。payload 包含大小与版本、
+缓存 generation、`/notes/user` 字节数、16字节卷标识，以及规范化文件目录和运行时
+信任策略的 SHA-256 摘要。文件摘要使用域标记 `SFFILES-SNAP-V1\0`、小端文件数，
+再按路径排序的记录（64字节 NUL 填充路径、小端64位内容长度、该文件内容的
+SHA-256）。信任摘要使用 `SFTRUST-SNAP-V1\0`、小端策略键数和按公钥排序的记录
+（32字节公钥、小端 usage/revoked），之后是小端运行时撤销项数及排序后的32字节
+撤销 ID。编码不依赖指针、结构填充或缓存槽位顺序。
+
+Root 在同一有效围栏令牌的 ACTIVE 阶段最多发起一次只读 capture。回复必须来自被
+记录的旧 Persist PID，且完整回显 request ID、deadline 和协议字段；Root 校验长度、
+未用字节、能力数、缓存版本/边界，以及对围栏中信任快照计算的信任摘要。丢失、
+矛盾、格式错误或信任不匹配的回复将 capture 标为失败并保持旧拥有者隔离；不会重试、
+清除 DIRTY、改变信任或关闭旧 provider。只读 getter 返回缓存的历史事实，不表示
+STOPPED_CLOSED、STOP 许可或未来启动许可。旧 `OP_PERSIST_STOP=105` 接口与其判定
+保持不变；capture 既不替代也不预先满足 STOP。
+
+Init 的独立 `persist-terminal-test` 诊断记录 `PERSIST SNAPSHOT CAPTURE PASSED` 或
+`PERSIST SNAPSHOT FAILED CLOSED`，并比较快照前后的旧拥有者、事务字节和状态；该诊断
+结果不代表普通启动流程已启用重启或候选激活。
+
+本专项证据为：信任指纹95项、parser 8197项、volume 87项、owner 170613项；生产构建
+及24次 VM 批次527.45秒、全宿主184.03秒通过。完整本地回归以及新 head 的托管结果和
+发布包尚未通过或确认，因此不宣称全绿。该专项 E1/E2 结果不能替代这些待核验项。

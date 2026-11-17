@@ -11,6 +11,7 @@
 #include "arguments.h"
 #include "native_image.h"
 #include "persist_candidate.h"
+#include "persist_snapshot.h"
 #include "file_rpc.h"
 #include "lifecycle_rpc.h"
 #include "net.h"
@@ -907,6 +908,12 @@ static int persist_fence_healthy_test(void){
  FENCE_CHECK(!sf_persist_load_end(load));load=0;
  sf_log("PERSIST FENCE DRAIN PASSED\n");
  FENCE_CHECK(!sf_persist_fence_begin(&token)&&token&&sf_persist_fenced());first=token;probe=99;
+ SfPersistCaptureStatus capture,capture_again;
+ FENCE_CHECK(!sf_persist_fence_capture(token)&&!sf_persist_fence_capture_status(token,&capture)&&
+             capture.phase==SF_PERSIST_CAPTURE_CAPTURED&&capture.authenticated&&capture.snapshot.generation);
+ FENCE_CHECK(sf_persist_fence_capture(token)==SF_DRAINING&&!sf_persist_fence_capture_status(token,&capture_again)&&
+             !memcmp(&capture,&capture_again,sizeof(capture)));
+ sf_log("PERSIST SNAPSHOT CAPTURE PASSED\n");
  FENCE_CHECK(sf_persist_fence_begin(&probe)==SF_BUSY&&probe==99);
  FENCE_CHECK(sf_persist_fence_cancel(0)==SF_STALE_HANDLE&&sf_persist_fence_cancel(token==1?2:1)==SF_STALE_HANDLE&&sf_persist_fenced());
  FENCE_CHECK(!sf_persist_quiescent());
@@ -943,6 +950,7 @@ static int persist_fence_healthy_test(void){
  sf_log("PERSIST FENCE RAM AND BUNDLE PASSED\n");
  for(unsigned i=1;i<8;i++)if(h[i]>0){FENCE_CHECK(!sf_ns_close(ns,1,(uint32_t)h[i]));h[i]=0;}
  FENCE_CHECK(!sf_ns_unlink(ns,1,(uint32_t)h[0],"persist-fence-ram"));ram_created=0;
+ FENCE_CHECK(!sf_persist_fence_capture_status(token,&capture_again)&&!memcmp(&capture,&capture_again,sizeof(capture)));
  FENCE_CHECK(!sf_persist_fence_cancel(token));token=0;
  FENCE_CHECK(!sf_persist_fence_begin(&token)&&token&&token!=first);
  FENCE_CHECK(sf_persist_fence_cancel(first)==SF_STALE_HANDLE&&sf_persist_fenced()&&!sf_persist_quiescent());first=token;
@@ -1013,7 +1021,8 @@ static int64_t persist_candidate_spawn_idle(const SfRuntimeTrust*trust,uint32_t 
 }
 static void persist_terminal_test(const char*mode){
  int idle_bad=!strcmp(mode,"idle-badprobe"),idle_drop=!strcmp(mode,"idle-dropdiscard"),idle_delay=!strcmp(mode,"idle-delayed");
- int healthy=!strcmp(mode,"healthy")||idle_bad||idle_drop||idle_delay,unknown=!strcmp(mode,"unknown"),busy=!strcmp(mode,"busy"),delayed=!strcmp(mode,"delayed");
+ int snapshot_bad=!strcmp(mode,"snapshot-badreply"),snapshot_drop=!strcmp(mode,"snapshot-dropped");
+ int healthy=!strcmp(mode,"healthy")||idle_bad||idle_drop||idle_delay||snapshot_bad||snapshot_drop,unknown=!strcmp(mode,"unknown"),busy=!strcmp(mode,"busy"),delayed=!strcmp(mode,"delayed");
  int r=SF_INVALID,ram=0,parent=0,file=0;uint64_t token=0,probe=0;
  SfPersistStopStatus before,after,again;FenceView view,end_view;SfRuntimeTrust trust=sf_trust;
  uint8_t digest[96],end[96];char text[16];
@@ -1026,10 +1035,31 @@ static void persist_terminal_test(const char*mode){
  TERMINAL_CHECK(before.phase==SF_PERSIST_TERMINAL_ACTIVE&&before.pid&&before.ep&&before.reply);
  TERMINAL_CHECK(sf_persist_fence_stop(0)==SF_STALE_HANDLE&&sf_persist_fence_stop(token==1?2:1)==SF_STALE_HANDLE);
  TERMINAL_CHECK(sf_persist_fence_begin(&probe)==SF_BUSY&&!probe);
+ SfPersistCaptureStatus capture,capture_again;
+ int capture_result=sf_persist_fence_capture(token);
+ if(snapshot_bad||snapshot_drop){
+  TERMINAL_CHECK(capture_result==(snapshot_bad?SF_BAD_FORMAT:SF_TIMEOUT)&&!sf_persist_fence_capture_status(token,&capture)&&
+                 capture.phase==SF_PERSIST_CAPTURE_FAILED&&capture.error==capture_result&&!capture.snapshot.size);
+  TERMINAL_CHECK(sf_persist_fence_capture(token)==SF_DRAINING&&sf_persist_fence_stop(token)==SF_DRAINING&&
+                 sf_persist_fence_cancel(token)==SF_DRAINING&&sf_persist_quiescent()==SF_DRAINING);
+  TERMINAL_CHECK(!sf_persist_fence_stop_status(token,&after)&&!memcmp(&before,&after,sizeof(before))&&
+                 sf_sys(SYS_TASK_STATUS,after.pid,0,0)==SF_TASK_RUNNING&&sf_persist_fenced()&&
+                 !sf_persist_uncertain()&&!sf_persist_security_error()&&!memcmp(&trust,&sf_trust,sizeof(trust)));
+  TERMINAL_CHECK(!sf_persist_fence_capture_status(token,&capture_again)&&!memcmp(&capture,&capture_again,sizeof(capture))&&
+                 !fence_view(&end_view)&&!memcmp(&view,&end_view,sizeof(view))&&
+                 !transaction_fingerprint(end)&&!memcmp(digest,end,sizeof(digest)));
+  sf_log("PERSIST SNAPSHOT FAILED CLOSED\n");goto terminal_ram_checks;
+ }
+ TERMINAL_CHECK(!capture_result&&!sf_persist_fence_capture_status(token,&capture)&&
+                capture.phase==SF_PERSIST_CAPTURE_CAPTURED&&capture.authenticated&&capture.snapshot.generation);
+ TERMINAL_CHECK(sf_persist_fence_capture(token)==SF_DRAINING&&!sf_persist_fence_capture_status(token,&capture_again)&&
+                !memcmp(&capture,&capture_again,sizeof(capture)));
+ sf_log("PERSIST SNAPSHOT CAPTURE PASSED\n");
  int result=sf_persist_fence_stop(token);
  TERMINAL_CHECK(!sf_persist_fence_stop_status(token,&after));
  TERMINAL_CHECK(after.token==token&&after.pid==before.pid&&after.ep==before.ep&&after.reply==before.reply&&after.request_id&&after.deadline_ns);
  TERMINAL_CHECK(!memcmp(&trust,&sf_trust,sizeof(trust))&&!sf_persist_uncertain()&&!sf_persist_security_error());
+ TERMINAL_CHECK(!sf_persist_fence_capture_status(token,&capture_again)&&!memcmp(&capture,&capture_again,sizeof(capture)));
  TERMINAL_CHECK(!fence_view(&end_view)&&!memcmp(&view,&end_view,sizeof(view))&&!sf_storage_quiescent());
  if(healthy||delayed){
   TERMINAL_CHECK(!result&&after.phase==SF_PERSIST_TERMINAL_STOPPED_CLOSED&&after.ack_authenticated&&after.ack_mode==1&&!after.ack_status&&after.death_confirmed&&after.retired&&!after.task_status);
@@ -1064,6 +1094,7 @@ static void persist_terminal_test(const char*mode){
    sf_log("PERSIST CANDIDATE IDLE PASSED\n");
   }
   TERMINAL_CHECK(sf_persist_candidate_cycle(token,persist_candidate_spawn_idle,0)<0);
+  TERMINAL_CHECK(!sf_persist_fence_capture_status(token,&capture_again)&&!memcmp(&capture,&capture_again,sizeof(capture)));
   TERMINAL_CHECK(!sf_persist_fence_stop_status(token,&again)&&!memcmp(&after,&again,sizeof(after))&&sf_persist_fenced());
   sf_log("PERSIST CANDIDATE IDLE RESULT phase=");sf_number(idle.phase);sf_log(" pid=");sf_number(idle.pid);
   sf_log(" probe=");sf_number(idle.probe_accepted);sf_log(" guard=");sf_number(idle.guard_denied);
@@ -1085,6 +1116,7 @@ static void persist_terminal_test(const char*mode){
  }
  /* Only RAM operations follow terminal acceptance; no missing recovery path is
   * hidden by reopening a mount or clearing the global fence/trust context. */
+terminal_ram_checks:
  parent=sf_ns_open(ns,1,"/","/tmp",OPEN_READ|OPEN_WRITE|OPEN_DIRECTORY);TERMINAL_CHECK(parent>0);
  TERMINAL_CHECK(!sf_ns_create(ns,"/tmp/persist-terminal-ram",NODE_FILE,0));ram=1;
  file=sf_ns_openat(ns,1,(uint32_t)parent,"persist-terminal-ram",OPEN_READ|OPEN_WRITE);TERMINAL_CHECK(file>0);
