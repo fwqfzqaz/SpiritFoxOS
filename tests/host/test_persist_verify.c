@@ -281,4 +281,3 @@ int main(void){
  printf("PERSIST VERIFY PASS %u checks across %u cases; E1 protocol/transport callback mock only\n",checks,cases);
  return 0;
 }
-
