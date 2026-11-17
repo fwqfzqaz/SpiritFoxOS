@@ -176,6 +176,12 @@ Linux 如需完整 VM 验证，改用 `python3 tools/test.py`；只有完整测�
 
 ## Persist 终止证据的原始产物
 
+ABI 回归完成后，结果报告中的 `abi_snapshot_entries` 必须从实际编译生成的
+`build/abi-current.json` 读取，不能沿用旧轮次的固定计数。PR #32 的 9c6b281
+完整测试通过后，报告仍写成 675，而发布门要求当前 677 项，导致打包失败。
+报告改读真实捕获值；发布门的精确计数、参考与捕获摘要校验继续保留。新增 ABI
+时仍须审阅基线保留和常量新增，并同步发布门及独立 ABI 回归的预期值。
+
 Windows CI 的结果包须保留 `build/bundle.bin`、`build/payload.S` 和
 `build/kernel.elf`，以及原有 EFI、磁盘、测试报告和发布 ZIP。终止证据门会核对
 这三个文件的实际摘要；只有报告中的摘要不能替代原始字节。上传时逐项列出文件，
