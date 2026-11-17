@@ -20,6 +20,7 @@ static inline long sf_ep_create(void){return sf_sys(SYS_EP_CREATE,0,0,0);}
 static inline long sf_cap_close(uint64_t h){return sf_sys(SYS_CAP_CLOSE,h,0,0);}
 static inline long sf_cap_derive(uint64_t h,uint64_t rights){return sf_sys(SYS_CAP_DERIVE,h,rights,0);}
 static inline long sf_cap_revoke(uint64_t h){return sf_sys(SYS_CAP_REVOKE,h,0,0);}
+static inline long sf_cap_revoke_branch(uint64_t h){return sf_sys(SYS_CAP_REVOKE_BRANCH,h,0,0);}
 /* 附带能力发送：cap_count=1 时 m->handle 被内核解释为要转移的能力句柄。
  * 接收方在 RECV 时得到同权的新句柄，也可改用 sf_send 保持 cap_count=0。 */
 static inline long sf_send_cap(uint32_t h,SfMessage*m,uint64_t cap){m->h.cap_count=1;m->handle=cap;return sf_sys(SYS_SEND,h,(uint64_t)m,0);}

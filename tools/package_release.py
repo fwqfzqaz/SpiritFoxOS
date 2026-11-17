@@ -221,6 +221,28 @@ if (revoke_host!={'passed':True,'evidence':'E1-real-kernel-mocked-user-copy','ch
     not all(revoke_guest.get(k)is False for k in ('driver_authority_handoff','physical_hardware'))):
     raise SystemExit('Run real queued/closed-parent capability revocation with preserved sibling/owner references and 1/2-CPU legacy/modern guest evidence before packaging')
 
+branch_source_paths = ('kernel/ipc.c', 'kernel/core.c', 'kernel/kernel.h', 'include/sf.h', 'include/libsf.h', 'services/init.c', 'services/console_policy.c', 'services/branch_probe.c', 'tools/build.py', 'tests/qemu/qemu_ipc_branch_test.py', 'tests/qemu/qemu_persist_test.py', 'tests/qemu/qemu_persist_write_reply_test.py', 'tests/host/test_ipc.c', 'tests/host/test_ipc_branch.c', 'tools/abi_snapshot.c', 'abi/x86_64-current.json')
+branch_source_sha256 = {p:hashlib.sha256((ROOT/p).read_bytes()).hexdigest() for p in branch_source_paths}
+branch_guest = result.get('ipc_branch_qemu',{})
+branch_host = result.get('ipc_branch_host',{})
+branch_cases = branch_guest.get('cases',[])
+def branch_case_valid(c):
+    return (c.get('passed') is True and type(c.get('cpus'))is int and c['cpus'] in (1,2) and
+            type(c.get('app_checks'))is int and c['app_checks']==16 and
+            all(c.get(k)is True for k in ('alice_denied','root_caps_preserved','ordinary_service_retained','disk_bytes_preserved','owner_parent_sibling_preserved','installed_and_queued_revoked','legacy_endpoint_revoke_preserved')))
+if (branch_host!={'passed':True,'evidence':'E1-real-kernel-branch-revoke-mocked-user-copy','checks':9101} or
+    branch_host.get('passed') is not True or type(branch_host.get('checks'))is not int or
+    type(branch_guest.get('abi_entries'))is not int or branch_guest['abi_entries']!=680 or
+    branch_guest.get('passed') is not True or branch_guest.get('evidence')!='E2-real-owner-branch-revocation' or
+    branch_guest.get('source_sha256')!=branch_source_sha256 or branch_guest.get('production_sha256')!=terminal_artifact_sha256 or
+    len(branch_guest.get('source_head',''))!=40 or any(c not in '0123456789abcdef'for c in branch_guest.get('source_head','')) or
+    type(branch_guest.get('guest_boots'))is not int or branch_guest['guest_boots']!=4 or len(branch_cases)!=4 or
+    {(c.get('transport'),c.get('cpus'))for c in branch_cases}!={(t,n)for t in ('legacy','modern')for n in (1,2)} or
+    not all(branch_case_valid(c)for c in branch_cases) or
+    not all(branch_guest.get(k)is True for k in ('production_artifacts_preserved','base_disk_unchanged')) or
+    not all(branch_guest.get(k)is False for k in ('driver_authority_handoff','physical_hardware'))):
+    raise SystemExit('Run explicit owner branch revocation with preserved parent/sibling references and legacy endpoint-revoke compatibility and 1/2-CPU legacy/modern guest evidence before packaging')
+
 write_reply=result.get('persist_write_reply_qemu',{})
 write_cases=write_reply.get('cases',[])
 if (write_reply.get('passed') is not True or write_reply.get('evidence')!='E2-signed-provider' or
@@ -318,7 +340,7 @@ if (result.get('persist_quiescence_client_checks')!=386 or result.get('persist_q
     not quiescence.get('base_disk_unchanged') or not quiescence.get('advisory_only') or
     quiescence.get('service_stop_restart_tested') is not False):
     raise SystemExit('Run authenticated Persist quiescence client/volume/ledger and actual trial/busy QEMU regressions before packaging')
-if result.get('abi_snapshot_host_tests') != 9 or result.get('abi_snapshot_entries') != 679:
+if result.get('abi_snapshot_host_tests') != 9 or result.get('abi_snapshot_entries') != 680:
     raise SystemExit('Run compiled ABI capture, offline comparison and header-drift regressions before packaging')
 if result.get('ipc_copy_host_checks') != 10041 or result.get('ipc_stats_control_host_checks') != 6001 or result.get('ipc_copy_profile') != 'successful-user-copy-bytes-v1' or not result.get('ipc_stats_qemu') or result.get('ipc_stats_qemu_boots') != 2:
     raise SystemExit('Run actual IPC copy event/control oracles and both production stats VM transports before packaging')

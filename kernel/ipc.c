@@ -134,6 +134,11 @@ long ipc_syscall(uint64_t call,uint64_t a,uint64_t b,uint64_t c){
   if(endpoints[ep].owner==t->pid){invalidate(ep);return 0;}
   revoke_cap(t,(unsigned)(a&255)-1);return 0;
  }
+ if(call==SYS_CAP_REVOKE_BRANCH){
+  Cap*x=cap(t,a,RIGHT_DELEGATE);if(!x)return SF_DENIED;
+  if(b||c)return SF_INVALID;
+  revoke_cap(t,(unsigned)(a&255)-1);return 0;
+ }
  if(call==SYS_SEND_CANCEL){
   Cap*x=cap(t,a,RIGHT_SEND);if(!x)return SF_STALE_HANDLE;if(c)return SF_INVALID;
   Endpoint*e=&endpoints[x->endpoint-1];if(e->head>=8||e->count>8)return SF_BAD_FORMAT;

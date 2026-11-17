@@ -84,6 +84,9 @@ enum { SYS_EXIT, SYS_YIELD, SYS_LOG, SYS_TICKS, SYS_EP_CREATE,
 /* 每线程 FS 基址与 futex 等待/唤醒；op&~128 只接受 0=WAIT、1=WAKE。 */
 #define SYS_SET_FSBASE 43
 #define SYS_FUTEX 44
+/* Revoke only this handle's delegation branch, even for an endpoint owner.
+ * The original SYS_CAP_REVOKE keeps its owner-wide endpoint semantics. */
+#define SYS_CAP_REVOKE_BRANCH 45
 #define SF_FUTEX_WAIT 0u
 #define SF_FUTEX_WAKE 1u
 #define SF_FUTEX_PRIVATE 128u
