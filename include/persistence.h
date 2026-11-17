@@ -52,6 +52,12 @@ int sf_persist_fence_stop(uint64_t token);
 /* Pure snapshot: never observes a process, retries IPC, or changes ownership.
  * The original tuple remains reportable after a legitimate refusal/cancel. */
 int sf_persist_fence_stop_status(uint64_t token,SfPersistStopStatus*out);
+/* Root-private inspection only. The trusted probe may prepare an image in
+ * caller scratch, but never creates a process/capability or opens admission.
+ * A returned description is not a later execution/activation permit. */
+struct SfPersistCandidateImage;
+typedef int (*SfPersistCandidateProbe)(const SfRuntimeTrust*,struct SfPersistCandidateImage*,void*);
+int sf_persist_fence_inspect(uint64_t,SfPersistCandidateProbe,void*,struct SfPersistCandidateImage*);
 /* The actual Root loader holds this scope through verification and spawn. */
 int sf_persist_load_begin(uint64_t*token);
 int sf_persist_load_end(uint64_t token);

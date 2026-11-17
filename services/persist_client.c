@@ -2,6 +2,7 @@
 #include "persistence.h"
 #include "trust.h"
 #include "txn.h"
+#include "persist_candidate.h"
 /* sf-init side of the persistence split: every volume operation is a bounded
  * RPC to sf-persist.sfmod. The block driver endpoints are derived here with
  * RIGHT_DELEGATE and transferred once, so the service needs no root-only task
@@ -128,9 +129,8 @@ int sf_persist_quiescent(void){
  r=sf_storage_quiescent();if(r)return r;
  SfMessage m;sf_message(&m,OP_PERSIST_QUIESCENT,0);return pf_call(&m);
 }
-static int fence_bindings(void){
+static int fence_storage_context(void){
  int r=sf_persist_security_error();if(r)return r;
- if(!ready()||persist_pid!=admission_fence.pid||persist_ep!=admission_fence.ep||persist_reply!=admission_fence.reply)return SF_DEVICE_GONE;
  r=sf_storage_quiescent();if(r)return r;
  uint32_t ep=0,reply=0,pid=0;uint64_t bytes=0;int writable=0;
  if(sf_storage_driver(&ep,&reply,&pid,&bytes,&writable)||!writable)return SF_DEVICE_GONE;
@@ -139,6 +139,11 @@ static int fence_bindings(void){
     bytes!=admission_fence.capacity||writable!=admission_fence.writable)return SF_STALE_HANDLE;
  if(memcmp(&sf_trust,&admission_fence.trust,sizeof(sf_trust)))return SF_STALE_HANDLE;
  return 0;
+}
+static int fence_bindings(void){
+ int r=sf_persist_security_error();if(r)return r;
+ if(!ready()||persist_pid!=admission_fence.pid||persist_ep!=admission_fence.ep||persist_reply!=admission_fence.reply)return SF_DEVICE_GONE;
+ return fence_storage_context();
 }
 static int fence_context(void){int r=fence_bindings();return r?r:provider_alive()?0:SF_DEVICE_GONE;}
 int sf_persist_fence_cancel(uint64_t token){
@@ -267,6 +272,38 @@ int sf_persist_fence_stop(uint64_t token){
   return terminal_error(terminal_stop.revoke_ep_result?terminal_stop.revoke_ep_result:terminal_stop.revoke_reply_result);
  }
  terminal_stop.retired=1;terminal_stop.phase=SF_PERSIST_TERMINAL_STOPPED_CLOSED;return 0;
+}
+static int candidate_context(uint64_t token){
+ if(!token||token!=admission_fence.token||token!=terminal_stop.token)return SF_STALE_HANDLE;
+ if(terminal_stop.phase!=SF_PERSIST_TERMINAL_STOPPED_CLOSED)return SF_DRAINING;
+ if(terminal_stop.ack_authenticated!=1||terminal_stop.ack_mode!=1||terminal_stop.ack_status||
+    terminal_stop.death_confirmed!=1||terminal_stop.task_status||terminal_stop.retired!=1||
+    terminal_stop.revoke_ep_result||terminal_stop.revoke_reply_result||persist_ep||persist_reply||
+    persist_pid!=terminal_stop.pid||terminal_stop.pid!=admission_fence.pid||
+    terminal_stop.ep!=admission_fence.ep||terminal_stop.reply!=admission_fence.reply||
+    terminal_stop.storage_instance!=admission_fence.storage_instance||terminal_stop.capacity!=admission_fence.capacity||
+    terminal_stop.fs_pid!=admission_fence.fs_pid||terminal_stop.driver_pid!=admission_fence.driver_pid||
+    terminal_stop.driver_ep!=admission_fence.driver_ep||terminal_stop.driver_reply!=admission_fence.driver_reply||
+    terminal_stop.writable!=admission_fence.writable||
+    memcmp(&terminal_stop.trust,&admission_fence.trust,sizeof(sf_trust)))return SF_STALE_HANDLE;
+ int r=fence_storage_context();if(r)return r;
+ /* A copied status record is not ownership. Re-observe the exact old PID;
+  * no truncated sentinel, missing process or abnormal status is accepted. */
+ return sf_sys(SYS_TASK_STATUS,terminal_stop.pid,0,0)==0?0:SF_DEVICE_GONE;
+}
+int sf_persist_fence_inspect(uint64_t token,SfPersistCandidateProbe probe,void*context,SfPersistCandidateImage*out){
+ if(!out)return SF_INVALID;
+ memset(out,0,sizeof(*out));if(!probe)return SF_INVALID;
+ int r=candidate_context(token);if(r)return r;
+ SfPersistCandidateImage staged;memset(&staged,0,sizeof(staged));
+ r=probe(&terminal_stop.trust,&staged,context);if(r)return r<0?r:SF_BAD_FORMAT;
+ SfArguments empty;memset(&empty,0,sizeof(empty));
+ if(!staged.bytes||staged.bytes>SF_PACKAGE_MAX||staged.plan.size!=sizeof(staged.plan)||!staged.plan.count||staged.plan.count>8||
+    staged.plan.image_base!=SF_BASE||staged.plan.grant_manager||staged.plan.grant_service||
+    staged.plan.service_rights||staged.plan.grant_device||staged.plan.device_rights||staged.plan.grant_bundle||
+    memcmp(&staged.plan.arguments,&empty,sizeof(empty)))return SF_BAD_FORMAT;
+ r=candidate_context(token);if(r)return r;
+ *out=staged;return 0;
 }
 void sf_persist_driver_down(void){
  if(!ready())return;SfMessage m;sf_message(&m,OP_PERSIST_DRIVER_DOWN,0);pf_call(&m);

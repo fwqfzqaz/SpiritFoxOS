@@ -50,6 +50,9 @@ with tempfile.TemporaryDirectory(prefix='terminal-evidence-', dir=ROOT / 'build'
     products = {p: hashlib.sha256((fake_root / p).read_bytes()).hexdigest() for p in artifact_paths}
     host = {'passed': True, 'evidence': 'E1-host-only', 'server_checks': 550,
             'owner_checks': 642533, 'owner_cases': 187}
+    candidate_host = {'passed': True, 'evidence': 'E1-host-real-signatures',
+                      'owner_checks': 216690, 'owner_cases': 67,
+                      'image_checks': 688, 'signed_fixtures': 8}
 
     def case(mode, transport):
         values = {'healthy': (3, True, True, True, 1),
@@ -59,7 +62,7 @@ with tempfile.TemporaryDirectory(prefix='terminal-evidence-', dir=ROOT / 'build'
         phase, ack, death, retired, observations = values
         return {'mode': mode, 'transport': transport, 'passed': True,
                 'disk_bytes_preserved': True, 'busy_is_injected_cache_result': mode == 'busy',
-                'status': {'pid': 21, 'phase': phase, 'observations': observations,
+                'status': {'pid': 21, 'phase': phase, 'observations': observations, 'candidate_inspected': mode in ('healthy','delayed'),
                            'ack_authenticated': ack, 'death_confirmed': death, 'retired': retired}}
 
     good = {'passed': True, 'evidence': 'E2-real-kernel-IPC-and-provider-exit',
@@ -70,10 +73,11 @@ with tempfile.TemporaryDirectory(prefix='terminal-evidence-', dir=ROOT / 'build'
             'cases': [case(mode, transport) for mode in ('healthy', 'unknown', 'delayed', 'busy')
                       for transport in ('legacy', 'modern')]}
 
-    def check(value, accept):
+    def check(value, accept, candidate=candidate_host):
         global checks
         namespace = {'ROOT': fake_root, 'hashlib': hashlib, 'result': {
-            'persist_terminal_host': host, 'persist_terminal_qemu': value}}
+            'persist_terminal_host': host, 'persist_terminal_qemu': value,
+            'persist_candidate_host': candidate}}
         try:
             exec(gate_code, namespace)
         except SystemExit:
@@ -95,6 +99,10 @@ with tempfile.TemporaryDirectory(prefix='terminal-evidence-', dir=ROOT / 'build'
         lambda c: c[0]['status'].__setitem__('phase', 4),
         lambda c: c[4]['status'].__setitem__('observations', 1),
         lambda c: c[6].__setitem__('busy_is_injected_cache_result', False),
+        lambda c: c[0]['status'].__setitem__('candidate_inspected', False),
+        lambda c: c[2]['status'].__setitem__('candidate_inspected', True),
+        lambda c: c[0]['status'].__setitem__('candidate_inspected', 1),
+        lambda c: c[0]['status'].pop('candidate_inspected'),
     )
     for mutate in mutations:
         bad = copy.deepcopy(good); mutate(bad['cases']); check(bad, False)
@@ -110,7 +118,8 @@ with tempfile.TemporaryDirectory(prefix='terminal-evidence-', dir=ROOT / 'build'
         bad = copy.deepcopy(good); bad['cases'][0]['status'][field] = True; check(bad, False)
     bad_host = dict(host, owner_checks=642532)
     namespace = {'ROOT': fake_root, 'hashlib': hashlib, 'result': {
-        'persist_terminal_host': bad_host, 'persist_terminal_qemu': good}}
+        'persist_terminal_host': bad_host, 'persist_terminal_qemu': good,
+        'persist_candidate_host': candidate_host}}
     try:
         exec(gate_code, namespace)
     except SystemExit:
@@ -118,10 +127,14 @@ with tempfile.TemporaryDirectory(prefix='terminal-evidence-', dir=ROOT / 'build'
     else:
         raise AssertionError('Bad host evidence was accepted')
 
+    check(good, False, candidate=None)
+    check(good, False, candidate=dict(candidate_host, image_checks=687))
+    check(good, False, candidate=dict(candidate_host, signed_fixtures=7))
+
     target = fake_root / source_paths[0]
     original = target.read_bytes(); target.write_bytes(original + b' changed'); check(good, False); target.write_bytes(original)
     target = fake_root / artifact_paths[0]
     original = target.read_bytes(); target.write_bytes(original + b' changed'); check(good, False); target.write_bytes(original)
 
-assert checks == 20
+assert checks == 27
 print('PERSIST TERMINAL EVIDENCE PASS: ' + str(checks) + ' actual release-gate checks')

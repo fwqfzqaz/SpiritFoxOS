@@ -10,6 +10,7 @@
 #include "trust.h"
 #include "arguments.h"
 #include "native_image.h"
+#include "persist_candidate.h"
 #include "file_rpc.h"
 #include "lifecycle_rpc.h"
 #include "net.h"
@@ -989,6 +990,17 @@ static void persist_fence_test(const char*mode){
 }
 /* Destructive diagnostic for a disposable test VM only: it never restarts a
  * stopped provider, activates a candidate, or force-releases its owner. */
+static int persist_candidate_probe(const SfRuntimeTrust*trust,SfPersistCandidateImage*out,void*context){
+ (void)context;
+ const uint8_t*data=0;uint64_t bytes=0;
+ int r=sf_bundle_find((const void*)boot->bundle,boot->bundle_bytes,"sf-persist.sfmod",&data,&bytes);
+ if(r)return r;
+ /* The previous boot loads already own this scratch. Inspection neither
+  * grows it nor calls the ordinary fenced package/spawn entry points. */
+ if(!img_stage||!img_stage_bytes)return SF_NO_SPACE;
+ size_t cap=img_stage_bytes>SF_IMAGE_MAX?SF_IMAGE_MAX:(size_t)img_stage_bytes;
+ return sf_persist_candidate_prepare(trust,data,bytes,(void*)img_stage,cap,out);
+}
 static void persist_terminal_test(const char*mode){
  int healthy=!strcmp(mode,"healthy"),unknown=!strcmp(mode,"unknown"),busy=!strcmp(mode,"busy"),delayed=!strcmp(mode,"delayed");
  int r=SF_INVALID,ram=0,parent=0,file=0;uint64_t token=0,probe=0;
@@ -1013,6 +1025,13 @@ static void persist_terminal_test(const char*mode){
   if(delayed)TERMINAL_CHECK(after.observations>1);
   SfMessage stale;sf_message(&stale,OP_PERSIST_QUIESCENT,1);
   TERMINAL_CHECK(sf_send(after.ep,&stale)<0&&sf_recv(after.reply,&stale,sf_deadline(1))<0);
+  SfPersistCandidateImage candidate,repeated;long caps=sf_task_cap_usage(1);
+  TERMINAL_CHECK(caps>=0&&sf_persist_fence_inspect(0,persist_candidate_probe,0,&candidate)==SF_STALE_HANDLE);
+  TERMINAL_CHECK(!sf_persist_fence_inspect(token,persist_candidate_probe,0,&candidate));
+  TERMINAL_CHECK(!sf_persist_fence_inspect(token,persist_candidate_probe,0,&repeated)&&
+                 !memcmp(&candidate,&repeated,sizeof(candidate))&&sf_task_cap_usage(1)==caps);
+  TERMINAL_CHECK(!sf_persist_fence_stop_status(token,&again)&&!memcmp(&after,&again,sizeof(after))&&sf_persist_fenced());
+  sf_log("PERSIST CANDIDATE INSPECT PASSED\n");
  }else if(busy){
   TERMINAL_CHECK(result==SF_BUSY&&after.phase==SF_PERSIST_TERMINAL_REJECTED&&after.ack_authenticated&&after.ack_status==SF_BUSY&&!after.ack_mode&&!after.retired&&!after.death_confirmed);
   TERMINAL_CHECK(!sf_persist_fence_cancel(token));token=0;
