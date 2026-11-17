@@ -24,6 +24,8 @@ int main(void){
  const char *ordinary[]={"run hello.sfk","runat /home/alice app.sfk","runenv X=1 -- hello.sfk","ls /home/alice","cat /home/alice/x","write /home/alice/x hi","stat /tmp","rm /tmp/x","mkdir /tmp/x","rmdir /tmp/x","echo","ifconfig","ping 10.0.2.2","udp 10.0.2.2 1 hi","tcp 10.0.2.2 1 hi","open 10.0.2.2 1","send 1 hi","recv 1","close 1","conns","","shutdownx","persistx","installx x","start nativex"};
  const char*fence_admin[]={"persist-fence-test","persist-fence-test healthy","persist-fence-test unknown","persist-fence-test invalid"};
  for(unsigned i=0;i<sizeof(fence_admin)/sizeof(*fence_admin);i++)CHECK(!sf_console_authorize(p,fence_admin[i]));
+ const char*terminal_admin[]={"persist-terminal-test","persist-terminal-test healthy","persist-terminal-test unknown","persist-terminal-test busy","persist-terminal-test delayed","persist-terminal-test invalid"};
+ for(unsigned i=0;i<sizeof(terminal_admin)/sizeof(*terminal_admin);i++)CHECK(!sf_console_authorize(p,terminal_admin[i]));
  for(unsigned i=0;i<sizeof(admin)/sizeof(*admin);i++)CHECK(!sf_console_authorize(p,admin[i]));
  CHECK(!sf_console_authorize(p,"file-peer-test"));
  CHECK(!sf_console_authorize(p,"persist-quiescent")&&!sf_console_authorize(p,"persist-quiescence-test"));
@@ -33,6 +35,8 @@ int main(void){
   * rejected command must not switch the active session or mutate its table. */
  SfSessionTable before=*sf_console_sessions(p);
  for(unsigned i=0;i<sizeof(fence_admin)/sizeof(*fence_admin);i++)CHECK(sf_console_authorize(p,fence_admin[i])==SF_DENIED);
+ for(unsigned i=0;i<sizeof(terminal_admin)/sizeof(*terminal_admin);i++)CHECK(sf_console_authorize(p,terminal_admin[i])==SF_DENIED);
+ CHECK(!sf_console_authorize(p,"persist-terminal-testx")&&!sf_console_authorize(p,"persist-terminal-testx healthy"));
  CHECK(!sf_console_authorize(p,"persist-fence-testx")&&!sf_console_authorize(p,"persist-fence-testx healthy"));
  for(unsigned i=0;i<sizeof(admin)/sizeof(*admin);i++)CHECK(sf_console_authorize(p,admin[i])==SF_DENIED);
  CHECK(sf_console_authorize(p,"file-peer-test")==SF_DENIED);

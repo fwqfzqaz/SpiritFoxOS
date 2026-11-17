@@ -2,6 +2,7 @@
 #define SF_PERSISTENCE_H
 #include "storage.h"
 #include "namespace.h"
+#include "package.h"
 /* sf-init 侧客户端：持久化卷与更新状态机运行在 sf-persist.sfmod，
  * 本头文件只暴露有界 RPC 与命名空间投影。 */
 int sf_persist_start(SfModuleSpawn spawn);
@@ -28,6 +29,29 @@ int sf_persist_quiescent(void);
 int sf_persist_fence_begin(uint64_t*token);
 int sf_persist_fence_cancel(uint64_t token);
 int sf_persist_fenced(void);
+/* Root-private terminal ownership, not a wire ABI or a candidate/start permit.
+ * stop sends once. Only authenticated acceptance, exact normal old-PID death,
+ * unchanged ownership and successful endpoint retirement return zero. All
+ * accepted/unknown outcomes keep admission closed and prohibit old cancel.
+ * A fully authenticated refusal permits cancel only while the old context is
+ * still healthy. No kill, retry, trust reset or DIRTY release is performed. */
+enum { SF_PERSIST_TERMINAL_ACTIVE, SF_PERSIST_TERMINAL_REQUEST_UNKNOWN,
+ SF_PERSIST_TERMINAL_ACCEPTED_WAIT, SF_PERSIST_TERMINAL_STOPPED_CLOSED,
+ SF_PERSIST_TERMINAL_FAILED, SF_PERSIST_TERMINAL_REJECTED };
+typedef struct {
+ uint64_t token,request_id,deadline_ns,storage_instance,capacity;
+ uint32_t pid,ep,reply,fs_pid,driver_pid,driver_ep,driver_reply;
+ unsigned phase,observations;
+ uint32_t ack_mode;
+ int writable,ack_authenticated,death_confirmed,retired;
+ int request_error,observation_error;
+ int64_t send_result,receive_result,ack_status,task_status,revoke_ep_result,revoke_reply_result;
+ SfRuntimeTrust trust;
+} SfPersistStopStatus;
+int sf_persist_fence_stop(uint64_t token);
+/* Pure snapshot: never observes a process, retries IPC, or changes ownership.
+ * The original tuple remains reportable after a legitimate refusal/cancel. */
+int sf_persist_fence_stop_status(uint64_t token,SfPersistStopStatus*out);
 /* The actual Root loader holds this scope through verification and spawn. */
 int sf_persist_load_begin(uint64_t*token);
 int sf_persist_load_end(uint64_t token);

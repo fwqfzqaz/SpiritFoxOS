@@ -49,11 +49,12 @@ def packages(data):
 
 
 @contextmanager
-def provider(source='tests/fixtures/persist_trust_fault.c',revoke_error=-10,write_reply='zero'):
+def provider(source='tests/fixtures/persist_trust_fault.c',revoke_error=-10,write_reply='zero',terminal_mode=1):
     assert Path.cwd().resolve()==ROOT
-    assert source in ('tests/fixtures/persist_trust_fault.c','tests/fixtures/persist_revoke_failure.c','tests/fixtures/persist_write_reply_fault.c')
+    assert source in ('tests/fixtures/persist_trust_fault.c','tests/fixtures/persist_revoke_failure.c','tests/fixtures/persist_write_reply_fault.c','tests/fixtures/persist_terminal_fault.c')
     assert revoke_error in (-10,-20)
     assert write_reply in ('zero','excess')
+    assert terminal_mode in (1,2,3)
     other=ROOT/'.cache/block-reply-fixture-state.json'
     assert not other.exists() or not json.loads(other.read_text(encoding='utf-8'))['active'],'Do not overlap signed fixtures'
     restore();BACKUP.mkdir(parents=True,exist_ok=True)
@@ -64,7 +65,9 @@ def provider(source='tests/fixtures/persist_trust_fault.c',revoke_error=-10,writ
     try:
         shared=build.objects('trust-fault-common',['services/start.S','services/memory.c','services/libsf.c','services/arguments.c'],extra=build.USER_SECTIONS)
         sources=[source,'services/persist_terminal.c','services/persist_metadata.c','services/persistence.c','services/txn.c','services/update.c','services/version.c',*build.CRYPTO]
-        if source.endswith('persist_write_reply_fault.c'):
+        if source.endswith('persist_terminal_fault.c'):
+            definitions=['-DTERM_FAULT_MODE='+str(terminal_mode)]
+        elif source.endswith('persist_write_reply_fault.c'):
             definitions=['-DSF_WRITE_REPLY_EXCESS='+str(int(write_reply=='excess'))]
         else:
             definitions=[] if source.endswith('persist_trust_fault.c') else ['-DSF_REVOKE_FAILURE_STATUS='+str(revoke_error)]
