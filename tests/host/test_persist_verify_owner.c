@@ -18,6 +18,7 @@ static unsigned bad_stage,bad_field,callback_mutate,callback_mutate_kind;
 static int64_t spawn_result,send_error,recv_error,recv_from,clock_fault,read_error;
 static unsigned clock_fault_at,clock_calls,candidate_dead_at,old_not_found_after_spawn;
 static unsigned fail_send_opcode,fail_send_at,fail_recv_opcode,fail_recv_at;
+static unsigned verify_discard_bad_field;
 static uint64_t verify_lba_start;
 static SfMessage verify_last_sent;
 static SfPersistSnapshot synthetic_capture;
@@ -139,7 +140,7 @@ static int idle_owner_recv_hook(uint32_t ep,SfMessage*m,uint64_t deadline,int64_
  unsigned op=verify_last_sent.h.opcode;
  if(op==OP_PERSIST_CANDIDATE_PROBE){make_ack(m,0);*out=recv_from?recv_from:13;return 1;}
  if(op==OP_PERSIST_NOTES_SIZE){make_ack(m,SF_DRAINING);*out=recv_from?recv_from:13;return 1;}
- if(op==OP_PERSIST_CANDIDATE_DISCARD){make_ack(m,0);*out=recv_from?recv_from:13;return 1;}
+ if(op==OP_PERSIST_CANDIDATE_DISCARD){make_ack(m,0);if(verify_discard_bad_field)apply_bad(m,verify_discard_bad_field,1);*out=recv_from?recv_from:13;return 1;}
  OWNER_CHECK(op==OP_PERSIST_CANDIDATE_VERIFY);
  if(verify_last_sent.mode==0&&verify_last_sent.length==sizeof(SfPersistSnapshot)){
   frame_index=0;make_read_frame(m,frame_index++);*out=bad_stage==1&&bad_field==BAD_FROM?(1ll<<32)+13:recv_from?recv_from:13;return 1;
@@ -176,6 +177,7 @@ static uint64_t start_owner(unsigned frames){
  bad_stage=bad_field=callback_mutate=callback_mutate_kind=0;
  spawn_result=13;send_error=recv_error=recv_from=clock_fault=read_error=0;clock_fault_at=clock_calls=0;
  candidate_dead_at=old_not_found_after_spawn=0;fail_send_opcode=fail_send_at=fail_recv_opcode=fail_recv_at=0;
+ verify_discard_bad_field=0;
  verify_lba_start=SF_TXN_HEADER;memset(&verify_last_sent,0,sizeof(verify_last_sent));
  capture_before=fence_capture;stop_before=report(token);
  old_send_count=sends;old_recv_count=receives;old_revoke_count=revokes;
@@ -308,7 +310,10 @@ static void callback_and_transport_failures(void){
  CHECK(!verify_report(token).verified&&!verify_revoke_calls);verify_no_retry(token);cases++;
 }
 
-int main(void){
+#ifndef SF_VERIFY_OWNER_ENTRY
+#define SF_VERIFY_OWNER_ENTRY main
+#endif
+int SF_VERIFY_OWNER_ENTRY(void){
  success_case(259,0);success_case(515,1);preconditions();frame_mutations();
  final_mutations_and_counts();callback_and_transport_failures();
  printf("PERSIST VERIFY OWNER PASS %u checks across %u cases; mocked kernel/transport and synthetic captured snapshot\n",checks,cases);

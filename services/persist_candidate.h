@@ -24,7 +24,7 @@ int sf_persist_candidate_prepare(const SfRuntimeTrust *trust,const void *data,
  * snapshots convey neither volume readiness nor activation authority. */
 enum { SF_PERSIST_IDLE_NONE, SF_PERSIST_IDLE_ALLOCATING, SF_PERSIST_IDLE_SPAWNING,
  SF_PERSIST_IDLE_PROBING, SF_PERSIST_IDLE_DISCARDING, SF_PERSIST_IDLE_EXIT_WAIT,
- SF_PERSIST_IDLE_CLOSED, SF_PERSIST_IDLE_FAILED, SF_PERSIST_IDLE_VERIFYING };
+ SF_PERSIST_IDLE_CLOSED, SF_PERSIST_IDLE_FAILED, SF_PERSIST_IDLE_VERIFYING, SF_PERSIST_IDLE_PREPARED };
 typedef struct {
  uint64_t token,probe_id,guard_id,discard_id,deadline_ns;
  uint32_t pid,ep,reply;
@@ -43,5 +43,9 @@ int sf_persist_candidate_cycle(uint64_t token,SfPersistIdleSpawn,void*);
 /* Root brokers only transaction-sector reads; success is still isolated and
  * followed by ordinary denial/discard, never service publication. */
 int sf_persist_candidate_verify_cycle(uint64_t token,SfPersistIdleSpawn,void*,SfTxnRead,void*);
+/* Retain an isolated, verified live owner until an explicit later discard.
+ * These private calls do not publish a service or permit activation. */
+int sf_persist_candidate_hold(uint64_t token,SfPersistIdleSpawn,void*,SfTxnRead,void*);
+int sf_persist_candidate_discard(uint64_t token);
 int sf_persist_candidate_status(uint64_t token,SfPersistIdleStatus*);
 #endif

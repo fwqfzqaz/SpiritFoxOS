@@ -456,7 +456,40 @@ static int idle_verify_volume(uint64_t token,SfTxnRead read,void*context){
  }
  return SF_BAD_FORMAT;
 }
-static int candidate_cycle(uint64_t token,SfPersistIdleSpawn spawn,void*context,SfTxnRead read,void*read_context){
+static int candidate_discard_current(uint64_t token,int fresh){
+ int r=idle_context(token);
+ /* No discard request or nonce has been admitted yet. A known live busy
+  * ledger may settle normally; do not turn it into an unknown delivery or
+  * release its resource. Identity/trust/death drift still quarantines. */
+ if(fresh&&r==SF_BUSY)return r;
+ if(r)return idle_failed(r);
+ uint64_t now=0;
+ if(fresh){
+  if(sf_sys(SYS_TASK_STATUS,idle_candidate.pid,0,0)!=SF_TASK_RUNNING)return idle_failed(SF_DEVICE_GONE);
+  if(requests==UINT64_MAX)return SF_NO_SPACE;
+  r=terminal_now(&now);if(r)return idle_failed(r);
+  idle_candidate.discard_id=++requests;idle_candidate.deadline_ns=now+3000000000ull;
+ }
+ idle_candidate.phase=SF_PERSIST_IDLE_DISCARDING;
+ r=idle_exchange(OP_PERSIST_CANDIDATE_DISCARD,idle_candidate.discard_id,0,&idle_candidate.discard_send,&idle_candidate.discard_receive);
+ if(r)return idle_failed(r);idle_candidate.discard_accepted=1;
+ idle_candidate.phase=SF_PERSIST_IDLE_EXIT_WAIT;
+ for(unsigned i=0;i<512;i++){
+  idle_candidate.observations++;
+  idle_candidate.task_status=sf_sys(SYS_TASK_STATUS,idle_candidate.pid,0,0);
+  if(!idle_candidate.task_status){idle_candidate.death_confirmed=1;break;}
+  if(idle_candidate.task_status!=SF_TASK_RUNNING)return idle_failed(SF_DEVICE_GONE);
+  r=terminal_now(&now);if(r)return idle_failed(r);
+  if(now>=idle_candidate.deadline_ns)return idle_failed(SF_TIMEOUT);
+  sf_sys(SYS_YIELD,0,0,0);
+ }
+ if(!idle_candidate.death_confirmed)return idle_failed(SF_TIMEOUT);
+ r=idle_context(token);if(r)return idle_failed(r);
+ r=idle_retire();if(r)return idle_failed(r);
+ r=idle_context(token);if(r)return idle_failed(r);
+ idle_candidate.phase=SF_PERSIST_IDLE_CLOSED;return 0;
+}
+static int candidate_cycle(uint64_t token,SfPersistIdleSpawn spawn,void*context,SfTxnRead read,void*read_context,int hold){
  if(!spawn)return SF_INVALID;
  int r=candidate_context(token);if(r)return r;
  if(read&&(fence_capture.token!=token||fence_capture.phase!=SF_PERSIST_CAPTURE_CAPTURED||
@@ -494,32 +527,30 @@ static int candidate_cycle(uint64_t token,SfPersistIdleSpawn spawn,void*context,
  }
  r=idle_exchange(OP_PERSIST_NOTES_SIZE,idle_candidate.guard_id,SF_DRAINING,&idle_candidate.guard_send,&idle_candidate.guard_receive);
  if(r)return idle_failed(r);idle_candidate.guard_denied=1;
- r=idle_context(token);if(r)return idle_failed(r);
- idle_candidate.phase=SF_PERSIST_IDLE_DISCARDING;
- r=idle_exchange(OP_PERSIST_CANDIDATE_DISCARD,idle_candidate.discard_id,0,&idle_candidate.discard_send,&idle_candidate.discard_receive);
- if(r)return idle_failed(r);idle_candidate.discard_accepted=1;
- idle_candidate.phase=SF_PERSIST_IDLE_EXIT_WAIT;
- for(unsigned i=0;i<512;i++){
-  idle_candidate.observations++;
-  idle_candidate.task_status=sf_sys(SYS_TASK_STATUS,idle_candidate.pid,0,0);
-  if(!idle_candidate.task_status){idle_candidate.death_confirmed=1;break;}
-  if(idle_candidate.task_status!=SF_TASK_RUNNING)return idle_failed(SF_DEVICE_GONE);
-  r=terminal_now(&now);if(r)return idle_failed(r);
-  if(now>=idle_candidate.deadline_ns)return idle_failed(SF_TIMEOUT);
-  sf_sys(SYS_YIELD,0,0,0);
+ if(hold){
+  r=idle_context(token);if(r)return idle_failed(r);
+  if(sf_sys(SYS_TASK_STATUS,idle_candidate.pid,0,0)!=SF_TASK_RUNNING)return idle_failed(SF_DEVICE_GONE);
+  idle_candidate.phase=SF_PERSIST_IDLE_PREPARED;return 0;
  }
- if(!idle_candidate.death_confirmed)return idle_failed(SF_TIMEOUT);
- r=idle_context(token);if(r)return idle_failed(r);
- r=idle_retire();if(r)return idle_failed(r);
- r=idle_context(token);if(r)return idle_failed(r);
- idle_candidate.phase=SF_PERSIST_IDLE_CLOSED;return 0;
+ return candidate_discard_current(token,0);
 }
 int sf_persist_candidate_cycle(uint64_t token,SfPersistIdleSpawn spawn,void*context){
- return candidate_cycle(token,spawn,context,0,0);
+ return candidate_cycle(token,spawn,context,0,0,0);
 }
 int sf_persist_candidate_verify_cycle(uint64_t token,SfPersistIdleSpawn spawn,void*context,SfTxnRead read,void*read_context){
  if(!read)return SF_INVALID;
- return candidate_cycle(token,spawn,context,read,read_context);
+ return candidate_cycle(token,spawn,context,read,read_context,0);
+}
+int sf_persist_candidate_hold(uint64_t token,SfPersistIdleSpawn spawn,void*context,SfTxnRead read,void*read_context){
+ if(!read)return SF_INVALID;
+ return candidate_cycle(token,spawn,context,read,read_context,1);
+}
+int sf_persist_candidate_discard(uint64_t token){
+ if(!token||token!=admission_fence.token||token!=idle_candidate.token||token!=terminal_stop.token)return SF_STALE_HANDLE;
+ if(idle_candidate.phase!=SF_PERSIST_IDLE_PREPARED||!idle_candidate.verified||!idle_candidate.guard_denied||
+    fence_capture.token!=token||fence_capture.phase!=SF_PERSIST_CAPTURE_CAPTURED||
+    fence_capture.pid!=terminal_stop.pid||memcmp(&fence_capture.snapshot,&idle_candidate.verified_snapshot,sizeof(SfPersistSnapshot)))return SF_DRAINING;
+ return candidate_discard_current(token,1);
 }
 void sf_persist_driver_down(void){
  if(!ready())return;SfMessage m;sf_message(&m,OP_PERSIST_DRIVER_DOWN,0);pf_call(&m);
