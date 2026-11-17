@@ -20,6 +20,17 @@ int sf_persist_mount(SfNamespace*);
 int sf_persist_notes_size(uint64_t*);
 /* Point-in-time preflight only: no admission fence, drain, or stop. */
 int sf_persist_quiescent(void);
+/* Root-internal, non-destructive admission scope. No provider stop/start.
+ * A nested refusal leaves the existing owner's output untouched. Otherwise
+ * begin leaves *token nonzero only while this caller still owns a fence,
+ * including an error whose changed context prevented safe cancellation.
+ * cancel never repairs trust, an unknown write, or a changed incarnation. */
+int sf_persist_fence_begin(uint64_t*token);
+int sf_persist_fence_cancel(uint64_t token);
+int sf_persist_fenced(void);
+/* The actual Root loader holds this scope through verification and spawn. */
+int sf_persist_load_begin(uint64_t*token);
+int sf_persist_load_end(uint64_t token);
 int sf_persist_reproject(SfNamespace*);
 /* 0 stages an update; 1 means the exact confirmed package is already present. */
 int sf_persist_install(const char*);

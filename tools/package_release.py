@@ -32,7 +32,7 @@ if result.get('namespace_handle_map_host_assertions') != 502975 or result.get('n
 if result.get('namespace_rpc_host_assertions') != [5506,30,52,2638,48065] or result.get('namespace_rpc_host_groups') != 5 or not result.get('namespace_recovery_qemu') or result.get('namespace_recovery_qemu_boots') != 2 or result.get('namespace_recovery_qemu_deaths') != 6:
     raise SystemExit('Run trusted namespace transport/control, real Fs incarnation loss, dirty drain, stale app/Root and TRYING preservation regressions before packaging')
 ownership=result.get('namespace_ownership',{})
-if result.get('console_policy_host_assertions') != 667 or result.get('launch_policy_host_assertions') != 2152 or result.get('policy_compile_boundary_tests') != 7:
+if result.get('console_policy_host_assertions') != 676 or result.get('launch_policy_host_assertions') != 2152 or result.get('policy_compile_boundary_tests') != 7:
     raise SystemExit('Run manager console/launch admission and real compile-boundary regressions before packaging')
 if result.get('file_ingress_host_checks') != 20001 or result.get('file_ingress_host_groups') != 1 or result.get('file_peer_qemu') is not True or result.get('file_peer_qemu_boots') != 2 or result.get('file_peer_transferred_caps') != 384:
     raise SystemExit('Run actual manager ingress cap cleanup and live rejected-peer budget regressions before packaging')
@@ -46,6 +46,29 @@ if result.get('persist_read_reply_bounds') is not True or result.get('persist_re
     raise SystemExit('Run bounded persistence READ replies and full-width sequential guest read/EOF regressions before packaging')
 if result.get('persist_write_reply_host') != {'passed':True,'evidence':'E1-host','checks':693161,'malformed_cases':120,'known_errors':60,'unknown_cases':33,'transport_cases':8}:
     raise SystemExit('Run exact persistence WRITE ACK, admitted-chunk progress and retained unknown DIRTY host regressions before packaging')
+if result.get('persist_admission_fence_host') != {'passed':True,'evidence':'E1-host-only','checks':3318,'frontend_checks':243,'raw_control_refusals':43,'namespace_peer_operations':34,'non_destructive':True,'provider_lifecycle':False}:
+    raise SystemExit('Run non-destructive Root admission fence/token/cancel host regressions before packaging')
+fence_source_paths = ('tests/qemu/qemu_persist_fence_test.py', 'tests/fixtures/persist_write_reply_fault.c', 'tests/qemu/qemu_persist_test.py', 'tests/qemu/qemu_persist_write_reply_test.py', 'tests/qemu/trust_sync_fixture.py', 'services/init.c', 'services/persist_client.c', 'services/storage.c', 'services/namespace_frontend.c')
+fence_source_sha256 = {p:hashlib.sha256((ROOT/p).read_bytes()).hexdigest() for p in fence_source_paths}
+fence_guest=result.get('persist_admission_fence_qemu',{})
+fence_healthy=fence_guest.get('healthy_cases',[])
+fence_unknown=fence_guest.get('unknown_cases',[])
+fence_recoveries=fence_guest.get('recoveries',[])
+fence_markers=['PERSIST FENCE DRAIN PASSED','PERSIST FENCE OWNER GUARDS PASSED','PERSIST FENCE RAM AND BUNDLE PASSED','PERSIST FENCE TOKENS PASSED','PERSIST FENCE HEALTHY PASSED']
+if (fence_guest.get('passed') is not True or fence_guest.get('evidence')!='E2-actual-root-fs-persist' or
+    fence_guest.get('source_sha256')!=fence_source_sha256 or
+    len(fence_guest.get('source_head',''))!=40 or any(c not in '0123456789abcdef' for c in fence_guest.get('source_head','')) or
+    fence_guest.get('production_efi_sha256')!=hashlib.sha256((BUILD/'esp/EFI/BOOT/BOOTX64.EFI').read_bytes()).hexdigest() or
+    fence_guest.get('guest_boots')!=4 or fence_guest.get('user_denials')!=4 or
+    len(fence_healthy)!=4 or {(c.get('transport'),c.get('state')) for c in fence_healthy}!={(t,s) for t in ('legacy','modern') for s in ('STABLE','PENDING')} or
+    not all(c.get('passed') is True and c.get('all_disk_bytes_preserved') is True and c.get('markers')==fence_markers for c in fence_healthy) or
+    len(fence_unknown)!=2 or {c.get('transport') for c in fence_unknown}!={'legacy','modern'} or
+    not all(c.get('passed') is True and c.get('generation_delta')==1 and c.get('diagnostic_runs')==2 and all(c.get(k) is True for k in ('retained_real_dirty','no_post_fault_provider_rpc','all_committed_bytes_preserved')) for c in fence_unknown) or
+    len(fence_recoveries)!=2 or {c.get('transport') for c in fence_recoveries}!={'legacy','modern'} or
+    not all(c.get('passed') is True and c.get('new_healthy_fence') is True and c.get('pending_bytes_preserved') is True for c in fence_recoveries) or
+    not all(fence_guest.get(k) is True for k in ('production_artifacts_restored','base_disk_unchanged')) or
+    not all(fence_guest.get(k) is False for k in ('provider_lifecycle','physical_hardware','power_loss'))):
+    raise SystemExit('Run actual Root/Fs admission fence, setter/raw/type guards, retained unknown DIRTY and fresh production recovery before packaging')
 write_reply=result.get('persist_write_reply_qemu',{})
 write_cases=write_reply.get('cases',[])
 if (write_reply.get('passed') is not True or write_reply.get('evidence')!='E2-signed-provider' or
@@ -69,7 +92,7 @@ block_guest=result.get('block_reply_qemu',{})
 if block_host.get('passed') is not True or block_host.get('checks')!=3968 or block_host.get('clients')!=[{'owner':'persist','checks':1984},{'owner':'storage','checks':1984}] or block_guest.get('passed') is not True or block_guest.get('guest_boots')!=4 or block_guest.get('malformed_reads_rejected')!=4 or block_guest.get('explicit_recoveries')!=4 or not all(block_guest.get(k) is True for k in ('root_degraded_to_bundle','persist_required_trust_fail_closed','committed_notes_unchanged','production_artifacts_restored','base_disk_unchanged')):
     raise SystemExit('Complete authenticated block-client host/guest recovery evidence required')
 trust_sync=result.get('trust_sync_qemu',{})
-if result.get('trust_sync_host_checks')!=1003 or result.get('trust_admission_host_tests')!=1 or result.get('trust_admission_host_checks')!=76 or trust_sync.get('passed') is not True or trust_sync.get('guest_boots')!=2 or trust_sync.get('malformed_snapshots')!=4 or trust_sync.get('denied_new_authority')!=8 or trust_sync.get('valid_resyncs')!=4 or not all(trust_sync.get(k) is True for k in ('pending_and_known_commit_preserved','ordinary_standby_app','production_artifacts_restored','base_disk_unchanged')):
+if result.get('trust_sync_host_checks')!=1003 or result.get('trust_admission_host_tests')!=1 or result.get('trust_admission_host_checks')!=92 or trust_sync.get('passed') is not True or trust_sync.get('guest_boots')!=2 or trust_sync.get('malformed_snapshots')!=4 or trust_sync.get('denied_new_authority')!=8 or trust_sync.get('valid_resyncs')!=4 or not all(trust_sync.get(k) is True for k in ('pending_and_known_commit_preserved','ordinary_standby_app','production_artifacts_restored','base_disk_unchanged')):
     raise SystemExit('Run atomic runtime trust/actual Root admission and signed-provider fault/resync regressions before packaging')
 if result.get('projection_width_host_assertions') != 9130 or result.get('projection_sdk_qemu') is not True or result.get('projection_sdk_qemu_boots') != 2:
     raise SystemExit('Run projection metadata/full-width seek host and both transport SDK regressions before packaging')

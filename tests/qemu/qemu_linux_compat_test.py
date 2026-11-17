@@ -23,6 +23,7 @@ def run():
         vm.expect('LINUX SYSCALL PROBE PASSED')
         vm.expect('LINUX THREAD TLS OK')
         vm.expect('LINUX THREAD MUTEX OK')
+        vm.expect('LINUX THREAD LIMIT COUNT 31')
         vm.expect('LINUX THREAD LIMIT OK')
         vm.expect('LINUX THREAD FUTEX OK')
         vm.expect('LINUX THREAD OK')

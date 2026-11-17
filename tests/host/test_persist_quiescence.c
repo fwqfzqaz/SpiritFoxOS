@@ -30,6 +30,8 @@ static long sf_cap_close(uint64_t h){CHECK(h==0x777);closed++;return 0;}
 static long sf_cap_derive(uint64_t h,uint64_t r){(void)h;(void)r;return SF_DENIED;}
 static long sf_send_cap(uint32_t e,SfMessage*m,uint64_t c){(void)e;(void)m;(void)c;CHECK(0);return SF_DENIED;}
 int sf_storage_quiescent(void){return guard_error;}
+uint64_t sf_storage_admission_instance(void){return 0;}
+uint32_t sf_storage_namespace_pid(void){return 0;}
 int sf_storage_driver(uint32_t*a,uint32_t*b,uint32_t*c,uint64_t*d,int*e){(void)a;(void)b;(void)c;(void)d;(void)e;return SF_DEVICE_GONE;}
 uint8_t*sf_storage_scratch(void){return 0;}
 long sf_storage_load(const char*n,void*p,size_t c){(void)n;(void)p;(void)c;return SF_DEVICE_GONE;}

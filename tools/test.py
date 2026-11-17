@@ -86,6 +86,7 @@ host_test('test_txn_compat','tests/host/test_txn_compat.c','services/txn.c',no_u
 host_test('test_update','tests/host/test_update.c','services/update.c','services/txn.c',no_unused=True)
 host_test('test_persist_metadata','tests/host/test_persist_metadata.c','tests/host/persist_volume_fixture.c','services/persist_metadata.c','services/namespace.c','services/txn.c','services/update.c','services/version.c',*build.CRYPTO,no_unused=True)
 host_test('test_persist_write_reply','tests/host/test_persist_write_reply.c','services/namespace.c',*build.CRYPTO,no_unused=True)
+host_test('test_persist_fence','tests/host/test_persist_fence.c','services/manager.c','services/namespace.c','services/namespace_control.c','services/namespace_transport.c',*build.CRYPTO,no_unused=True,include_services=True)
 host_test('test_persist_quiescence','tests/host/test_persist_quiescence.c','tests/host/persist_volume_fixture.c','services/persist_metadata.c','services/namespace.c','services/txn.c','services/update.c','services/version.c',*build.CRYPTO,no_unused=True)
 host_test('test_trust_sync','tests/host/test_trust_sync.c','services/namespace.c',*build.CRYPTO,no_unused=True)
 host_test('test_version','tests/host/test_version.c','services/version.c')
@@ -118,6 +119,7 @@ subprocess.run([sys.executable,'tests/integration/test_policy_boundary.py'],chec
 subprocess.run([sys.executable,'tests/integration/test_trust_boundary.py'],check=True)
 subprocess.run([sys.executable,'tests/integration/test_block_reply.py'],check=True)
 subprocess.run([sys.executable,'tests/integration/test_persist_quiescence.py'],check=True)
+subprocess.run([sys.executable,'tests/integration/test_persist_fence_evidence.py'],check=True)
 subprocess.run([sys.executable,'tests/integration/test_file_ingress.py'],check=True)
 subprocess.run([sys.executable,'tests/integration/test_linux_blob_assembly.py'],check=True)
 abi_reference_sha256 = hashlib.sha256((ROOT/'abi/x86_64-current.json').read_bytes()).hexdigest()
@@ -161,6 +163,7 @@ if not args.host_only:
     subprocess.run([sys.executable, 'tests/qemu/qemu_block_reply_test.py'], check=True)
     subprocess.run([sys.executable, 'tests/qemu/qemu_revoke_failure_test.py'], check=True)
     subprocess.run([sys.executable, 'tests/qemu/qemu_persist_write_reply_test.py'], check=True)
+    subprocess.run([sys.executable, 'tests/qemu/qemu_persist_fence_test.py'], check=True)
     subprocess.run([sys.executable, 'tests/qemu/qemu_namespace_recovery_test.py'], check=True)
     subprocess.run([sys.executable, 'tests/qemu/qemu_hardware_test.py'], check=True)
     # USB：xHCI 初始化、HID 枚举、键盘输入、指针注入与热插拔。
@@ -222,7 +225,7 @@ result['namespace_ownership'] = json.loads((ROOT/'build/namespace-ownership.json
 result['namespace_recovery_qemu'] = not args.host_only
 result['namespace_recovery_qemu_boots'] = 0 if args.host_only else 2
 result['namespace_recovery_qemu_deaths'] = 0 if args.host_only else 6
-result['console_policy_host_assertions'] = 667
+result['console_policy_host_assertions'] = 676
 result['launch_policy_host_assertions'] = 2152
 result['policy_compile_boundary_tests'] = 7
 result['file_ingress_host_checks'] = 20001
@@ -237,6 +240,8 @@ result['persist_quiescence_guard'] = json.loads((ROOT/'build/persist-quiescence-
 result['persist_quiescence_qemu'] = {} if args.host_only else json.loads((ROOT/'build/persist-quiescence-results.json').read_text(encoding='utf-8'))
 result['persist_read_reply_bounds'] = True
 result['persist_write_reply_host'] = {'passed':True,'evidence':'E1-host','checks':693161,'malformed_cases':120,'known_errors':60,'unknown_cases':33,'transport_cases':8}
+result['persist_admission_fence_host'] = {'passed':True,'evidence':'E1-host-only','checks':3318,'frontend_checks':243,'raw_control_refusals':43,'namespace_peer_operations':34,'non_destructive':True,'provider_lifecycle':False}
+result['persist_admission_fence_qemu'] = {} if args.host_only else json.loads((ROOT/'build/persist-fence-results.json').read_text(encoding='utf-8'))
 result['persist_write_reply_qemu'] = {} if args.host_only else json.loads((ROOT/'build/persist-write-reply-results.json').read_text(encoding='utf-8'))
 result['persist_read_qemu_boots'] = 0 if args.host_only else 2
 result['persist_read_qemu_bytes'] = 0 if args.host_only else 8192
@@ -244,7 +249,7 @@ chunks = {} if args.host_only else json.loads((ROOT/'build/persist-chunk-results
 result['persist_chunk_qemu'] = chunks
 result['trust_sync_host_checks'] = 1003
 result['trust_admission_host_tests'] = 1
-result['trust_admission_host_checks'] = 76
+result['trust_admission_host_checks'] = 92
 result['trust_sync_qemu'] = {} if args.host_only else json.loads((ROOT/'build/trust-sync-results.json').read_text(encoding='utf-8'))
 result['block_reply_host'] = json.loads((ROOT/'build/block-reply-host-results.json').read_text(encoding='utf-8'))
 result['block_reply_qemu'] = {} if args.host_only else json.loads((ROOT/'build/block-reply-results.json').read_text(encoding='utf-8'))

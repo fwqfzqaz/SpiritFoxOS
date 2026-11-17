@@ -323,6 +323,7 @@ S3 证据等级为 E1（宿主 errno 表，26 项断言）+ E2（QEMU 内 7 个�
 - `SYS_COMPAT_SET` 新增第 4 参数（翻译器栈顶，经 `r10` 传入）；S2 的 stub/probe 与 S3 翻译器入口一样先 `mmap` 64 KiB 并传栈顶，`arch_prctl(ARCH_SET_FS)` 也从 S3 的 `ENOSYS` 改为成功。
 - `SYS_FUTEX` 的 WAIT 做「比较值—阻塞」的原子判定，WAKE 只唤醒同 PID、同地址的阻塞线程；超时复用 `ipc_deadlines`，`private` 位被忽略。
 - 线程上限仍为每进程 32（含主线程），第 32 个 `clone` 返回 `EAGAIN`；线程退出解映射用户栈与帧页并归还页计数。
+- 线程额度夹具预先映射 32 个独立的 16 KiB 访客测试栈，检查 31 个成功子线程及下一次 clone 的精确 EAGAIN；避免额外的第 32 次 64 KiB mmap 先耗尽共享页池而掩盖线程额度。TLS/互斥夹具与内核兼容线程栈仍使用各自原有的 64 KiB；此调整不增加 pthread 或 ABI 承诺。
 
 阶段性偏差（经评审确认）：
 

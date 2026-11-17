@@ -1,5 +1,6 @@
 #include "libsf.h"
 #include "namespace_frontend.h"
+#include "namespace_protocol.h"
 #include "package.h"
 #include "manager.h"
 #include "supervisor.h"
@@ -63,6 +64,7 @@ static int echo_request(uint32_t,uint32_t,unsigned);
 static uint64_t echo_after(uint64_t now,uint64_t delay){return delay>UINT64_MAX-now?UINT64_MAX:now+delay;}
 static long console_write(const void*p,size_t n){return sf_sys(SYS_LOG,(uint64_t)p,n,0);}
 static int package_get(const char*name,SfPackage*p,uint64_t*base,uint64_t*have){
+ if(sf_persist_fenced())return SF_DRAINING;
  int secure=sf_persist_security_error();if(secure)return secure;
  const uint8_t*d;uint64_t n;
  if(name[0]=='/'){
@@ -125,9 +127,11 @@ static int spawn_package_policy_inner(const char*name,uint32_t service,uint32_t 
  return spawned;
 }
 static int spawn_package_policy(const char*name,uint32_t service,uint32_t rights,uint32_t device,uint32_t device_rights,int directory,const SfArguments*arguments,uint32_t reply,uint16_t expected_kind){
- if(loader_depth)return SF_BUSY;loader_depth++;
+ if(loader_depth)return SF_BUSY;
+ uint64_t load;int admitted=sf_persist_load_begin(&load);if(admitted)return admitted;
+ loader_depth++;
  int r=spawn_package_policy_inner(name,service,rights,device,device_rights,directory,arguments,reply,expected_kind);
- loader_depth--;return r;
+ loader_depth--;int released=sf_persist_load_end(load);return r?r:released;
 }
 static int spawn_package_device(const char*name,uint32_t service,uint32_t rights,uint32_t device,uint32_t device_rights){return spawn_package_policy(name,service,rights,device,device_rights,0,0,0,1);}
 static int spawn_storage_package(const char*name,uint32_t service,uint32_t rights,uint32_t device,uint32_t device_rights,uint32_t reply){return spawn_package_policy(name,service,rights,device,device_rights,0,0,reply,1);}
@@ -623,6 +627,7 @@ static void identity_setup(void){
  sf_assert(sf_session_is_root(sessions),"console boot session is authenticated root");
 }
 static int namespace_recover(void){
+ if(sf_persist_fenced())return SF_DRAINING;
  if(!namespace_lost&&sf_ns_client_healthy())return SF_BUSY;
  if(loader_depth)return SF_BUSY;
  sf_ns_peer_lost();int r=sf_storage_namespace_reset();if(r)return r;
@@ -858,7 +863,132 @@ static int transaction_fingerprint(uint8_t out[96]){
   sf_sha256(out+group*32,buffer,count*512);first+=count;
  }return first==end?0:SF_INVALID;
 }
+typedef struct {uint32_t fs,ep,reply,driver;uint64_t instance,bytes;int writable;} FenceView;
+static int fence_view(FenceView*out){
+ memset(out,0,sizeof(*out));out->fs=sf_storage_namespace_pid();out->instance=sf_storage_admission_instance();
+ return sf_storage_driver(&out->ep,&out->reply,&out->driver,&out->bytes,&out->writable);
+}
+static int fence_raw_refused(unsigned op,unsigned mode){
+ SfMessage m;sf_message(&m,op,1);m.h.deadline_ns=0;m.mode=mode;
+ if(op==OP_NS_CREATE){
+  /* The existing trusted CREATE codec: owner=0, uid=0, gid=0, mode=0644,
+   * followed by one NUL-terminated path. No new wire operation is used. */
+  uint32_t fields[]={0,0,0,0644};static const char path[]="/tmp/persist-fence-forbidden";
+  memcpy(m.data,fields,sizeof(fields));memcpy(m.data+sizeof(fields),path,sizeof(path));m.length=sizeof(fields)+sizeof(path);m.offset=1;
+ }
+ SfMessage before=m;int64_t r=sf_storage_namespace_exchange(0,&m);
+ return r==SF_DRAINING&&!memcmp(&m,&before,sizeof(m))?0:SF_BAD_FORMAT;
+}
+/* Root-only, lexical owner diagnostic. It never clears an unknown write,
+ * force-releases a fence, or stops/replaces any provider. A failed context
+ * check leaves the genuine token held and reports it rather than repairing. */
+static int persist_fence_healthy_test(void){
+ if(sf_persist_fenced())return SF_BUSY;
+ if(sf_persist_security_error())return sf_persist_security_error();
+ int r=SF_BAD_FORMAT,h[8]={0},ram_created=0;uint64_t token=0,load=0,probe=0,first=0;
+ static const char ram_path[]="/tmp/persist-fence-ram";
+ FenceView before,after;SfRuntimeTrust trust=sf_trust;uint8_t digest[96],end[96];char text[96];
+#define FENCE_CHECK(c) do{if(!(c)){sf_log("persist-fence: failed line=");sf_number(__LINE__);sf_log("\n");goto done;}}while(0)
+ FENCE_CHECK(!sf_persist_quiescent()&&!fence_view(&before)&&before.instance&&before.writable&&!transaction_fingerprint(digest));
+ h[0]=sf_ns_open(ns,1,"/","/tmp",OPEN_READ|OPEN_WRITE|OPEN_DIRECTORY);FENCE_CHECK(h[0]>0);
+ const char*mounted[]={"/persist/notes","/disk/etc/readme.txt"};
+ for(unsigned i=0;i<2;i++){
+  h[1]=sf_ns_open(ns,1,"/",mounted[i],OPEN_READ);FENCE_CHECK(h[1]>0);
+  h[2]=sf_ns_dup(ns,1,(uint32_t)h[1]);FENCE_CHECK(h[2]>0);probe=99;
+  FENCE_CHECK(sf_persist_fence_begin(&probe)==SF_BUSY&&!probe&&!sf_persist_fenced());
+  FENCE_CHECK(!sf_ns_close(ns,1,(uint32_t)h[1]));h[1]=0;probe=99;
+  FENCE_CHECK(sf_persist_fence_begin(&probe)==SF_BUSY&&!probe&&!sf_persist_fenced());
+  FENCE_CHECK(!sf_ns_close(ns,1,(uint32_t)h[2]));h[2]=0;
+ }
+ FENCE_CHECK(!sf_persist_load_begin(&load)&&load);probe=99;
+ FENCE_CHECK(sf_persist_fence_begin(&probe)==SF_BUSY&&!probe);
+ FENCE_CHECK(sf_persist_load_end(0)==SF_STALE_HANDLE&&sf_persist_load_end(load==1?2:1)==SF_STALE_HANDLE);
+ FENCE_CHECK(!sf_persist_load_end(load));load=0;
+ sf_log("PERSIST FENCE DRAIN PASSED\n");
+ FENCE_CHECK(!sf_persist_fence_begin(&token)&&token&&sf_persist_fenced());first=token;probe=99;
+ FENCE_CHECK(sf_persist_fence_begin(&probe)==SF_BUSY&&probe==99);
+ FENCE_CHECK(sf_persist_fence_cancel(0)==SF_STALE_HANDLE&&sf_persist_fence_cancel(token==1?2:1)==SF_STALE_HANDLE&&sf_persist_fenced());
+ FENCE_CHECK(!sf_persist_quiescent());
+ sf_ns_mount_hooks(ns,0,0);SfNsRead old=sf_ns_external(ns,0,0,0);sf_ns_projection_backend(ns,0);
+ FENCE_CHECK(old&&sf_ns_external(ns,0,0,0)==old);sf_ns_init(ns,0);
+ const SfMountEntry denied[]={{"/tmp/persist-fence-mount",NODE_DIR,1,0,0}};
+ FENCE_CHECK(sf_ns_mount_publish(ns,denied,1,1)==SF_DRAINING&&sf_ns_unmount(ns,1)==SF_DRAINING);
+ FENCE_CHECK(sf_ns_assign(ns,ram_path,0,0,0644)==SF_DRAINING&&sf_ns_project(ns,ram_path,0)==SF_DRAINING&&sf_ns_protect(ns,ram_path)==SF_DRAINING);
+ FENCE_CHECK(!fence_raw_refused(OP_NS_BACKENDS,SF_NS_B_ALL)&&!fence_raw_refused(OP_NS_UNMOUNT,1)&&!fence_raw_refused(OP_FS_STOP,0));
+ const unsigned forbidden[]={NODE_DISK,NODE_PROJECTION,0,UINT32_MAX};
+ for(unsigned i=0;i<sizeof(forbidden)/sizeof(*forbidden);i++){
+  FENCE_CHECK(sf_ns_create_owned(ns,"/tmp/persist-fence-forbidden",forbidden[i],1,0,0,0644)==SF_DRAINING);
+  FENCE_CHECK(!fence_raw_refused(OP_NS_CREATE,forbidden[i]));
+ }
+ FENCE_CHECK(sf_ns_open(ns,1,"/","/tmp/persist-fence-forbidden",OPEN_READ)==SF_NOT_FOUND);
+ for(unsigned i=0;i<2;i++)FENCE_CHECK(sf_ns_open(ns,1,"/",mounted[i],OPEN_READ)==SF_DRAINING);
+ h[3]=sf_ns_open(ns,1,"/","/",OPEN_READ|OPEN_DIRECTORY);FENCE_CHECK(h[3]>0);
+ FENCE_CHECK(sf_ns_openat(ns,1,(uint32_t)h[3],"persist/notes",OPEN_READ)==SF_DRAINING&&sf_ns_openat(ns,1,(uint32_t)h[3],"disk/etc/readme.txt",OPEN_READ)==SF_DRAINING);
+ SfFileStat stat;FENCE_CHECK(!sf_ns_stat(ns,1,(uint32_t)h[0],&stat)&&stat.type==NODE_DIR);
+ FENCE_CHECK(sf_storage_namespace_disk_live()==SF_DRAINING);
+ FENCE_CHECK(sf_ns_client_healthy()&&sf_storage_namespace_pid()==before.fs);
+ sf_log("PERSIST FENCE OWNER GUARDS PASSED\n");
+ /* Creation must own a previously absent path; never replace user RAM data. */
+ FENCE_CHECK(!sf_ns_create(ns,ram_path,NODE_FILE,0));ram_created=1;
+ h[4]=sf_ns_openat(ns,1,(uint32_t)h[0],"persist-fence-ram",OPEN_READ|OPEN_WRITE);FENCE_CHECK(h[4]>0);
+ FENCE_CHECK(sf_ns_write(ns,1,(uint32_t)h[4],"fenced-ram",10)==10&&!sf_ns_seek(ns,1,(uint32_t)h[4],0)&&sf_ns_read(ns,1,(uint32_t)h[4],text,10)==10&&!memcmp(text,"fenced-ram",10));
+ h[6]=sf_ns_open(ns,1,"/","/proc/uptime",OPEN_READ);FENCE_CHECK(h[6]>0&&sf_ns_read(ns,1,(uint32_t)h[6],text,sizeof(text))>0);
+ FENCE_CHECK(!echo_call(echo_ep,echo_pid));long caps=sf_task_cap_usage(1);
+ FENCE_CHECK(caps>=0&&launch_app("hello.sfk")==SF_DRAINING&&sf_task_cap_usage(1)==caps);
+ probe=UINT64_MAX;FENCE_CHECK(sf_persist_notes_size(&probe)==SF_DRAINING&&probe==UINT64_MAX);
+ FENCE_CHECK(sf_storage_load("/disk/bin/diskhello.sfk",text,sizeof(text))==SF_DRAINING&&sf_storage_transaction(1)==SF_DRAINING);
+ FENCE_CHECK(sf_persist_begin()==SF_DRAINING&&sf_persist_finish(0)==SF_DRAINING);
+ FENCE_CHECK(!transaction_fingerprint(end)&&!memcmp(digest,end,sizeof(digest))&&!memcmp(&trust,&sf_trust,sizeof(trust)));
+ sf_log("PERSIST FENCE RAM AND BUNDLE PASSED\n");
+ for(unsigned i=1;i<8;i++)if(h[i]>0){FENCE_CHECK(!sf_ns_close(ns,1,(uint32_t)h[i]));h[i]=0;}
+ FENCE_CHECK(!sf_ns_unlink(ns,1,(uint32_t)h[0],"persist-fence-ram"));ram_created=0;
+ FENCE_CHECK(!sf_persist_fence_cancel(token));token=0;
+ FENCE_CHECK(!sf_persist_fence_begin(&token)&&token&&token!=first);
+ FENCE_CHECK(sf_persist_fence_cancel(first)==SF_STALE_HANDLE&&sf_persist_fenced()&&!sf_persist_quiescent());first=token;
+ FENCE_CHECK(!sf_persist_fence_cancel(token));token=0;
+ FENCE_CHECK(sf_persist_fence_cancel(first)==SF_STALE_HANDLE&&!sf_persist_fenced());
+ sf_log("PERSIST FENCE TOKENS PASSED\n");
+ for(unsigned i=0;i<2;i++){
+  h[1]=sf_ns_open(ns,1,"/",mounted[i],OPEN_READ);FENCE_CHECK(h[1]>0&&sf_ns_read(ns,1,(uint32_t)h[1],text,sizeof(text))>0);
+  FENCE_CHECK(!sf_ns_close(ns,1,(uint32_t)h[1]));h[1]=0;
+ }
+ h[6]=sf_ns_open(ns,1,"/","/proc/uptime",OPEN_READ);FENCE_CHECK(h[6]>0&&sf_ns_read(ns,1,(uint32_t)h[6],text,sizeof(text))>0);
+ FENCE_CHECK(!sf_ns_close(ns,1,(uint32_t)h[6]));h[6]=0;
+ int pid=launch_app("hello.sfk");FENCE_CHECK(pid>0&&!wait_app(pid));
+ FENCE_CHECK(!fence_view(&after)&&!memcmp(&before,&after,sizeof(before))&&sf_ns_client_healthy()&&!sf_persist_quiescent());
+ FENCE_CHECK(!transaction_fingerprint(end)&&!memcmp(digest,end,sizeof(digest))&&!memcmp(&trust,&sf_trust,sizeof(trust)));r=0;
+done:
+ for(unsigned i=1;i<8;i++)if(h[i]>0&&sf_ns_close(ns,1,(uint32_t)h[i]))r=SF_BAD_FORMAT;
+ if(h[0]>0){
+  if(ram_created&&sf_ns_unlink(ns,1,(uint32_t)h[0],"persist-fence-ram"))r=SF_BAD_FORMAT;
+  if(sf_ns_close(ns,1,(uint32_t)h[0]))r=SF_BAD_FORMAT;
+ }
+ if(load&&sf_persist_load_end(load))r=SF_BAD_FORMAT;
+ if(token){int released=sf_persist_fence_cancel(token);if(released){sf_log("persist-fence: owner retained token=");sf_number(token);sf_log("\n");r=released;}}
+#undef FENCE_CHECK
+ return r;
+}
+static int persist_fence_unknown_test(void){
+ if(!sf_persist_uncertain()||sf_persist_fenced())return SF_INVALID;
+ for(unsigned i=0;i<2;i++){
+  uint64_t token=99,notes=UINT64_MAX;
+  if(sf_persist_fence_begin(&token)!=SF_COMMIT_UNCERTAIN||token||sf_persist_fenced()||
+     sf_persist_fence_cancel(0)!=SF_STALE_HANDLE||sf_persist_fence_cancel(1)!=SF_STALE_HANDLE||
+     sf_persist_security_error()!=SF_COMMIT_UNCERTAIN||sf_persist_quiescent()!=SF_COMMIT_UNCERTAIN||
+     sf_storage_quiescent()!=SF_BUSY||sf_storage_unmount()!=SF_BUSY||
+     sf_persist_notes_size(&notes)!=SF_COMMIT_UNCERTAIN||notes!=UINT64_MAX||
+     sf_persist_begin()!=SF_COMMIT_UNCERTAIN||sf_persist_finish(0)!=SF_COMMIT_UNCERTAIN||
+     launch_app("hello.sfk")!=SF_COMMIT_UNCERTAIN||!sf_persist_uncertain()||!sf_ns_client_healthy())return SF_BAD_FORMAT;
+ }
+ return echo_call(echo_ep,echo_pid);
+}
+static void persist_fence_test(const char*mode){
+ int r=!strcmp(mode,"healthy")?persist_fence_healthy_test():!strcmp(mode,"unknown")?persist_fence_unknown_test():SF_INVALID;
+ if(r){sf_log("persist-fence: refused code=");sf_number(r<0?-(int64_t)r:r);sf_log("\n");}
+ else sf_log(!strcmp(mode,"healthy")?"PERSIST FENCE HEALTHY PASSED\n":"PERSIST FENCE UNKNOWN DIRTY PASSED\n");
+}
 static void persist_quiescence_test(void){
+ if(sf_persist_fenced()){sf_log("persist: diagnostic refused while fenced\n");return;}
  sf_assert(!sf_persist_quiescent(),"quiescence diagnostic starts with drained PENDING volume");
  uint8_t before[96],after[96];SfRuntimeTrust trust=sf_trust;
  sf_assert(!transaction_fingerprint(before),"quiescence fingerprints PENDING bytes");
@@ -876,6 +1006,7 @@ static void persist_quiescence_test(void){
  sf_log("PERSIST QUIESCENCE TEST PASSED\n");
 }
 static void namespace_recovery_test(void){
+ if(sf_persist_fenced()){sf_log("namespace: diagnostic refused while fenced\n");return;}
  sf_assert(sf_storage_writable()&&sf_ns_client_healthy(),"namespace recovery test requires mounted writable volume");
  uint32_t original=sf_storage_namespace_pid();
  sf_assert(!sf_ns_create(ns,"/tmp/ns-held",NODE_FILE,0),"recovery test creates volatile RAM file");
@@ -1121,6 +1252,8 @@ static void command(char*line){
  else if(!strcmp(line,"stat")||!memcmp(line,"stat ",5))namespace_stat_line(line+4);
  else if(!strcmp(line,"namespace-recovery-test"))namespace_recovery_test();
  else if(!strcmp(line,"persist-quiescence-test"))persist_quiescence_test();
+ else if(!strcmp(line,"persist-fence-test"))persist_fence_test("");
+ else if(!memcmp(line,"persist-fence-test ",19))persist_fence_test(line+19);
  else if(!strcmp(line,"persist-quiescent")){int r=sf_persist_quiescent();if(!r)sf_log("persist: QUIESCENT preflight only\n");else{sf_log("persist: preflight refused code=");sf_number(-r);sf_log("\n");}}
  else if(!strcmp(line,"file-peer-test"))file_peer_test();
  else if(!strcmp(line,"namespace-status"))namespace_status();

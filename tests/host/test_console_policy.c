@@ -22,6 +22,8 @@ int main(void){
  CHECK(!sf_console_identity(p,0,0,0));
  const char *admin[]={"namespace-status","namespace-crash","namespace-recover","namespace-recovery-test","persist","install /disk/bin/x.sfk","revoke-key /disk/pkg","priority 2 3","threads 2 1","page-limit 2 0","cap-limit 2 1","cpu-budget 2 0","ipc-cancel-test","ipc-stats-test","dma-test 1","disk-crash","trust","channel-test","native-capacity-test","echo-channel-test","start native","stop native","native-crash","native-hang","native-bad-reply","native-bad-op","start echo","stop echo","echo-crash","echo-hang","echo-bad-reply","echo-bad-op","mount /disk","unmount /disk","start disk","stop disk","dhcp","gui","selftest","shutdown"};
  const char *ordinary[]={"run hello.sfk","runat /home/alice app.sfk","runenv X=1 -- hello.sfk","ls /home/alice","cat /home/alice/x","write /home/alice/x hi","stat /tmp","rm /tmp/x","mkdir /tmp/x","rmdir /tmp/x","echo","ifconfig","ping 10.0.2.2","udp 10.0.2.2 1 hi","tcp 10.0.2.2 1 hi","open 10.0.2.2 1","send 1 hi","recv 1","close 1","conns","","shutdownx","persistx","installx x","start nativex"};
+ const char*fence_admin[]={"persist-fence-test","persist-fence-test healthy","persist-fence-test unknown","persist-fence-test invalid"};
+ for(unsigned i=0;i<sizeof(fence_admin)/sizeof(*fence_admin);i++)CHECK(!sf_console_authorize(p,fence_admin[i]));
  for(unsigned i=0;i<sizeof(admin)/sizeof(*admin);i++)CHECK(!sf_console_authorize(p,admin[i]));
  CHECK(!sf_console_authorize(p,"file-peer-test"));
  CHECK(!sf_console_authorize(p,"persist-quiescent")&&!sf_console_authorize(p,"persist-quiescence-test"));
@@ -30,6 +32,8 @@ int main(void){
  /* Independent command vectors check the policy before handlers run. A
   * rejected command must not switch the active session or mutate its table. */
  SfSessionTable before=*sf_console_sessions(p);
+ for(unsigned i=0;i<sizeof(fence_admin)/sizeof(*fence_admin);i++)CHECK(sf_console_authorize(p,fence_admin[i])==SF_DENIED);
+ CHECK(!sf_console_authorize(p,"persist-fence-testx")&&!sf_console_authorize(p,"persist-fence-testx healthy"));
  for(unsigned i=0;i<sizeof(admin)/sizeof(*admin);i++)CHECK(sf_console_authorize(p,admin[i])==SF_DENIED);
  CHECK(sf_console_authorize(p,"file-peer-test")==SF_DENIED);
  CHECK(sf_console_authorize(p,"persist-quiescent")==SF_DENIED&&sf_console_authorize(p,"persist-quiescence-test")==SF_DENIED);

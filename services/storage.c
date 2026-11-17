@@ -53,6 +53,7 @@ int sf_storage_driver(uint32_t*ep,uint32_t*reply,uint32_t*pid,uint64_t*bytes,int
 }
 static int writable,write_grant;
 static int call(SfMessage*m){
+ if(sf_persist_fenced()&&m->h.opcode!=OP_BLOCK_READ&&m->h.opcode!=OP_BLOCK_INFO)return SF_DRAINING;
  if(!driver_pid||sf_sys(SYS_TASK_STATUS,driver_pid,0,0)!=SF_TASK_RUNNING)return SF_DEVICE_GONE;
  if(sequence==UINT64_MAX)return SF_NO_SPACE;
  m->h.request_id=++sequence;SfBlockRequest request=sf_block_request(m);
@@ -92,6 +93,23 @@ static int transport_pump(void*c,unsigned ms){(void)c;return sf_storage_broker(m
 static void transport_close(void*c,uint64_t cap){(void)c;sf_cap_close(cap);}
 int64_t sf_storage_namespace_exchange(void*context,SfMessage*m){
  (void)context;
+ if(!m)return SF_INVALID;
+ if(sf_persist_fenced()){
+  /* Only ordinary namespace/file traffic may cross the held fence. Deny
+   * backend/lifecycle/configuration and disk-control frames even when a Root
+   * caller bypasses the frontend, before changing transport state or IPC. */
+  switch(m->h.opcode){
+  case OP_NS_CREATE:
+   if(m->mode!=NODE_FILE&&m->mode!=NODE_DIR&&m->mode!=NODE_PIPE&&m->mode!=NODE_CONSOLE)return SF_DRAINING;
+   break;
+  case OP_NS_MOUNT_CHECK:case OP_NS_OPEN:case OP_NS_OPENAT:
+  case OP_NS_UNLINK:case OP_NS_RMDIR:case OP_NS_STAT:case OP_NS_DUP:case OP_NS_CLOSE:
+  case OP_NS_READ:case OP_NS_PREAD:case OP_NS_WRITE:case OP_NS_TRUNCATE:case OP_NS_SEEK:
+  case OP_NS_POLL:case OP_NS_ENUMERATE:case OP_NS_ENUMERATE_AT:case OP_NS_HANDOFF:case OP_NS_REAP:
+   break;
+  default:return SF_DRAINING;
+  }
+ }
  fs_transport.ops=(SfNsTransportOps){transport_send,transport_receive,transport_ticks,transport_alive,transport_pump,transport_close};
  fs_transport.service=fs_service_ep;fs_transport.reply=fs_service_reply;fs_transport.peer=fs_pid;
  return sf_nst_exchange(&fs_transport,m);
@@ -122,6 +140,7 @@ static int fs_endpoints(void){
  return 0;
 }
 static int fs_shutdown(void){
+ if(sf_persist_fenced())return SF_DRAINING;
  if(fs_pid){
   if(sf_sys(SYS_TASK_STATUS,fs_pid,0,0)==SF_TASK_RUNNING)sf_sys(SYS_KILL,fs_pid,SF_DEVICE_GONE,0);
   uint64_t start=sf_ticks();
@@ -135,6 +154,7 @@ static int fs_shutdown(void){
  return 0;
 }
 static int fs_attach(void){
+ if(sf_persist_fenced())return SF_DRAINING;
  int cap=(int)sf_cap_derive(fs_broker_ep,RIGHT_SEND|RIGHT_DELEGATE);if(cap<0)return cap;
  SfMessage m;sf_message(&m,OP_FS_ATTACH_SEND,0);m.offset=capacity;
  int r=fs_send_cap(&m,(uint32_t)cap);sf_cap_close(cap);if(r)return r;
@@ -143,6 +163,7 @@ static int fs_attach(void){
  r=fs_send_cap(&m,(uint32_t)cap);sf_cap_close(cap);return r;
 }
 static int fs_start(void){
+ if(sf_persist_fenced())return SF_DRAINING;
  if(fs_pid)return sf_sys(SYS_TASK_STATUS,fs_pid,0,0)==SF_TASK_RUNNING?0:SF_RESTART_REQUIRED;
  if(!manager||!spawn)return SF_INVALID;
  if(fs_slot<0){fs_slot=sfmod_add(manager,"org.spiritfox.fs.disk",0,0);if(fs_slot<0)return fs_slot;}
@@ -158,8 +179,9 @@ fail:
 }
 int sf_storage_namespace_start(void){int r=fs_start();return r?r:(int)fs_pid;}
 uint32_t sf_storage_namespace_pid(void){return fs_pid;}
-int sf_storage_namespace_disk_live(void){return mounted&&driver_pid&&sf_sys(SYS_TASK_STATUS,driver_pid,0,0)==SF_TASK_RUNNING?0:SF_DEVICE_GONE;}
+int sf_storage_namespace_disk_live(void){if(sf_persist_fenced())return SF_DRAINING;return mounted&&driver_pid&&sf_sys(SYS_TASK_STATUS,driver_pid,0,0)==SF_TASK_RUNNING?0:SF_DEVICE_GONE;}
 int sf_storage_namespace_reset(void){
+ if(sf_persist_fenced())return SF_DRAINING;
  if(fs_transport.inflight||fs_slot<0)return SF_BUSY;
  SfModule*book=&manager->modules[fs_slot];
  if(book->resources[RES_DIRTY]||book->resources[RES_OPEN]!=namespace_descriptions)return SF_BUSY;
@@ -175,6 +197,7 @@ int sf_storage_namespace_reset(void){
  return 0;
 }
 int sf_storage_namespace_crash(void){
+ if(sf_persist_fenced())return SF_DRAINING;
  if(!fs_pid)return SF_NOT_FOUND;
  int r=sf_sys(SYS_KILL,fs_pid,SF_DEVICE_GONE,0);if(r)return r;
  sf_ns_peer_lost();return 0;
@@ -182,6 +205,7 @@ int sf_storage_namespace_crash(void){
 int sf_storage_sector_read(void*c,uint64_t lba,uint8_t out[512]){return sector(c,lba,out);}
 int sf_storage_writable(void){return writable&&mounted&&driver_pid&&sf_sys(SYS_TASK_STATUS,driver_pid,0,0)==SF_TASK_RUNNING;}
 int sf_storage_sector_write(void*c,uint64_t lba,const uint8_t data[512]){
+ if(sf_persist_fenced())return SF_DRAINING;
  if(!sf_storage_writable())return SF_READ_ONLY;
  if(lba>=capacity/512)return SF_INVALID;
  for(unsigned half=0;half<512;half+=256){SfMessage m;sf_message(&m,OP_BLOCK_WRITE,0);m.offset=lba*512;m.mode=half;m.length=256;memcpy(m.data,data+half,256);int r=call(&m);if(r)return r;}return 0;
@@ -192,6 +216,7 @@ int sf_storage_transaction(int begin){
  /* A failed write can kill the driver after admission. Release its ledger
   * entry even when no further storage operation is allowed. */
  if(!begin)return fs_slot>=0?sfmod_release(manager,fs_slot,RES_DIRTY):SF_STALE_HANDLE;
+ if(sf_persist_fenced())return SF_DRAINING;
  if(!sf_storage_writable())return SF_READ_ONLY;
  return sfmod_acquire(manager,fs_slot,RES_DIRTY);
 }
@@ -204,8 +229,17 @@ int sf_storage_quiescent(void){
  for(unsigned i=0;i<RES_COUNT;i++)if(book->resources[i])return SF_BUSY;
  return 0;
 }
+uint64_t sf_storage_admission_instance(void){
+ if(!manager||fs_slot<0||driver_slot<0||!mounted||!mount_admission||!mount_driver_lease||
+    !sf_ns_client_healthy())return 0;
+ const SfModule*f=&manager->modules[fs_slot],*d=&manager->modules[driver_slot];
+ if(!f->generation||!d->generation||f->state!=MOD_ACTIVE||d->state!=MOD_ACTIVE||
+    !d->resources[RES_LEASE])return 0;
+ return((uint64_t)f->generation<<32)|d->generation;
+}
 static int mount_open(unsigned tag){
  if(tag!=1||fs_slot<0)return SF_STALE_HANDLE;
+ if(sf_persist_fenced())return SF_DRAINING;
  if(!mounted||!mount_admission)return SF_DRAINING;
  if(namespace_descriptions==UINT32_MAX)return SF_NO_SPACE;
  int r=sfmod_acquire(manager,fs_slot,RES_OPEN);if(!r)namespace_descriptions++;return r;
@@ -215,6 +249,7 @@ static void mount_close(unsigned tag){
  namespace_descriptions--;
 }
 static long external_read(unsigned index,uint64_t offset,void*out,size_t bytes){
+ if(sf_persist_fenced())return SF_DRAINING;
  if(!mounted||!fs_pid||sf_sys(SYS_TASK_STATUS,driver_pid,0,0)!=SF_TASK_RUNNING)return SF_DEVICE_GONE;
  if(!bytes)return 0;
  long total=0;uint8_t*dst=out;
@@ -229,9 +264,10 @@ static long external_read(unsigned index,uint64_t offset,void*out,size_t bytes){
  }
  return total;
 }
-void sf_storage_init(SfManager*m,SfNamespace*n,SfModuleSpawn callback){manager=m;ns=n;spawn=callback;build_candidates();}
-void sf_storage_namespace_bind(SfNamespace*n){sf_ns_external(n,external_read,0,0);sf_ns_mount_hooks(n,mount_open,mount_close);}
+void sf_storage_init(SfManager*m,SfNamespace*n,SfModuleSpawn callback){if(sf_persist_fenced())return;manager=m;ns=n;spawn=callback;build_candidates();}
+void sf_storage_namespace_bind(SfNamespace*n){if(sf_persist_fenced())return;sf_ns_external(n,external_read,0,0);sf_ns_mount_hooks(n,mount_open,mount_close);}
 static int mount_disk_view(void){
+ if(sf_persist_fenced())return SF_DRAINING;
  int r=fs_start();if(r)return r;r=fs_attach();if(r)return r;
  if(write_grant){
   uint8_t header[512],hash[32];r=sector(0,SF_TXN_HEADER,header);if(r)return r;sf_sha256(hash,header,480);
@@ -242,11 +278,13 @@ static int mount_disk_view(void){
  fs_format_id=(int)m.mode;return 0;
 }
 int sf_storage_namespace_restore(void){
+ if(sf_persist_fenced())return SF_DRAINING;
  if(!mounted)return 0;
  int r=mount_disk_view();if(r)return r;
  mount_admission=1;return 0;
 }
 static int start_candidate(unsigned index,unsigned rights){
+ if(sf_persist_fenced())return SF_DRAINING;
  if(driver_pid&&sf_sys(SYS_TASK_STATUS,driver_pid,0,0)==SF_TASK_RUNNING)return SF_BUSY;
  if(index>=candidate_count)return SF_NOT_FOUND;
  int kind=candidate_kind[index];uint32_t device=candidate_bdf[index];
@@ -264,6 +302,7 @@ fail:
  sfmod_prepare(manager,driver_slot);sfmod_stop(manager,driver_slot);return r;
 }
 int sf_storage_start(void){
+ if(sf_persist_fenced())return SF_DRAINING;
  if(!candidate_count)return SF_NOT_FOUND;
  while(candidate_next<candidate_count){
   int r=start_candidate(candidate_next,0);
@@ -276,11 +315,13 @@ int sf_storage_start(void){
  candidate_next=0;return SF_NOT_FOUND;
 }
 int sf_storage_restart_next(void){
+ if(sf_persist_fenced())return SF_DRAINING;
  int r=sf_storage_stop();if(r){sf_log("[STORAGE] stop failed code=");sf_number(-r);sf_log("\n");return r;}
  if(candidate_next+1>=candidate_count){candidate_next=0;return SF_NOT_FOUND;}
  candidate_next++;return sf_storage_start();
 }
 int sf_storage_mount(void){
+ if(sf_persist_fenced())return SF_DRAINING;
  if(mounted)return SF_BUSY;if(!driver_pid)return SF_DEVICE_GONE;
  int r=sf_ns_mount_check(ns,"/disk");if(r)return r;
  r=sfmod_acquire(manager,driver_slot,RES_LEASE);if(r)return r;mount_driver_lease=1;
@@ -289,6 +330,7 @@ int sf_storage_mount(void){
  sf_log("[STORAGE] format ");sf_number((uint64_t)fs_format_id);sf_log("\n");return 0;
 }
 int sf_storage_unmount(void){
+ if(sf_persist_fenced())return SF_DRAINING;
  if(!mounted||fs_slot<0)return SF_NOT_FOUND;mount_admission=0;
  if(manager->modules[fs_slot].resources[RES_OPEN]||manager->modules[fs_slot].resources[RES_DIRTY]){mount_admission=1;return SF_BUSY;}
  int r=sf_ns_unmount(ns,1);if(r){mount_admission=1;return r;}
@@ -297,6 +339,7 @@ int sf_storage_unmount(void){
  mounted=0;writable=0;sf_persist_driver_down();return 0;
 }
 int sf_storage_stop(void){
+ if(sf_persist_fenced())return SF_DRAINING;
  if(driver_slot<0||!driver_pid)return SF_NOT_FOUND;int r=sfmod_prepare(manager,driver_slot);if(r)return r;
  if(manager->modules[driver_slot].resources[RES_LEASE]){sfmod_cancel(manager,driver_slot);return SF_DEPENDENCY;}
  for(unsigned i=0;i<RES_COUNT;i++)if(i!=RES_DMA&&manager->modules[driver_slot].resources[i]){sfmod_cancel(manager,driver_slot);return SF_BUSY;}
@@ -308,6 +351,7 @@ int sf_storage_stop(void){
  sfmod_release(manager,driver_slot,RES_DMA);r=sfmod_stop(manager,driver_slot);if(r)return r;sf_sys(SYS_KILL,driver_pid,0,0);sf_sys(SYS_CAP_REVOKE,driver_ep,0,0);sf_sys(SYS_CAP_REVOKE,driver_reply,0,0);driver_pid=driver_ep=driver_reply=0;mounted=0;writable=0;sf_persist_driver_down();return 0;
 }
 long sf_storage_load(const char*path,void*out,size_t capacity_bytes){
+ if(sf_persist_fenced())return SF_DRAINING;
  if(strlen(path)<7||memcmp(path,"/disk/",6))return SF_INVALID;if(fs_slot<0||sf_storage_namespace_disk_live())return SF_DEVICE_GONE;
  int r=sfmod_acquire(manager,fs_slot,RES_OPEN);if(r)return r;
  SfMessage m;sf_message(&m,OP_FS_FIND,0);size_t n=strlen(path+5)+1;if(n>sizeof(m.data)){sfmod_release(manager,fs_slot,RES_OPEN);return SF_INVALID;}
@@ -326,6 +370,7 @@ long sf_storage_load(const char*path,void*out,size_t capacity_bytes){
 }
 int sf_storage_ready(void){return mounted;}
 int sf_storage_crash_test(void){
+ if(sf_persist_fenced())return SF_DRAINING;
  if(!sf_storage_writable())return SF_DEVICE_GONE;
  int h=sf_ns_open(ns,1,"/","/persist/notes",OPEN_READ|OPEN_WRITE);if(h<0)return h;
  char data[32];long r=sf_ns_read(ns,1,h,data,sizeof(data));if(r<0){sf_ns_close(ns,1,h);return r;}
@@ -336,6 +381,7 @@ int sf_storage_crash_test(void){
  sf_log("STORAGE CRASH TEST PASSED\n");return 0;
 }
 void sf_storage_dma_probe(unsigned mode){
+ if(sf_persist_fenced()){sf_log("DMA PROBE REFUSED while fenced\n");return;}
  SfDmaStatus before,after;int r=sf_sys(SYS_DMA_STATUS,(uint64_t)&before,sizeof(before),0);
  if(r||before.mode!=1||!driver_pid||!before.active_mapping||mode>1){sf_log("DMA PROBE REFUSED\n");return;}
  SfMessage m;sf_message(&m,OP_BLOCK_DMA_PROBE,0);m.offset=before.probe_address;m.mode=mode;r=call(&m);
@@ -346,12 +392,14 @@ void sf_storage_dma_probe(unsigned mode){
  sf_log("DMA PROBE PASSED: guard intact, device quarantined\n");
 }
 void sf_storage_write_tests(void){
+ if(sf_persist_fenced()){sf_log("STORAGE WRITE TEST REFUSED while fenced\n");return;}
  uint8_t zero[512]={0};sf_assert(sf_storage_sector_write(0,0,zero)==SF_INVALID,"write grant cannot overwrite immutable disk region");
  sf_assert(sf_storage_sector_write(0,capacity/512,zero)==SF_INVALID&&sf_storage_sector_write(0,(1ull<<55)+SF_TXN_BANK,zero)==SF_INVALID,"sector write rejects capacity and wrapped LBA before multiplication");
  SfMessage m;sf_message(&m,OP_BLOCK_WRITE,0);m.offset=SF_TXN_BANK*512ull;m.mode=256;m.length=256;sf_assert(call(&m)==SF_INVALID,"write service rejects missing first fragment");
  sf_assert(!sf_storage_transaction(1),"transaction acquires dirty resource");sf_assert(sf_storage_unmount()==SF_BUSY,"dirty transaction prevents unmount and restores admission");sf_assert(!sf_storage_transaction(0),"transaction releases dirty resource");
 }
 void sf_storage_tests(void){
+ if(sf_persist_fenced()){sf_log("STORAGE TEST REFUSED while fenced\n");return;}
  if(!mounted||writable)return;SfMessage m;sf_message(&m,OP_BLOCK_READ,0);m.offset=capacity;m.length=256;sf_assert(call(&m)==SF_INVALID,"block read rejects capacity boundary");
  sf_message(&m,OP_BLOCK_READ,0);m.offset=1;m.length=256;sf_assert(call(&m)==SF_INVALID,"block read rejects unaligned offset");sf_message(&m,OP_BLOCK_WRITE,0);sf_assert(call(&m)==SF_READ_ONLY,"block service rejects every write");
  sf_assert(sf_storage_stop()==SF_DEPENDENCY,"mounted filesystem pins block driver");int h=sf_ns_open(ns,1,"/","/disk/etc/readme.txt",1);sf_assert(h>0&&sf_storage_unmount()==SF_BUSY,"open disk file prevents unmount and restores admission");int dup=sf_ns_dup(ns,1,h);sf_ns_close(ns,1,h);sf_assert(sf_storage_unmount()==SF_BUSY,"duplicated disk description retains mount lease");sf_ns_close(ns,1,dup);

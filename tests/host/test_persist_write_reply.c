@@ -36,6 +36,8 @@ static long sf_cap_derive(uint64_t cap,uint64_t rights){(void)cap;(void)rights;r
 static long sf_send_cap(uint32_t ep,SfMessage*m,uint64_t cap){(void)ep;(void)m;(void)cap;CHECK(0);return SF_DENIED;}
 int sf_storage_writable(void){return 1;}
 int sf_storage_quiescent(void){return dirty?SF_BUSY:0;}
+uint64_t sf_storage_admission_instance(void){return 0;}
+uint32_t sf_storage_namespace_pid(void){return 0;}
 int sf_storage_transaction(int begin){
  if(begin){CHECK(!dirty);begins++;if(begin_error)return begin_error;dirty=1;}
  else{CHECK(dirty==1);ends++;if(end_error)return end_error;dirty=0;}

@@ -19,6 +19,9 @@ static uint64_t capacity=4096,sequence;
 static int driver_alive __attribute__((unused)),running,variant,bad_after,send_error,recv_error,service_error;
 static unsigned checks,sends,receives,closed,killed;
 static SfMessage wire;
+/* This codec regression models ordinary admission; the actual fenced block
+ * boundary and zero-transport refusal are exercised by test_persist_fence. */
+static int sf_persist_fenced(void){return 0;}
 #define CHECK(x) do{checks++;if(!(x)){fprintf(stderr,"line%d case%d: %s\n",__LINE__,variant,#x);exit(1);}}while(0)
 /* Preserve the guest's LP64 sentinel on an LLP64 Windows test host. */
 static int64_t sf_sys(unsigned n,uint64_t a,uint64_t b,uint64_t c){(void)a;(void)b;(void)c;

@@ -12,14 +12,35 @@ static int uncertain_commit;
 /* Distinct from an uncertain write: a detected runtime-trust failure blocks
  * new package authority until a complete explicit synchronization succeeds. */
 static int trust_error;
+static uint64_t fence_sequence,load_sequence,load_owner;
+static struct {
+ uint64_t token,storage_instance,capacity;
+ uint32_t pid,ep,reply,fs_pid,driver_pid,driver_ep,driver_reply;
+ int writable;
+ SfRuntimeTrust trust;
+} admission_fence;
+int sf_persist_fenced(void){return admission_fence.token!=0;}
+int sf_persist_load_begin(uint64_t*token){
+ if(!token)return SF_INVALID;
+ if(sf_persist_fenced())return SF_DRAINING;
+ if(load_owner)return SF_BUSY;
+ if(load_sequence==UINT64_MAX)return SF_NO_SPACE;
+ load_owner=++load_sequence;*token=load_owner;return 0;
+}
+int sf_persist_load_end(uint64_t token){
+ if(!token||token!=load_owner)return SF_STALE_HANDLE;
+ load_owner=0;return 0;
+}
 static long(*disk_read)(unsigned,uint64_t,void*,size_t);
 static int ready(void){return persist_ep&&persist_reply&&persist_pid;}
+static int provider_alive(void){int64_t status=sf_sys(SYS_TASK_STATUS,persist_pid,0,0);return status==SF_TASK_RUNNING;}
 static void hooks(SfNamespace*ns);
 static int transient(int r){return r==SF_DEVICE_GONE||r==SF_TIMEOUT||r==SF_WOULD_BLOCK;}
 static int pf_call(SfMessage*m){
  if(!ready())return SF_DEVICE_GONE;
  if(uncertain_commit)return SF_COMMIT_UNCERTAIN;
  unsigned opcode=m->h.opcode;
+ if(sf_persist_fenced()&&opcode!=OP_PERSIST_QUIESCENT)return SF_DRAINING;
  int metadata=opcode==OP_PERSIST_NOTES_SIZE;
  int dirty=opcode==OP_PERSIST_MOUNT||opcode==OP_PERSIST_WRITE||opcode==OP_PERSIST_TRUNCATE||
            opcode==OP_PERSIST_INSTALL||opcode==OP_PERSIST_BEGIN||opcode==OP_PERSIST_FINISH||opcode==OP_PERSIST_REVOKE;
@@ -57,6 +78,7 @@ static int pf_call(SfMessage*m){
  return(int)m->status;
 }
 static int pf_send_cap(uint64_t opcode,uint32_t cap,uint64_t offset,uint32_t mode){
+ if(sf_persist_fenced()){sf_cap_close(cap);return SF_DRAINING;}
  if(!ready()){sf_cap_close(cap);return SF_DEVICE_GONE;}
  if(uncertain_commit||requests==UINT64_MAX){sf_cap_close(cap);return uncertain_commit?SF_COMMIT_UNCERTAIN:SF_NO_SPACE;}
  SfMessage m;sf_message(&m,opcode,++requests);m.offset=offset;m.mode=mode;
@@ -74,6 +96,7 @@ static int pf_send_cap(uint64_t opcode,uint32_t cap,uint64_t offset,uint32_t mod
  return(int)m.status;
 }
 static int attach(void){
+ if(sf_persist_fenced())return SF_DRAINING;
  if(!ready())return SF_DEVICE_GONE;
  uint32_t ep=0,reply=0,pid=0;uint64_t bytes=0;int writable=0;
  if(sf_storage_driver(&ep,&reply,&pid,&bytes,&writable))return SF_DEVICE_GONE;
@@ -83,6 +106,7 @@ static int attach(void){
  return pf_send_cap(OP_PERSIST_ATTACH_REPLY,(uint32_t)rcap,bytes,writable?1u:0u);
 }
 int sf_persist_start(SfModuleSpawn spawn){
+ if(sf_persist_fenced())return SF_DRAINING;
  if(ready())return SF_BUSY;
  persist_reply=(uint32_t)sf_sys(SYS_EP_CREATE,0,0,0);if((int)persist_reply<0){int r=(int)persist_reply;persist_reply=0;trust_error=SF_DEVICE_GONE;return r;}
  persist_ep=(uint32_t)sf_sys(SYS_EP_CREATE,0,0,0);if((int)persist_ep<0){int r=(int)persist_ep;persist_ep=0;sf_sys(SYS_CAP_REVOKE,persist_reply,0,0);persist_reply=0;trust_error=SF_DEVICE_GONE;return r;}
@@ -99,6 +123,47 @@ int sf_persist_quiescent(void){
  r=sf_storage_quiescent();if(r)return r;
  SfMessage m;sf_message(&m,OP_PERSIST_QUIESCENT,0);return pf_call(&m);
 }
+static int fence_context(void){
+ int r=sf_persist_security_error();if(r)return r;
+ if(!ready()||persist_pid!=admission_fence.pid||persist_ep!=admission_fence.ep||persist_reply!=admission_fence.reply||
+    !provider_alive())return SF_DEVICE_GONE;
+ r=sf_storage_quiescent();if(r)return r;
+ uint32_t ep=0,reply=0,pid=0;uint64_t bytes=0;int writable=0;
+ if(sf_storage_driver(&ep,&reply,&pid,&bytes,&writable)||!writable)return SF_DEVICE_GONE;
+ if(sf_storage_namespace_pid()!=admission_fence.fs_pid||sf_storage_admission_instance()!=admission_fence.storage_instance||
+    pid!=admission_fence.driver_pid||ep!=admission_fence.driver_ep||reply!=admission_fence.driver_reply||
+    bytes!=admission_fence.capacity||writable!=admission_fence.writable)return SF_STALE_HANDLE;
+ if(memcmp(&sf_trust,&admission_fence.trust,sizeof(sf_trust)))return SF_STALE_HANDLE;
+ return 0;
+}
+int sf_persist_fence_cancel(uint64_t token){
+ if(!token||token!=admission_fence.token)return SF_STALE_HANDLE;
+ int r=fence_context();if(r)return r;
+ memset(&admission_fence,0,sizeof(admission_fence));return 0;
+}
+int sf_persist_fence_begin(uint64_t*token){
+ if(!token)return SF_INVALID;
+ if(sf_persist_fenced())return SF_BUSY;
+ *token=0;
+ int r=sf_persist_security_error();if(r)return r;
+ if(load_owner)return SF_BUSY;
+ if(!ready()||!provider_alive())return SF_DEVICE_GONE;
+ r=sf_storage_quiescent();if(r)return r;
+ uint64_t instance=sf_storage_admission_instance();if(!instance)return SF_DEVICE_GONE;
+ uint32_t ep=0,reply=0,pid=0;uint64_t bytes=0;int writable=0;
+ if(sf_storage_driver(&ep,&reply,&pid,&bytes,&writable)||!writable)return SF_DEVICE_GONE;
+ if(fence_sequence==UINT64_MAX)return SF_NO_SPACE;
+ admission_fence.token=++fence_sequence;admission_fence.storage_instance=instance;
+ admission_fence.pid=persist_pid;admission_fence.ep=persist_ep;admission_fence.reply=persist_reply;
+ admission_fence.fs_pid=sf_storage_namespace_pid();admission_fence.driver_pid=pid;
+ admission_fence.driver_ep=ep;admission_fence.driver_reply=reply;admission_fence.capacity=bytes;
+ admission_fence.writable=writable;admission_fence.trust=sf_trust;*token=admission_fence.token;
+ /* Publish the fence before the remote observation. No zero104 is a stop
+  * permit: this scope leaves the provider alive and is explicitly cancelled. */
+ r=sf_persist_quiescent();if(!r)r=fence_context();
+ if(r){if(!sf_persist_fence_cancel(*token))*token=0;return r;}
+ return 0;
+}
 void sf_persist_driver_down(void){
  if(!ready())return;SfMessage m;sf_message(&m,OP_PERSIST_DRIVER_DOWN,0);pf_call(&m);
 }
@@ -110,6 +175,7 @@ static int trust_fail(int r,int required){
  return r;
 }
 static int trust_sync(int required){
+ if(sf_persist_fenced())return SF_DRAINING;
  _Static_assert(SF_TRUST_MAX*32u<=sizeof(((SfMessage*)0)->data),"revocation snapshot fits one message");
  /* A full monotonic cache cannot forget an observed overflow to accept a
   * later smaller list. This capacity fault needs a fresh trust context. */
@@ -134,6 +200,7 @@ static int project_notes(SfNamespace*ns,uint64_t notes){
  return 0;
 }
 int sf_persist_mount(SfNamespace*ns){
+ if(sf_persist_fenced())return SF_DRAINING;
  if(!ns)return SF_INVALID;
  if(!ready()){trust_error=SF_DEVICE_GONE;return SF_DEVICE_GONE;}
  if(!sf_storage_writable())return SF_READ_ONLY;
