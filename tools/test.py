@@ -86,9 +86,11 @@ host_test('test_txn_compat','tests/host/test_txn_compat.c','services/txn.c',no_u
 host_test('test_update','tests/host/test_update.c','services/update.c','services/txn.c',no_unused=True)
 host_test('test_persist_metadata','tests/host/test_persist_metadata.c','tests/host/persist_volume_fixture.c','services/persist_metadata.c','services/namespace.c','services/txn.c','services/update.c','services/version.c',*build.CRYPTO,no_unused=True)
 host_test('test_persist_write_reply','tests/host/test_persist_write_reply.c','services/namespace.c',*build.CRYPTO,no_unused=True)
-host_test('test_persist_terminal','tests/host/test_persist_terminal.c','services/persist_metadata.c',no_unused=True)
+host_test('test_persist_terminal','tests/host/test_persist_terminal.c','services/persist_metadata.c','services/persist_idle.c',no_unused=True)
+host_test('test_persist_idle','tests/host/test_persist_idle.c','services/persist_idle.c',include_services=True)
 host_test('test_persist_terminal_owner','tests/host/test_persist_terminal_owner.c','services/manager.c','services/namespace.c','services/namespace_control.c','services/namespace_transport.c',*build.CRYPTO,no_unused=True,include_services=True)
 host_test('test_persist_candidate_owner','tests/host/test_persist_candidate_owner.c','services/manager.c','services/namespace.c','services/namespace_control.c','services/namespace_transport.c',*build.CRYPTO,no_unused=True,include_services=True)
+host_test('test_persist_idle_owner','tests/host/test_persist_idle_owner.c','services/manager.c','services/namespace.c','services/namespace_control.c','services/namespace_transport.c',*build.CRYPTO,no_unused=True,include_services=True)
 host_test('test_persist_fence','tests/host/test_persist_fence.c','services/manager.c','services/namespace.c','services/namespace_control.c','services/namespace_transport.c',*build.CRYPTO,no_unused=True,include_services=True)
 host_test('test_persist_quiescence','tests/host/test_persist_quiescence.c','tests/host/persist_volume_fixture.c','services/persist_metadata.c','services/namespace.c','services/txn.c','services/update.c','services/version.c',*build.CRYPTO,no_unused=True)
 host_test('test_trust_sync','tests/host/test_trust_sync.c','services/namespace.c',*build.CRYPTO,no_unused=True)
@@ -124,6 +126,7 @@ subprocess.run([sys.executable,'tests/integration/test_block_reply.py'],check=Tr
 subprocess.run([sys.executable,'tests/integration/test_persist_quiescence.py'],check=True)
 subprocess.run([sys.executable,'tests/integration/test_persist_fence_evidence.py'],check=True)
 subprocess.run([sys.executable,'tests/integration/test_persist_terminal_evidence.py'],check=True)
+subprocess.run([sys.executable,'tests/integration/test_persist_idle_evidence.py'],check=True)
 subprocess.run([sys.executable,'tests/integration/test_persist_candidate_image.py'],check=True)
 subprocess.run([sys.executable,'tests/integration/test_file_ingress.py'],check=True)
 subprocess.run([sys.executable,'tests/integration/test_linux_blob_assembly.py'],check=True)
@@ -170,6 +173,7 @@ if not args.host_only:
     subprocess.run([sys.executable, 'tests/qemu/qemu_persist_write_reply_test.py'], check=True)
     subprocess.run([sys.executable, 'tests/qemu/qemu_persist_fence_test.py'], check=True)
     subprocess.run([sys.executable, 'tests/qemu/qemu_persist_terminal_test.py'], check=True)
+    subprocess.run([sys.executable, 'tests/qemu/qemu_persist_idle_test.py'], check=True)
     subprocess.run([sys.executable, 'tests/qemu/qemu_namespace_recovery_test.py'], check=True)
     subprocess.run([sys.executable, 'tests/qemu/qemu_hardware_test.py'], check=True)
     # USB：xHCI 初始化、HID 枚举、键盘输入、指针注入与热插拔。
@@ -250,7 +254,9 @@ result['persist_admission_fence_host'] = {'passed':True,'evidence':'E1-host-only
 result['persist_admission_fence_qemu'] = {} if args.host_only else json.loads((ROOT/'build/persist-fence-results.json').read_text(encoding='utf-8'))
 result['persist_terminal_host'] = {'passed':True,'evidence':'E1-host-only','server_checks':550,'owner_checks':642533,'owner_cases':187}
 result['persist_candidate_host'] = {'passed':True,'evidence':'E1-host-real-signatures','owner_checks':216690,'owner_cases':67,'image_checks':688,'signed_fixtures':8}
+result['persist_idle_host'] = {'passed':True,'evidence':'E1-host-mocked-kernel','parser_checks':4173,'owner_checks':437812}
 result['persist_terminal_qemu'] = {} if args.host_only else json.loads((ROOT/'build/persist-terminal-results.json').read_text(encoding='utf-8'))
+result['persist_idle_qemu'] = {} if args.host_only else json.loads((ROOT/'build/persist-idle-results.json').read_text(encoding='utf-8'))
 result['persist_write_reply_qemu'] = {} if args.host_only else json.loads((ROOT/'build/persist-write-reply-results.json').read_text(encoding='utf-8'))
 result['persist_read_qemu_boots'] = 0 if args.host_only else 2
 result['persist_read_qemu_bytes'] = 0 if args.host_only else 8192

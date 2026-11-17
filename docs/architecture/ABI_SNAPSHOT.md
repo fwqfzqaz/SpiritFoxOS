@@ -119,3 +119,10 @@ OP_PERSIST_QUIESCENT=104至663，静态目录旧662项无删改。当前仅离�
 `check-additions` 核对旧674项逐值保持，并与当前参考完全匹配。作者 S4 的结构、
 Linux 常量及其余编号无改动。本轮尚未跑九组完整漂移、生产构建或 E2；
 契约与宿主证据边界见 [Persist terminal](../quality/PERSIST_TERMINAL.md)。
+
+
+2026-11-17 空闲候选切片：对固定3e361d2的675项实际基线，仅追加
+`constant.OP_PERSIST_CANDIDATE_PROBE=106` 和
+`constant.OP_PERSIST_CANDIDATE_DISCARD=107` 至677项。实际 catalog 编译与
+check-additions 已逐值证明旧675项不变，无结构/布局变化；完整宿主漂移与新提交CI
+状态独立见 PROGRESS。106/107不表示激活或通用 restart，旧105准入检查不放宽。

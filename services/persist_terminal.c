@@ -1,6 +1,7 @@
 #include "libsf.h"
 #include "persist_server.h"
 #include "persist_terminal.h"
+#include "persist_idle.h"
 
 static uint64_t stop_limit(uint64_t now){
  return now>UINT64_MAX-SF_PERSIST_STOP_NS?UINT64_MAX:now+SF_PERSIST_STOP_NS;
@@ -34,12 +35,27 @@ static void stop_reply(SfMessage*m,int status,uint64_t now,int accepted){
  m->status=status;m->handle=m->offset=0;m->length=0;m->mode=accepted?1u:0u;
  for(unsigned i=0;i<sizeof(m->data);i++)m->data[i]=0;
 }
-int64_t persist_serve(const SfBootArgs*a,int(*ordinary)(SfMessage*),
-                     int64_t(*reply_send)(uint32_t,SfMessage*)){
+int64_t persist_serve_with_idle(const SfBootArgs*a,int(*ordinary)(SfMessage*),
+                              int64_t(*reply_send)(uint32_t,SfMessage*),int(*unbound)(void)){
  if(!a||!a->service||!a->manager||!ordinary||!reply_send)return SF_INVALID;
  SfPersistTerminal terminal={0};
+ SfPersistIdle idle={0};int ordinary_seen=0;
  for(;;){
   SfMessage m;int64_t from=sf_recv(a->service,&m,0);if(from<0)return from;
+  if(m.h.opcode==OP_PERSIST_CANDIDATE_PROBE||m.h.opcode==OP_PERSIST_CANDIDATE_DISCARD||idle.entered){
+   if(m.h.cap_count==1)sf_cap_close(m.handle);
+   uint64_t ticks=sf_ticks();if(ticks>UINT64_MAX/10000000ull)return SF_TIMEOUT;
+   uint64_t now=ticks*10000000ull;
+   int control=m.h.opcode==OP_PERSIST_CANDIDATE_PROBE||m.h.opcode==OP_PERSIST_CANDIDATE_DISCARD;
+   /* Never evaluate a candidate permission by mounting or attaching. A
+    * fresh provider may be privately inspected; ordinary authority stays off. */
+   int available=!ordinary_seen&&unbound&&unbound()==1;
+   int r=control?persist_idle_dispatch(&idle,from,&m,now,available):SF_DRAINING;
+   persist_idle_reply(&m,r,now,!r);reply_send(a->manager,&m);
+   if(idle.discarded)return 0;
+   continue;
+  }
+  if(from==1)ordinary_seen=1;
   if(m.h.opcode==OP_PERSIST_STOP){
    /* RECV installed this handle before parsing or sender authentication. */
    if(m.h.cap_count==1)sf_cap_close(m.handle);
@@ -56,4 +72,8 @@ int64_t persist_serve(const SfBootArgs*a,int(*ordinary)(SfMessage*),
   }else m.status=from==1?ordinary(&m):SF_DENIED;
   m.h.cap_count=0;reply_send(a->manager,&m);
  }
+}
+int64_t persist_serve(const SfBootArgs*a,int(*ordinary)(SfMessage*),
+                     int64_t(*reply_send)(uint32_t,SfMessage*)){
+ return persist_serve_with_idle(a,ordinary,reply_send,0);
 }

@@ -27,19 +27,23 @@ static int terminal_fault_quiescent(void){
  * linked by the regular source list, under its original symbol names. */
 #define persist_terminal_dispatch terminal_fault_dispatch
 #define persist_serve terminal_fault_serve
+#define persist_serve_with_idle terminal_fault_serve_with_idle
 #define persist_quiescent terminal_fault_quiescent
 #include "../../services/persist_terminal.c"
 #undef persist_quiescent
 #undef persist_serve
+#undef persist_serve_with_idle
 #undef persist_terminal_dispatch
 
 /* Include the production Persist service entry point, routing all sends
  * through a narrow test callback while retaining its ordinary dispatcher. */
 #define persist_serve terminal_fault_serve
+#define persist_serve_with_idle terminal_fault_serve_with_idle
 #define sf_send terminal_fault_send
 #include "../../services/persist.c"
 #undef sf_send
 #undef persist_serve
+#undef persist_serve_with_idle
 
 static long terminal_fault_send(uint32_t ep,SfMessage*m){
  static int ack_fault_done;

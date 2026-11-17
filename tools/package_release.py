@@ -71,7 +71,7 @@ if (fence_guest.get('passed') is not True or fence_guest.get('evidence')!='E2-ac
     raise SystemExit('Run actual Root/Fs admission fence, setter/raw/type guards, retained unknown DIRTY and fresh production recovery before packaging')
 
 # STOP evidence is distinct from non-destructive fencing and from restart.
-terminal_source_paths = ('tests/qemu/qemu_persist_terminal_test.py', 'tests/fixtures/persist_terminal_fault.c', 'tests/qemu/trust_sync_fixture.py', 'services/persist_terminal.c', 'services/persist.c', 'services/persist_client.c', 'services/init.c', 'services/console_policy.c', 'include/persistence.h', 'include/sf.h', 'include/libsf.h', 'services/persist_metadata.c', 'services/persistence.c', 'services/storage.c', 'kernel/core.c', 'kernel/ipc.c', 'tests/qemu/qemu_persist_test.py', 'tests/qemu/qemu_persist_write_reply_test.py', 'services/persist_candidate.c', 'services/persist_candidate.h')
+terminal_source_paths = ('tests/qemu/qemu_persist_terminal_test.py', 'tests/fixtures/persist_terminal_fault.c', 'tests/qemu/trust_sync_fixture.py', 'services/persist_terminal.c', 'services/persist.c', 'services/persist_client.c', 'services/init.c', 'services/console_policy.c', 'include/persistence.h', 'include/sf.h', 'include/libsf.h', 'services/persist_metadata.c', 'services/persistence.c', 'services/storage.c', 'kernel/core.c', 'kernel/ipc.c', 'tests/qemu/qemu_persist_test.py', 'tests/qemu/qemu_persist_write_reply_test.py', 'services/persist_candidate.c', 'services/persist_candidate.h', 'services/persist_idle.c', 'services/persist_idle.h')
 terminal_source_sha256 = {p:hashlib.sha256((ROOT/p).read_bytes()).hexdigest() for p in terminal_source_paths}
 terminal_artifact_paths = ('build/bundle.bin', 'build/payload.S', 'build/esp/EFI/BOOT/BOOTX64.EFI', 'build/kernel.elf', 'build/storage.img', 'build/persistent.img', 'build/trust-policy.json')
 terminal_artifact_sha256 = {p:hashlib.sha256((ROOT/p).read_bytes()).hexdigest() for p in terminal_artifact_paths}
@@ -88,6 +88,7 @@ def terminal_case_valid(c):
         not all(type(status.get(k)) is bool for k in ('ack_authenticated','death_confirmed','retired'))):
         return False
     if status.get('candidate_inspected') is not (mode in ('healthy','delayed')):return False
+    if status.get('candidate_idle') is not (mode in ('healthy','delayed')):return False
     if tuple(status.get(k) for k in ('phase','ack_authenticated','death_confirmed','retired'))!=expected[mode]:
         return False
     return status['observations']==0 if mode=='busy' else status['observations']>=(2 if mode=='delayed' else 1)
@@ -102,6 +103,32 @@ if (result.get('persist_terminal_host')!={'passed':True,'evidence':'E1-host-only
     not all(terminal_guest.get(k) is True for k in ('production_artifacts_restored','base_disk_unchanged')) or
     not all(terminal_guest.get(k) is False for k in ('candidate_activation','generic_restart','physical_hardware'))):
     raise SystemExit('Run actual owned Persist terminal acceptance, exact normal death, unknown ACK refusal, delayed exit and endpoint retirement before packaging')
+
+idle_source_paths = terminal_source_paths + ('tests/qemu/qemu_persist_idle_test.py','tests/fixtures/persist_idle_fault.c')
+idle_source_sha256 = {p:hashlib.sha256((ROOT/p).read_bytes()).hexdigest() for p in idle_source_paths}
+idle_guest = result.get('persist_idle_qemu',{})
+idle_cases = idle_guest.get('cases',[])
+def idle_case_valid(c):
+    mode=c.get('mode');fields=('probe','ordinary_denied','discard','death','retired')
+    expected={'healthy':(6,True,True,True,True,True),'idle-delayed':(6,True,True,True,True,True),
+              'idle-badprobe':(7,False,False,False,False,False),'idle-dropdiscard':(7,True,True,False,False,False)}
+    if (mode not in expected or c.get('passed') is not True or c.get('disk_bytes_preserved') is not True or
+        c.get('old_stop_snapshot_preserved') is not True or type(c.get('pid')) is not int or not 1<c['pid']<=2147483647 or
+        type(c.get('phase')) is not int or type(c.get('observations')) is not int or
+        not all(type(c.get(k)) is bool for k in fields)):
+        return False
+    if (c['phase'],*(c[k] for k in fields))!=expected[mode]:return False
+    return c['observations']>=(2 if mode=='idle-delayed' else 1) if c['phase']==6 else c['observations']==0
+if (result.get('persist_idle_host')!={'passed':True,'evidence':'E1-host-mocked-kernel','parser_checks':4173,'owner_checks':437812} or
+    idle_guest.get('passed') is not True or idle_guest.get('evidence')!='E2-real-private-candidate-IPC-and-exit' or
+    idle_guest.get('source_sha256')!=idle_source_sha256 or idle_guest.get('production_sha256')!=terminal_artifact_sha256 or
+    len(idle_guest.get('source_head',''))!=40 or any(c not in '0123456789abcdef' for c in idle_guest.get('source_head','')) or
+    idle_guest.get('guest_boots')!=8 or idle_guest.get('user_denials')!=8 or len(idle_cases)!=8 or
+    {(c.get('mode'),c.get('transport')) for c in idle_cases}!={(m,t) for m in ('healthy','idle-badprobe','idle-dropdiscard','idle-delayed') for t in ('legacy','modern')} or
+    not all(idle_case_valid(c) for c in idle_cases) or
+    not all(idle_guest.get(k) is True for k in ('production_artifacts_restored','base_disk_unchanged')) or
+    not all(idle_guest.get(k) is False for k in ('candidate_activation','driver_grants','mount_requested','physical_hardware'))):
+    raise SystemExit('Run isolated Persist candidate identity, ordinary denial, normal discard/exit and conservative unknown reply guest evidence before packaging')
 
 write_reply=result.get('persist_write_reply_qemu',{})
 write_cases=write_reply.get('cases',[])
@@ -200,7 +227,7 @@ if (result.get('persist_quiescence_client_checks')!=386 or result.get('persist_q
     not quiescence.get('base_disk_unchanged') or not quiescence.get('advisory_only') or
     quiescence.get('service_stop_restart_tested') is not False):
     raise SystemExit('Run authenticated Persist quiescence client/volume/ledger and actual trial/busy QEMU regressions before packaging')
-if result.get('abi_snapshot_host_tests') != 9 or result.get('abi_snapshot_entries') != 675:
+if result.get('abi_snapshot_host_tests') != 9 or result.get('abi_snapshot_entries') != 677:
     raise SystemExit('Run compiled ABI capture, offline comparison and header-drift regressions before packaging')
 if result.get('ipc_copy_host_checks') != 10041 or result.get('ipc_stats_control_host_checks') != 6001 or result.get('ipc_copy_profile') != 'successful-user-copy-bytes-v1' or not result.get('ipc_stats_qemu') or result.get('ipc_stats_qemu_boots') != 2:
     raise SystemExit('Run actual IPC copy event/control oracles and both production stats VM transports before packaging')

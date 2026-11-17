@@ -1001,8 +1001,19 @@ static int persist_candidate_probe(const SfRuntimeTrust*trust,SfPersistCandidate
  size_t cap=img_stage_bytes>SF_IMAGE_MAX?SF_IMAGE_MAX:(size_t)img_stage_bytes;
  return sf_persist_candidate_prepare(trust,data,bytes,(void*)img_stage,cap,out);
 }
+static int64_t persist_candidate_spawn_idle(const SfRuntimeTrust*trust,uint32_t ep,uint32_t reply,void*context){
+ (void)context;
+ SfPersistCandidateImage candidate;
+ /* Re-authenticate immediately before spawn. An earlier inspected plan is
+  * not reused as authority and no fenced normal-loader entry is opened. */
+ int r=persist_candidate_probe(trust,&candidate,0);if(r)return r;
+ candidate.plan.grant_manager=reply;candidate.plan.grant_service=ep;
+ candidate.plan.service_rights=RIGHT_RECV;
+ return sf_sys(SYS_SPAWN,(uint64_t)&candidate.plan,0,0);
+}
 static void persist_terminal_test(const char*mode){
- int healthy=!strcmp(mode,"healthy"),unknown=!strcmp(mode,"unknown"),busy=!strcmp(mode,"busy"),delayed=!strcmp(mode,"delayed");
+ int idle_bad=!strcmp(mode,"idle-badprobe"),idle_drop=!strcmp(mode,"idle-dropdiscard"),idle_delay=!strcmp(mode,"idle-delayed");
+ int healthy=!strcmp(mode,"healthy")||idle_bad||idle_drop||idle_delay,unknown=!strcmp(mode,"unknown"),busy=!strcmp(mode,"busy"),delayed=!strcmp(mode,"delayed");
  int r=SF_INVALID,ram=0,parent=0,file=0;uint64_t token=0,probe=0;
  SfPersistStopStatus before,after,again;FenceView view,end_view;SfRuntimeTrust trust=sf_trust;
  uint8_t digest[96],end[96];char text[16];
@@ -1032,6 +1043,32 @@ static void persist_terminal_test(const char*mode){
                  !memcmp(&candidate,&repeated,sizeof(candidate))&&sf_task_cap_usage(1)==caps);
   TERMINAL_CHECK(!sf_persist_fence_stop_status(token,&again)&&!memcmp(&after,&again,sizeof(after))&&sf_persist_fenced());
   sf_log("PERSIST CANDIDATE INSPECT PASSED\n");
+  int idle_result=sf_persist_candidate_cycle(token,persist_candidate_spawn_idle,0);
+  SfPersistIdleStatus idle;
+  TERMINAL_CHECK(!sf_persist_candidate_status(token,&idle)&&idle.pid>1&&idle.pid!=after.pid);
+  sf_log("PERSIST IDLE TRACE error=");sf_number(idle_result<0?(uint64_t)-idle_result:(uint64_t)idle_result);
+  sf_log(" phase=");sf_number(idle.phase);sf_log(" probe=");sf_number(idle.probe_accepted);
+  sf_log(" guard=");sf_number(idle.guard_denied);sf_log(" discard=");sf_number(idle.discard_accepted);
+  sf_log(" death=");sf_number(idle.death_confirmed);sf_log(" retired=");sf_number(idle.retired);
+  sf_log(" caps-before=");sf_number(caps);sf_log(" caps-after=");sf_number(sf_task_cap_usage(1));sf_log("\n");
+  if(idle_bad||idle_drop){
+   TERMINAL_CHECK(idle_result==(idle_bad?SF_BAD_FORMAT:SF_TIMEOUT)&&idle.error==idle_result&&idle.phase==SF_PERSIST_IDLE_FAILED&&
+                  !idle.discard_accepted&&!idle.death_confirmed&&!idle.retired&&sf_task_cap_usage(1)==caps+2);
+   TERMINAL_CHECK(idle.probe_accepted==idle_drop&&idle.guard_denied==idle_drop);
+   if(idle_drop)TERMINAL_CHECK(sf_sys(SYS_TASK_STATUS,idle.pid,0,0)==0);
+   sf_log("PERSIST CANDIDATE IDLE FAILED CLOSED\n");
+  }else{
+   TERMINAL_CHECK(!idle_result&&idle.phase==SF_PERSIST_IDLE_CLOSED&&idle.probe_accepted&&idle.guard_denied&&idle.discard_accepted&&
+                  idle.death_confirmed&&idle.retired&&!idle.task_status&&!idle.revoke_ep_result&&!idle.revoke_reply_result&&sf_task_cap_usage(1)==caps);
+   if(idle_delay)TERMINAL_CHECK(idle.observations>1);
+   sf_log("PERSIST CANDIDATE IDLE PASSED\n");
+  }
+  TERMINAL_CHECK(sf_persist_candidate_cycle(token,persist_candidate_spawn_idle,0)<0);
+  TERMINAL_CHECK(!sf_persist_fence_stop_status(token,&again)&&!memcmp(&after,&again,sizeof(after))&&sf_persist_fenced());
+  sf_log("PERSIST CANDIDATE IDLE RESULT phase=");sf_number(idle.phase);sf_log(" pid=");sf_number(idle.pid);
+  sf_log(" probe=");sf_number(idle.probe_accepted);sf_log(" guard=");sf_number(idle.guard_denied);
+  sf_log(" discard=");sf_number(idle.discard_accepted);sf_log(" death=");sf_number(idle.death_confirmed);
+  sf_log(" retired=");sf_number(idle.retired);sf_log(" observations=");sf_number(idle.observations);sf_log("\n");
  }else if(busy){
   TERMINAL_CHECK(result==SF_BUSY&&after.phase==SF_PERSIST_TERMINAL_REJECTED&&after.ack_authenticated&&after.ack_status==SF_BUSY&&!after.ack_mode&&!after.retired&&!after.death_confirmed);
   TERMINAL_CHECK(!sf_persist_fence_cancel(token));token=0;

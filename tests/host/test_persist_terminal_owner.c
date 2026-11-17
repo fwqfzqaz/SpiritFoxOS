@@ -14,6 +14,11 @@ static long sf_cap_derive(uint64_t,uint64_t);
 static long sf_send_cap(uint32_t,SfMessage*,uint64_t);
 static uint64_t sf_ticks(void);
 static void sf_yield(void);
+#ifdef SF_TEST_IDLE_OWNER
+static int idle_owner_sys_hook(long,uint64_t,uint64_t,uint64_t,int64_t*);
+static int idle_owner_send_hook(uint32_t,SfMessage*,int64_t*);
+static int idle_owner_recv_hook(uint32_t,SfMessage*,uint64_t,int64_t*);
+#endif
 static uint64_t sf_deadline(unsigned ms){return sf_ticks()*10000000ull+(uint64_t)ms*1000000ull;}
 static void sf_message(SfMessage*m,unsigned op,uint64_t id){memset(m,0,sizeof(*m));m->h=(SfIpcHeader){40,1,0,op,0,id,sizeof(*m)-40,0,sf_deadline(3000)};}
 static void sf_log(const char*s){(void)s;}
@@ -38,6 +43,9 @@ static SfTrustKey policy_keys[2];
 static void mutate(unsigned);
 static int no_spawn(const char*p,uint32_t a,uint32_t b,uint32_t c,uint32_t d,uint32_t e){(void)p;(void)a;(void)b;(void)c;(void)d;(void)e;CHECK(0);return SF_DENIED;}
 static int64_t sf_sys(long op,uint64_t a,uint64_t b,uint64_t c){
+#ifdef SF_TEST_IDLE_OWNER
+ int64_t hook_result;if(idle_owner_sys_hook(op,a,b,c,&hook_result))return hook_result;
+#endif
  (void)b;(void)c;
  if(op==SYS_TICKS)return clock_error?clock_error:(int64_t)clock_ticks;
  if(op==SYS_YIELD){yields++;if(!freeze_clock)clock_ticks++;return 0;}
@@ -76,6 +84,9 @@ static void locked(void){
  CHECK(sf_persist_quiescent()==SF_DRAINING&&sends==before);
 }
 static int64_t sf_send(uint32_t ep,SfMessage*m){
+#ifdef SF_TEST_IDLE_OWNER
+ int64_t hook_result;if(idle_owner_send_hook(ep,m,&hook_result))return hook_result;
+#endif
  CHECK(ep==0x101);
  if(m->h.opcode==OP_PERSIST_QUIESCENT){advisories++;CHECK(!sends);reply=*m;reply.h.flags=12;return 0;}
  CHECK(m->h.opcode==OP_PERSIST_STOP&&++sends==1);
@@ -89,6 +100,9 @@ static int64_t sf_send(uint32_t ep,SfMessage*m){
  return send_result;
 }
 static int64_t sf_recv(uint32_t ep,SfMessage*m,uint64_t deadline){
+#ifdef SF_TEST_IDLE_OWNER
+ int64_t hook_result;if(idle_owner_recv_hook(ep,m,deadline,&hook_result))return hook_result;
+#endif
  CHECK(ep==0x102);
  if(m->h.opcode==OP_PERSIST_QUIESCENT){CHECK(deadline==sf_deadline(10000));*m=reply;return 12;}
  receives++;CHECK(receives==1&&deadline==terminal_stop.deadline_ns);

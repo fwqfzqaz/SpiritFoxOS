@@ -62,7 +62,7 @@ with tempfile.TemporaryDirectory(prefix='terminal-evidence-', dir=ROOT / 'build'
         phase, ack, death, retired, observations = values
         return {'mode': mode, 'transport': transport, 'passed': True,
                 'disk_bytes_preserved': True, 'busy_is_injected_cache_result': mode == 'busy',
-                'status': {'pid': 21, 'phase': phase, 'observations': observations, 'candidate_inspected': mode in ('healthy','delayed'),
+                'status': {'pid': 21, 'phase': phase, 'observations': observations, 'candidate_inspected': mode in ('healthy','delayed'), 'candidate_idle': mode in ('healthy','delayed'),
                            'ack_authenticated': ack, 'death_confirmed': death, 'retired': retired}}
 
     good = {'passed': True, 'evidence': 'E2-real-kernel-IPC-and-provider-exit',
@@ -103,6 +103,9 @@ with tempfile.TemporaryDirectory(prefix='terminal-evidence-', dir=ROOT / 'build'
         lambda c: c[2]['status'].__setitem__('candidate_inspected', True),
         lambda c: c[0]['status'].__setitem__('candidate_inspected', 1),
         lambda c: c[0]['status'].pop('candidate_inspected'),
+        lambda c: c[0]['status'].__setitem__('candidate_idle', False),
+        lambda c: c[2]['status'].__setitem__('candidate_idle', True),
+        lambda c: c[0]['status'].__setitem__('candidate_idle', 1),
     )
     for mutate in mutations:
         bad = copy.deepcopy(good); mutate(bad['cases']); check(bad, False)
@@ -136,5 +139,5 @@ with tempfile.TemporaryDirectory(prefix='terminal-evidence-', dir=ROOT / 'build'
     target = fake_root / artifact_paths[0]
     original = target.read_bytes(); target.write_bytes(original + b' changed'); check(good, False); target.write_bytes(original)
 
-assert checks == 27
+assert checks == 30
 print('PERSIST TERMINAL EVIDENCE PASS: ' + str(checks) + ' actual release-gate checks')

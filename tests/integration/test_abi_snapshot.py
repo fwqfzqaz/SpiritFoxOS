@@ -45,9 +45,11 @@ class AbiSnapshot(unittest.TestCase):
     def test_capture_and_independent_wire_sizes(self):
         self.assertEqual(self.current,self.reference)
         values=self.current['values']
-        self.assertEqual(len(values),675)
+        self.assertEqual(len(values),677)
         self.assertEqual(values['constant.OP_PERSIST_QUIESCENT'],104)
         self.assertEqual(values['constant.OP_PERSIST_STOP'],105)
+        self.assertEqual(values['constant.OP_PERSIST_CANDIDATE_PROBE'],106)
+        self.assertEqual(values['constant.OP_PERSIST_CANDIDATE_DISCARD'],107)
         self.assertEqual(values['constant.OP_NS_INIT'],200)
         self.assertEqual(values['constant.OP_NS_UNMOUNT'],227)
         self.assertEqual(values['constant.OP_NS_ENUMERATE_AT'],228)

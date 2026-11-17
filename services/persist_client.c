@@ -273,7 +273,7 @@ int sf_persist_fence_stop(uint64_t token){
  }
  terminal_stop.retired=1;terminal_stop.phase=SF_PERSIST_TERMINAL_STOPPED_CLOSED;return 0;
 }
-static int candidate_context(uint64_t token){
+static int candidate_bindings(uint64_t token){
  if(!token||token!=admission_fence.token||token!=terminal_stop.token)return SF_STALE_HANDLE;
  if(terminal_stop.phase!=SF_PERSIST_TERMINAL_STOPPED_CLOSED)return SF_DRAINING;
  if(terminal_stop.ack_authenticated!=1||terminal_stop.ack_mode!=1||terminal_stop.ack_status||
@@ -286,7 +286,10 @@ static int candidate_context(uint64_t token){
     terminal_stop.driver_ep!=admission_fence.driver_ep||terminal_stop.driver_reply!=admission_fence.driver_reply||
     terminal_stop.writable!=admission_fence.writable||
     memcmp(&terminal_stop.trust,&admission_fence.trust,sizeof(sf_trust)))return SF_STALE_HANDLE;
- int r=fence_storage_context();if(r)return r;
+ return fence_storage_context();
+}
+static int candidate_context(uint64_t token){
+ int r=candidate_bindings(token);if(r)return r;
  /* A copied status record is not ownership. Re-observe the exact old PID;
   * no truncated sentinel, missing process or abnormal status is accepted. */
  return sf_sys(SYS_TASK_STATUS,terminal_stop.pid,0,0)==0?0:SF_DEVICE_GONE;
@@ -304,6 +307,99 @@ int sf_persist_fence_inspect(uint64_t token,SfPersistCandidateProbe probe,void*c
     memcmp(&staged.plan.arguments,&empty,sizeof(empty)))return SF_BAD_FORMAT;
  r=candidate_context(token);if(r)return r;
  *out=staged;return 0;
+}
+static SfPersistIdleStatus idle_candidate;
+static int idle_context(uint64_t token){
+ int r=candidate_bindings(token);if(r)return r;
+ int64_t status=sf_sys(SYS_TASK_STATUS,terminal_stop.pid,0,0);
+ if(!status)return 0;
+ /* Before our spawn, the strict context re-observed old normal exit. The
+  * kernel may now reuse that dead slot for the new, monotonically unique PID
+  * and forget its old status. This is not evidence of death by itself: the
+  * sealed accepted/zero-exit/retired tuple above remains mandatory. Only this
+  * post-spawn private phase accepts forgotten bookkeeping, never STOP or the
+  * read-only pre-spawn inspection. Running/abnormal/unknown values still fail. */
+ if(status==SF_NOT_FOUND&&idle_candidate.token==token&&idle_candidate.pid>1&&
+    idle_candidate.pid!=terminal_stop.pid&&idle_candidate.spawn_result==idle_candidate.pid)return 0;
+ return SF_DEVICE_GONE;
+}
+int sf_persist_candidate_status(uint64_t token,SfPersistIdleStatus*out){
+ if(!out)return SF_INVALID;
+ if(!token||token!=idle_candidate.token)return SF_STALE_HANDLE;
+ *out=idle_candidate;return 0;
+}
+static int idle_failed(int r){idle_candidate.error=r;idle_candidate.phase=SF_PERSIST_IDLE_FAILED;return r;}
+static int idle_retire(void){
+ if(idle_candidate.ep)idle_candidate.revoke_ep_result=sf_sys(SYS_CAP_REVOKE,idle_candidate.ep,0,0);
+ if(idle_candidate.reply)idle_candidate.revoke_reply_result=sf_sys(SYS_CAP_REVOKE,idle_candidate.reply,0,0);
+ if(idle_candidate.revoke_ep_result||idle_candidate.revoke_reply_result)
+  return terminal_error(idle_candidate.revoke_ep_result?idle_candidate.revoke_ep_result:idle_candidate.revoke_reply_result);
+ idle_candidate.retired=1;return 0;
+}
+static int idle_exchange(unsigned opcode,uint64_t id,int expected,int64_t*sent,int64_t*received){
+ SfMessage m;memset(&m,0,sizeof(m));
+ m.h=(SfIpcHeader){sizeof(SfIpcHeader),1,0,opcode,0,id,sizeof(m)-sizeof(SfIpcHeader),0,idle_candidate.deadline_ns};
+ *sent=sf_send(idle_candidate.ep,&m);if(*sent)return terminal_error(*sent);
+ *received=sf_recv(idle_candidate.reply,&m,idle_candidate.deadline_ns);
+ if(*received<0)return terminal_error(*received);
+ if(m.h.cap_count==1)sf_cap_close(m.handle);
+ int empty=1;for(unsigned i=0;i<sizeof(m.data);i++)if(m.data[i]){empty=0;break;}
+ if(*received!=(int64_t)idle_candidate.pid||m.h.size!=sizeof(SfIpcHeader)||m.h.protocol_major!=1||
+    m.h.protocol_minor||m.h.opcode!=opcode||m.h.flags!=idle_candidate.pid||m.h.request_id!=id||
+    m.h.cap_count||m.h.payload_bytes!=sizeof(m)-sizeof(SfIpcHeader)||m.h.deadline_ns!=idle_candidate.deadline_ns||
+    m.handle||m.offset||m.length||!empty||m.status<SF_VERSION_REJECTED||m.status>0||
+    m.mode!=(m.status==0?1u:0u))return SF_BAD_FORMAT;
+ return m.status==expected?0:m.status?(int)m.status:SF_BAD_FORMAT;
+}
+int sf_persist_candidate_cycle(uint64_t token,SfPersistIdleSpawn spawn,void*context){
+ if(!spawn)return SF_INVALID;
+ int r=candidate_context(token);if(r)return r;
+ /* No unknown delivery, PID or revocation can cause another private spawn. */
+ if(idle_candidate.token)return SF_DRAINING;
+ if(requests>UINT64_MAX-3)return SF_NO_SPACE;
+ uint64_t now=0;r=terminal_now(&now);if(r)return r;
+ memset(&idle_candidate,0,sizeof(idle_candidate));idle_candidate.token=token;
+ idle_candidate.probe_id=++requests;idle_candidate.guard_id=++requests;idle_candidate.discard_id=++requests;
+ idle_candidate.deadline_ns=now+3000000000ull;idle_candidate.phase=SF_PERSIST_IDLE_ALLOCATING;
+ int64_t handle=sf_sys(SYS_EP_CREATE,0,0,0);
+ if(handle<=0||handle>UINT32_MAX)return idle_failed(terminal_error(handle));
+ idle_candidate.reply=(uint32_t)handle;
+ handle=sf_sys(SYS_EP_CREATE,0,0,0);
+ if(handle<=0||handle>UINT32_MAX){r=terminal_error(handle);int cleanup=idle_retire();return idle_failed(cleanup?cleanup:r);}
+ idle_candidate.ep=(uint32_t)handle;
+ r=candidate_context(token);if(r){int cleanup=idle_retire();return idle_failed(cleanup?cleanup:r);}
+ idle_candidate.phase=SF_PERSIST_IDLE_SPAWNING;
+ idle_candidate.spawn_result=spawn(&terminal_stop.trust,idle_candidate.ep,idle_candidate.reply,context);
+ if(idle_candidate.spawn_result<0){r=terminal_error(idle_candidate.spawn_result);int cleanup=idle_retire();return idle_failed(cleanup?cleanup:r);}
+ if(idle_candidate.spawn_result<=1||idle_candidate.spawn_result>INT32_MAX||idle_candidate.spawn_result==terminal_stop.pid)
+  return idle_failed(SF_BAD_FORMAT);
+ idle_candidate.pid=(uint32_t)idle_candidate.spawn_result;
+ r=idle_context(token);if(r)return idle_failed(r);
+ idle_candidate.phase=SF_PERSIST_IDLE_PROBING;
+ r=idle_exchange(OP_PERSIST_CANDIDATE_PROBE,idle_candidate.probe_id,0,&idle_candidate.probe_send,&idle_candidate.probe_receive);
+ if(r)return idle_failed(r);idle_candidate.probe_accepted=1;
+ r=idle_context(token);if(r)return idle_failed(r);
+ r=idle_exchange(OP_PERSIST_NOTES_SIZE,idle_candidate.guard_id,SF_DRAINING,&idle_candidate.guard_send,&idle_candidate.guard_receive);
+ if(r)return idle_failed(r);idle_candidate.guard_denied=1;
+ r=idle_context(token);if(r)return idle_failed(r);
+ idle_candidate.phase=SF_PERSIST_IDLE_DISCARDING;
+ r=idle_exchange(OP_PERSIST_CANDIDATE_DISCARD,idle_candidate.discard_id,0,&idle_candidate.discard_send,&idle_candidate.discard_receive);
+ if(r)return idle_failed(r);idle_candidate.discard_accepted=1;
+ idle_candidate.phase=SF_PERSIST_IDLE_EXIT_WAIT;
+ for(unsigned i=0;i<512;i++){
+  idle_candidate.observations++;
+  idle_candidate.task_status=sf_sys(SYS_TASK_STATUS,idle_candidate.pid,0,0);
+  if(!idle_candidate.task_status){idle_candidate.death_confirmed=1;break;}
+  if(idle_candidate.task_status!=SF_TASK_RUNNING)return idle_failed(SF_DEVICE_GONE);
+  r=terminal_now(&now);if(r)return idle_failed(r);
+  if(now>=idle_candidate.deadline_ns)return idle_failed(SF_TIMEOUT);
+  sf_sys(SYS_YIELD,0,0,0);
+ }
+ if(!idle_candidate.death_confirmed)return idle_failed(SF_TIMEOUT);
+ r=idle_context(token);if(r)return idle_failed(r);
+ r=idle_retire();if(r)return idle_failed(r);
+ r=idle_context(token);if(r)return idle_failed(r);
+ idle_candidate.phase=SF_PERSIST_IDLE_CLOSED;return 0;
 }
 void sf_persist_driver_down(void){
  if(!ready())return;SfMessage m;sf_message(&m,OP_PERSIST_DRIVER_DOWN,0);pf_call(&m);

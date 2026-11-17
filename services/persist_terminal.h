@@ -13,4 +13,6 @@ int persist_terminal_dispatch(SfPersistTerminal*,int64_t,SfMessage*,uint64_t now
  * from persist.c so its signed test fixtures retain their sf_send wrappers. */
 int64_t persist_serve(const SfBootArgs*,int(*ordinary)(SfMessage*),
                      int64_t(*reply_send)(uint32_t,SfMessage*));
+int64_t persist_serve_with_idle(const SfBootArgs*,int(*ordinary)(SfMessage*),
+                              int64_t(*reply_send)(uint32_t,SfMessage*),int(*unbound)(void));
 #endif

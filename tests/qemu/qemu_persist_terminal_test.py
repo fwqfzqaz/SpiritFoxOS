@@ -16,7 +16,8 @@ SOURCES = ('tests/qemu/qemu_persist_terminal_test.py',
            'include/libsf.h', 'services/persist_metadata.c', 'services/persistence.c',
            'services/storage.c', 'kernel/core.c', 'kernel/ipc.c',
            'tests/qemu/qemu_persist_test.py', 'tests/qemu/qemu_persist_write_reply_test.py',
-           'services/persist_candidate.c', 'services/persist_candidate.h')
+           'services/persist_candidate.c', 'services/persist_candidate.h',
+           'services/persist_idle.c', 'services/persist_idle.h')
 PRODUCTS = (*FILES, 'build/kernel.elf', 'build/storage.img',
             'build/persistent.img', 'build/trust-policy.json')
 
@@ -39,6 +40,7 @@ def terminal(vm, mode):
     phase, pid, ack, death, retired, observations = map(int, rows[0])
     inspected = mode in ('healthy', 'delayed')
     assert text.splitlines().count('PERSIST CANDIDATE INSPECT PASSED') == int(inspected)
+    assert text.splitlines().count('PERSIST CANDIDATE IDLE PASSED') == int(inspected)
     assert pid > 1 and observations >= (0 if mode == 'busy' else 1)
     if mode in ('healthy', 'delayed'):
         assert (phase, ack, death, retired) == (3, 1, 1, 1)
@@ -50,7 +52,7 @@ def terminal(vm, mode):
         assert (phase, ack, death, retired) == (5, 1, 0, 0)
     return {'phase': phase, 'pid': pid, 'ack_authenticated': bool(ack),
             'death_confirmed': bool(death), 'retired': bool(retired),
-            'observations': observations, 'candidate_inspected': inspected}
+            'observations': observations, 'candidate_inspected': inspected, 'candidate_idle': inspected}
 
 
 def run():
