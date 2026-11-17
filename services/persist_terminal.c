@@ -35,11 +35,19 @@ static void stop_reply(SfMessage*m,int status,uint64_t now,int accepted){
  m->status=status;m->handle=m->offset=0;m->length=0;m->mode=accepted?1u:0u;
  for(unsigned i=0;i<sizeof(m->data);i++)m->data[i]=0;
 }
+typedef struct {const SfBootArgs*args;int64_t(*send)(uint32_t,SfMessage*);} VerifyChannel;
+static int64_t verify_channel_send(void*context,SfMessage*m){VerifyChannel*c=context;return c->send(c->args->manager,m);}
+static int64_t verify_channel_receive(void*context,SfMessage*m,uint64_t deadline){VerifyChannel*c=context;return sf_recv(c->args->service,m,deadline);}
+static int verify_channel_now(void*context,uint64_t*out){
+ (void)context;uint64_t ticks=sf_ticks();if(ticks>UINT64_MAX/10000000ull)return SF_BAD_FORMAT;
+ *out=ticks*10000000ull;return 0;
+}
+static void verify_channel_close(void*context,uint64_t cap){(void)context;sf_cap_close(cap);}
 int64_t persist_serve_with_idle(const SfBootArgs*a,int(*ordinary)(SfMessage*),
-                              int64_t(*reply_send)(uint32_t,SfMessage*),int(*unbound)(void),SfPersistSnapshotGet snapshot_get){
+                              int64_t(*reply_send)(uint32_t,SfMessage*),int(*unbound)(void),SfPersistSnapshotGet snapshot_get,SfPersistVolumeVerify volume_verify){
  if(!a||!a->service||!a->manager||!ordinary||!reply_send)return SF_INVALID;
  SfPersistTerminal terminal={0};
- SfPersistIdle idle={0};int ordinary_seen=0;
+ SfPersistIdle idle={0};SfPersistVerify verification={0};int ordinary_seen=0;
  for(;;){
   SfMessage m;int64_t from=sf_recv(a->service,&m,0);if(from<0)return from;
   if(m.h.opcode==OP_PERSIST_CANDIDATE_PROBE||m.h.opcode==OP_PERSIST_CANDIDATE_DISCARD||idle.entered){
@@ -50,6 +58,15 @@ int64_t persist_serve_with_idle(const SfBootArgs*a,int(*ordinary)(SfMessage*),
    /* Never evaluate a candidate permission by mounting or attaching. A
     * fresh provider may be privately inspected; ordinary authority stays off. */
    int available=!ordinary_seen&&unbound&&unbound()==1;
+   if(m.h.opcode==OP_PERSIST_CANDIDATE_VERIFY&&idle.entered){
+    VerifyChannel channel={a,reply_send};
+    SfPersistVerifyTransport transport={&channel,verify_channel_send,verify_channel_receive,verify_channel_now,verify_channel_close};
+    if(verification.last_nonce<idle.last_nonce)verification.last_nonce=idle.last_nonce;
+    SfPersistSnapshot snapshot;
+    int r=persist_verify_dispatch(&verification,from,&m,now,available,volume_verify,&transport,&snapshot);
+    if(idle.last_nonce<verification.last_nonce)idle.last_nonce=verification.last_nonce;
+    persist_verify_reply(&m,r,now,r?0:&snapshot);reply_send(a->manager,&m);continue;
+   }
    int r=control?persist_idle_dispatch(&idle,from,&m,now,available):SF_DRAINING;
    persist_idle_reply(&m,r,now,!r);reply_send(a->manager,&m);
    if(idle.discarded)return 0;
@@ -82,5 +99,5 @@ int64_t persist_serve_with_idle(const SfBootArgs*a,int(*ordinary)(SfMessage*),
 }
 int64_t persist_serve(const SfBootArgs*a,int(*ordinary)(SfMessage*),
                      int64_t(*reply_send)(uint32_t,SfMessage*)){
- return persist_serve_with_idle(a,ordinary,reply_send,0,0);
+ return persist_serve_with_idle(a,ordinary,reply_send,0,0,0);
 }

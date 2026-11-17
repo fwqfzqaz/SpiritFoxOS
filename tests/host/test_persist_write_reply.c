@@ -6,7 +6,7 @@
 #include <string.h>
 #define LIBSF_H
 #include "sf.h"
-static long sf_sys(long,uint64_t,uint64_t,uint64_t);
+static int64_t sf_sys(long,uint64_t,uint64_t,uint64_t);
 static long sf_send(uint32_t,SfMessage*);
 static long sf_recv(uint32_t,SfMessage*,uint64_t);
 static long sf_cap_close(uint64_t);
@@ -30,7 +30,7 @@ static size_t logical;
 static SfMessage reply;
 #define CHECK(c) do{checks++;if(!(c)){fprintf(stderr,"PERSIST WRITE FAIL line %d variant%u call%u: %s\n",__LINE__,variant,sends,#c);exit(1);}}while(0)
 
-static long sf_sys(long a,uint64_t b,uint64_t c,uint64_t d){(void)a;(void)b;(void)c;(void)d;return SF_DENIED;}
+static int64_t sf_sys(long a,uint64_t b,uint64_t c,uint64_t d){(void)a;(void)b;(void)c;(void)d;return SF_DENIED;}
 static long sf_cap_close(uint64_t cap){CHECK(cap==0x777);closed++;return 0;}
 static long sf_cap_derive(uint64_t cap,uint64_t rights){(void)cap;(void)rights;return SF_DENIED;}
 static long sf_send_cap(uint32_t ep,SfMessage*m,uint64_t cap){(void)ep;(void)m;(void)cap;CHECK(0);return SF_DENIED;}

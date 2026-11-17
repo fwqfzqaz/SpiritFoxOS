@@ -3,7 +3,7 @@
 #include <string.h>
 #define LIBSF_H
 #include "sf.h"
-static long sf_sys(long,uint64_t,uint64_t,uint64_t);
+static int64_t sf_sys(long,uint64_t,uint64_t,uint64_t);
 static long sf_send(uint32_t,SfMessage*);
 static long sf_recv(uint32_t,SfMessage*,uint64_t);
 static long sf_cap_close(uint64_t);
@@ -25,7 +25,7 @@ static char logs[4096];static size_t logged;
 #define CHECK(c) do{checks++;if(!(c)){fprintf(stderr,"TRUST SYNC FAIL line %d: %s\n",__LINE__,#c);exit(1);}}while(0)
 static void sf_log(const char*s){size_t n=strlen(s);CHECK(n<sizeof(logs)-logged);memcpy(logs+logged,s,n+1);logged+=n;}
 static void sf_number(uint64_t n){char s[32];snprintf(s,sizeof(s),"%llu",(unsigned long long)n);sf_log(s);}
-static long sf_sys(long op,uint64_t a,uint64_t b,uint64_t c){
+static int64_t sf_sys(long op,uint64_t a,uint64_t b,uint64_t c){
  (void)a;(void)b;(void)c;
  if(op==SYS_EP_CREATE){sys_calls++;return sys_calls==sys_fail?SF_NO_SPACE:(long)(0x100+sys_calls);}
  if(op==SYS_CAP_REVOKE){revokes++;return 0;}return SF_DENIED;

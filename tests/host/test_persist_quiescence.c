@@ -5,7 +5,7 @@
 #include <string.h>
 #define LIBSF_H
 #include "sf.h"
-static long sf_sys(long,uint64_t,uint64_t,uint64_t);
+static int64_t sf_sys(long,uint64_t,uint64_t,uint64_t);
 static long sf_send(uint32_t,SfMessage*);
 static long sf_recv(uint32_t,SfMessage*,uint64_t);
 static long sf_cap_close(uint64_t);
@@ -25,7 +25,7 @@ static unsigned checks,sends,receives,closed,variant;
 static int guard_error,send_error,recv_error,semantic,real_provider;
 static SfMessage wire;
 #define CHECK(c) do{checks++;if(!(c)){fprintf(stderr,"QUIESCENCE FAIL line %d variant%u: %s\n",__LINE__,variant,#c);exit(1);}}while(0)
-static long sf_sys(long a,uint64_t b,uint64_t c,uint64_t d){(void)a;(void)b;(void)c;(void)d;return SF_DENIED;}
+static int64_t sf_sys(long a,uint64_t b,uint64_t c,uint64_t d){(void)a;(void)b;(void)c;(void)d;return SF_DENIED;}
 static long sf_cap_close(uint64_t h){CHECK(h==0x777);closed++;return 0;}
 static long sf_cap_derive(uint64_t h,uint64_t r){(void)h;(void)r;return SF_DENIED;}
 static long sf_send_cap(uint32_t e,SfMessage*m,uint64_t c){(void)e;(void)m;(void)c;CHECK(0);return SF_DENIED;}

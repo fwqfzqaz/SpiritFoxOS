@@ -151,3 +151,40 @@ Init 的独立 `persist-terminal-test` 诊断记录 `PERSIST SNAPSHOT CAPTURE PA
 本专项证据为：信任指纹95项、parser 8197项、volume 87项、owner 170613项；生产构建
 及24次 VM 批次527.45秒、全宿主184.03秒通过。完整本地回归以及新 head 的托管结果和
 发布包尚未通过或确认，因此不宣称全绿。该专项 E1/E2 结果不能替代这些待核验项。
+
+## 私有候选卷只读重建（OP_PERSIST_CANDIDATE_VERIFY=109，2026-11-18）
+
+109是ABI相对678项目录的唯一新增，当前679项；它没有新增公开结构布局。该周期只能在
+旧108缓存快照已经捕获、105 STOP已达到 STOPPED_CLOSED，且原 PID正常零退出、旧端点已
+撤销、存储/Fs/驱动/信任元组仍密封一致后启动。候选来自固定签名的 Persist 服务包，
+spawn前重新验证；候选仅获得私有服务接收端和回复发送端，不获得驱动端点或卷写权限。
+108的capture和105的STOP仍各自独立，109不会放宽它们。
+
+Root通过同一私有端点代理sector read：109开始请求携带完整缓存快照及父 request nonce、
+verify deadline；每个读取帧使用mode 1、一个512字节扇区、严格递增的handle序号与
+`[2048,2563)`范围内的LBA，最多515帧（3个事务头扇区与两个256扇区bank）。Root只调用
+已有存储只读读取回调，不给候选驱动能力，也不提供write或flush。全部读取共享独立
+30秒有界deadline；probe/普通RPC拒绝/discard控制交换仍受3秒deadline约束。每帧都核对
+双方的内核认证发送者、opcode、nonce、deadline、sequence、LBA、状态、长度、能力数和未使用字节；
+成功终包必须逐字节匹配捕获的104字节快照。错误、超时、矛盾回复或上下文改变均封闭
+失败，不重放109，不kill、不清除围栏或DIRTY，也不重置信任状态。
+
+候选侧对收到的Root请求执行实际 `persist_candidate_verify_volume`。它只用只读回调运行
+`sf_txn_mount`解析已提交事务，不调用会回滚TRYING的`persist_mount`；任何写/flush回调
+均返回READ_ONLY。随后从事务中的durable revocation列表重建运行时撤销集合，并通过实际
+缓存摘要核对generation、notes长度、卷UUID、规范化文件摘要和信任指纹。TRYING状态返回
+BUSY，损坏/重复撤销项、读取失败、超界或任一摘要不一致均拒绝且不改盘。这里重建的只是
+隔离缓存。候选的普通RPC仍返回DRAINING；即使109成功，Root还必须完成普通元数据拒绝、
+正常DISCARD、准确候选PID的零退出确认和两个私有端点撤销。成功后也不发布候选、不开放
+普通Persist服务；candidate status只是历史结果，不是激活许可。
+
+init的正常verify诊断覆盖STABLE/PENDING两种卷状态及legacy/modern两种传输；
+verify-readerror、verify-badreply和verify-dropped各覆盖STABLE的两种传输，共十次新启动。
+verify-readerror只验证Root
+注入的sector读取错误；badreply和drop路径保持候选进程仍活着且不discard，验证旧快照与
+盘字节保持。E1实际卷重建5907项、109 parser/transport 4441242项/66场景、Root owner
+751802项/58场景；release evidence AST测试450项通过。两批合计34次真实VM专项批次
+（193.62秒与368.72秒）通过，覆盖稳定/待处理卷、读取错误、错误终包、丢终包及两种传输。
+随后完整宿主源码冻结批次171.91秒通过；四个旧Windows系统调用mock已由32位long
+改为int64_t，未改变生产比较或关闭告警。五组实际选定发布门及42份联合来源、七产物
+摘要通过。完整本地回归、新head托管和完整发布尚未完成，不能据此宣称全绿。

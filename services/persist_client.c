@@ -5,6 +5,7 @@
 #include "persist_candidate.h"
 #include "persist_snapshot.h"
 #include "trust_fingerprint.h"
+#include "persist_verify.h"
 /* sf-init side of the persistence split: every volume operation is a bounded
  * RPC to sf-persist.sfmod. The block driver endpoints are derived here with
  * RIGHT_DELEGATE and transferred once, so the service needs no root-only task
@@ -404,15 +405,69 @@ static int idle_exchange(unsigned opcode,uint64_t id,int expected,int64_t*sent,i
     m.mode!=(m.status==0?1u:0u))return SF_BAD_FORMAT;
  return m.status==expected?0:m.status?(int)m.status:SF_BAD_FORMAT;
 }
-int sf_persist_candidate_cycle(uint64_t token,SfPersistIdleSpawn spawn,void*context){
+static int idle_verify_volume(uint64_t token,SfTxnRead read,void*context){
+ uint64_t now=0;int r=terminal_now(&now);if(r)return r;
+ if(now>UINT64_MAX-SF_PERSIST_VERIFY_NS)return SF_BAD_FORMAT;
+ idle_candidate.phase=SF_PERSIST_IDLE_VERIFYING;
+ idle_candidate.verify_deadline_ns=now+SF_PERSIST_VERIFY_NS;
+ SfMessage m;memset(&m,0,sizeof(m));
+ m.h=(SfIpcHeader){sizeof(SfIpcHeader),1,0,OP_PERSIST_CANDIDATE_VERIFY,0,idle_candidate.verify_id,
+                  sizeof(m)-sizeof(SfIpcHeader),0,idle_candidate.verify_deadline_ns};
+ m.length=sizeof(SfPersistSnapshot);memcpy(m.data,&fence_capture.snapshot,sizeof(SfPersistSnapshot));
+ idle_candidate.verify_send=sf_send(idle_candidate.ep,&m);
+ if(idle_candidate.verify_send)return terminal_error(idle_candidate.verify_send);
+ for(unsigned frame=0;frame<=SF_PERSIST_VERIFY_READS;frame++){
+  idle_candidate.verify_receive=sf_recv(idle_candidate.reply,&m,idle_candidate.verify_deadline_ns);
+  if(idle_candidate.verify_receive<0)return terminal_error(idle_candidate.verify_receive);
+  if(m.h.cap_count==1)sf_cap_close(m.handle);
+  if(idle_candidate.verify_receive!=(int64_t)idle_candidate.pid||m.h.size!=sizeof(SfIpcHeader)||
+     m.h.protocol_major!=1||m.h.protocol_minor||m.h.opcode!=OP_PERSIST_CANDIDATE_VERIFY||
+     m.h.flags!=idle_candidate.pid||m.h.request_id!=idle_candidate.verify_id||m.h.cap_count||
+     m.h.payload_bytes!=sizeof(m)-sizeof(SfIpcHeader)||m.h.deadline_ns!=idle_candidate.verify_deadline_ns)return SF_BAD_FORMAT;
+  r=idle_context(token);if(r)return r;
+  if(sf_sys(SYS_TASK_STATUS,idle_candidate.pid,0,0)!=SF_TASK_RUNNING)return SF_DEVICE_GONE;
+  r=terminal_now(&now);if(r)return r;if(now>=idle_candidate.verify_deadline_ns)return SF_TIMEOUT;
+  if(m.mode==0){
+   if(m.offset||m.handle||m.status<SF_VERSION_REJECTED||m.status>0||
+      m.length!=(m.status?0u:sizeof(SfPersistSnapshot)))return SF_BAD_FORMAT;
+   unsigned used=m.status?0u:sizeof(SfPersistSnapshot);
+   for(unsigned i=used;i<sizeof(m.data);i++)if(m.data[i])return SF_BAD_FORMAT;
+   if(m.status)return(int)m.status;
+   if(idle_candidate.read_frames<3+SF_TXN_BANK_SECTORS||
+      memcmp(m.data,&fence_capture.snapshot,sizeof(SfPersistSnapshot)))return SF_BAD_FORMAT;
+   memcpy(&idle_candidate.verified_snapshot,m.data,sizeof(SfPersistSnapshot));
+   idle_candidate.verified=1;return 0;
+  }
+  if(m.mode!=1||m.status||m.length!=512||m.handle!=idle_candidate.read_frames+1u||
+     m.offset<SF_TXN_HEADER||m.offset>=SF_TXN_BANK+2*SF_TXN_BANK_SECTORS||
+     idle_candidate.read_frames>=SF_PERSIST_VERIFY_READS)return SF_BAD_FORMAT;
+  for(unsigned i=0;i<sizeof(m.data);i++)if(m.data[i])return SF_BAD_FORMAT;
+  uint64_t lba=m.offset,sequence=m.handle;uint8_t sector[512];
+  r=read(context,lba,sector);if(r>0||r<SF_VERSION_REJECTED)r=SF_BAD_FORMAT;
+  idle_candidate.read_frames++;
+  int binding=idle_context(token);if(binding)return binding;
+  if(sf_sys(SYS_TASK_STATUS,idle_candidate.pid,0,0)!=SF_TASK_RUNNING)return SF_DEVICE_GONE;
+  int clock=terminal_now(&now);if(clock)return clock;if(now>=idle_candidate.verify_deadline_ns)return SF_TIMEOUT;
+  memset(&m,0,sizeof(m));m.h=(SfIpcHeader){sizeof(SfIpcHeader),1,0,OP_PERSIST_CANDIDATE_VERIFY,0,idle_candidate.verify_id,
+                          sizeof(m)-sizeof(SfIpcHeader),0,idle_candidate.verify_deadline_ns};
+  m.mode=1;m.offset=lba;m.handle=sequence;m.status=r;
+  if(!r){m.length=512;memcpy(m.data,sector,512);}
+  int64_t sent=sf_send(idle_candidate.ep,&m);if(sent)return terminal_error(sent);
+ }
+ return SF_BAD_FORMAT;
+}
+static int candidate_cycle(uint64_t token,SfPersistIdleSpawn spawn,void*context,SfTxnRead read,void*read_context){
  if(!spawn)return SF_INVALID;
  int r=candidate_context(token);if(r)return r;
+ if(read&&(fence_capture.token!=token||fence_capture.phase!=SF_PERSIST_CAPTURE_CAPTURED||
+           fence_capture.pid!=terminal_stop.pid))return SF_DRAINING;
  /* No unknown delivery, PID or revocation can cause another private spawn. */
  if(idle_candidate.token)return SF_DRAINING;
- if(requests>UINT64_MAX-3)return SF_NO_SPACE;
+ if(requests>UINT64_MAX-(read?4u:3u))return SF_NO_SPACE;
  uint64_t now=0;r=terminal_now(&now);if(r)return r;
  memset(&idle_candidate,0,sizeof(idle_candidate));idle_candidate.token=token;
- idle_candidate.probe_id=++requests;idle_candidate.guard_id=++requests;idle_candidate.discard_id=++requests;
+ idle_candidate.probe_id=++requests;if(read)idle_candidate.verify_id=++requests;
+ idle_candidate.guard_id=++requests;idle_candidate.discard_id=++requests;
  idle_candidate.deadline_ns=now+3000000000ull;idle_candidate.phase=SF_PERSIST_IDLE_ALLOCATING;
  int64_t handle=sf_sys(SYS_EP_CREATE,0,0,0);
  if(handle<=0||handle>UINT32_MAX)return idle_failed(terminal_error(handle));
@@ -432,6 +487,11 @@ int sf_persist_candidate_cycle(uint64_t token,SfPersistIdleSpawn spawn,void*cont
  r=idle_exchange(OP_PERSIST_CANDIDATE_PROBE,idle_candidate.probe_id,0,&idle_candidate.probe_send,&idle_candidate.probe_receive);
  if(r)return idle_failed(r);idle_candidate.probe_accepted=1;
  r=idle_context(token);if(r)return idle_failed(r);
+ if(read){
+  r=idle_verify_volume(token,read,read_context);if(r)return idle_failed(r);
+  r=idle_context(token);if(r)return idle_failed(r);
+  r=terminal_now(&now);if(r)return idle_failed(r);idle_candidate.deadline_ns=now+3000000000ull;
+ }
  r=idle_exchange(OP_PERSIST_NOTES_SIZE,idle_candidate.guard_id,SF_DRAINING,&idle_candidate.guard_send,&idle_candidate.guard_receive);
  if(r)return idle_failed(r);idle_candidate.guard_denied=1;
  r=idle_context(token);if(r)return idle_failed(r);
@@ -453,6 +513,13 @@ int sf_persist_candidate_cycle(uint64_t token,SfPersistIdleSpawn spawn,void*cont
  r=idle_retire();if(r)return idle_failed(r);
  r=idle_context(token);if(r)return idle_failed(r);
  idle_candidate.phase=SF_PERSIST_IDLE_CLOSED;return 0;
+}
+int sf_persist_candidate_cycle(uint64_t token,SfPersistIdleSpawn spawn,void*context){
+ return candidate_cycle(token,spawn,context,0,0);
+}
+int sf_persist_candidate_verify_cycle(uint64_t token,SfPersistIdleSpawn spawn,void*context,SfTxnRead read,void*read_context){
+ if(!read)return SF_INVALID;
+ return candidate_cycle(token,spawn,context,read,read_context);
 }
 void sf_persist_driver_down(void){
  if(!ready())return;SfMessage m;sf_message(&m,OP_PERSIST_DRIVER_DOWN,0);pf_call(&m);
