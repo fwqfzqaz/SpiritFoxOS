@@ -3,7 +3,8 @@
 #include "linux_raw.h"
 
 #define THREAD_STACK (64u*1024u)
-#define THREAD_MAX 40
+#define LIMIT_STACK (16u*1024u)
+#define LIMIT_STACK_COUNT 32
 
 typedef struct {
  int tid;              /* CLONE_CHILD_CLEARTID 在线程退出时清零 */
@@ -12,13 +13,12 @@ typedef struct {
  void *stack;
 } LxThread;
 
-static LxThread threads[THREAD_MAX];
+static LxThread threads[LIMIT_STACK_COUNT];
 static unsigned long tls_area[4][16];
 static volatile int mutex_word;
 static volatile int gate_open;
 static volatile int gate_started;
 static volatile int counter;
-static int limit_ok;
 
 /* clone 的 C 包装：rdi=fn,rsi=arg,rdx=stack,rcx=tls,r8=tid,r9=flags。
  * 子线程在 rsp=stack 处弹出 fn/arg 并调用，随后 exit；父线程拿到 tid。 */
@@ -59,7 +59,8 @@ static inline unsigned long fs_read(long off){unsigned long value;__asm__ volati
 
 static void *lx_mmap(unsigned long bytes){
  long r=lx_raw(LX_SYS_MMAP,0,(long)bytes,LX_PROT_READ|LX_PROT_WRITE,LX_MAP_PRIVATE|LX_MAP_ANONYMOUS,-1,0);
- return r<0?(void*)0:(void*)r;
+ if(r<0){lx_puts("LINUX THREAD MMAP ERROR ");lx_putnum((unsigned long)-r);lx_puts("\n");return(void*)0;}
+ return(void*)r;
 }
 static void lx_munmap(void *p,unsigned long bytes){if(p)lx_raw(LX_SYS_MUNMAP,(long)p,(long)bytes,0,0,0,0);}
 static void lx_yield(void){lx_raw(LX_SYS_SCHED_YIELD,0,0,0,0,0,0);}
@@ -89,19 +90,30 @@ static void mutex_lock(void){
 }
 static void mutex_unlock(void){if(xchg(&mutex_word,0)==2)futex_wake(&mutex_word,1);}
 
+static long thread_create_on_stack(LxThread *t,int (*fn)(void*),void *arg,void *tls,void *stack_top);
 static long thread_create(LxThread *t,int (*fn)(void*),void *arg,void *tls){
  void *stack=lx_mmap(THREAD_STACK);
  if(!stack)return-LX_ENOMEM;
- t->tid=0;t->fn=fn;t->arg=arg;t->stack=stack;
- unsigned long flags=LX_CLONE_VM|LX_CLONE_FS|LX_CLONE_FILES|LX_CLONE_SIGHAND|LX_CLONE_THREAD|LX_CLONE_SYSVSEM|LX_CLONE_CHILD_SETTID|LX_CLONE_CHILD_CLEARTID;
- if(tls)flags|=LX_CLONE_SETTLS;
- long tid=lx_clone_start(fn,arg,(char*)stack+THREAD_STACK,tls,&t->tid,flags);
+ long tid=thread_create_on_stack(t,fn,arg,tls,(char*)stack+THREAD_STACK);
+ t->stack=stack;
  if(tid<0){lx_munmap(stack,THREAD_STACK);t->stack=0;}
  return tid;
+}
+/* The limit probe supplies pre-mapped guest stacks to avoid allocating one
+ * Linux userspace stack per clone. Kernel-created native stacks remain 64 KiB. */
+static long thread_create_on_stack(LxThread *t,int (*fn)(void*),void *arg,void *tls,void *stack_top){
+ t->tid=0;t->fn=fn;t->arg=arg;t->stack=stack_top;
+ unsigned long flags=LX_CLONE_VM|LX_CLONE_FS|LX_CLONE_FILES|LX_CLONE_SIGHAND|LX_CLONE_THREAD|LX_CLONE_SYSVSEM|LX_CLONE_CHILD_SETTID|LX_CLONE_CHILD_CLEARTID;
+ if(tls)flags|=LX_CLONE_SETTLS;
+ return lx_clone_start(fn,arg,stack_top,tls,&t->tid,flags);
 }
 static void thread_join(LxThread *t){
  while(t->tid)futex_wait(&t->tid,t->tid);
  lx_munmap(t->stack,THREAD_STACK);t->stack=0;
+}
+static void thread_join_on_arena(LxThread *t){
+ while(t->tid)futex_wait(&t->tid,t->tid);
+ t->stack=0;
 }
 
 static int tls_thread(void *p){
@@ -151,17 +163,28 @@ static int thread_main(void){
  lx_puts("LINUX THREAD MUTEX OK\n");
  /* 上限：持续创建直到内核返回 EAGAIN，再统一放行并回收。 */
  gate_open=0;gate_started=0;
+ /* The 16 KiB Linux stacks are only fixture call stacks. The native compat
+  * thread stacks allocated by the kernel remain 64 KiB each. Pre-map all
+  * slots, including the final clone expected to be rejected, before cloning. */
+ void *stack_arena=lx_mmap(LIMIT_STACK*LIMIT_STACK_COUNT);
+ REQUIRE(stack_arena!=0);
  int created=0;
- for(;;){
-  long r=thread_create(&threads[created],gate_thread,0,0);
-  if(r<0){REQUIRE(r==-LX_EAGAIN);limit_ok=1;break;}
-  created++;REQUIRE(created<THREAD_MAX);
+ long limit_result=0;
+ for(int i=0;i<LIMIT_STACK_COUNT;i++){
+  void *stack_top=(char*)stack_arena+(i+1)*LIMIT_STACK;
+  long r=thread_create_on_stack(&threads[i],gate_thread,0,0,stack_top);
+  if(r<0){limit_result=r;break;}
+  created++;
  }
  while(__atomic_load_n(&gate_started,__ATOMIC_ACQUIRE)<created)lx_yield();
  __atomic_store_n(&gate_open,1,__ATOMIC_RELEASE);
  futex_wake(&gate_open,created);
- for(int i=0;i<created;i++)thread_join(&threads[i]);
- REQUIRE(limit_ok&&created>0);
+ for(int i=0;i<created;i++)thread_join_on_arena(&threads[i]);
+ REQUIRE(lx_raw(LX_SYS_MUNMAP,(long)stack_arena,LIMIT_STACK*LIMIT_STACK_COUNT,0,0,0,0)==0);
+ if(limit_result!=-LX_EAGAIN||created!=31){lx_puts("LINUX THREAD CREATE RESULT ");lx_putnum((unsigned long)(limit_result<0?-limit_result:0));lx_puts(" created=");lx_putnum((unsigned long)created);lx_puts("\n");}
+ REQUIRE(limit_result==-LX_EAGAIN);
+ REQUIRE(created==31);
+ lx_puts("LINUX THREAD LIMIT COUNT ");lx_putnum(created);lx_puts("\n");
  lx_puts("LINUX THREAD LIMIT OK\n");
  /* futex 负例：值不匹配立即 EAGAIN；无等待者 WAKE 返回 0；20ms 超时。 */
  volatile int word=1;

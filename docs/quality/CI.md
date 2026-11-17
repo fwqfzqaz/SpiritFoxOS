@@ -164,3 +164,12 @@ Linux 如需完整 VM 验证，改用 `python3 tools/test.py`；只有完整测�
 本地逐层回归还修复了中文 Windows 下账户配置默认 GBK 读取失败（改为显式 UTF-8），Core 宿主夹具遗漏 `user_phys` / `space_map_fb` 链接依赖，以及线程优先级断言在 Windows LLP64 下的有符号/无符号比较。图形映射在该 Core 夹具中属于未建模路径，意外调用会立即失败；真实映射仍由 GUI VM 测试验证，不能用夹具代替设备验证。
 
 网络测试在启动 DHCP 已由队列轮询完成时可能尚无 IRQ 等待记录；测试服务端延迟 UDP 回包后再检查中断日志和非零计数，保留真实网络流量和 IRQ 断言。GUI 两个脚本共用 `tests/qemu/qmp.py`：Python 先绑定回环地址的随机 TCP 端口，QEMU 作为客户端连接；端口保留到连接建立，避免释放再绑定的竞争，也兼容没有 `AF_UNIX` 的 Windows Python。QMP 有超时、EOF 检查和退出清理；串口命令统一用 LF 结尾，兼容 Windows stdio 后端，图形输入、校验和及真实像素断言保留。
+
+
+### Linux 线程额度夹具与共享页池压力
+
+若启动日志先输出 `LINUX THREAD TLS OK`、`LINUX THREAD MUTEX OK`，随后在线程额度阶段失败，先区分栈 `mmap` 和 `clone` 的错误。旧夹具在每次 clone 前申请 64 KiB 栈；PR #28 的固定组合在已创建 31 个子线程后，额外栈申请返回 `ENOSPC=28`，帮助函数转成 `ENOMEM=12`，尚未执行预期返回 `EAGAIN=11` 的第 32 次 clone。因此宿主通过、持久盘启动通过，并不能代替只读 storage 盘的同一启动流程。
+
+额度阶段改为先申请一块含 32 个独立 16 KiB 访客栈的测试 arena，循环中只调用 clone。每个栈都有独立区域，最后一次被拒绝的尝试也使用独立栈；要求 31 个子线程成功、下一次 clone 精确返回 EAGAIN。原 TLS/互斥测试仍使用 64 KiB 访客栈，内核为兼容线程分配的 64 KiB 栈和原有 ABI 均未修改。所有已启动线程退出后才整体释放 arena；mmap 失败与其他 clone 错误仍使测试失败，日志保留错误码和创建数。
+
+复现和验证入口为 `python tests/qemu/qemu_posix_test.py`（只读 storage 盘启动）与 `python tests/qemu/qemu_linux_compat_test.py`（持久盘副本启动）。每次源码变化后先重新构建；本地专项与完整托管结果分别记录。
