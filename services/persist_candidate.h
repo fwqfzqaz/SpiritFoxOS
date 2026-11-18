@@ -2,6 +2,7 @@
 #define SF_PERSIST_CANDIDATE_H
 #include "package.h"
 #include "persist_snapshot.h"
+#include "persist_stage.h"
 
 /* In-memory inspection result only. A prepared plan grants no capabilities
  * and does not authorize execution or Persist service readiness. */
@@ -24,7 +25,8 @@ int sf_persist_candidate_prepare(const SfRuntimeTrust *trust,const void *data,
  * snapshots convey neither volume readiness nor activation authority. */
 enum { SF_PERSIST_IDLE_NONE, SF_PERSIST_IDLE_ALLOCATING, SF_PERSIST_IDLE_SPAWNING,
  SF_PERSIST_IDLE_PROBING, SF_PERSIST_IDLE_DISCARDING, SF_PERSIST_IDLE_EXIT_WAIT,
- SF_PERSIST_IDLE_CLOSED, SF_PERSIST_IDLE_FAILED, SF_PERSIST_IDLE_VERIFYING, SF_PERSIST_IDLE_PREPARED };
+ SF_PERSIST_IDLE_CLOSED, SF_PERSIST_IDLE_FAILED, SF_PERSIST_IDLE_VERIFYING, SF_PERSIST_IDLE_PREPARED,
+ SF_PERSIST_IDLE_STAGING, SF_PERSIST_IDLE_STAGED };
 typedef struct {
  uint64_t token,probe_id,guard_id,discard_id,deadline_ns;
  uint32_t pid,ep,reply;
@@ -48,4 +50,18 @@ int sf_persist_candidate_verify_cycle(uint64_t token,SfPersistIdleSpawn,void*,Sf
 int sf_persist_candidate_hold(uint64_t token,SfPersistIdleSpawn,void*,SfTxnRead,void*);
 int sf_persist_candidate_discard(uint64_t token);
 int sf_persist_candidate_status(uint64_t token,SfPersistIdleStatus*);
+enum { SF_PERSIST_CAPS_NONE,SF_PERSIST_CAPS_ALLOCATING,SF_PERSIST_CAPS_SENDING,
+       SF_PERSIST_CAPS_READY,SF_PERSIST_CAPS_FAILED,SF_PERSIST_CAPS_RETIRED };
+typedef struct {
+ uint64_t token,request_id[2],deadline[2];
+ uint32_t parent[2];
+ unsigned phase,branches_retired,allocation_unknown;
+ int error;
+ int64_t derive_result[2],send_result[2],receive_result[2],revoke_result[2];
+ SfPersistStageBinding binding;
+} SfPersistCapsStatus;
+/* Provisionally held, attenuated driver capabilities only. Ordinary backend
+ * globals, namespace admission and activation remain closed. */
+int sf_persist_candidate_stage_caps(uint64_t token);
+int sf_persist_candidate_caps_status(uint64_t token,SfPersistCapsStatus*);
 #endif

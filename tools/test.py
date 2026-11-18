@@ -88,7 +88,8 @@ host_test('test_txn_compat','tests/host/test_txn_compat.c','services/txn.c',no_u
 host_test('test_update','tests/host/test_update.c','services/update.c','services/txn.c',no_unused=True)
 host_test('test_persist_metadata','tests/host/test_persist_metadata.c','tests/host/persist_volume_fixture.c','services/persist_metadata.c','services/namespace.c','services/txn.c','services/update.c','services/version.c',*build.CRYPTO,no_unused=True)
 host_test('test_persist_write_reply','tests/host/test_persist_write_reply.c','services/namespace.c',*build.CRYPTO,no_unused=True)
-host_test('test_persist_terminal','tests/host/test_persist_terminal.c','services/persist_metadata.c','services/persist_idle.c','services/persist_snapshot.c','services/persist_verify.c',no_unused=True)
+host_test('test_persist_stage','tests/host/test_persist_stage.c',no_unused=True)
+host_test('test_persist_terminal','tests/host/test_persist_terminal.c','services/persist_metadata.c','services/persist_idle.c','services/persist_snapshot.c','services/persist_verify.c','services/persist_stage.c',no_unused=True)
 host_test('test_persist_idle','tests/host/test_persist_idle.c','services/persist_idle.c',include_services=True)
 host_test('test_persist_snapshot','tests/host/test_persist_snapshot.c',no_unused=True,include_services=True)
 host_test('test_persist_verify','tests/host/test_persist_verify.c',no_unused=True,include_services=True)
@@ -99,6 +100,7 @@ host_test('test_persist_idle_owner','tests/host/test_persist_idle_owner.c','serv
 host_test('test_persist_snapshot_owner','tests/host/test_persist_snapshot_owner.c','services/manager.c','services/namespace.c','services/namespace_control.c','services/namespace_transport.c',*build.CRYPTO,no_unused=True,include_services=True)
 host_test('test_persist_verify_owner','tests/host/test_persist_verify_owner.c','services/manager.c','services/namespace.c','services/namespace_control.c','services/namespace_transport.c',*build.CRYPTO,no_unused=True,include_services=True)
 host_test('test_persist_hold_owner','tests/host/test_persist_hold_owner.c','services/manager.c','services/namespace.c','services/namespace_control.c','services/namespace_transport.c',*build.CRYPTO,no_unused=True,include_services=True)
+host_test('test_persist_caps_owner','tests/host/test_persist_caps_owner.c','services/manager.c','services/namespace.c','services/namespace_control.c','services/namespace_transport.c',*build.CRYPTO,no_unused=True,include_services=True)
 host_test('test_persist_fence','tests/host/test_persist_fence.c','services/manager.c','services/namespace.c','services/namespace_control.c','services/namespace_transport.c',*build.CRYPTO,no_unused=True,include_services=True)
 host_test('test_persist_quiescence','tests/host/test_persist_quiescence.c','tests/host/persist_volume_fixture.c','services/persist_metadata.c','services/namespace.c','services/txn.c','services/update.c','services/version.c',*build.CRYPTO,no_unused=True)
 host_test('test_trust_sync','tests/host/test_trust_sync.c','services/namespace.c',*build.CRYPTO,no_unused=True)
@@ -138,6 +140,7 @@ subprocess.run([sys.executable,'tests/integration/test_persist_idle_evidence.py'
 subprocess.run([sys.executable,'tests/integration/test_persist_snapshot_evidence.py'],check=True)
 subprocess.run([sys.executable,'tests/integration/test_persist_verify_evidence.py'],check=True)
 subprocess.run([sys.executable,'tests/integration/test_persist_hold_evidence.py'],check=True)
+subprocess.run([sys.executable,'tests/integration/test_persist_stage_evidence.py'],check=True)
 subprocess.run([sys.executable,'tests/integration/test_ipc_revocation_evidence.py'],check=True)
 subprocess.run([sys.executable,'tests/integration/test_ipc_branch_evidence.py'],check=True)
 subprocess.run([sys.executable,'tests/integration/test_persist_candidate_image.py'],check=True)
@@ -194,6 +197,7 @@ if not args.host_only:
     subprocess.run([sys.executable, 'tests/qemu/qemu_persist_snapshot_test.py'], check=True)
     subprocess.run([sys.executable, 'tests/qemu/qemu_persist_verify_test.py'], check=True)
     subprocess.run([sys.executable, 'tests/qemu/qemu_persist_hold_test.py'], check=True)
+    subprocess.run([sys.executable, 'tests/qemu/qemu_persist_stage_test.py'], check=True)
     subprocess.run([sys.executable, 'tests/qemu/qemu_namespace_recovery_test.py'], check=True)
     subprocess.run([sys.executable, 'tests/qemu/qemu_hardware_test.py'], check=True)
     # USB：xHCI 初始化、HID 枚举、键盘输入、指针注入与热插拔。
@@ -282,11 +286,15 @@ result['ipc_branch_qemu'] = {} if args.host_only else json.loads((ROOT/'build/ip
 result['ipc_revocation_host'] = {'passed':True,'evidence':'E1-real-kernel-mocked-user-copy','checks':9151}
 result['ipc_revocation_qemu'] = {} if args.host_only else json.loads((ROOT/'build/ipc-revocation-results.json').read_text(encoding='utf-8'))
 result['persist_hold_host'] = {'passed':True,'evidence':'E1-held-owner-mocked-kernel-transport','checks':247421,'cases':14}
+result['persist_stage_host'] = {'passed':True,'evidence':'E1-real-stage-codec-and-mocked-owner-IPC',
+                                'provider_checks':22098,'provider_cases':4003,
+                                'owner_checks':1220783,'owner_cases':50}
 result['persist_terminal_qemu'] = {} if args.host_only else json.loads((ROOT/'build/persist-terminal-results.json').read_text(encoding='utf-8'))
 result['persist_idle_qemu'] = {} if args.host_only else json.loads((ROOT/'build/persist-idle-results.json').read_text(encoding='utf-8'))
 result['persist_snapshot_qemu'] = {} if args.host_only else json.loads((ROOT/'build/persist-snapshot-results.json').read_text(encoding='utf-8'))
 result['persist_verify_qemu'] = {} if args.host_only else json.loads((ROOT/'build/persist-verify-results.json').read_text(encoding='utf-8'))
 result['persist_hold_qemu'] = {} if args.host_only else json.loads((ROOT/'build/persist-hold-results.json').read_text(encoding='utf-8'))
+result['persist_stage_qemu'] = {} if args.host_only else json.loads((ROOT/'build/persist-stage-results.json').read_text(encoding='utf-8'))
 result['persist_write_reply_qemu'] = {} if args.host_only else json.loads((ROOT/'build/persist-write-reply-results.json').read_text(encoding='utf-8'))
 result['persist_read_qemu_boots'] = 0 if args.host_only else 2
 result['persist_read_qemu_bytes'] = 0 if args.host_only else 8192

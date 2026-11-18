@@ -8,6 +8,7 @@
 static int64_t sf_send(uint32_t,SfMessage*);
 static int64_t sf_recv(uint32_t,SfMessage*,uint64_t);
 static int64_t sf_cap_close(uint64_t);
+static int64_t sf_cap_derive(uint64_t h,uint64_t rights){(void)h;(void)rights;return SF_DENIED;}
 static uint64_t sf_ticks(void);
 #include "../../services/persist_terminal.c"
 
