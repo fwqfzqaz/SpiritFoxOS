@@ -14,6 +14,11 @@ static long sf_cap_derive(uint64_t,uint64_t);
 static long sf_send_cap(uint32_t,SfMessage*,uint64_t);
 static uint64_t sf_ticks(void);
 static void sf_yield(void);
+#ifdef SF_TEST_STAGE_OWNER
+static int caps_owner_sys_hook(long,uint64_t,uint64_t,uint64_t,int64_t*);
+static int caps_owner_send_cap_hook(uint32_t,SfMessage*,uint64_t,int64_t*);
+static int caps_owner_recv_hook(uint32_t,SfMessage*,uint64_t,int64_t*);
+#endif
 #ifdef SF_TEST_IDLE_OWNER
 static int idle_owner_sys_hook(long,uint64_t,uint64_t,uint64_t,int64_t*);
 static int idle_owner_send_hook(uint32_t,SfMessage*,int64_t*);
@@ -43,6 +48,9 @@ static SfTrustKey policy_keys[2];
 static void mutate(unsigned);
 static int no_spawn(const char*p,uint32_t a,uint32_t b,uint32_t c,uint32_t d,uint32_t e){(void)p;(void)a;(void)b;(void)c;(void)d;(void)e;CHECK(0);return SF_DENIED;}
 static int64_t sf_sys(long op,uint64_t a,uint64_t b,uint64_t c){
+#ifdef SF_TEST_STAGE_OWNER
+ int64_t caps_result;if(caps_owner_sys_hook(op,a,b,c,&caps_result))return caps_result;
+#endif
 #ifdef SF_TEST_IDLE_OWNER
  int64_t hook_result;if(idle_owner_sys_hook(op,a,b,c,&hook_result))return hook_result;
 #endif
@@ -71,7 +79,13 @@ static void sf_yield(void){sf_sys(SYS_YIELD,0,0,0);}
 static void sf_assert(int ok,const char*why){(void)why;CHECK(ok);}
 static long sf_cap_close(uint64_t cap){CHECK(cap==0x777);closes++;return 0;}
 static long sf_cap_derive(uint64_t cap,uint64_t rights){(void)cap;(void)rights;CHECK(0);return SF_DENIED;}
-static long sf_send_cap(uint32_t ep,SfMessage*m,uint64_t cap){(void)ep;(void)m;(void)cap;CHECK(0);return SF_DENIED;}
+static long sf_send_cap(uint32_t ep,SfMessage*m,uint64_t cap){
+#ifdef SF_TEST_STAGE_OWNER
+ m->h.cap_count=1;m->handle=cap;
+ int64_t caps_result;if(caps_owner_send_cap_hook(ep,m,cap,&caps_result))return caps_result;
+#endif
+ (void)ep;(void)m;(void)cap;CHECK(0);return SF_DENIED;
+}
 int sf_ns_client_healthy(void){return namespace_alive;}
 void sf_ns_peer_lost(void){CHECK(0);}
 int64_t sf_ns_client_callback(uint32_t from,SfMessage*m){(void)from;(void)m;CHECK(0);return SF_DENIED;}
@@ -100,6 +114,9 @@ static int64_t sf_send(uint32_t ep,SfMessage*m){
  return send_result;
 }
 static int64_t sf_recv(uint32_t ep,SfMessage*m,uint64_t deadline){
+#ifdef SF_TEST_STAGE_OWNER
+ int64_t caps_result;if(caps_owner_recv_hook(ep,m,deadline,&caps_result))return caps_result;
+#endif
 #ifdef SF_TEST_IDLE_OWNER
  int64_t hook_result;if(idle_owner_recv_hook(ep,m,deadline,&hook_result))return hook_result;
 #endif

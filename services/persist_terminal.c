@@ -43,27 +43,44 @@ static int verify_channel_now(void*context,uint64_t*out){
  *out=ticks*10000000ull;return 0;
 }
 static void verify_channel_close(void*context,uint64_t cap){(void)context;sf_cap_close(cap);}
+static int64_t stage_derive(void*context,uint64_t cap,unsigned rights){(void)context;return sf_cap_derive(cap,rights);}
+static int64_t stage_close(void*context,uint64_t cap){(void)context;return sf_cap_close(cap);}
 int64_t persist_serve_with_idle(const SfBootArgs*a,int(*ordinary)(SfMessage*),
                               int64_t(*reply_send)(uint32_t,SfMessage*),int(*unbound)(void),SfPersistSnapshotGet snapshot_get,SfPersistVolumeVerify volume_verify){
  if(!a||!a->service||!a->manager||!ordinary||!reply_send)return SF_INVALID;
  SfPersistTerminal terminal={0};
- SfPersistIdle idle={0};SfPersistVerify verification={0};int ordinary_seen=0;
+ SfPersistIdle idle={0};SfPersistVerify verification={0};SfPersistStage stage={0};
+ SfPersistSnapshot verified_snapshot={0};int verified=0,ordinary_seen=0;
  for(;;){
   SfMessage m;int64_t from=sf_recv(a->service,&m,0);if(from<0)return from;
-  if(m.h.opcode==OP_PERSIST_CANDIDATE_PROBE||m.h.opcode==OP_PERSIST_CANDIDATE_DISCARD||idle.entered){
-   if(m.h.cap_count==1)sf_cap_close(m.handle);
+  if(m.h.opcode==OP_PERSIST_CANDIDATE_PROBE||m.h.opcode==OP_PERSIST_CANDIDATE_DISCARD||
+     m.h.opcode==OP_PERSIST_CANDIDATE_CAPS||idle.entered){
+   if(m.h.opcode!=OP_PERSIST_CANDIDATE_CAPS&&m.h.cap_count==1)sf_cap_close(m.handle);
    uint64_t ticks=sf_ticks();if(ticks>UINT64_MAX/10000000ull)return SF_TIMEOUT;
    uint64_t now=ticks*10000000ull;
    int control=m.h.opcode==OP_PERSIST_CANDIDATE_PROBE||m.h.opcode==OP_PERSIST_CANDIDATE_DISCARD;
    /* Never evaluate a candidate permission by mounting or attaching. A
     * fresh provider may be privately inspected; ordinary authority stays off. */
    int available=!ordinary_seen&&unbound&&unbound()==1;
+   if(m.h.opcode==OP_PERSIST_CANDIDATE_CAPS){
+    SfPersistStageCaps caps={0,stage_derive,stage_close};
+    if(stage.last_nonce<idle.last_nonce)stage.last_nonce=idle.last_nonce;
+    unsigned mode=m.mode;SfPersistStageBinding binding;memset(&binding,0,sizeof(binding));
+    int r=persist_stage_dispatch(&stage,from,&m,now,available&&idle.entered&&verified,a->pid,
+                                 verified?&verified_snapshot:0,&caps);
+    if(idle.last_nonce<stage.last_nonce)idle.last_nonce=stage.last_nonce;
+    if(!r)binding=stage.binding;
+    persist_stage_reply(&m,r,now,mode,r?0:&binding);reply_send(a->manager,&m);
+    if(stage.fatal)return SF_BAD_FORMAT;
+    continue;
+   }
    if(m.h.opcode==OP_PERSIST_CANDIDATE_VERIFY&&idle.entered){
     VerifyChannel channel={a,reply_send};
     SfPersistVerifyTransport transport={&channel,verify_channel_send,verify_channel_receive,verify_channel_now,verify_channel_close};
     if(verification.last_nonce<idle.last_nonce)verification.last_nonce=idle.last_nonce;
     SfPersistSnapshot snapshot;
     int r=persist_verify_dispatch(&verification,from,&m,now,available,volume_verify,&transport,&snapshot);
+    if(!r){verified_snapshot=snapshot;verified=1;}
     if(idle.last_nonce<verification.last_nonce)idle.last_nonce=verification.last_nonce;
     persist_verify_reply(&m,r,now,r?0:&snapshot);reply_send(a->manager,&m);continue;
    }

@@ -1,5 +1,13 @@
 # 测试记录
 
+## 临时候选能力与CI接续（2026-11-18）
+
+2026-11-18当前组合已完成：含初始构建、冻结源码的完整宿主226.06秒通过（ABI681、旧680逐值保持），八次新临时能力+六次原hold真实访客262.52秒通过；两组实际发布门绑定各37项来源、并集39项及同一七项原始构建产品。九组AST证据负例共2260检查通过，其中stage490。原host-only结果保留空guest字段，没有把专项拼成完整套件。签名故障夹具已恢复。此前216.7秒来源清单夹具失败不计通过；本地完整VM及完整发布仍未验证，按已授权草稿+托管完整验证路线继续。
+
+重现命令：`python tools/test.py --host-only`，随后在同一源码构建运行`python tests/qemu/qemu_persist_stage_test.py`（八次）及`python tests/qemu/qemu_persist_hold_test.py`（六次）。仅专项通过时不得运行/声称完整发布通过。暂存与丢弃发布门分别核对实际源码和七项原始产品，synthetic AST输入仅验证门禁拒绝行为。
+
+同日USB/GUI CI修复另在隔离工作树验证：显式选择实际HID鼠标并回读，要求反向坐标变化；三次USB与GUI及完整宿主通过。PR38组合另通过USB与四次能力撤销访客。Windows绝对预算现为120分钟，单VM期限及完整清单不变；配置与文档示例一致，见[CI配置](CI.md)。旧失败/取消与各新head托管结果分别记录。
+
 ## Windows/Linux CI 兼容修复（2026-11-08）
 
 本轮在 Windows x64 / Python 3.14 / Rust 1.99.1 / Zig 0.13.0 上重新执行 `python tools/test.py`（包含初始构建），3150.79 秒、退出码 0。宿主、集成和全部既有 QEMU 场景通过，包含网络独立/磁盘共存、GUI 输入/真实扫描输出、IOMMU、1/2 CPU 线程、会话、持久化/更新/故障恢复与旧事务盘升级。日志 `build/ci-final-full-20261108.log`，机器结果 `build/ci-verified-test-results-20261108.json`，证明 `.cache/ci-full-proof-20261108.json`。此前因额度中断或启动 IRQ 观察时序失败的尝试不计为完整通过。

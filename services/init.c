@@ -1027,6 +1027,43 @@ static int persist_candidate_sector(void*context,uint64_t lba,uint8_t out[512]){
  return sf_storage_sector_read(0,lba,out);
 }
 static uint64_t held_candidate_token;
+static void persist_candidate_stage_test(void){
+ int r=SF_NOT_FOUND;uint64_t token=held_candidate_token;if(!token)goto done;
+ SfPersistStopStatus stop_before,stop_after;SfPersistCaptureStatus capture_before,capture_after;
+ SfPersistIdleStatus before,after;SfPersistCapsStatus caps,again;
+ SfRuntimeTrust trust=sf_trust;uint8_t disk_before[96],disk_after[96];
+ long root_caps=sf_task_cap_usage(1);
+ if(root_caps<0||sf_persist_candidate_status(token,&before)||before.phase!=SF_PERSIST_IDLE_PREPARED||
+    sf_persist_fence_stop_status(token,&stop_before)||sf_persist_fence_capture_status(token,&capture_before)||
+    transaction_fingerprint(disk_before)){r=SF_DRAINING;goto done;}
+ r=sf_persist_candidate_stage_caps(token);
+ if(sf_persist_candidate_status(token,&after)||sf_persist_candidate_caps_status(token,&caps)||
+    sf_persist_fence_stop_status(token,&stop_after)||memcmp(&stop_before,&stop_after,sizeof(stop_before))||
+    sf_persist_fence_capture_status(token,&capture_after)||memcmp(&capture_before,&capture_after,sizeof(capture_before))||
+    transaction_fingerprint(disk_after)||memcmp(disk_before,disk_after,sizeof(disk_before))||
+    memcmp(&trust,&sf_trust,sizeof(trust))||!sf_persist_fenced()||after.pid!=before.pid){r=SF_BAD_FORMAT;goto done;}
+ if(!r){
+  if(after.phase!=SF_PERSIST_IDLE_STAGED||caps.phase!=SF_PERSIST_CAPS_READY||caps.error||caps.allocation_unknown||
+     !caps.parent[0]||!caps.parent[1]||caps.parent[0]==caps.parent[1]||
+     caps.parent[0]==stop_before.driver_ep||caps.parent[1]==stop_before.driver_reply||
+     sf_task_cap_usage(1)!=root_caps+2||sf_task_cap_usage(after.pid)!=4||
+     sf_sys(SYS_TASK_STATUS,after.pid,0,0)!=SF_TASK_RUNNING||
+     sf_persist_candidate_stage_caps(token)!=SF_DRAINING||sf_persist_candidate_caps_status(token,&again)||
+     memcmp(&caps,&again,sizeof(caps))){r=SF_BAD_FORMAT;goto done;}
+  sf_log("PERSIST PROVISIONAL CAPS READY phase=11 pid=");sf_number(after.pid);
+  sf_log(" root-parents=2 candidate-caps=4 preserved=1\n");return;
+ }
+ if(after.phase==SF_PERSIST_IDLE_FAILED&&caps.phase==SF_PERSIST_CAPS_FAILED&&caps.branches_retired&&
+    !caps.parent[0]&&!caps.parent[1]&&!caps.allocation_unknown&&sf_task_cap_usage(1)==root_caps&&
+    sf_task_cap_usage(after.pid)==2&&sf_sys(SYS_TASK_STATUS,after.pid,0,0)==SF_TASK_RUNNING&&
+    sf_persist_candidate_stage_caps(token)==SF_DRAINING&&!sf_persist_candidate_caps_status(token,&again)&&
+    !memcmp(&caps,&again,sizeof(caps))){
+  sf_log("PERSIST PROVISIONAL CAPS FAILED CLOSED code=");sf_number((uint64_t)-r);
+  sf_log(" parents-retired=1 candidate-caps=2 preserved=1\n");
+ }
+done:
+ if(r){sf_log("persist-candidate-stage: refused code=");sf_number(r<0?(uint64_t)-r:(uint64_t)r);sf_log("\n");}
+}
 static void persist_candidate_discard_test(void){
  int r=SF_NOT_FOUND;uint64_t token=held_candidate_token;
  if(!token)goto done;
@@ -1034,7 +1071,8 @@ static void persist_candidate_discard_test(void){
  SfPersistIdleStatus before,after;uint8_t disk_before[96],disk_after[96];
  if(sf_persist_fence_stop_status(token,&stop_before)||sf_persist_fence_capture_status(token,&capture_before)||
     sf_persist_candidate_status(token,&before)){r=SF_BAD_FORMAT;goto done;}
- if(before.phase!=SF_PERSIST_IDLE_PREPARED){r=sf_persist_candidate_discard(token);if(!r)r=SF_BAD_FORMAT;goto done;}
+ if(before.phase!=SF_PERSIST_IDLE_PREPARED&&before.phase!=SF_PERSIST_IDLE_STAGED){r=sf_persist_candidate_discard(token);if(!r)r=SF_BAD_FORMAT;goto done;}
+ int staged=before.phase==SF_PERSIST_IDLE_STAGED;SfPersistCapsStatus owned_caps;
  if(!before.verified||transaction_fingerprint(disk_before)){r=SF_BAD_FORMAT;goto done;}
  uint64_t observed_ticks=sf_ticks();
  int old_expired=observed_ticks<=UINT64_MAX/10000000ull&&observed_ticks*10000000ull>=before.deadline_ns;
@@ -1042,7 +1080,9 @@ static void persist_candidate_discard_test(void){
  if(r){
   if(sf_persist_candidate_status(token,&after)||after.phase!=SF_PERSIST_IDLE_FAILED||!after.verified||
      after.pid!=before.pid||memcmp(&after.verified_snapshot,&before.verified_snapshot,sizeof(before.verified_snapshot))||
-     after.discard_accepted||after.death_confirmed||after.retired||sf_task_cap_usage(1)!=caps||
+     after.discard_accepted||after.death_confirmed||after.retired||sf_task_cap_usage(1)!=caps-(staged?2:0)||
+     (staged&&(sf_persist_candidate_caps_status(token,&owned_caps)||!owned_caps.branches_retired||
+       owned_caps.phase!=SF_PERSIST_CAPS_FAILED||owned_caps.parent[0]||owned_caps.parent[1]))||
      sf_persist_fence_stop_status(token,&stop_after)||memcmp(&stop_before,&stop_after,sizeof(stop_before))||
      sf_persist_fence_capture_status(token,&capture_after)||memcmp(&capture_before,&capture_after,sizeof(capture_before))||
      transaction_fingerprint(disk_after)||memcmp(disk_before,disk_after,sizeof(disk_before))||!sf_persist_fenced())goto done;
@@ -1051,7 +1091,9 @@ static void persist_candidate_discard_test(void){
   sf_log(" death=");sf_number(after.death_confirmed);sf_log(" retired=");sf_number(after.retired);
   sf_log(" old_expired=");sf_number((uint64_t)old_expired);sf_log("\n");goto done;
  }
- if(caps<2||sf_task_cap_usage(1)!=caps-2||sf_persist_candidate_status(token,&after)||
+ if(caps<(staged?4:2)||sf_task_cap_usage(1)!=caps-(staged?4:2)||sf_persist_candidate_status(token,&after)||
+    (staged&&(sf_persist_candidate_caps_status(token,&owned_caps)||!owned_caps.branches_retired||
+      owned_caps.phase!=SF_PERSIST_CAPS_RETIRED||owned_caps.parent[0]||owned_caps.parent[1]))||
     after.phase!=SF_PERSIST_IDLE_CLOSED||!after.verified||!after.discard_accepted||!after.death_confirmed||!after.retired||
     after.pid!=before.pid||memcmp(&after.verified_snapshot,&before.verified_snapshot,sizeof(before.verified_snapshot))||
     sf_persist_fence_stop_status(token,&stop_after)||memcmp(&stop_before,&stop_after,sizeof(stop_before))||
@@ -1546,6 +1588,7 @@ static void command(char*line){
  else if(!strcmp(line,"ipc-cancel-test"))ipc_cancel_test();
  else if(!strcmp(line,"ipc-revocation-test"))ipc_revocation_test();
  else if(!strcmp(line,"ipc-branch-test"))ipc_branch_test();
+ else if(!strcmp(line,"persist-candidate-stage"))persist_candidate_stage_test();
  else if(!strcmp(line,"page-limit")||!memcmp(line,"page-limit ",11))page_limit_line(line+10);
  else if(!strcmp(line,"cap-limit")||!memcmp(line,"cap-limit ",10))cap_limit_line(line+9);
  else if(!memcmp(line,"revoke-key ",11)){int r=sf_persist_revoke(line+11);if(!r)sf_log("revoke: OK\n");else if(r==1)sf_log("revoke: UNCHANGED\n");else{sf_log("revoke: failed code=");sf_number(-r);sf_log("\n");}}

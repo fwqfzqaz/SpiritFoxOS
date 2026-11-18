@@ -3,6 +3,7 @@
 #include "sf.h"
 #include "persist_snapshot.h"
 #include "persist_verify.h"
+#include "persist_stage.h"
 
 /* Private provider state, never a wire structure or a Root restart permit.
  * A valid STOP consumes its monotonic nonce even when quiescence says BUSY. */

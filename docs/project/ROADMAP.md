@@ -217,3 +217,6 @@ CI 独立核对。P0 的命名空间拆分及策略边界已有 E1/E2 证据，�
 2026-11-12：P1 有界应用接口完成目录遍历游标。应用文件 RPC 追加 `OP_ENUMERATE_AT=27`，Fs 私有命名空间协议追加 `OP_NS_ENUMERATE_AT=228`；请求 `offset` 为零基子项序号、`length` 为输出容量，成功返回单个 NUL 结尾名称，0 表示结束，容量不足为 `SF_NO_SPACE`。游标无服务端状态，越界序号、非目录句柄和陈旧句柄分别拒绝。SDK 增加 `sf_file_enumerate_at`；ABI 快照只追加两项至 660。宿主 `test_file_rpc`（364 项）与 `test_file_client`、`qemu_file_client_test.py`（legacy/modern 两次启动）均通过；同时修正 Fs 进程把 `OP_NS_UNMOUNT` 之后的新操作码误判为磁盘消息的范围检查。
 
 2026-11-08：M7 的有界图形切片完成。内核追加 `SF_FB=0x70000000`、`SfFbInfo`、`SYS_FB_GRANT=32` 与 `SYS_FB_MAP=33`：仅 PID 1 可把固件 framebuffer 授权给单一进程，目标进程经 `space_map_fb` 逐页建立 RW+NX+缓存禁用映射（不占私有数据页）。新增 `sf-wm.sfmod`（`org.spiritfox.wm`）与纯 C 布局核心 `services/tiling.c`：4 工作区 × 16 列 × 8 窗口、列内纵向堆叠、列宽/窗口高度千分比、水平滚动、consume/expel、焦点夹紧与容量无副作用。`sf-init` 新增 root `gui` 命令，经模块生命周期启动合成器、串口字节以 `OP_WM_INPUT` 转发、`Ctrl-]` 退出并恢复 shell；期间继续驱动既有服务监督。宿主 `test_tiling` 与 QEMU `qemu_gui_test.py`（`-display none -vga std`）验证布局状态与不同 framebuffer 校验和。真实输入驱动、GUI 客户端协议、多显示器与 GPU 仍未实现，详见 [GRAPHICS](../architecture/GRAPHICS.md)。
+
+
+2026-11-18当前P1前置工作树：在已验证的活候选上暂存两支精确可撤销的私有驱动能力，Root保留派生parent，候选衰减后CLOSE入站句柄；失败/未知结果隔离并逐支撤销，后续显式丢弃要求完整回收。ABI仅追加OP115至681。该切片不执行驱动I/O、不安装普通后端、不开放命名空间或激活候选；普通服务重新绑定、恢复及激活仍需后续独立设计与验证。当前专项、完整托管与提交状态分别以PROGRESS和真实CI为准。
