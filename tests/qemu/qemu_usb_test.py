@@ -4,6 +4,7 @@
 import os
 from pathlib import Path
 import queue
+import re
 import shutil
 import subprocess
 import sys
@@ -48,6 +49,21 @@ def command(qmp_endpoint):
             '-device', 'usb-kbd,id=ukbd,bus=xhci.0',
             '-device', 'usb-mouse,id=umouse,bus=xhci.0',
             '-device', 'isa-debug-exit,iobase=0xf4,iosize=0x04']
+
+
+def select_usb_mouse(qmp):
+    # Q35 also exposes a PS/2 mouse, which may be selected by default.
+    # input-send-event.device selects a display, not an input device.
+    mice = qmp.execute('query-mice')
+    usb = [m for m in mice if m['name'] == 'QEMU HID Mouse' and not m['absolute']]
+    if len(usb) != 1:
+        raise RuntimeError('Expected one relative USB HID mouse: %r' % mice)
+    index = usb[0]['index']
+    qmp.execute('human-monitor-command', {'command-line': 'mouse_set %d' % index})
+    selected = qmp.execute('query-mice')
+    if [m['index'] for m in selected if m['current']] != [index]:
+        raise RuntimeError('USB HID mouse was not selected: %r' % selected)
+    print('USB QMP mouse selected: index=%d' % index, flush=True)
 
 
 def main():
@@ -95,8 +111,29 @@ def main():
             process.stdin.flush()
             time.sleep(.02)
 
-    def pointer_count():
-        return output.count(b'WM: pointer x=')
+    def pointer_positions():
+        return [(int(x), int(y)) for x, y in
+                re.findall(rb'WM: pointer x=(\d+) y=(\d+) b=\d+\r?\n', output)]
+
+    def move_and_wait(dx, dy, previous=None):
+        before = len(pointer_positions())
+        qmp.execute('input-send-event', {'events': [
+            {'type': 'rel', 'data': {'axis': 'x', 'value': dx}},
+            {'type': 'rel', 'data': {'axis': 'y', 'value': dy}}]})
+        until = time.monotonic() + 10
+        while True:
+            for position in pointer_positions()[before:]:
+                if previous is None or (position[0] < previous[0] and
+                                        position[1] < previous[1]):
+                    return position
+            if time.monotonic() > until:
+                raise RuntimeError('USB mouse movement did not reach the compositor')
+            if process.poll() is not None and chunks.empty():
+                raise RuntimeError('QEMU exited before USB mouse movement')
+            try:
+                output.extend(chunks.get(timeout=.1))
+            except queue.Empty:
+                continue
 
     qmp = None
     try:
@@ -106,6 +143,7 @@ def main():
         expect('[USB] HID keyboard', 20)
         expect('[USB] HID mouse', 20)
         qmp = qmp_endpoint.accept()
+        select_usb_mouse(qmp)
 
         # USB 键盘：按键经 xHCI 中断端点进入内核控制台输入缓冲。
         output.clear()
@@ -119,18 +157,10 @@ def main():
         send(b'gui\n')
         expect('GUI: started pid=', 30)
         expect('WM: fb=', 30)
-        before = pointer_count()
-        qmp.execute('input-send-event', {'events': [
-            {'type': 'rel', 'data': {'axis': 'x', 'value': 60}},
-            {'type': 'rel', 'data': {'axis': 'y', 'value': 40}}]})
-        until = time.monotonic() + 10
-        while pointer_count() <= before:
-            if time.monotonic() > until:
-                raise RuntimeError('USB mouse movement did not reach the compositor')
-            try:
-                output.extend(chunks.get(timeout=.1))
-            except queue.Empty:
-                continue
+        position = move_and_wait(60, 40)
+        # A second, opposite movement must change both coordinates. A stale
+        # initial pointer line or a duplicated packet cannot satisfy this.
+        move_and_wait(-30, -20, position)
 
         # 热插拔：移除后重新插入键盘，必须重新枚举并继续输入。
         output.clear()

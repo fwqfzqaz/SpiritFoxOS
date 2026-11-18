@@ -1274,6 +1274,20 @@ static void cap_limit_test(void){
  sf_assert(sf_task_cap_usage(pid)==SF_NOT_FOUND&&sf_sys(SYS_TASK_CAP_LIMIT,pid,0,SF_LIMIT_QUERY)==SF_NOT_FOUND,"retired child usage/limit is not configurable");
  sf_log("CAP LIMIT TEST PASSED\n");
 }
+static void ipc_revocation_test(void){
+ long before=sf_task_cap_usage(1);sf_assert(before>=0,"revocation records root handle usage");
+ int pid=launch_app("revokeprobe.sfk");sf_assert(pid>0,"revocation owns gated probe application");
+ Child*c=child((uint32_t)pid);long shared=sf_ep_create();sf_assert(c&&shared>0,"revocation owns private shared endpoint");
+ SfMessage m;sf_message(&m,OP_ECHO,0x7265766full);
+ sf_assert(!sf_send_cap(c->reply,&m,(uint32_t)shared),"revocation grants only disposable private endpoint");
+ sf_assert(!wait_app((uint32_t)pid),"revocation probe exits normally");
+ sf_message(&m,OP_ECHO,0x72657670ull);
+ sf_assert(!sf_send((uint32_t)shared,&m)&&sf_recv((uint32_t)shared,&m,sf_deadline(500))==1&&
+           m.h.request_id==0x72657670ull,"child subtree revocation preserves owner's private endpoint");
+ sf_assert(!sf_cap_close((uint32_t)shared)&&sf_task_cap_usage(1)==before,"revocation releases only diagnostic handles");
+ sf_assert(!echo_call(echo_ep,echo_pid),"revocation leaves ordinary service usable");
+ sf_log("IPC REVOCATION TEST PASSED\n");
+}
 static void ipc_cancel_test(void){
  int pid=launch_app("cancelprobe.sfk");sf_assert(pid>0,"send withdrawal test owns gated application");
  SfMessage keep;sf_message(&keep,OP_HELLO,0x100000007ull);keep.status=0xca11;
@@ -1421,14 +1435,23 @@ fail:
  if(wm_ep){sf_sys(SYS_CAP_REVOKE,wm_ep,0,0);wm_ep=0;}
  sfmod_prepare(&manager,wm_slot);sfmod_stop(&manager,wm_slot);return r;
 }
+static void gui_ready_log(void){
+ /* One SYS_LOG per line: WM can register apps while Root announces ready. */
+ char line[64]="GUI: started pid=",digits[10];
+ unsigned used=sizeof("GUI: started pid=")-1,count=0;uint32_t value=wm_pid;
+ do{digits[count++]=(char)('0'+value%10);value/=10;}while(value);
+ while(count)line[used++]=digits[--count];line[used++]='\n';line[used]=0;
+ sf_log(line);
+}
 /* gui：串口按键转发给合成器；Ctrl-] 退出并回到串口 shell。 */
 static void gui_line(void){
  if(wm_slot>=0&&manager.modules[wm_slot].state==MOD_ACTIVE){sf_log("gui: busy\n");return;}
  int r=gui_start();
  if(r){sf_log("gui: unavailable code=");sf_number(r<0?-(int64_t)r:r);sf_log("\n");return;}
- sf_log("GUI: started pid=");sf_number(wm_pid);sf_log("\n");
  /* 指针从屏幕中心开始，同时清掉进入图形前的积压移动。 */
  sf_sys(SYS_POINTER_READ,1,0,0);
+ /* 已就绪日志必须在清队列之后，避免测试/输入方的首个移动被启动清理丢掉。 */
+ gui_ready_log();
  for(;;){
   echo_supervise();native_supervise();manager_serve();
   long pointer=sf_sys(SYS_POINTER_READ,0,0,0);
@@ -1505,6 +1528,7 @@ static void command(char*line){
  else if(!strcmp(line,"page-quota-test"))page_quota_test();
  else if(!strcmp(line,"cap-limit-test"))cap_limit_test();
  else if(!strcmp(line,"ipc-cancel-test"))ipc_cancel_test();
+ else if(!strcmp(line,"ipc-revocation-test"))ipc_revocation_test();
  else if(!strcmp(line,"page-limit")||!memcmp(line,"page-limit ",11))page_limit_line(line+10);
  else if(!strcmp(line,"cap-limit")||!memcmp(line,"cap-limit ",10))cap_limit_line(line+9);
  else if(!memcmp(line,"revoke-key ",11)){int r=sf_persist_revoke(line+11);if(!r)sf_log("revoke: OK\n");else if(r==1)sf_log("revoke: UNCHANGED\n");else{sf_log("revoke: failed code=");sf_number(-r);sf_log("\n");}}

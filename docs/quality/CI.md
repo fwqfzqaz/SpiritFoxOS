@@ -15,7 +15,7 @@ Windows/POSIX/含空格路径交给真实汇编器，逐字节核对三个 blob�
 
 仓库有两个工作流，配置文件必须位于 `.github/workflows/`，使用 UTF-8、空格缩进的 YAML。以下配置与本轮修复后的文件一致；修改工作流时同步更新本页。它们是 GitHub Actions，不是本地 Codex 的额度监测任务。
 
-2026-11-11：通用串口 VM 等待使用 `tests/qemu/poll_deadline.py` 的轮询预算。正常每 0.1 秒轮询时，原 45/60 秒预算保持；单次宿主未获调度超过 2 秒时只扣 2 秒，避免电脑暂停后尚未消费已排队输出就直接超时。这只识别调度间隔，不据此断言系统发生了休眠，也不是性能测量。持续无应答仍会耗尽有效轮询预算，客户机故障/退出/响应内容检查保留；Windows CI 的 90 分钟绝对作业时限保持。8 组确定性宿主测试覆盖正常预算、长间隔、重复间隔仍超时、坏时钟，以及真实 VM 等待方法的排队响应和静默客户机拒绝路径；并入宿主套件和发布门。
+2026-11-11：通用串口 VM 等待使用 `tests/qemu/poll_deadline.py` 的轮询预算。正常每 0.1 秒轮询时，原 45/60 秒预算保持；单次宿主未获调度超过 2 秒时只扣 2 秒，避免电脑暂停后尚未消费已排队输出就直接超时。这只识别调度间隔，不据此断言系统发生了休眠，也不是性能测量。持续无应答仍会耗尽有效轮询预算，客户机故障/退出/响应内容检查保留；Windows CI 原90分钟绝对作业时限现调整为下述120分钟（单次VM等待预算不变）。8 组确定性宿主测试覆盖正常预算、长间隔、重复间隔仍超时、坏时钟，以及真实 VM 等待方法的排队响应和静默客户机拒绝路径；并入宿主套件和发布门。
 
 
 2026-11-12：6b627d6 的两项 Linux 检查在安装系统包时持续出现 Ubuntu 仓库 DNS 解析失败，耗尽 30 分钟后取消，代码测试尚未运行。runner 固定为官方支持的 [Ubuntu 24.04 标签](https://github.com/actions/runner-images#available-images)，避免 latest 迁移时基础系统变化；安装阶段单独限时、失败不继续构建，保留原测试与 30 分钟作业门禁。APT 选项见 [apt-get](https://manpages.ubuntu.com/manpages/noble/man8/apt-get.8.html)、[apt.conf](https://manpages.ubuntu.com/manpages/noble/man5/apt.conf.5.html) 与 [HTTP 传输](https://manpages.ubuntu.com/manpages/noble/man1/apt-transport-http.1.html)。这些措施限制依赖失败的影响，实际 Linux 成功仍须看新提交的托管结果；Windows 本地通过不能代替它。
@@ -48,7 +48,7 @@ Python 3.13、Zig 0.13.0（`tools/bootstrap.py` 下载/校验）、rustup/Cargo 
 
 ## Windows prototype tests
 
-源文件：[windows.yml](../../.github/workflows/windows.yml)。`push` 与 `pull_request` 均触发，90 分钟上限；执行完整构建、宿主/集成/QEMU 测试和发布门，最后无论成功失败都尝试上传已有产物。本轮本地完整回归实测 3150.79 秒（约 52.5 分钟），预算为冷工具链准备、故障恢复和打包留出余量，测试清单保持。
+源文件：[windows.yml](../../.github/workflows/windows.yml)。`push` 与 `pull_request` 均触发，120分钟绝对上限；执行完整构建、宿主/集成/QEMU测试和发布门，最后无论成功失败都尝试上传已有产物。2026-11-18核实PR #38的Windows PR作业在90分钟硬上限被取消，尚在事务兼容VM中，没有该步骤断言失败；PR #36同日完整测试用时5217秒，原余量已不足以覆盖runner波动、准备和发布。调整总预算，单次VM期限、断言与完整测试清单不变，超时取消不能算测试通过。
 
 ```yaml
 name: Windows prototype tests
@@ -56,7 +56,7 @@ on: [push, pull_request]
 jobs:
   prototype:
     runs-on: windows-latest
-    timeout-minutes: 90
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -75,6 +75,9 @@ jobs:
           path: |
             build/*.log
             build/test-results.json
+            build/bundle.bin
+            build/payload.S
+            build/kernel.elf
             build/esp/EFI/BOOT/BOOTX64.EFI
             build/storage.img
             build/persistent.img
@@ -192,3 +195,15 @@ Windows CI 的结果包须保留 `build/bundle.bin`、`build/payload.S` 和
 这三个文件的实际摘要；只有报告中的摘要不能替代原始字节。上传时逐项列出文件，
 避免通配上传签名种子或宿主工具。独立审核必须绑定同一提交和运行的产物，缺失时
 保留审核失败，不能用本地重建或其他提交的文件补作原始证据。
+
+
+### USB鼠标路由与启动就绪
+
+Q35同时带有PS/2鼠标和显式USB HID鼠标。实际本地QMP枚举显示默认current是PS/2，USB名称为`QEMU HID Mouse`。USB测试先`query-mice`唯一识别相对HID鼠标，以HMP `mouse_set <index>`选择，再回读确认唯一current；`input-send-event.device`是显示设备路由，不能填写`umouse`。参考[QMP输入命令](https://www.qemu.org/docs/master/interop/qemu-qmp-ref.html)和[monitor鼠标选择](https://www.qemu.org/docs/master/system/monitor)。
+
+GUI的started日志现位于指针队列初始化之后，消除日志已出现但首个输入仍可能被清除的窗口。USB测试保留10秒期限，先等待一次真实合成器坐标，再反向移动并要求两轴坐标均减小，避免仅凭新日志数量误收旧包；USB键盘、热插拔和退出检查仍保留。实际托管通过以新head检查为准。
+
+
+### GUI注册状态行交错（2026-11-18）
+
+PR37/d9f6249的USB已通过；Windows PR在等待`WM: app FILES`时失败。真实原始日志显示`GUI: started pid=25WM: app `后换行才输出`FILES`，是两进程的多次SYS_LOG片段交错，不是完整FILES注册行。Root的ready PID和WM的应用注册状态各先在有界缓冲拼成整行，再只调用一次sf_log，保留相同完整文本及原30秒等待，不扩大期限或接受破碎状态行。需要重新构建、真实GUI/截图/USB与新head完整CI验证；同族其他head偶然通过不代表该竞态已修复。
