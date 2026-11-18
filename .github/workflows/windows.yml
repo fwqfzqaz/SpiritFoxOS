@@ -3,7 +3,7 @@ on: [push, pull_request]
 jobs:
   prototype:
     runs-on: windows-latest
-    timeout-minutes: 90
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5

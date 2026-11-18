@@ -1464,9 +1464,10 @@ static void gui_line(void){
  if(wm_slot>=0&&manager.modules[wm_slot].state==MOD_ACTIVE){sf_log("gui: busy\n");return;}
  int r=gui_start();
  if(r){sf_log("gui: unavailable code=");sf_number(r<0?-(int64_t)r:r);sf_log("\n");return;}
- sf_log("GUI: started pid=");sf_number(wm_pid);sf_log("\n");
  /* 指针从屏幕中心开始，同时清掉进入图形前的积压移动。 */
  sf_sys(SYS_POINTER_READ,1,0,0);
+ /* 已就绪日志必须在清队列之后，避免测试/输入方的首个移动被启动清理丢掉。 */
+ sf_log("GUI: started pid=");sf_number(wm_pid);sf_log("\n");
  for(;;){
   echo_supervise();native_supervise();manager_serve();
   long pointer=sf_sys(SYS_POINTER_READ,0,0,0);
