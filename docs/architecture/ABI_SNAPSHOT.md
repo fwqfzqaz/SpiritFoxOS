@@ -113,3 +113,23 @@ OP_PERSIST_QUIESCENT=104至663，静态目录旧662项无删改。当前仅离�
 因此“仅追加”只描述本整合相对673项的差异，不声称旧662项所有值从未变化。
 静态目录审阅、编译采集/九组比较及当前八个QEMU脚本已通过；新head完整CI/发布
 仍须按PROGRESS独立核对，不能用专项结果代替。
+
+2026-11-16 terminal 服务端原型：相对含104的674项目录，仅追加
+`constant.OP_PERSIST_STOP=105` 至675。只读借用 Zig 实际编译 catalog，采集及
+`check-additions` 核对旧674项逐值保持，并与当前参考完全匹配。作者 S4 的结构、
+Linux 常量及其余编号无改动。本轮尚未跑九组完整漂移、生产构建或 E2；
+契约与宿主证据边界见 [Persist terminal](../quality/PERSIST_TERMINAL.md)。
+
+
+2026-11-17 空闲候选切片：对固定3e361d2的675项实际基线，仅追加
+`constant.OP_PERSIST_CANDIDATE_PROBE=106` 和
+`constant.OP_PERSIST_CANDIDATE_DISCARD=107` 至677项。实际 catalog 编译与
+check-additions 已逐值证明旧675项不变，无结构/布局变化；完整宿主漂移与新提交CI
+状态独立见 PROGRESS。106/107不表示激活或通用 restart，旧105准入检查不放宽。
+
+2026-11-17 Persist 缓存快照：相对保留677项目录，仅追加
+`constant.OP_PERSIST_SNAPSHOT=108`，当前678项；既有编号与结构布局保持。
+108承载私有104字节版本化缓存描述，不登记为公开结构布局ABI。它用于核对
+Persist缓存、卷标识、文件内容摘要及信任状态，不构成停止确认、执行许可或激活授权。
+实现和证据边界见[Persist terminal](../quality/PERSIST_TERMINAL.md)。本专项构建、宿主
+和访客结果通过，但完整本地回归及新head托管/发布尚未通过或确认；不可据此宣称全绿。

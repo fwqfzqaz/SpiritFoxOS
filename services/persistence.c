@@ -5,6 +5,8 @@
 #include "update.h"
 #include "version.h"
 #include "trust.h"
+#include "persist_snapshot.h"
+#include "trust_fingerprint.h"
 /* This file is linked only into sf-persist.sfmod. The transaction volume and
  * the update state machine execute in that process; sf-init reaches them
  * through the bounded persist RPC in include/persistence.h. */
@@ -81,6 +83,37 @@ int persist_mount(uint64_t*notes){
  sf_log("PERSIST READY generation=");sf_number(volume.generation);sf_log("\n");return 0;
 }
 int persist_volume_ready(void){return volume.ready&&sf_storage_writable();}
+static void snapshot_put64(uint8_t*p,uint64_t v){for(unsigned i=0;i<8;i++)p[i]=(uint8_t)(v>>(i*8));}
+int persist_snapshot_get(SfPersistSnapshot*out){
+ if(!out)return SF_INVALID;
+ int r=persist_quiescent();if(r)return r;
+ if(!volume.generation)return SF_BAD_FORMAT;
+ unsigned order[SF_TXN_FILES],count=0;
+ for(unsigned i=0;i<SF_TXN_FILES;i++)if(volume.files[i].path[0]){
+  unsigned n=0;while(n<sizeof(volume.files[i].path)&&volume.files[i].path[n])n++;
+  if(n==sizeof(volume.files[i].path)||volume.files[i].bytes>SF_TXN_FILE_BYTES)return SF_BAD_FORMAT;
+  order[count++]=i;
+ }
+ for(unsigned i=1;i<count;i++){
+  unsigned v=order[i],j=i;while(j&&strcmp(volume.files[v].path,volume.files[order[j-1]].path)<0){order[j]=order[j-1];j--;}
+  order[j]=v;
+ }
+ SfPersistSnapshot snapshot;memset(&snapshot,0,sizeof(snapshot));
+ snapshot.size=sizeof(snapshot);snapshot.version=1;snapshot.generation=volume.generation;memcpy(snapshot.volume,volume.volume,16);
+ uint8_t canonical[20+SF_TXN_FILES*104];memset(canonical,0,sizeof(canonical));
+ static const uint8_t tag[16]={'S','F','F','I','L','E','S','-','S','N','A','P','-','V','1',0};
+ memcpy(canonical,tag,16);canonical[16]=(uint8_t)count;size_t used=20;
+ for(unsigned i=0;i<count;i++){
+  const SfTxnFile*f=&volume.files[order[i]];
+  if(i&&!strcmp(f->path,volume.files[order[i-1]].path))return SF_BAD_FORMAT;
+  memcpy(canonical+used,f->path,strlen(f->path));snapshot_put64(canonical+used+64,f->bytes);
+  sf_sha256(canonical+used+72,f->data,f->bytes);used+=104;
+  if(!strcmp(f->path,"/notes/user"))snapshot.notes_bytes=f->bytes;
+ }
+ sf_sha256(snapshot.files_sha256,canonical,used);
+ r=sf_trust_fingerprint(&sf_trust,snapshot.trust_sha256);if(r)return r;
+ *out=snapshot;return 0;
+}
 int persist_quiescent(void){
  if(!persist_volume_ready())return SF_DEVICE_GONE;
  /* Inspect only the already verified mounted table. state_read uses scratch;

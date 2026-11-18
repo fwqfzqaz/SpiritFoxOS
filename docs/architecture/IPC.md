@@ -100,3 +100,14 @@ TRYING为SF_BUSY，畸形选择器拒绝、离线为SF_DEVICE_GONE。查询不�
 state_read的暂存区、不MOUNT、不回退试运行、不改变stage/export/信任或DIRTY。
 它只是时点观察，没有准入围栏、排空、停止或重启语义；不得以早先的0直接终止服务。
 完整生命周期必须另外建立原子围栏与确认死亡/旧端点撤销，不能通过重启消除未知写。
+
+
+## Persist 空闲候选控制（106、107）
+
+106 PROBE / 107 DISCARD 仅供 Root 对新私有端点上的未绑定进程使用；完整空信封、
+实际 sender/flags=1、递增 nonce 和三秒上限全部必需，data/业务字段必须为零。
+PROBE 只接受尚未处理普通 Root RPC 的未绑定实例，进入后普通 RPC 一律 DRAINING；
+DISCARD 回复 mode=1/status=0 后正常退出。其他回复 mode=0 且为既有负错误，头部
+回显 opcode/request_id 和有界 deadline；kernel 认证回复 sender。ACK 不代替死亡
+或能力回收，更不代表卷已挂载/可用。原104/105和已挂载服务路径保持原语义。
+契约、拥有者阶段及失败证据见 [Persist terminal](../quality/PERSIST_TERMINAL.md)。

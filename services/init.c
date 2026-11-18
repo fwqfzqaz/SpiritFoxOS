@@ -10,6 +10,8 @@
 #include "trust.h"
 #include "arguments.h"
 #include "native_image.h"
+#include "persist_candidate.h"
+#include "persist_snapshot.h"
 #include "file_rpc.h"
 #include "lifecycle_rpc.h"
 #include "net.h"
@@ -906,6 +908,12 @@ static int persist_fence_healthy_test(void){
  FENCE_CHECK(!sf_persist_load_end(load));load=0;
  sf_log("PERSIST FENCE DRAIN PASSED\n");
  FENCE_CHECK(!sf_persist_fence_begin(&token)&&token&&sf_persist_fenced());first=token;probe=99;
+ SfPersistCaptureStatus capture,capture_again;
+ FENCE_CHECK(!sf_persist_fence_capture(token)&&!sf_persist_fence_capture_status(token,&capture)&&
+             capture.phase==SF_PERSIST_CAPTURE_CAPTURED&&capture.authenticated&&capture.snapshot.generation);
+ FENCE_CHECK(sf_persist_fence_capture(token)==SF_DRAINING&&!sf_persist_fence_capture_status(token,&capture_again)&&
+             !memcmp(&capture,&capture_again,sizeof(capture)));
+ sf_log("PERSIST SNAPSHOT CAPTURE PASSED\n");
  FENCE_CHECK(sf_persist_fence_begin(&probe)==SF_BUSY&&probe==99);
  FENCE_CHECK(sf_persist_fence_cancel(0)==SF_STALE_HANDLE&&sf_persist_fence_cancel(token==1?2:1)==SF_STALE_HANDLE&&sf_persist_fenced());
  FENCE_CHECK(!sf_persist_quiescent());
@@ -942,6 +950,7 @@ static int persist_fence_healthy_test(void){
  sf_log("PERSIST FENCE RAM AND BUNDLE PASSED\n");
  for(unsigned i=1;i<8;i++)if(h[i]>0){FENCE_CHECK(!sf_ns_close(ns,1,(uint32_t)h[i]));h[i]=0;}
  FENCE_CHECK(!sf_ns_unlink(ns,1,(uint32_t)h[0],"persist-fence-ram"));ram_created=0;
+ FENCE_CHECK(!sf_persist_fence_capture_status(token,&capture_again)&&!memcmp(&capture,&capture_again,sizeof(capture)));
  FENCE_CHECK(!sf_persist_fence_cancel(token));token=0;
  FENCE_CHECK(!sf_persist_fence_begin(&token)&&token&&token!=first);
  FENCE_CHECK(sf_persist_fence_cancel(first)==SF_STALE_HANDLE&&sf_persist_fenced()&&!sf_persist_quiescent());first=token;
@@ -986,6 +995,150 @@ static void persist_fence_test(const char*mode){
  int r=!strcmp(mode,"healthy")?persist_fence_healthy_test():!strcmp(mode,"unknown")?persist_fence_unknown_test():SF_INVALID;
  if(r){sf_log("persist-fence: refused code=");sf_number(r<0?-(int64_t)r:r);sf_log("\n");}
  else sf_log(!strcmp(mode,"healthy")?"PERSIST FENCE HEALTHY PASSED\n":"PERSIST FENCE UNKNOWN DIRTY PASSED\n");
+}
+/* Destructive diagnostic for a disposable test VM only: it never restarts a
+ * stopped provider, activates a candidate, or force-releases its owner. */
+static int persist_candidate_probe(const SfRuntimeTrust*trust,SfPersistCandidateImage*out,void*context){
+ (void)context;
+ const uint8_t*data=0;uint64_t bytes=0;
+ int r=sf_bundle_find((const void*)boot->bundle,boot->bundle_bytes,"sf-persist.sfmod",&data,&bytes);
+ if(r)return r;
+ /* The previous boot loads already own this scratch. Inspection neither
+  * grows it nor calls the ordinary fenced package/spawn entry points. */
+ if(!img_stage||!img_stage_bytes)return SF_NO_SPACE;
+ size_t cap=img_stage_bytes>SF_IMAGE_MAX?SF_IMAGE_MAX:(size_t)img_stage_bytes;
+ return sf_persist_candidate_prepare(trust,data,bytes,(void*)img_stage,cap,out);
+}
+static int64_t persist_candidate_spawn_idle(const SfRuntimeTrust*trust,uint32_t ep,uint32_t reply,void*context){
+ (void)context;
+ SfPersistCandidateImage candidate;
+ /* Re-authenticate immediately before spawn. An earlier inspected plan is
+  * not reused as authority and no fenced normal-loader entry is opened. */
+ int r=persist_candidate_probe(trust,&candidate,0);if(r)return r;
+ candidate.plan.grant_manager=reply;candidate.plan.grant_service=ep;
+ candidate.plan.service_rights=RIGHT_RECV;
+ return sf_sys(SYS_SPAWN,(uint64_t)&candidate.plan,0,0);
+}
+static void persist_terminal_test(const char*mode){
+ int idle_bad=!strcmp(mode,"idle-badprobe"),idle_drop=!strcmp(mode,"idle-dropdiscard"),idle_delay=!strcmp(mode,"idle-delayed");
+ int snapshot_bad=!strcmp(mode,"snapshot-badreply"),snapshot_drop=!strcmp(mode,"snapshot-dropped");
+ int healthy=!strcmp(mode,"healthy")||idle_bad||idle_drop||idle_delay||snapshot_bad||snapshot_drop,unknown=!strcmp(mode,"unknown"),busy=!strcmp(mode,"busy"),delayed=!strcmp(mode,"delayed");
+ int r=SF_INVALID,ram=0,parent=0,file=0;uint64_t token=0,probe=0;
+ SfPersistStopStatus before,after,again;FenceView view,end_view;SfRuntimeTrust trust=sf_trust;
+ uint8_t digest[96],end[96];char text[16];
+ if(!healthy&&!unknown&&!busy&&!delayed)goto done;
+ r=SF_BAD_FORMAT;
+#define TERMINAL_CHECK(c) do{if(!(c)){sf_log("persist-terminal: failed line=");sf_number(__LINE__);sf_log("\n");goto done;}}while(0)
+ TERMINAL_CHECK(!sf_persist_fenced()&&!sf_persist_security_error()&&!sf_storage_quiescent());
+ TERMINAL_CHECK(!fence_view(&view)&&view.instance&&view.writable&&!transaction_fingerprint(digest));
+ TERMINAL_CHECK(!sf_persist_fence_begin(&token)&&token&&!sf_persist_fence_stop_status(token,&before));
+ TERMINAL_CHECK(before.phase==SF_PERSIST_TERMINAL_ACTIVE&&before.pid&&before.ep&&before.reply);
+ TERMINAL_CHECK(sf_persist_fence_stop(0)==SF_STALE_HANDLE&&sf_persist_fence_stop(token==1?2:1)==SF_STALE_HANDLE);
+ TERMINAL_CHECK(sf_persist_fence_begin(&probe)==SF_BUSY&&!probe);
+ SfPersistCaptureStatus capture,capture_again;
+ int capture_result=sf_persist_fence_capture(token);
+ if(snapshot_bad||snapshot_drop){
+  TERMINAL_CHECK(capture_result==(snapshot_bad?SF_BAD_FORMAT:SF_TIMEOUT)&&!sf_persist_fence_capture_status(token,&capture)&&
+                 capture.phase==SF_PERSIST_CAPTURE_FAILED&&capture.error==capture_result&&!capture.snapshot.size);
+  TERMINAL_CHECK(sf_persist_fence_capture(token)==SF_DRAINING&&sf_persist_fence_stop(token)==SF_DRAINING&&
+                 sf_persist_fence_cancel(token)==SF_DRAINING&&sf_persist_quiescent()==SF_DRAINING);
+  TERMINAL_CHECK(!sf_persist_fence_stop_status(token,&after)&&!memcmp(&before,&after,sizeof(before))&&
+                 sf_sys(SYS_TASK_STATUS,after.pid,0,0)==SF_TASK_RUNNING&&sf_persist_fenced()&&
+                 !sf_persist_uncertain()&&!sf_persist_security_error()&&!memcmp(&trust,&sf_trust,sizeof(trust)));
+  TERMINAL_CHECK(!sf_persist_fence_capture_status(token,&capture_again)&&!memcmp(&capture,&capture_again,sizeof(capture))&&
+                 !fence_view(&end_view)&&!memcmp(&view,&end_view,sizeof(view))&&
+                 !transaction_fingerprint(end)&&!memcmp(digest,end,sizeof(digest)));
+  sf_log("PERSIST SNAPSHOT FAILED CLOSED\n");goto terminal_ram_checks;
+ }
+ TERMINAL_CHECK(!capture_result&&!sf_persist_fence_capture_status(token,&capture)&&
+                capture.phase==SF_PERSIST_CAPTURE_CAPTURED&&capture.authenticated&&capture.snapshot.generation);
+ TERMINAL_CHECK(sf_persist_fence_capture(token)==SF_DRAINING&&!sf_persist_fence_capture_status(token,&capture_again)&&
+                !memcmp(&capture,&capture_again,sizeof(capture)));
+ sf_log("PERSIST SNAPSHOT CAPTURE PASSED\n");
+ int result=sf_persist_fence_stop(token);
+ TERMINAL_CHECK(!sf_persist_fence_stop_status(token,&after));
+ TERMINAL_CHECK(after.token==token&&after.pid==before.pid&&after.ep==before.ep&&after.reply==before.reply&&after.request_id&&after.deadline_ns);
+ TERMINAL_CHECK(!memcmp(&trust,&sf_trust,sizeof(trust))&&!sf_persist_uncertain()&&!sf_persist_security_error());
+ TERMINAL_CHECK(!sf_persist_fence_capture_status(token,&capture_again)&&!memcmp(&capture,&capture_again,sizeof(capture)));
+ TERMINAL_CHECK(!fence_view(&end_view)&&!memcmp(&view,&end_view,sizeof(view))&&!sf_storage_quiescent());
+ if(healthy||delayed){
+  TERMINAL_CHECK(!result&&after.phase==SF_PERSIST_TERMINAL_STOPPED_CLOSED&&after.ack_authenticated&&after.ack_mode==1&&!after.ack_status&&after.death_confirmed&&after.retired&&!after.task_status);
+  if(delayed)TERMINAL_CHECK(after.observations>1);
+  SfMessage stale;sf_message(&stale,OP_PERSIST_QUIESCENT,1);
+  TERMINAL_CHECK(sf_send(after.ep,&stale)<0&&sf_recv(after.reply,&stale,sf_deadline(1))<0);
+  SfPersistCandidateImage candidate,repeated;long caps=sf_task_cap_usage(1);
+  TERMINAL_CHECK(caps>=0&&sf_persist_fence_inspect(0,persist_candidate_probe,0,&candidate)==SF_STALE_HANDLE);
+  TERMINAL_CHECK(!sf_persist_fence_inspect(token,persist_candidate_probe,0,&candidate));
+  TERMINAL_CHECK(!sf_persist_fence_inspect(token,persist_candidate_probe,0,&repeated)&&
+                 !memcmp(&candidate,&repeated,sizeof(candidate))&&sf_task_cap_usage(1)==caps);
+  TERMINAL_CHECK(!sf_persist_fence_stop_status(token,&again)&&!memcmp(&after,&again,sizeof(after))&&sf_persist_fenced());
+  sf_log("PERSIST CANDIDATE INSPECT PASSED\n");
+  int idle_result=sf_persist_candidate_cycle(token,persist_candidate_spawn_idle,0);
+  SfPersistIdleStatus idle;
+  TERMINAL_CHECK(!sf_persist_candidate_status(token,&idle)&&idle.pid>1&&idle.pid!=after.pid);
+  sf_log("PERSIST IDLE TRACE error=");sf_number(idle_result<0?(uint64_t)-idle_result:(uint64_t)idle_result);
+  sf_log(" phase=");sf_number(idle.phase);sf_log(" probe=");sf_number(idle.probe_accepted);
+  sf_log(" guard=");sf_number(idle.guard_denied);sf_log(" discard=");sf_number(idle.discard_accepted);
+  sf_log(" death=");sf_number(idle.death_confirmed);sf_log(" retired=");sf_number(idle.retired);
+  sf_log(" caps-before=");sf_number(caps);sf_log(" caps-after=");sf_number(sf_task_cap_usage(1));sf_log("\n");
+  if(idle_bad||idle_drop){
+   TERMINAL_CHECK(idle_result==(idle_bad?SF_BAD_FORMAT:SF_TIMEOUT)&&idle.error==idle_result&&idle.phase==SF_PERSIST_IDLE_FAILED&&
+                  !idle.discard_accepted&&!idle.death_confirmed&&!idle.retired&&sf_task_cap_usage(1)==caps+2);
+   TERMINAL_CHECK(idle.probe_accepted==idle_drop&&idle.guard_denied==idle_drop);
+   if(idle_drop)TERMINAL_CHECK(sf_sys(SYS_TASK_STATUS,idle.pid,0,0)==0);
+   sf_log("PERSIST CANDIDATE IDLE FAILED CLOSED\n");
+  }else{
+   TERMINAL_CHECK(!idle_result&&idle.phase==SF_PERSIST_IDLE_CLOSED&&idle.probe_accepted&&idle.guard_denied&&idle.discard_accepted&&
+                  idle.death_confirmed&&idle.retired&&!idle.task_status&&!idle.revoke_ep_result&&!idle.revoke_reply_result&&sf_task_cap_usage(1)==caps);
+   if(idle_delay)TERMINAL_CHECK(idle.observations>1);
+   sf_log("PERSIST CANDIDATE IDLE PASSED\n");
+  }
+  TERMINAL_CHECK(sf_persist_candidate_cycle(token,persist_candidate_spawn_idle,0)<0);
+  TERMINAL_CHECK(!sf_persist_fence_capture_status(token,&capture_again)&&!memcmp(&capture,&capture_again,sizeof(capture)));
+  TERMINAL_CHECK(!sf_persist_fence_stop_status(token,&again)&&!memcmp(&after,&again,sizeof(after))&&sf_persist_fenced());
+  sf_log("PERSIST CANDIDATE IDLE RESULT phase=");sf_number(idle.phase);sf_log(" pid=");sf_number(idle.pid);
+  sf_log(" probe=");sf_number(idle.probe_accepted);sf_log(" guard=");sf_number(idle.guard_denied);
+  sf_log(" discard=");sf_number(idle.discard_accepted);sf_log(" death=");sf_number(idle.death_confirmed);
+  sf_log(" retired=");sf_number(idle.retired);sf_log(" observations=");sf_number(idle.observations);sf_log("\n");
+ }else if(busy){
+  TERMINAL_CHECK(result==SF_BUSY&&after.phase==SF_PERSIST_TERMINAL_REJECTED&&after.ack_authenticated&&after.ack_status==SF_BUSY&&!after.ack_mode&&!after.retired&&!after.death_confirmed);
+  TERMINAL_CHECK(!sf_persist_fence_cancel(token));token=0;
+ }else{
+  TERMINAL_CHECK(result<0&&!after.retired&&
+   (after.phase==SF_PERSIST_TERMINAL_REQUEST_UNKNOWN||after.phase==SF_PERSIST_TERMINAL_ACCEPTED_WAIT||after.phase==SF_PERSIST_TERMINAL_FAILED));
+ }
+ if(!busy){
+  TERMINAL_CHECK(sf_persist_fenced()&&sf_persist_fence_cancel(token)<0&&sf_persist_fence_stop(token)==SF_DRAINING);
+  TERMINAL_CHECK(!sf_persist_fence_stop_status(token,&again)&&!memcmp(&after,&again,sizeof(after)));
+  TERMINAL_CHECK(launch_app("hello.sfk")==SF_DRAINING&&sf_storage_transaction(1)==SF_DRAINING);
+  TERMINAL_CHECK(sf_ns_open(ns,1,"/","/disk/etc/readme.txt",OPEN_READ)==SF_DRAINING);
+  TERMINAL_CHECK(!transaction_fingerprint(end)&&!memcmp(digest,end,sizeof(digest)));
+ }
+ /* Only RAM operations follow terminal acceptance; no missing recovery path is
+  * hidden by reopening a mount or clearing the global fence/trust context. */
+terminal_ram_checks:
+ parent=sf_ns_open(ns,1,"/","/tmp",OPEN_READ|OPEN_WRITE|OPEN_DIRECTORY);TERMINAL_CHECK(parent>0);
+ TERMINAL_CHECK(!sf_ns_create(ns,"/tmp/persist-terminal-ram",NODE_FILE,0));ram=1;
+ file=sf_ns_openat(ns,1,(uint32_t)parent,"persist-terminal-ram",OPEN_READ|OPEN_WRITE);TERMINAL_CHECK(file>0);
+ TERMINAL_CHECK(sf_ns_write(ns,1,(uint32_t)file,"terminal-ram",12)==12&&!sf_ns_seek(ns,1,(uint32_t)file,0)&&sf_ns_read(ns,1,(uint32_t)file,text,12)==12&&!memcmp(text,"terminal-ram",12));
+ TERMINAL_CHECK(!sf_ns_close(ns,1,(uint32_t)file));file=0;
+ TERMINAL_CHECK(!sf_ns_unlink(ns,1,(uint32_t)parent,"persist-terminal-ram"));ram=0;
+ TERMINAL_CHECK(!sf_ns_close(ns,1,(uint32_t)parent));parent=0;
+ TERMINAL_CHECK(!echo_call(echo_ep,echo_pid));
+ sf_log("PERSIST TERMINAL TEST PASSED mode=");sf_log(mode);sf_log(" phase=");sf_number(after.phase);
+ sf_log(" pid=");sf_number(after.pid);sf_log(" ack=");sf_number(after.ack_authenticated);sf_log(" death=");sf_number(after.death_confirmed);
+ sf_log(" retired=");sf_number(after.retired);sf_log(" observations=");sf_number(after.observations);sf_log("\n");r=0;
+done:
+ if(file>0&&sf_ns_close(ns,1,(uint32_t)file))r=SF_BAD_FORMAT;
+ if(parent>0){if(ram&&sf_ns_unlink(ns,1,(uint32_t)parent,"persist-terminal-ram"))r=SF_BAD_FORMAT;if(sf_ns_close(ns,1,(uint32_t)parent))r=SF_BAD_FORMAT;}
+ if(r){
+  /* An untouched lexical owner may be released. Accepted or unknown terminal
+   * state has no such escape and is retained for the diagnostic report. */
+  if(token&&!sf_persist_fence_stop_status(token,&after)&&
+     (after.phase==SF_PERSIST_TERMINAL_ACTIVE||after.phase==SF_PERSIST_TERMINAL_REJECTED))sf_persist_fence_cancel(token);
+  sf_log("persist-terminal: refused code=");sf_number(r<0?-(int64_t)r:r);sf_log("\n");
+ }
+#undef TERMINAL_CHECK
 }
 static void persist_quiescence_test(void){
  if(sf_persist_fenced()){sf_log("persist: diagnostic refused while fenced\n");return;}
@@ -1252,6 +1405,8 @@ static void command(char*line){
  else if(!strcmp(line,"stat")||!memcmp(line,"stat ",5))namespace_stat_line(line+4);
  else if(!strcmp(line,"namespace-recovery-test"))namespace_recovery_test();
  else if(!strcmp(line,"persist-quiescence-test"))persist_quiescence_test();
+ else if(!strcmp(line,"persist-terminal-test"))persist_terminal_test("");
+ else if(!memcmp(line,"persist-terminal-test ",22))persist_terminal_test(line+22);
  else if(!strcmp(line,"persist-fence-test"))persist_fence_test("");
  else if(!memcmp(line,"persist-fence-test ",19))persist_fence_test(line+19);
  else if(!strcmp(line,"persist-quiescent")){int r=sf_persist_quiescent();if(!r)sf_log("persist: QUIESCENT preflight only\n");else{sf_log("persist: preflight refused code=");sf_number(-r);sf_log("\n");}}
