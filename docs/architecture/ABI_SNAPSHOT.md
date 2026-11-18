@@ -133,3 +133,9 @@ check-additions 已逐值证明旧675项不变，无结构/布局变化；完整
 Persist缓存、卷标识、文件内容摘要及信任状态，不构成停止确认、执行许可或激活授权。
 实现和证据边界见[Persist terminal](../quality/PERSIST_TERMINAL.md)。本专项构建、宿主
 和访客结果通过，但完整本地回归及新head托管/发布尚未通过或确认；不可据此宣称全绿。
+
+2026-11-18 Persist 候选卷只读重建：相对保留678项目录，仅追加
+`constant.OP_PERSIST_CANDIDATE_VERIFY=109` 至679项。109通过私有 Root 代理重建候选侧
+事务缓存，不新增公开结构布局。它依赖先前108快照及105 STOP的密封拥有者证明；不表示
+候选激活或未来启动许可，详细边界见[Persist terminal](../quality/PERSIST_TERMINAL.md)。
+专项E1/E2与完整宿主通过；完整本地回归及新head托管/发布仍待核对，不以专项代替全绿。

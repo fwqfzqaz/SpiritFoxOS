@@ -1,6 +1,7 @@
 #ifndef SF_PERSIST_CANDIDATE_H
 #define SF_PERSIST_CANDIDATE_H
 #include "package.h"
+#include "persist_snapshot.h"
 
 /* In-memory inspection result only. A prepared plan grants no capabilities
  * and does not authorize execution or Persist service readiness. */
@@ -23,7 +24,7 @@ int sf_persist_candidate_prepare(const SfRuntimeTrust *trust,const void *data,
  * snapshots convey neither volume readiness nor activation authority. */
 enum { SF_PERSIST_IDLE_NONE, SF_PERSIST_IDLE_ALLOCATING, SF_PERSIST_IDLE_SPAWNING,
  SF_PERSIST_IDLE_PROBING, SF_PERSIST_IDLE_DISCARDING, SF_PERSIST_IDLE_EXIT_WAIT,
- SF_PERSIST_IDLE_CLOSED, SF_PERSIST_IDLE_FAILED };
+ SF_PERSIST_IDLE_CLOSED, SF_PERSIST_IDLE_FAILED, SF_PERSIST_IDLE_VERIFYING };
 typedef struct {
  uint64_t token,probe_id,guard_id,discard_id,deadline_ns;
  uint32_t pid,ep,reply;
@@ -32,8 +33,15 @@ typedef struct {
  int64_t spawn_result,probe_send,probe_receive,discard_send,discard_receive;
  int64_t guard_send,guard_receive;
  int64_t task_status,revoke_ep_result,revoke_reply_result;
+ uint64_t verify_id,verify_deadline_ns;
+ unsigned verified,read_frames;
+ int64_t verify_send,verify_receive;
+ SfPersistSnapshot verified_snapshot;
 } SfPersistIdleStatus;
 typedef int64_t(*SfPersistIdleSpawn)(const SfRuntimeTrust*,uint32_t ep,uint32_t reply,void*);
 int sf_persist_candidate_cycle(uint64_t token,SfPersistIdleSpawn,void*);
+/* Root brokers only transaction-sector reads; success is still isolated and
+ * followed by ordinary denial/discard, never service publication. */
+int sf_persist_candidate_verify_cycle(uint64_t token,SfPersistIdleSpawn,void*,SfTxnRead,void*);
 int sf_persist_candidate_status(uint64_t token,SfPersistIdleStatus*);
 #endif

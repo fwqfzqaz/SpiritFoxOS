@@ -84,35 +84,82 @@ int persist_mount(uint64_t*notes){
 }
 int persist_volume_ready(void){return volume.ready&&sf_storage_writable();}
 static void snapshot_put64(uint8_t*p,uint64_t v){for(unsigned i=0;i<8;i++)p[i]=(uint8_t)(v>>(i*8));}
-int persist_snapshot_get(SfPersistSnapshot*out){
- if(!out)return SF_INVALID;
- int r=persist_quiescent();if(r)return r;
- if(!volume.generation)return SF_BAD_FORMAT;
+static int snapshot_cache(const SfTxn*cache,const SfRuntimeTrust*trust,SfPersistSnapshot*out){
+ if(!cache||!trust||!out)return SF_INVALID;
+ if(!cache->ready)return SF_DEVICE_GONE;
+ if(!cache->generation)return SF_BAD_FORMAT;
  unsigned order[SF_TXN_FILES],count=0;
- for(unsigned i=0;i<SF_TXN_FILES;i++)if(volume.files[i].path[0]){
-  unsigned n=0;while(n<sizeof(volume.files[i].path)&&volume.files[i].path[n])n++;
-  if(n==sizeof(volume.files[i].path)||volume.files[i].bytes>SF_TXN_FILE_BYTES)return SF_BAD_FORMAT;
+ for(unsigned i=0;i<SF_TXN_FILES;i++)if(cache->files[i].path[0]){
+  unsigned n=0;while(n<sizeof(cache->files[i].path)&&cache->files[i].path[n])n++;
+  if(n==sizeof(cache->files[i].path)||cache->files[i].bytes>SF_TXN_FILE_BYTES)return SF_BAD_FORMAT;
+  if(!strcmp(cache->files[i].path,"/boot/current")){
+   const SfTxnFile*f=&cache->files[i];
+   if(!(f->bytes==1&&(f->data[0]=='a'||f->data[0]=='b'))){
+    SfUpdate state;int r=sf_update_decode(&state,f->data,f->bytes);if(r)return r;
+    if(state.phase==SF_UPDATE_TRYING)return SF_BUSY;
+   }
+  }
   order[count++]=i;
  }
  for(unsigned i=1;i<count;i++){
-  unsigned v=order[i],j=i;while(j&&strcmp(volume.files[v].path,volume.files[order[j-1]].path)<0){order[j]=order[j-1];j--;}
+  unsigned v=order[i],j=i;while(j&&strcmp(cache->files[v].path,cache->files[order[j-1]].path)<0){order[j]=order[j-1];j--;}
   order[j]=v;
  }
  SfPersistSnapshot snapshot;memset(&snapshot,0,sizeof(snapshot));
- snapshot.size=sizeof(snapshot);snapshot.version=1;snapshot.generation=volume.generation;memcpy(snapshot.volume,volume.volume,16);
+ snapshot.size=sizeof(snapshot);snapshot.version=1;snapshot.generation=cache->generation;memcpy(snapshot.volume,cache->volume,16);
  uint8_t canonical[20+SF_TXN_FILES*104];memset(canonical,0,sizeof(canonical));
  static const uint8_t tag[16]={'S','F','F','I','L','E','S','-','S','N','A','P','-','V','1',0};
  memcpy(canonical,tag,16);canonical[16]=(uint8_t)count;size_t used=20;
  for(unsigned i=0;i<count;i++){
-  const SfTxnFile*f=&volume.files[order[i]];
-  if(i&&!strcmp(f->path,volume.files[order[i-1]].path))return SF_BAD_FORMAT;
+  const SfTxnFile*f=&cache->files[order[i]];
+  if(i&&!strcmp(f->path,cache->files[order[i-1]].path))return SF_BAD_FORMAT;
   memcpy(canonical+used,f->path,strlen(f->path));snapshot_put64(canonical+used+64,f->bytes);
   sf_sha256(canonical+used+72,f->data,f->bytes);used+=104;
   if(!strcmp(f->path,"/notes/user"))snapshot.notes_bytes=f->bytes;
  }
  sf_sha256(snapshot.files_sha256,canonical,used);
- r=sf_trust_fingerprint(&sf_trust,snapshot.trust_sha256);if(r)return r;
+ int r=sf_trust_fingerprint(trust,snapshot.trust_sha256);if(r)return r;
  *out=snapshot;return 0;
+}
+int persist_snapshot_get(SfPersistSnapshot*out){
+ if(!out)return SF_INVALID;
+ int r=persist_quiescent();return r?r:snapshot_cache(&volume,&sf_trust,out);
+}
+typedef struct {SfTxnRead read;void*context;unsigned count;} CandidateRead;
+static int candidate_sector(void*context,uint64_t lba,uint8_t out[512]){
+ CandidateRead*c=context;
+ if(lba<SF_TXN_HEADER||lba>=SF_TXN_BANK+2*SF_TXN_BANK_SECTORS||c->count>=3+2*SF_TXN_BANK_SECTORS)return SF_INVALID;
+ c->count++;return c->read(c->context,lba,out);
+}
+static int candidate_no_write(void*context,uint64_t lba,const uint8_t data[512]){
+ (void)context;(void)lba;(void)data;return SF_READ_ONLY;
+}
+static int candidate_no_flush(void*context){(void)context;return SF_READ_ONLY;}
+int persist_candidate_verify_volume(const SfPersistSnapshot*expected,SfTxnRead read,void*context,SfPersistSnapshot*out){
+ if(!expected||!read||!out)return SF_INVALID;
+ if(volume.ready||stage_bytes||export_bytes>=0)return SF_BUSY;
+ if(expected->size!=sizeof(*expected)||expected->version!=1||!expected->generation||expected->notes_bytes>SF_TXN_FILE_BYTES)return SF_INVALID;
+ CandidateRead reader={read,context,0};
+ int r=sf_txn_mount(&volume,candidate_sector,candidate_no_write,candidate_no_flush,&reader);
+ if(r){volume.ready=0;volume.read=0;volume.context=0;return r;}
+ /* Recovery observes the authenticated committed table. It never invokes
+  * persist_mount, whose TRYING recovery may write, or borrows global scratch. */
+ SfRuntimeTrust next;r=sf_trust_init(&next,&sf_trust.policy);if(r)goto fail;
+ for(unsigned i=0;i<SF_TXN_FILES;i++)if(!strcmp(volume.files[i].path,"/boot/revoked")){
+  const SfTxnFile*f=&volume.files[i];
+  if(f->bytes%32||f->bytes>SF_TRUST_MAX*32u){r=SF_BAD_FORMAT;goto fail;}
+  for(unsigned off=0;off<f->bytes;off+=32){
+   for(unsigned prior=0;prior<off;prior+=32)if(!memcmp(f->data+off,f->data+prior,32)){r=SF_BAD_FORMAT;goto fail;}
+   r=sf_trust_revoke(&next,f->data+off);if(r)goto fail;
+  }
+ }
+ SfPersistSnapshot staged;r=snapshot_cache(&volume,&next,&staged);if(r)goto fail;
+ if(memcmp(&staged,expected,sizeof(staged))){r=SF_STALE_HANDLE;goto fail;}
+ /* Keep the isolated cache read-only even if a future caller errs. The
+  * protocol still denies ordinary RPC and grants no driver capability. */
+ volume.read=0;volume.context=0;sf_trust=next;*out=staged;return 0;
+fail:
+ volume.ready=0;volume.read=0;volume.context=0;return r;
 }
 int persist_quiescent(void){
  if(!persist_volume_ready())return SF_DEVICE_GONE;

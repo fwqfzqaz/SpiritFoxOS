@@ -11,6 +11,7 @@
 #include "arguments.h"
 #include "native_image.h"
 #include "persist_candidate.h"
+#include "persist_verify.h"
 #include "persist_snapshot.h"
 #include "file_rpc.h"
 #include "lifecycle_rpc.h"
@@ -1019,10 +1020,18 @@ static int64_t persist_candidate_spawn_idle(const SfRuntimeTrust*trust,uint32_t 
  candidate.plan.service_rights=RIGHT_RECV;
  return sf_sys(SYS_SPAWN,(uint64_t)&candidate.plan,0,0);
 }
+static int persist_candidate_sector(void*context,uint64_t lba,uint8_t out[512]){
+ /* Explicit read-error injection belongs only to the disposable diagnostic.
+  * The production broker callback grants no endpoint or write operation. */
+ if(context&&*(const int*)context)return SF_DEVICE_GONE;
+ return sf_storage_sector_read(0,lba,out);
+}
 static void persist_terminal_test(const char*mode){
  int idle_bad=!strcmp(mode,"idle-badprobe"),idle_drop=!strcmp(mode,"idle-dropdiscard"),idle_delay=!strcmp(mode,"idle-delayed");
  int snapshot_bad=!strcmp(mode,"snapshot-badreply"),snapshot_drop=!strcmp(mode,"snapshot-dropped");
- int healthy=!strcmp(mode,"healthy")||idle_bad||idle_drop||idle_delay||snapshot_bad||snapshot_drop,unknown=!strcmp(mode,"unknown"),busy=!strcmp(mode,"busy"),delayed=!strcmp(mode,"delayed");
+ int verify_read_error=!strcmp(mode,"verify-readerror"),verify_bad=!strcmp(mode,"verify-badreply"),verify_drop=!strcmp(mode,"verify-dropped");
+ int verify=!strcmp(mode,"verify")||verify_read_error||verify_bad||verify_drop;
+ int healthy=!strcmp(mode,"healthy")||idle_bad||idle_drop||idle_delay||snapshot_bad||snapshot_drop||verify,unknown=!strcmp(mode,"unknown"),busy=!strcmp(mode,"busy"),delayed=!strcmp(mode,"delayed");
  int r=SF_INVALID,ram=0,parent=0,file=0;uint64_t token=0,probe=0;
  SfPersistStopStatus before,after,again;FenceView view,end_view;SfRuntimeTrust trust=sf_trust;
  uint8_t digest[96],end[96];char text[16];
@@ -1073,7 +1082,8 @@ static void persist_terminal_test(const char*mode){
                  !memcmp(&candidate,&repeated,sizeof(candidate))&&sf_task_cap_usage(1)==caps);
   TERMINAL_CHECK(!sf_persist_fence_stop_status(token,&again)&&!memcmp(&after,&again,sizeof(after))&&sf_persist_fenced());
   sf_log("PERSIST CANDIDATE INSPECT PASSED\n");
-  int idle_result=sf_persist_candidate_cycle(token,persist_candidate_spawn_idle,0);
+  int idle_result=verify?sf_persist_candidate_verify_cycle(token,persist_candidate_spawn_idle,0,persist_candidate_sector,&verify_read_error):
+                         sf_persist_candidate_cycle(token,persist_candidate_spawn_idle,0);
   SfPersistIdleStatus idle;
   TERMINAL_CHECK(!sf_persist_candidate_status(token,&idle)&&idle.pid>1&&idle.pid!=after.pid);
   sf_log("PERSIST IDLE TRACE error=");sf_number(idle_result<0?(uint64_t)-idle_result:(uint64_t)idle_result);
@@ -1081,7 +1091,15 @@ static void persist_terminal_test(const char*mode){
   sf_log(" guard=");sf_number(idle.guard_denied);sf_log(" discard=");sf_number(idle.discard_accepted);
   sf_log(" death=");sf_number(idle.death_confirmed);sf_log(" retired=");sf_number(idle.retired);
   sf_log(" caps-before=");sf_number(caps);sf_log(" caps-after=");sf_number(sf_task_cap_usage(1));sf_log("\n");
-  if(idle_bad||idle_drop){
+  if(verify&&(verify_read_error||verify_bad||verify_drop)){
+   int expected_error=verify_read_error?SF_DEVICE_GONE:verify_bad?SF_BAD_FORMAT:SF_TIMEOUT;
+   TERMINAL_CHECK(idle_result==expected_error&&idle.error==expected_error&&idle.phase==SF_PERSIST_IDLE_FAILED&&
+                  idle.probe_accepted&&!idle.verified&&!idle.guard_denied&&!idle.discard_accepted&&
+                  !idle.death_confirmed&&!idle.retired&&sf_task_cap_usage(1)==caps+2&&
+                  sf_sys(SYS_TASK_STATUS,idle.pid,0,0)==SF_TASK_RUNNING);
+   TERMINAL_CHECK(idle.read_frames>0&&idle.read_frames<=SF_PERSIST_VERIFY_READS);
+   sf_log("PERSIST CANDIDATE VERIFY FAILED CLOSED\n");
+  }else if(idle_bad||idle_drop){
    TERMINAL_CHECK(idle_result==(idle_bad?SF_BAD_FORMAT:SF_TIMEOUT)&&idle.error==idle_result&&idle.phase==SF_PERSIST_IDLE_FAILED&&
                   !idle.discard_accepted&&!idle.death_confirmed&&!idle.retired&&sf_task_cap_usage(1)==caps+2);
    TERMINAL_CHECK(idle.probe_accepted==idle_drop&&idle.guard_denied==idle_drop);
@@ -1091,15 +1109,23 @@ static void persist_terminal_test(const char*mode){
    TERMINAL_CHECK(!idle_result&&idle.phase==SF_PERSIST_IDLE_CLOSED&&idle.probe_accepted&&idle.guard_denied&&idle.discard_accepted&&
                   idle.death_confirmed&&idle.retired&&!idle.task_status&&!idle.revoke_ep_result&&!idle.revoke_reply_result&&sf_task_cap_usage(1)==caps);
    if(idle_delay)TERMINAL_CHECK(idle.observations>1);
+   if(verify)TERMINAL_CHECK(idle.verified&&idle.read_frames>=3+SF_TXN_BANK_SECTORS&&
+                           idle.read_frames<=SF_PERSIST_VERIFY_READS&&!memcmp(&idle.verified_snapshot,&capture.snapshot,sizeof(capture.snapshot)));
    sf_log("PERSIST CANDIDATE IDLE PASSED\n");
+   if(verify)sf_log("PERSIST CANDIDATE VERIFY PASSED\n");
   }
   TERMINAL_CHECK(sf_persist_candidate_cycle(token,persist_candidate_spawn_idle,0)<0);
+  if(verify)TERMINAL_CHECK(sf_persist_candidate_verify_cycle(token,persist_candidate_spawn_idle,0,persist_candidate_sector,0)<0);
   TERMINAL_CHECK(!sf_persist_fence_capture_status(token,&capture_again)&&!memcmp(&capture,&capture_again,sizeof(capture)));
   TERMINAL_CHECK(!sf_persist_fence_stop_status(token,&again)&&!memcmp(&after,&again,sizeof(after))&&sf_persist_fenced());
   sf_log("PERSIST CANDIDATE IDLE RESULT phase=");sf_number(idle.phase);sf_log(" pid=");sf_number(idle.pid);
   sf_log(" probe=");sf_number(idle.probe_accepted);sf_log(" guard=");sf_number(idle.guard_denied);
   sf_log(" discard=");sf_number(idle.discard_accepted);sf_log(" death=");sf_number(idle.death_confirmed);
   sf_log(" retired=");sf_number(idle.retired);sf_log(" observations=");sf_number(idle.observations);sf_log("\n");
+  if(verify){
+   sf_log("PERSIST CANDIDATE VERIFY RESULT verified=");sf_number(idle.verified);
+   sf_log(" reads=");sf_number(idle.read_frames);sf_log(" phase=");sf_number(idle.phase);sf_log("\n");
+  }
  }else if(busy){
   TERMINAL_CHECK(result==SF_BUSY&&after.phase==SF_PERSIST_TERMINAL_REJECTED&&after.ack_authenticated&&after.ack_status==SF_BUSY&&!after.ack_mode&&!after.retired&&!after.death_confirmed);
   TERMINAL_CHECK(!sf_persist_fence_cancel(token));token=0;

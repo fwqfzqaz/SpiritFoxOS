@@ -3,7 +3,7 @@
 #include <string.h>
 #define LIBSF_H
 #include "sf.h"
-static long sf_sys(long,uint64_t,uint64_t,uint64_t);
+static int64_t sf_sys(long,uint64_t,uint64_t,uint64_t);
 static long sf_send(uint32_t,SfMessage*);
 static long sf_recv(uint32_t,SfMessage*,uint64_t);
 static long sf_cap_close(uint64_t);
@@ -31,7 +31,7 @@ static uint8_t chunk_data[SF_TXN_FILE_BYTES],staged_data[SF_TXN_FILE_BYTES];
 static SfMessage reply;
 static SfNamespace fresh,copy;
 #define CHECK(c) do{checks++;if(!(c)){fprintf(stderr,"PERSIST METADATA FAIL line %d: %s\n",__LINE__,#c);exit(1);}}while(0)
-static long sf_sys(long op,uint64_t a,uint64_t b,uint64_t c){(void)op;(void)a;(void)b;(void)c;return SF_DENIED;}
+static int64_t sf_sys(long op,uint64_t a,uint64_t b,uint64_t c){(void)op;(void)a;(void)b;(void)c;return SF_DENIED;}
 static long sf_cap_close(uint64_t h){CHECK(h==0x777||h==0x888);closes++;if(h==0x777)input_closes++;else reply_closes++;return 0;}
 static long sf_cap_derive(uint64_t h,uint64_t r){(void)h;(void)r;return SF_DENIED;}
 static long sf_send_cap(uint32_t h,SfMessage*m,uint64_t c){

@@ -176,6 +176,11 @@ Linux 如需完整 VM 验证，改用 `python3 tools/test.py`；只有完整测�
 
 ## Persist 终止证据的原始产物
 
+Windows 使用 LLP64：`long` 只有32位，测试中的系统调用mock应像64位内核返回值一样
+使用 `int64_t`。`SF_TASK_RUNNING` 为 `2^32`，把mock声明成long会使严格的运行状态比较
+在编译期恒真；不能通过截断状态值或关闭告警解决。持久化metadata/quiescence/WRITE/
+trust旧夹具已同步为64位返回，生产比较仍保留完整宽度。
+
 ABI 回归完成后，结果报告中的 `abi_snapshot_entries` 必须从实际编译生成的
 `build/abi-current.json` 读取，不能沿用旧轮次的固定计数。PR #32 的 9c6b281
 完整测试通过后，报告仍写成 675，而发布门要求当前 677 项，导致打包失败。

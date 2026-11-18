@@ -91,5 +91,5 @@ long sf_main(const SfBootArgs*a,size_t size){
  if(size!=sizeof(*a)||a->abi_major!=1||!a->service||!a->manager)return SF_ABI_MISMATCH;
  if(sf_trust_init(&sf_trust,&sf_trust_store))return SF_INVALID;
  sf_log("[PERSIST] transactional volume service in ring 3\n");
- return persist_serve_with_idle(a,dispatch,sf_send,candidate_unbound,persist_snapshot_get);
+ return persist_serve_with_idle(a,dispatch,sf_send,candidate_unbound,persist_snapshot_get,persist_candidate_verify_volume);
 }
