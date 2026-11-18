@@ -171,6 +171,34 @@ if (result.get('persist_verify_host')!={'passed':True,'evidence':'E1-real-txn-an
     not all(verify_guest.get(k)is False for k in ('candidate_activation','driver_grants','mount_requested','physical_hardware'))):
     raise SystemExit('Run actual isolated readonly transaction reconstruction, exact old cache/trust attestation, conservative failed replies and normal private discard before packaging')
 
+hold_source_paths = terminal_source_paths + ('tests/qemu/qemu_persist_hold_test.py','tests/fixtures/persist_idle_fault.c')
+hold_source_sha256 = {p:hashlib.sha256((ROOT/p).read_bytes()).hexdigest() for p in hold_source_paths}
+hold_guest = result.get('persist_hold_qemu',{})
+hold_cases = hold_guest.get('cases',[])
+def hold_case_valid(c):
+    mode=c.get('mode');success=mode=='healthy'
+    return (mode in ('healthy','idle-dropdiscard') and c.get('passed') is True and
+            type(c.get('held_pid'))is int and 1<c['held_pid']<=2147483647 and
+            type(c.get('verified_reads'))is int and 259<=c['verified_reads']<=515 and
+            type(c.get('phase'))is int and c['phase']==(6 if success else 7) and
+            c.get('discard_outcome')==('discarded'if success else'discard-ack-dropped') and
+            all(c.get(k)is True for k in ('old_hold_deadline_expired','alice_denied_hold_and_discard',
+                'ram_access_retained','persist_read_blocked','disk_bytes_preserved','old_capture_stop_preserved')))
+if (result.get('persist_hold_host')!={'passed':True,'evidence':'E1-held-owner-mocked-kernel-transport','checks':247421,'cases':14} or
+    result['persist_hold_host'].get('passed') is not True or
+    any(type(result['persist_hold_host'].get(k))is not int for k in ('checks','cases')) or
+    hold_guest.get('passed') is not True or hold_guest.get('evidence')!='E2-real-held-candidate-and-delayed-explicit-discard' or
+    hold_guest.get('source_sha256')!=hold_source_sha256 or hold_guest.get('production_sha256')!=terminal_artifact_sha256 or
+    len(hold_guest.get('source_head',''))!=40 or any(c not in '0123456789abcdef'for c in hold_guest.get('source_head','')) or
+    type(hold_guest.get('guest_boots'))is not int or hold_guest['guest_boots']!=6 or
+    type(hold_guest.get('user_denials'))is not int or hold_guest['user_denials']!=12 or len(hold_cases)!=6 or
+    {(c.get('mode'),c.get('state'),c.get('transport'))for c in hold_cases}!=
+        {(m,s,t)for m,s in (('healthy','STABLE'),('healthy','PENDING'),('idle-dropdiscard','STABLE'))for t in ('legacy','modern')} or
+    not all(hold_case_valid(c)for c in hold_cases) or
+    not all(hold_guest.get(k)is True for k in ('production_artifacts_restored','base_disk_unchanged')) or
+    not all(hold_guest.get(k)is False for k in ('candidate_activation','driver_grants','mount_requested','physical_hardware'))):
+    raise SystemExit('Run actual live prepared ownership across Root commands, refreshed explicit discard and retained unknown ACK guest evidence before packaging')
+
 write_reply=result.get('persist_write_reply_qemu',{})
 write_cases=write_reply.get('cases',[])
 if (write_reply.get('passed') is not True or write_reply.get('evidence')!='E2-signed-provider' or

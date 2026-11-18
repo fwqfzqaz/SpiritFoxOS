@@ -188,3 +188,26 @@ verify-readerror只验证Root
 随后完整宿主源码冻结批次171.91秒通过；四个旧Windows系统调用mock已由32位long
 改为int64_t，未改变生产比较或关闭告警。五组实际选定发布门及42份联合来源、七产物
 摘要通过。完整本地回归、新head托管和完整发布尚未完成，不能据此宣称全绿。
+
+## 跨命令持有活候选与显式丢弃（2026-11-18）
+
+Root 私有 `sf_persist_candidate_hold` 复用106/109：固定签名候选通过只读重建、
+旧快照精确比较和普通请求DRAINING后进入私有PREPARED=9。它保留候选PID与两个
+私有IPC端点，返回控制台；没有驱动能力、普通挂载、命名空间发布或激活。公开ABI
+仍为679项，既有即时验证并丢弃的周期保持不变。
+
+后续 `sf_persist_candidate_discard` 只接受当前token、PREPARED、已验证快照及
+原封闭所有者绑定；重新确认实际候选仍活着，分配新的全局递增nonce和三秒期限。
+因此旧持有窗口过期不影响合法显式丢弃。只有认证107回复、准确PID正常零退出和
+两个端点撤销都成功才进入CLOSED=6。已知BUSY且尚未发送时保持PREPARED，允许
+资源自然释放后显式重试；身份/信任漂移、候选死亡、未知发送/回复或退役失败均
+隔离失败，禁止重发、另起候选、kill、清除DIRTY/围栏或重置信任。纯状态getter
+不重核活性，也不能当成未来激活许可。
+
+受保护的诊断 `persist-terminal-test verify-hold` 与独立命令
+`persist-candidate-discard` 验证跨控制台返回的真实存活和延迟清理。E2六次启动覆盖
+STABLE/PENDING×legacy/modern，以及两种传输的签名DISCARD丢ACK故障；Alice均被
+拒绝，RAM/echo仍可用，普通Persist读仍阻断。实际等待旧期限过期后正常丢弃；丢ACK
+则保留失败状态及端点，第二次命令拒绝重发，盘字节和旧capture/STOP不变。
+E1拥有者247421项/14场景使用模拟kernel/transport与合成快照，不能代替E2；发布门
+逐项绑定真实来源、七个生产产物和六种访客组合。最终宿主/兼容回归与托管状态见PROGRESS。

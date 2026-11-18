@@ -96,6 +96,7 @@ host_test('test_persist_candidate_owner','tests/host/test_persist_candidate_owne
 host_test('test_persist_idle_owner','tests/host/test_persist_idle_owner.c','services/manager.c','services/namespace.c','services/namespace_control.c','services/namespace_transport.c',*build.CRYPTO,no_unused=True,include_services=True)
 host_test('test_persist_snapshot_owner','tests/host/test_persist_snapshot_owner.c','services/manager.c','services/namespace.c','services/namespace_control.c','services/namespace_transport.c',*build.CRYPTO,no_unused=True,include_services=True)
 host_test('test_persist_verify_owner','tests/host/test_persist_verify_owner.c','services/manager.c','services/namespace.c','services/namespace_control.c','services/namespace_transport.c',*build.CRYPTO,no_unused=True,include_services=True)
+host_test('test_persist_hold_owner','tests/host/test_persist_hold_owner.c','services/manager.c','services/namespace.c','services/namespace_control.c','services/namespace_transport.c',*build.CRYPTO,no_unused=True,include_services=True)
 host_test('test_persist_fence','tests/host/test_persist_fence.c','services/manager.c','services/namespace.c','services/namespace_control.c','services/namespace_transport.c',*build.CRYPTO,no_unused=True,include_services=True)
 host_test('test_persist_quiescence','tests/host/test_persist_quiescence.c','tests/host/persist_volume_fixture.c','services/persist_metadata.c','services/namespace.c','services/txn.c','services/update.c','services/version.c',*build.CRYPTO,no_unused=True)
 host_test('test_trust_sync','tests/host/test_trust_sync.c','services/namespace.c',*build.CRYPTO,no_unused=True)
@@ -134,6 +135,7 @@ subprocess.run([sys.executable,'tests/integration/test_persist_terminal_evidence
 subprocess.run([sys.executable,'tests/integration/test_persist_idle_evidence.py'],check=True)
 subprocess.run([sys.executable,'tests/integration/test_persist_snapshot_evidence.py'],check=True)
 subprocess.run([sys.executable,'tests/integration/test_persist_verify_evidence.py'],check=True)
+subprocess.run([sys.executable,'tests/integration/test_persist_hold_evidence.py'],check=True)
 subprocess.run([sys.executable,'tests/integration/test_persist_candidate_image.py'],check=True)
 subprocess.run([sys.executable,'tests/integration/test_trust_fingerprint.py'],check=True)
 subprocess.run([sys.executable,'tests/integration/test_persist_snapshot_volume.py'],check=True)
@@ -185,6 +187,7 @@ if not args.host_only:
     subprocess.run([sys.executable, 'tests/qemu/qemu_persist_idle_test.py'], check=True)
     subprocess.run([sys.executable, 'tests/qemu/qemu_persist_snapshot_test.py'], check=True)
     subprocess.run([sys.executable, 'tests/qemu/qemu_persist_verify_test.py'], check=True)
+    subprocess.run([sys.executable, 'tests/qemu/qemu_persist_hold_test.py'], check=True)
     subprocess.run([sys.executable, 'tests/qemu/qemu_namespace_recovery_test.py'], check=True)
     subprocess.run([sys.executable, 'tests/qemu/qemu_hardware_test.py'], check=True)
     # USB：xHCI 初始化、HID 枚举、键盘输入、指针注入与热插拔。
@@ -268,10 +271,12 @@ result['persist_candidate_host'] = {'passed':True,'evidence':'E1-host-real-signa
 result['persist_idle_host'] = {'passed':True,'evidence':'E1-host-mocked-kernel','parser_checks':4173,'owner_checks':437812}
 result['persist_snapshot_host'] = {'passed':True,'evidence':'E1-host-independent-canonical-vectors','parser_checks':8197,'volume_checks':87,'owner_checks':170613,'trust_checks':95}
 result['persist_verify_host'] = {'passed':True,'evidence':'E1-real-txn-and-mocked-IPC','volume_checks':5907,'parser_checks':4441242,'parser_cases':66,'owner_checks':751802,'owner_cases':58}
+result['persist_hold_host'] = {'passed':True,'evidence':'E1-held-owner-mocked-kernel-transport','checks':247421,'cases':14}
 result['persist_terminal_qemu'] = {} if args.host_only else json.loads((ROOT/'build/persist-terminal-results.json').read_text(encoding='utf-8'))
 result['persist_idle_qemu'] = {} if args.host_only else json.loads((ROOT/'build/persist-idle-results.json').read_text(encoding='utf-8'))
 result['persist_snapshot_qemu'] = {} if args.host_only else json.loads((ROOT/'build/persist-snapshot-results.json').read_text(encoding='utf-8'))
 result['persist_verify_qemu'] = {} if args.host_only else json.loads((ROOT/'build/persist-verify-results.json').read_text(encoding='utf-8'))
+result['persist_hold_qemu'] = {} if args.host_only else json.loads((ROOT/'build/persist-hold-results.json').read_text(encoding='utf-8'))
 result['persist_write_reply_qemu'] = {} if args.host_only else json.loads((ROOT/'build/persist-write-reply-results.json').read_text(encoding='utf-8'))
 result['persist_read_qemu_boots'] = 0 if args.host_only else 2
 result['persist_read_qemu_bytes'] = 0 if args.host_only else 8192

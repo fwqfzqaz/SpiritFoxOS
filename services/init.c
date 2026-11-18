@@ -1026,11 +1026,50 @@ static int persist_candidate_sector(void*context,uint64_t lba,uint8_t out[512]){
  if(context&&*(const int*)context)return SF_DEVICE_GONE;
  return sf_storage_sector_read(0,lba,out);
 }
+static uint64_t held_candidate_token;
+static void persist_candidate_discard_test(void){
+ int r=SF_NOT_FOUND;uint64_t token=held_candidate_token;
+ if(!token)goto done;
+ SfPersistStopStatus stop_before,stop_after;SfPersistCaptureStatus capture_before,capture_after;
+ SfPersistIdleStatus before,after;uint8_t disk_before[96],disk_after[96];
+ if(sf_persist_fence_stop_status(token,&stop_before)||sf_persist_fence_capture_status(token,&capture_before)||
+    sf_persist_candidate_status(token,&before)){r=SF_BAD_FORMAT;goto done;}
+ if(before.phase!=SF_PERSIST_IDLE_PREPARED){r=sf_persist_candidate_discard(token);if(!r)r=SF_BAD_FORMAT;goto done;}
+ if(!before.verified||transaction_fingerprint(disk_before)){r=SF_BAD_FORMAT;goto done;}
+ uint64_t observed_ticks=sf_ticks();
+ int old_expired=observed_ticks<=UINT64_MAX/10000000ull&&observed_ticks*10000000ull>=before.deadline_ns;
+ long caps=sf_task_cap_usage(1);r=sf_persist_candidate_discard(token);
+ if(r){
+  if(sf_persist_candidate_status(token,&after)||after.phase!=SF_PERSIST_IDLE_FAILED||!after.verified||
+     after.pid!=before.pid||memcmp(&after.verified_snapshot,&before.verified_snapshot,sizeof(before.verified_snapshot))||
+     after.discard_accepted||after.death_confirmed||after.retired||sf_task_cap_usage(1)!=caps||
+     sf_persist_fence_stop_status(token,&stop_after)||memcmp(&stop_before,&stop_after,sizeof(stop_before))||
+     sf_persist_fence_capture_status(token,&capture_after)||memcmp(&capture_before,&capture_after,sizeof(capture_before))||
+     transaction_fingerprint(disk_after)||memcmp(disk_before,disk_after,sizeof(disk_before))||!sf_persist_fenced())goto done;
+  sf_log("PERSIST CANDIDATE HELD DISCARD FAILED CLOSED phase=");sf_number(after.phase);
+  sf_log(" verified=");sf_number(after.verified);sf_log(" ack=");sf_number(after.discard_accepted);
+  sf_log(" death=");sf_number(after.death_confirmed);sf_log(" retired=");sf_number(after.retired);
+  sf_log(" old_expired=");sf_number((uint64_t)old_expired);sf_log("\n");goto done;
+ }
+ if(caps<2||sf_task_cap_usage(1)!=caps-2||sf_persist_candidate_status(token,&after)||
+    after.phase!=SF_PERSIST_IDLE_CLOSED||!after.verified||!after.discard_accepted||!after.death_confirmed||!after.retired||
+    after.pid!=before.pid||memcmp(&after.verified_snapshot,&before.verified_snapshot,sizeof(before.verified_snapshot))||
+    sf_persist_fence_stop_status(token,&stop_after)||memcmp(&stop_before,&stop_after,sizeof(stop_before))||
+    sf_persist_fence_capture_status(token,&capture_after)||memcmp(&capture_before,&capture_after,sizeof(capture_before))||
+    transaction_fingerprint(disk_after)||memcmp(disk_before,disk_after,sizeof(disk_before))||
+    after.discard_id<=before.discard_id||!sf_persist_fenced()||sf_persist_candidate_discard(token)!=SF_DRAINING){r=SF_BAD_FORMAT;goto done;}
+ held_candidate_token=0;
+ sf_log("PERSIST CANDIDATE HELD DISCARD PASSED phase=");sf_number(after.phase);
+ sf_log(" pid=");sf_number(after.pid);sf_log(" preserved=1 old_expired=");sf_number((uint64_t)old_expired);sf_log("\n");return;
+done:
+ sf_log("persist-candidate-discard: refused code=");sf_number(r<0?(uint64_t)-r:(uint64_t)r);sf_log("\n");
+}
 static void persist_terminal_test(const char*mode){
  int idle_bad=!strcmp(mode,"idle-badprobe"),idle_drop=!strcmp(mode,"idle-dropdiscard"),idle_delay=!strcmp(mode,"idle-delayed");
  int snapshot_bad=!strcmp(mode,"snapshot-badreply"),snapshot_drop=!strcmp(mode,"snapshot-dropped");
  int verify_read_error=!strcmp(mode,"verify-readerror"),verify_bad=!strcmp(mode,"verify-badreply"),verify_drop=!strcmp(mode,"verify-dropped");
- int verify=!strcmp(mode,"verify")||verify_read_error||verify_bad||verify_drop;
+ int hold=!strcmp(mode,"verify-hold");
+ int verify=!strcmp(mode,"verify")||verify_read_error||verify_bad||verify_drop||hold;
  int healthy=!strcmp(mode,"healthy")||idle_bad||idle_drop||idle_delay||snapshot_bad||snapshot_drop||verify,unknown=!strcmp(mode,"unknown"),busy=!strcmp(mode,"busy"),delayed=!strcmp(mode,"delayed");
  int r=SF_INVALID,ram=0,parent=0,file=0;uint64_t token=0,probe=0;
  SfPersistStopStatus before,after,again;FenceView view,end_view;SfRuntimeTrust trust=sf_trust;
@@ -1082,7 +1121,8 @@ static void persist_terminal_test(const char*mode){
                  !memcmp(&candidate,&repeated,sizeof(candidate))&&sf_task_cap_usage(1)==caps);
   TERMINAL_CHECK(!sf_persist_fence_stop_status(token,&again)&&!memcmp(&after,&again,sizeof(after))&&sf_persist_fenced());
   sf_log("PERSIST CANDIDATE INSPECT PASSED\n");
-  int idle_result=verify?sf_persist_candidate_verify_cycle(token,persist_candidate_spawn_idle,0,persist_candidate_sector,&verify_read_error):
+  int idle_result=hold?sf_persist_candidate_hold(token,persist_candidate_spawn_idle,0,persist_candidate_sector,0):
+                  verify?sf_persist_candidate_verify_cycle(token,persist_candidate_spawn_idle,0,persist_candidate_sector,&verify_read_error):
                          sf_persist_candidate_cycle(token,persist_candidate_spawn_idle,0);
   SfPersistIdleStatus idle;
   TERMINAL_CHECK(!sf_persist_candidate_status(token,&idle)&&idle.pid>1&&idle.pid!=after.pid);
@@ -1091,7 +1131,14 @@ static void persist_terminal_test(const char*mode){
   sf_log(" guard=");sf_number(idle.guard_denied);sf_log(" discard=");sf_number(idle.discard_accepted);
   sf_log(" death=");sf_number(idle.death_confirmed);sf_log(" retired=");sf_number(idle.retired);
   sf_log(" caps-before=");sf_number(caps);sf_log(" caps-after=");sf_number(sf_task_cap_usage(1));sf_log("\n");
-  if(verify&&(verify_read_error||verify_bad||verify_drop)){
+  if(hold){
+   TERMINAL_CHECK(!idle_result&&!held_candidate_token&&idle.phase==SF_PERSIST_IDLE_PREPARED&&idle.verified&&
+                  idle.probe_accepted&&idle.guard_denied&&!idle.discard_accepted&&!idle.death_confirmed&&!idle.retired&&
+                  idle.read_frames>=3+SF_TXN_BANK_SECTORS&&idle.read_frames<=SF_PERSIST_VERIFY_READS&&
+                  !memcmp(&idle.verified_snapshot,&capture.snapshot,sizeof(capture.snapshot))&&
+                  sf_sys(SYS_TASK_STATUS,idle.pid,0,0)==SF_TASK_RUNNING&&sf_task_cap_usage(1)==caps+2);
+   held_candidate_token=token;sf_log("PERSIST CANDIDATE HELD\n");
+  }else if(verify&&(verify_read_error||verify_bad||verify_drop)){
    int expected_error=verify_read_error?SF_DEVICE_GONE:verify_bad?SF_BAD_FORMAT:SF_TIMEOUT;
    TERMINAL_CHECK(idle_result==expected_error&&idle.error==expected_error&&idle.phase==SF_PERSIST_IDLE_FAILED&&
                   idle.probe_accepted&&!idle.verified&&!idle.guard_denied&&!idle.discard_accepted&&
@@ -1116,6 +1163,7 @@ static void persist_terminal_test(const char*mode){
   }
   TERMINAL_CHECK(sf_persist_candidate_cycle(token,persist_candidate_spawn_idle,0)<0);
   if(verify)TERMINAL_CHECK(sf_persist_candidate_verify_cycle(token,persist_candidate_spawn_idle,0,persist_candidate_sector,0)<0);
+  if(hold)TERMINAL_CHECK(sf_persist_candidate_hold(token,persist_candidate_spawn_idle,0,persist_candidate_sector,0)<0);
   TERMINAL_CHECK(!sf_persist_fence_capture_status(token,&capture_again)&&!memcmp(&capture,&capture_again,sizeof(capture)));
   TERMINAL_CHECK(!sf_persist_fence_stop_status(token,&again)&&!memcmp(&after,&again,sizeof(after))&&sf_persist_fenced());
   sf_log("PERSIST CANDIDATE IDLE RESULT phase=");sf_number(idle.phase);sf_log(" pid=");sf_number(idle.pid);
@@ -1433,6 +1481,7 @@ static void command(char*line){
  else if(!strcmp(line,"persist-quiescence-test"))persist_quiescence_test();
  else if(!strcmp(line,"persist-terminal-test"))persist_terminal_test("");
  else if(!memcmp(line,"persist-terminal-test ",22))persist_terminal_test(line+22);
+ else if(!strcmp(line,"persist-candidate-discard"))persist_candidate_discard_test();
  else if(!strcmp(line,"persist-fence-test"))persist_fence_test("");
  else if(!memcmp(line,"persist-fence-test ",19))persist_fence_test(line+19);
  else if(!strcmp(line,"persist-quiescent")){int r=sf_persist_quiescent();if(!r)sf_log("persist: QUIESCENT preflight only\n");else{sf_log("persist: preflight refused code=");sf_number(-r);sf_log("\n");}}
