@@ -6,6 +6,7 @@
 #include "persist_snapshot.h"
 #include "trust_fingerprint.h"
 #include "persist_verify.h"
+#include "storage_reply.h"
 /* sf-init side of the persistence split: every volume operation is a bounded
  * RPC to sf-persist.sfmod. The block driver endpoints are derived here with
  * RIGHT_DELEGATE and transferred once, so the service needs no root-only task
@@ -666,6 +667,66 @@ int sf_persist_candidate_caps_status(uint64_t token,SfPersistCapsStatus*out){
  if(!out)return SF_INVALID;
  if(!token||token!=idle_candidate.token)return SF_STALE_HANDLE;
  *out=candidate_caps;if(!out->token)out->token=token;return 0;
+}
+static int candidate_reply_seal(uint64_t token,SfStorageReplySeal*out){
+ if(!token||token!=idle_candidate.token||token!=candidate_caps.token)return SF_STALE_HANDLE;
+ if(idle_candidate.phase!=SF_PERSIST_IDLE_STAGED||candidate_caps.phase!=SF_PERSIST_CAPS_READY||
+    candidate_caps.allocation_unknown||!candidate_caps.parent[0]||!candidate_caps.parent[1]||
+    candidate_caps.parent[0]==candidate_caps.parent[1])return SF_DRAINING;
+ for(unsigned i=0;i<2;i++)if(candidate_caps.parent[i]>2147483647u||
+    candidate_caps.parent[i]==admission_fence.driver_ep||candidate_caps.parent[i]==admission_fence.driver_reply||
+    candidate_caps.parent[i]==idle_candidate.ep||candidate_caps.parent[i]==idle_candidate.reply)return SF_BAD_FORMAT;
+ int r=caps_context(token);if(r)return r;
+ if(sf_sys(SYS_TASK_CAP_LIMIT,idle_candidate.pid,0,SF_LIMIT_USED)!=4)return SF_BAD_FORMAT;
+ SfPersistStageBinding expected={fence_capture.snapshot,token,admission_fence.storage_instance,
+    admission_fence.capacity,admission_fence.driver_pid,admission_fence.fs_pid,(uint32_t)admission_fence.writable,1};
+ if(memcmp(&expected,&candidate_caps.binding,sizeof(expected)))return SF_STALE_HANDLE;
+ SfStorageReplySeal seal;memset(&seal,0,sizeof(seal));
+ seal.binding=candidate_caps.binding;seal.driver_ep=admission_fence.driver_ep;
+ seal.driver_reply=admission_fence.driver_reply;seal.candidate_pid=idle_candidate.pid;
+ if(!storage_reply_seal_valid(&seal))return SF_BAD_FORMAT;
+ *out=seal;return 0;
+}
+int sf_persist_candidate_reply_borrow(uint64_t token,uint64_t*out){
+ if(!out)return SF_INVALID;
+ if(!token||token!=idle_candidate.token||token!=candidate_caps.token)return SF_STALE_HANDLE;
+ if(idle_candidate.phase!=SF_PERSIST_IDLE_STAGED||candidate_caps.phase!=SF_PERSIST_CAPS_READY)return SF_DRAINING;
+ SfStorageReplyOwner owner;int r=sf_storage_reply_status(&owner);if(r)return r;
+ if(owner.phase==SF_STORAGE_REPLY_BORROWED)return SF_BUSY;
+ if(owner.phase!=SF_STORAGE_REPLY_ROOT)return SF_DRAINING;
+ SfStorageReplySeal seal;r=candidate_reply_seal(token,&seal);
+ if(r)return r==SF_BUSY?r:caps_failed(terminal_error(r));
+ r=sf_storage_reply_claim_trusted(&seal,out);
+ if(r&&r!=SF_BUSY&&r!=SF_NO_SPACE)return caps_failed(terminal_error(r));
+ return r;
+}
+static int candidate_reply_owned(uint64_t token,uint64_t serial,SfStorageReplyOwner*out){
+ int r=sf_storage_reply_status(out);if(r)return r;
+ if(out->phase!=SF_STORAGE_REPLY_ROOT&&out->phase!=SF_STORAGE_REPLY_BORROWED)return SF_DRAINING;
+ if(out->phase!=SF_STORAGE_REPLY_BORROWED||!token||!serial||
+    token!=out->seal.binding.token||serial!=out->serial)return SF_STALE_HANDLE;
+ return 0;
+}
+static int candidate_reply_failed(uint64_t token,const SfStorageReplyOwner*owner,int error){
+ error=terminal_error(error);
+ int r=sf_storage_reply_taint_trusted(&owner->seal,owner->serial,error);
+ if(r&&r!=SF_DRAINING)return r;
+ if(candidate_caps.token==token&&idle_candidate.token==token) return caps_failed(error);
+ return error;
+}
+int sf_persist_candidate_reply_release(uint64_t token,uint64_t serial){
+ SfStorageReplyOwner owner;int r=candidate_reply_owned(token,serial,&owner);if(r)return r;
+ SfStorageReplySeal seal;r=candidate_reply_seal(token,&seal);
+ if(r)return candidate_reply_failed(token,&owner,r);
+ if(memcmp(&seal,&owner.seal,sizeof(seal)))return candidate_reply_failed(token,&owner,SF_STALE_HANDLE);
+ r=sf_storage_reply_return_trusted(&seal,serial);
+ if(r)return candidate_reply_failed(token,&owner,r);
+ return 0;
+}
+int sf_persist_candidate_reply_quarantine(uint64_t token,uint64_t serial,int error){
+ SfStorageReplyOwner owner;int r=candidate_reply_owned(token,serial,&owner);if(r)return r;
+ if(error<SF_VERSION_REJECTED||error>=0)return SF_INVALID;
+ return candidate_reply_failed(token,&owner,error);
 }
 void sf_persist_driver_down(void){
  if(!ready())return;SfMessage m;sf_message(&m,OP_PERSIST_DRIVER_DOWN,0);pf_call(&m);

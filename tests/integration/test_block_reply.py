@@ -17,11 +17,13 @@ PREFIX=r'''
 static uint32_t driver_ep=0x101,driver_reply=0x102,driver_pid=12;
 static uint64_t capacity=4096,sequence;
 static int driver_alive __attribute__((unused)),running,variant,bad_after,send_error,recv_error,service_error;
+static int fence_state,storage_access_gate __attribute__((unused));
 static unsigned checks,sends,receives,closed,killed;
 static SfMessage wire;
 /* This codec regression models ordinary admission; the actual fenced block
  * boundary and zero-transport refusal are exercised by test_persist_fence. */
-static int sf_persist_fenced(void){return 0;}
+static int sf_persist_fenced(void){return fence_state;}
+static int sf_storage_reply_access(void){return storage_access_gate;}
 #define CHECK(x) do{checks++;if(!(x)){fprintf(stderr,"line%d case%d: %s\n",__LINE__,variant,#x);exit(1);}}while(0)
 /* Preserve the guest's LP64 sentinel on an LLP64 Windows test host. */
 static int64_t sf_sys(unsigned n,uint64_t a,uint64_t b,uint64_t c){(void)a;(void)b;(void)c;
@@ -60,7 +62,7 @@ static long sf_send(uint32_t ep,SfMessage*m){
  return send_error;
 }
 static long sf_recv(uint32_t ep,SfMessage*m,uint64_t deadline){CHECK(ep==driver_reply&&deadline==sf_deadline(2000));receives++;if(recv_error)return recv_error;*m=wire;return effective()==15?driver_pid+1:driver_pid;}
-static void reset(void){driver_ep=0x101;driver_reply=0x102;driver_pid=12;driver_alive=running=1;sequence=0x200000000ull;sends=receives=closed=killed=0;variant=bad_after=send_error=recv_error=service_error=0;}
+static void reset(void){driver_ep=0x101;driver_reply=0x102;driver_pid=12;driver_alive=running=1;sequence=0x200000000ull;sends=receives=closed=killed=0;variant=bad_after=send_error=recv_error=service_error=fence_state=storage_access_gate=0;}
 static void failed(void){
 #if OWNER_STORAGE
  CHECK(killed==1&&!running);
@@ -71,6 +73,7 @@ static void failed(void){
 '''
 MAIN=r'''
 int main(void){
+ unsigned owner_checks=0;
  const unsigned ops[]={OP_BLOCK_INFO,OP_BLOCK_READ,OP_BLOCK_WRITE,OP_BLOCK_FLUSH,OP_BLOCK_WRITE_RANGE,OP_BLOCK_STOP,OP_BLOCK_DMA_PROBE};
  for(unsigned i=0;i<sizeof(ops)/sizeof(*ops);i++){
   reset();SfMessage m;sf_message(&m,ops[i],0);if(ops[i]==OP_BLOCK_READ||ops[i]==OP_BLOCK_WRITE)m.length=256;
@@ -101,6 +104,24 @@ int main(void){
    CHECK(out[i]==expected);
   }
  }
+#if OWNER_STORAGE
+ unsigned before_owner=checks;
+ for(unsigned live=0;live<2;live++)for(unsigned fenced=0;fenced<2;fenced++){
+  reset();running=driver_alive=(int)live;fence_state=(int)fenced;storage_access_gate=SF_DRAINING;
+  SfMessage denied;sf_message(&denied,OP_BLOCK_READ,0);denied.length=256;denied.offset=512;denied.mode=0;
+  SfMessage saved=denied;uint64_t saved_sequence=sequence;
+  CHECK(call(&denied)==SF_DRAINING);
+  CHECK(!memcmp(&denied,&saved,sizeof(denied))&&sequence==saved_sequence&&
+        !sends&&!receives&&!closed&&!killed&&running==(int)live&&driver_alive==(int)live);
+  unsigned char guarded[528];memset(guarded,0xa7,sizeof(guarded));
+  CHECK(SECTOR(0,0,guarded+8)==SF_DRAINING);
+  for(unsigned i=0;i<sizeof(guarded);i++)CHECK(guarded[i]==0xa7);
+  CHECK(sequence==saved_sequence&&!sends&&!receives&&!closed&&!killed&&
+        running==(int)live&&driver_alive==(int)live);
+ }
+ owner_checks=checks-before_owner;
+#endif
+ printf("BLOCK CLIENT OWNER ASSERTIONS %u\n",owner_checks);
  printf("BLOCK CLIENT CHECKS %u\n",checks);return 0;
 }
 '''
@@ -117,7 +138,13 @@ class BlockReply(unittest.TestCase):
             build.run(['-target',build.HOST,'-g0','-O2','-Wall','-Wextra','-Werror','-Wno-unused-function','-Wno-unused-parameter','-Iinclude','-Iservices',str(c.relative_to(ROOT)),'-o',str(binary.relative_to(ROOT))])
             run=subprocess.run([str(binary)],capture_output=True,text=True)
             self.assertEqual(run.returncode,0,run.stdout+run.stderr)
-            results.append({'owner':owner,'checks':int(run.stdout.strip().split()[-1])})
+            lines=run.stdout.splitlines()
+            total=next(int(line.split()[-1]) for line in lines if line.startswith('BLOCK CLIENT CHECKS '))
+            owner_checks=next(int(line.split()[-1]) for line in lines if line.startswith('BLOCK CLIENT OWNER ASSERTIONS '))
+            results.append({'owner':owner,'checks':total,'owner_checks':owner_checks})
         (ROOT/'build/block-reply-host-results.json').write_text(json.dumps({'passed':True,'clients':results,'checks':sum(r['checks'] for r in results)},indent=2)+'\n',encoding='utf-8')
+        print('BLOCK REPLY ASSERTION LOG: '+', '.join(
+            f"{r['owner']}={r['checks']} (owner-gate={r['owner_checks']})" for r in results)+
+            '; aggregate='+str(sum(r['checks'] for r in results)),flush=True)
 
 if __name__=='__main__':unittest.main(verbosity=2)

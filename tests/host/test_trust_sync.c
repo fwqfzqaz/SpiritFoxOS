@@ -23,6 +23,7 @@ static uint8_t list_data[SF_TRUST_MAX*32],scratch[SF_STORAGE_SNAPSHOT_BYTES],app
 static SfMessage reply;
 static char logs[4096];static size_t logged;
 #define CHECK(c) do{checks++;if(!(c)){fprintf(stderr,"TRUST SYNC FAIL line %d: %s\n",__LINE__,#c);exit(1);}}while(0)
+#include "storage_reply_unavailable.h"
 static void sf_log(const char*s){size_t n=strlen(s);CHECK(n<sizeof(logs)-logged);memcpy(logs+logged,s,n+1);logged+=n;}
 static void sf_number(uint64_t n){char s[32];snprintf(s,sizeof(s),"%llu",(unsigned long long)n);sf_log(s);}
 static int64_t sf_sys(long op,uint64_t a,uint64_t b,uint64_t c){
