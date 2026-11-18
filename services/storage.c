@@ -3,6 +3,7 @@
 #include "persistence.h"
 #include "virtio.h"
 #include "block_rpc.h"
+#include "storage_reply.h"
 #include "txn.h"
 #include "namespace_frontend.h"
 #include "namespace_transport.h"
@@ -42,6 +43,9 @@ static uint64_t capacity,sequence=0x100000000ull,fs_requests=0x400000000ull;
  * 两条路径不会嵌套；每次借出前作废模块侧缓存状态。 */
 static SfNsTransport fs_transport;
 static uint32_t namespace_descriptions;
+/* Separate from the Persist admission fence: even READ/INFO must not consume
+ * a candidate's shared reply stream while it is borrowed or quarantined. */
+static SfStorageReplyOwner reply_owner;
 static int mount_admission,mount_driver_lease;
 static uint8_t load_scratch[SF_STORAGE_SNAPSHOT_BYTES];
 uint8_t* sf_storage_scratch(void){return load_scratch;}
@@ -53,6 +57,7 @@ int sf_storage_driver(uint32_t*ep,uint32_t*reply,uint32_t*pid,uint64_t*bytes,int
 }
 static int writable,write_grant;
 static int call(SfMessage*m){
+ int access=sf_storage_reply_access();if(access)return access;
  if(sf_persist_fenced()&&m->h.opcode!=OP_BLOCK_READ&&m->h.opcode!=OP_BLOCK_INFO)return SF_DRAINING;
  if(!driver_pid||sf_sys(SYS_TASK_STATUS,driver_pid,0,0)!=SF_TASK_RUNNING)return SF_DEVICE_GONE;
  if(sequence==UINT64_MAX)return SF_NO_SPACE;
@@ -236,6 +241,47 @@ uint64_t sf_storage_admission_instance(void){
  if(!f->generation||!d->generation||f->state!=MOD_ACTIVE||d->state!=MOD_ACTIVE||
     !d->resources[RES_LEASE])return 0;
  return((uint64_t)f->generation<<32)|d->generation;
+}
+int sf_storage_reply_access(void){return storage_reply_access(&reply_owner);}
+int sf_storage_reply_status(SfStorageReplyOwner*out){
+ if(!out)return SF_INVALID;*out=reply_owner;return 0;
+}
+static int reply_live_context(const SfStorageReplySeal*s){
+ if(!storage_reply_seal_valid(s))return SF_INVALID;
+ if(!sf_persist_fenced())return SF_DRAINING;
+ int r=sf_storage_quiescent();if(r)return r;
+ uint32_t ep=0,reply=0,pid=0;uint64_t bytes=0;int write=0;
+ if(sf_storage_driver(&ep,&reply,&pid,&bytes,&write))return SF_DEVICE_GONE;
+ if(sf_storage_admission_instance()!=s->binding.storage_instance||
+    sf_storage_namespace_pid()!=s->binding.fs_pid||pid!=s->binding.driver_pid||
+    ep!=s->driver_ep||reply!=s->driver_reply||bytes!=s->binding.capacity||
+    write!=(int)s->binding.writable)return SF_STALE_HANDLE;
+ if(sf_sys(SYS_TASK_STATUS,s->candidate_pid,0,0)!=SF_TASK_RUNNING)return SF_DEVICE_GONE;
+ return 0;
+}
+int sf_storage_reply_claim_trusted(const SfStorageReplySeal*s,uint64_t*out){
+ if(!out)return SF_INVALID;
+ if(reply_owner.phase==SF_STORAGE_REPLY_BORROWED)return SF_BUSY;
+ if(sf_storage_reply_access())return SF_DRAINING;
+ int r=reply_live_context(s);if(r)return r;
+ r=storage_reply_acquire(&reply_owner,s);if(!r)*out=reply_owner.serial;
+ return r;
+}
+int sf_storage_reply_return_trusted(const SfStorageReplySeal*s,uint64_t serial){
+ /* Validate the exact owner on a copy before live observations. A mismatched
+  * caller must not release or taint an established borrow. */
+ SfStorageReplyOwner probe=reply_owner;
+ int r=storage_reply_release(&probe,s,serial);if(r)return r;
+ r=reply_live_context(s);
+ if(r){
+  int error=r>=SF_VERSION_REJECTED&&r<0?r:SF_BAD_FORMAT;
+  storage_reply_taint(&reply_owner,s,serial,error);return r;
+ }
+ return storage_reply_release(&reply_owner,s,serial);
+}
+int sf_storage_reply_taint_trusted(const SfStorageReplySeal*s,uint64_t serial,int error){
+ /* An unknown result must remain recordable after PID/context drift. */
+ return storage_reply_taint(&reply_owner,s,serial,error);
 }
 static int mount_open(unsigned tag){
  if(tag!=1||fs_slot<0)return SF_STALE_HANDLE;

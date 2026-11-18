@@ -29,6 +29,7 @@ static uint32_t observed_length[4];
 static size_t logical;
 static SfMessage reply;
 #define CHECK(c) do{checks++;if(!(c)){fprintf(stderr,"PERSIST WRITE FAIL line %d variant%u call%u: %s\n",__LINE__,variant,sends,#c);exit(1);}}while(0)
+#include "storage_reply_unavailable.h"
 
 static int64_t sf_sys(long a,uint64_t b,uint64_t c,uint64_t d){(void)a;(void)b;(void)c;(void)d;return SF_DENIED;}
 static long sf_cap_close(uint64_t cap){CHECK(cap==0x777);closed++;return 0;}

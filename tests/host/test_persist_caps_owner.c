@@ -354,7 +354,10 @@ static void staged_discard_failures_revoke_parents_once(void){
  }
 }
 
-int main(void){
+#ifndef SF_CAPS_OWNER_ENTRY
+#define SF_CAPS_OWNER_ENTRY main
+#endif
+int SF_CAPS_OWNER_ENTRY(void){
  normal_stage_and_discard();
  busy_and_capacity_refusal_are_retryable();preflight_and_derive_fail_closed();
  ack_and_transport_failures_retire_only_staged_branches();revocation_failures_remain_explicit();

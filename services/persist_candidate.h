@@ -64,4 +64,10 @@ typedef struct {
  * globals, namespace admission and activation remain closed. */
 int sf_persist_candidate_stage_caps(uint64_t token);
 int sf_persist_candidate_caps_status(uint64_t token,SfPersistCapsStatus*);
+/* Root-only preparatory reply-stream ownership; no candidate driver RPC.
+ * Return is allowed only for a known completed use. Unknown completion must
+ * quarantine instead; neither a status getter nor task death proves drain. */
+int sf_persist_candidate_reply_borrow(uint64_t token,uint64_t*serial);
+int sf_persist_candidate_reply_release(uint64_t token,uint64_t serial);
+int sf_persist_candidate_reply_quarantine(uint64_t token,uint64_t serial,int error);
 #endif

@@ -11,6 +11,7 @@
 #include "arguments.h"
 #include "native_image.h"
 #include "persist_candidate.h"
+#include "storage_reply.h"
 #include "persist_verify.h"
 #include "persist_snapshot.h"
 #include "file_rpc.h"
@@ -1064,6 +1065,65 @@ static void persist_candidate_stage_test(void){
 done:
  if(r){sf_log("persist-candidate-stage: refused code=");sf_number(r<0?(uint64_t)-r:(uint64_t)r);sf_log("\n");}
 }
+static void persist_reply_owner_test(int quarantine){
+ uint64_t token=held_candidate_token,serial=0,nested=0xa5a5u;int r=SF_NOT_FOUND;
+ if(!token)goto failed;
+ SfPersistIdleStatus idle;SfPersistCapsStatus caps;SfStorageReplyOwner owner,after;
+ SfPersistStopStatus stop,stop_after;SfPersistCaptureStatus capture,capture_after;
+ SfRuntimeTrust trust=sf_trust;uint8_t digest[96],end[96],sector_probe[512];
+ if(sf_persist_candidate_status(token,&idle)||idle.phase!=SF_PERSIST_IDLE_STAGED||
+    sf_persist_candidate_caps_status(token,&caps)||caps.phase!=SF_PERSIST_CAPS_READY||
+    sf_storage_reply_status(&owner)||owner.phase!=SF_STORAGE_REPLY_ROOT||owner.serial>=UINT64_MAX-1||
+    sf_persist_fence_stop_status(token,&stop)||sf_persist_fence_capture_status(token,&capture)||
+    transaction_fingerprint(digest)){r=SF_DRAINING;goto failed;}
+ long root_caps=sf_task_cap_usage(1);
+ if(root_caps<4){r=SF_BAD_FORMAT;goto failed;}
+ r=sf_persist_candidate_reply_borrow(token,&serial);if(r)goto failed;
+ if(!serial||sf_storage_reply_status(&owner)||owner.phase!=SF_STORAGE_REPLY_BORROWED||
+    owner.serial!=serial||owner.seal.binding.token!=token||owner.seal.candidate_pid!=idle.pid||
+    sf_persist_candidate_reply_borrow(token,&nested)!=SF_BUSY||nested!=0xa5a5u||
+    sf_persist_candidate_reply_release(token,serial+1)!=SF_STALE_HANDLE||
+    sf_persist_candidate_reply_release(token,0)!=SF_STALE_HANDLE||
+    sf_persist_candidate_reply_quarantine(token,serial,0)!=SF_INVALID||
+    sf_storage_reply_status(&after)||memcmp(&owner,&after,sizeof(owner))){r=SF_BAD_FORMAT;goto failed;}
+ /* These refusal observations do not themselves attest that a guest driver
+  * saw zero packets. E1 instruments the actual pre-send/pre-receive gate. */
+ memset(sector_probe,0xa7,sizeof(sector_probe));
+ if(sf_storage_sector_read(0,0,sector_probe)!=SF_DRAINING){r=SF_BAD_FORMAT;goto failed;}
+ for(unsigned i=0;i<sizeof(sector_probe);i++)if(sector_probe[i]!=0xa7){r=SF_BAD_FORMAT;goto failed;}
+ if(sf_task_cap_usage(1)!=root_caps||sf_task_cap_usage(idle.pid)!=4||
+    sf_sys(SYS_TASK_STATUS,caps.binding.driver_pid,0,0)!=SF_TASK_RUNNING||
+    sf_sys(SYS_TASK_STATUS,idle.pid,0,0)!=SF_TASK_RUNNING){r=SF_BAD_FORMAT;goto failed;}
+ if(quarantine){
+  /* Deliberately exercise the unknown-result policy. No candidate driver RPC
+   * or actual lost packet is created by this diagnostic. */
+  r=sf_persist_candidate_reply_quarantine(token,serial,SF_TIMEOUT);
+  if(r!=SF_TIMEOUT||sf_storage_reply_status(&after)||after.phase!=SF_STORAGE_REPLY_TAINTED||
+     after.error!=SF_TIMEOUT||after.serial!=serial||
+     sf_persist_candidate_caps_status(token,&caps)||caps.phase!=SF_PERSIST_CAPS_FAILED||
+     !caps.branches_retired||caps.parent[0]||caps.parent[1]||
+     sf_task_cap_usage(1)!=root_caps-2||sf_task_cap_usage(idle.pid)!=2||
+     sf_sys(SYS_TASK_STATUS,caps.binding.driver_pid,0,0)!=SF_TASK_RUNNING||
+     sf_storage_sector_read(0,0,sector_probe)!=SF_DRAINING||
+     sf_persist_candidate_reply_release(token,serial)!=SF_DRAINING||
+     sf_persist_candidate_reply_quarantine(token,serial,SF_TIMEOUT)!=SF_DRAINING){r=SF_BAD_FORMAT;goto failed;}
+ }else{
+  r=sf_persist_candidate_reply_release(token,serial);if(r)goto failed;
+  if(sf_storage_reply_status(&after)||after.phase!=SF_STORAGE_REPLY_ROOT||after.serial!=serial||
+     sf_persist_candidate_reply_release(token,serial)!=SF_STALE_HANDLE||
+     sf_task_cap_usage(1)!=root_caps||sf_task_cap_usage(idle.pid)!=4||
+     transaction_fingerprint(end)||memcmp(digest,end,sizeof(digest))){r=SF_BAD_FORMAT;goto failed;}
+ }
+ if(sf_persist_fence_stop_status(token,&stop_after)||memcmp(&stop,&stop_after,sizeof(stop))||
+    sf_persist_fence_capture_status(token,&capture_after)||memcmp(&capture,&capture_after,sizeof(capture))||
+    memcmp(&trust,&sf_trust,sizeof(trust))||!sf_persist_fenced()){r=SF_BAD_FORMAT;goto failed;}
+ sf_log(quarantine?"PERSIST REPLY OWNER EXPLICIT QUARANTINE PASSED serial=":"PERSIST REPLY OWNER KNOWN RELEASE PASSED serial=");
+ sf_number(serial);sf_log(quarantine?" candidate-caps=2 driver-alive=1 io-blocked=1 preserved=1\n":" candidate-caps=4 preserved=1\n");return;
+failed:
+ if(serial){SfStorageReplyOwner current;if(!sf_storage_reply_status(&current)&&current.phase==SF_STORAGE_REPLY_BORROWED)
+  sf_persist_candidate_reply_quarantine(token,serial,SF_BAD_FORMAT);}
+ sf_log("persist-reply-owner-test: refused code=");sf_number(r<0?(uint64_t)-r:(uint64_t)r);sf_log("\n");
+}
 static void persist_candidate_discard_test(void){
  int r=SF_NOT_FOUND;uint64_t token=held_candidate_token;
  if(!token)goto done;
@@ -1597,6 +1657,8 @@ static void command(char*line){
  else if(!strcmp(line,"ipc-revocation-test"))ipc_revocation_test();
  else if(!strcmp(line,"ipc-branch-test"))ipc_branch_test();
  else if(!strcmp(line,"persist-candidate-stage"))persist_candidate_stage_test();
+ else if(!strcmp(line,"persist-reply-owner-test"))persist_reply_owner_test(0);
+ else if(!strcmp(line,"persist-reply-owner-test taint"))persist_reply_owner_test(1);
  else if(!strcmp(line,"page-limit")||!memcmp(line,"page-limit ",11))page_limit_line(line+10);
  else if(!strcmp(line,"cap-limit")||!memcmp(line,"cap-limit ",10))cap_limit_line(line+9);
  else if(!memcmp(line,"revoke-key ",11)){int r=sf_persist_revoke(line+11);if(!r)sf_log("revoke: OK\n");else if(r==1)sf_log("revoke: UNCHANGED\n");else{sf_log("revoke: failed code=");sf_number(-r);sf_log("\n");}}
