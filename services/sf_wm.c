@@ -605,7 +605,8 @@ static void register_app(const SfMessage*m){
  const char*id=(const char*)m->data;
  const char*title=(const char*)(m->data+i+1u);
  if(launcher_add(&launcher,id,title)==LAUNCHER_OK){
-  sf_log("WM: app ");sf_log(title);sf_log("\n");
+  Line line;line_reset(&line);line_add(&line,"WM: app ");line_add(&line,title);
+  line_add(&line,"\n");sf_log(line.b);
  }
 }
 long sf_main(const SfBootArgs*a,size_t size){

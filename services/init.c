@@ -1435,6 +1435,14 @@ fail:
  if(wm_ep){sf_sys(SYS_CAP_REVOKE,wm_ep,0,0);wm_ep=0;}
  sfmod_prepare(&manager,wm_slot);sfmod_stop(&manager,wm_slot);return r;
 }
+static void gui_ready_log(void){
+ /* One SYS_LOG per line: WM can register apps while Root announces ready. */
+ char line[64]="GUI: started pid=",digits[10];
+ unsigned used=sizeof("GUI: started pid=")-1,count=0;uint32_t value=wm_pid;
+ do{digits[count++]=(char)('0'+value%10);value/=10;}while(value);
+ while(count)line[used++]=digits[--count];line[used++]='\n';line[used]=0;
+ sf_log(line);
+}
 /* gui：串口按键转发给合成器；Ctrl-] 退出并回到串口 shell。 */
 static void gui_line(void){
  if(wm_slot>=0&&manager.modules[wm_slot].state==MOD_ACTIVE){sf_log("gui: busy\n");return;}
@@ -1443,7 +1451,7 @@ static void gui_line(void){
  /* 指针从屏幕中心开始，同时清掉进入图形前的积压移动。 */
  sf_sys(SYS_POINTER_READ,1,0,0);
  /* 已就绪日志必须在清队列之后，避免测试/输入方的首个移动被启动清理丢掉。 */
- sf_log("GUI: started pid=");sf_number(wm_pid);sf_log("\n");
+ gui_ready_log();
  for(;;){
   echo_supervise();native_supervise();manager_serve();
   long pointer=sf_sys(SYS_POINTER_READ,0,0,0);
