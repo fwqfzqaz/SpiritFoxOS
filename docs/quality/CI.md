@@ -202,3 +202,8 @@ Windows CI 的结果包须保留 `build/bundle.bin`、`build/payload.S` 和
 Q35同时带有PS/2鼠标和显式USB HID鼠标。实际本地QMP枚举显示默认current是PS/2，USB名称为`QEMU HID Mouse`。USB测试先`query-mice`唯一识别相对HID鼠标，以HMP `mouse_set <index>`选择，再回读确认唯一current；`input-send-event.device`是显示设备路由，不能填写`umouse`。参考[QMP输入命令](https://www.qemu.org/docs/master/interop/qemu-qmp-ref.html)和[monitor鼠标选择](https://www.qemu.org/docs/master/system/monitor)。
 
 GUI的started日志现位于指针队列初始化之后，消除日志已出现但首个输入仍可能被清除的窗口。USB测试保留10秒期限，先等待一次真实合成器坐标，再反向移动并要求两轴坐标均减小，避免仅凭新日志数量误收旧包；USB键盘、热插拔和退出检查仍保留。实际托管通过以新head检查为准。
+
+
+### GUI注册状态行交错（2026-11-18）
+
+PR37/d9f6249的USB已通过；Windows PR在等待`WM: app FILES`时失败。真实原始日志显示`GUI: started pid=25WM: app `后换行才输出`FILES`，是两进程的多次SYS_LOG片段交错，不是完整FILES注册行。Root的ready PID和WM的应用注册状态各先在有界缓冲拼成整行，再只调用一次sf_log，保留相同完整文本及原30秒等待，不扩大期限或接受破碎状态行。需要重新构建、真实GUI/截图/USB与新head完整CI验证；同族其他head偶然通过不代表该竞态已修复。
