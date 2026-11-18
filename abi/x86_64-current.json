@@ -194,6 +194,7 @@
     "constant.SYS_CAP_CLOSE": 13,
     "constant.SYS_CAP_DERIVE": 12,
     "constant.SYS_CAP_REVOKE": 15,
+    "constant.SYS_CAP_REVOKE_BRANCH": 45,
     "constant.SYS_COMPAT_RET": 42,
     "constant.SYS_COMPAT_SET": 41,
     "constant.SYS_CONSOLE_READ": 10,

@@ -1274,6 +1274,30 @@ static void cap_limit_test(void){
  sf_assert(sf_task_cap_usage(pid)==SF_NOT_FOUND&&sf_sys(SYS_TASK_CAP_LIMIT,pid,0,SF_LIMIT_QUERY)==SF_NOT_FOUND,"retired child usage/limit is not configurable");
  sf_log("CAP LIMIT TEST PASSED\n");
 }
+static void ipc_branch_test(void){
+ long before=sf_task_cap_usage(1);sf_assert(before>=0,"branch revoke records root handle usage");
+ int pid=launch_app("branchprobe.sfk");sf_assert(pid>0,"branch revoke owns gated probe application");
+ Child*c=child((uint32_t)pid);long shared=sf_ep_create();
+ long branch=sf_cap_derive((uint32_t)shared,7),sibling=sf_cap_derive((uint32_t)shared,7);
+ sf_assert(c&&shared>0&&branch>0&&sibling>0,"branch revoke owns only disposable private capabilities");
+ SfMessage m;sf_message(&m,OP_ECHO,0xb001);
+ sf_assert(!sf_send_cap(c->reply,&m,(uint32_t)branch),"branch revoke transfers a private derived branch");
+ cap_limit_wait((uint32_t)pid,0xb002);
+ sf_assert(sf_sys(SYS_CAP_REVOKE_BRANCH,(uint32_t)branch,1,0)==SF_INVALID&&
+           sf_sys(SYS_CAP_REVOKE_BRANCH,(uint32_t)branch,0,1)==SF_INVALID,"branch revoke refuses reserved parameters");
+ sf_assert(!sf_cap_revoke_branch((uint32_t)branch),"owner explicitly revokes only its chosen branch");
+ sf_message(&m,OP_ECHO,0xb003);
+ sf_assert(sf_send((uint32_t)branch,&m)==SF_STALE_HANDLE&&!sf_send_cap(c->reply,&m,(uint32_t)sibling),"branch is stale while sibling remains delegable");
+ sf_assert(!wait_app((uint32_t)pid),"branch probe confirms installed and queued descendants revoked");
+ sf_message(&m,OP_ECHO,0xb600);
+ sf_assert(!sf_send((uint32_t)shared,&m)&&sf_recv((uint32_t)shared,&m,sf_deadline(500))==1,"owner parent remains usable");
+ sf_message(&m,OP_ECHO,0xb601);
+ sf_assert(!sf_send((uint32_t)sibling,&m)&&sf_recv((uint32_t)shared,&m,sf_deadline(500))==1,"owner sibling remains usable");
+ sf_assert(!sf_cap_revoke((uint32_t)shared),"legacy owner revoke still invalidates the entire endpoint");
+ sf_assert(sf_cap_close((uint32_t)sibling)==SF_STALE_HANDLE&&sf_task_cap_usage(1)==before,"legacy revoke releases private diagnostic handles");
+ sf_assert(!echo_call(echo_ep,echo_pid),"branch revoke leaves ordinary service usable");
+ sf_log("IPC BRANCH TEST PASSED\n");
+}
 static void ipc_revocation_test(void){
  long before=sf_task_cap_usage(1);sf_assert(before>=0,"revocation records root handle usage");
  int pid=launch_app("revokeprobe.sfk");sf_assert(pid>0,"revocation owns gated probe application");
@@ -1529,6 +1553,7 @@ static void command(char*line){
  else if(!strcmp(line,"cap-limit-test"))cap_limit_test();
  else if(!strcmp(line,"ipc-cancel-test"))ipc_cancel_test();
  else if(!strcmp(line,"ipc-revocation-test"))ipc_revocation_test();
+ else if(!strcmp(line,"ipc-branch-test"))ipc_branch_test();
  else if(!strcmp(line,"page-limit")||!memcmp(line,"page-limit ",11))page_limit_line(line+10);
  else if(!strcmp(line,"cap-limit")||!memcmp(line,"cap-limit ",10))cap_limit_line(line+9);
  else if(!memcmp(line,"revoke-key ",11)){int r=sf_persist_revoke(line+11);if(!r)sf_log("revoke: OK\n");else if(r==1)sf_log("revoke: UNCHANGED\n");else{sf_log("revoke: failed code=");sf_number(-r);sf_log("\n");}}

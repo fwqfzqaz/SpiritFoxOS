@@ -447,6 +447,9 @@ def main(policy_path=None):
     revoke_image = link_elf('revokeprobe',shared+objects('revokeprobe',['services/revocation_probe.c']),'services/user.ld')
     revoke_manifest = {'app_id':'org.spiritfox.revokeprobe','version':'0.1.0','runtime_id':'org.spiritfox.native','app_abi':1,'requested_caps':['stdio'],'resource_limits':{'memory':131072}}
     packages.append(('revokeprobe.sfk',pack(revoke_manifest,revoke_image,2,application_seed)))
+    branch_image = link_elf('branchprobe',shared+objects('branchprobe',['services/branch_probe.c']),'services/user.ld')
+    branch_manifest = {'app_id':'org.spiritfox.branchprobe','version':'0.1.0','runtime_id':'org.spiritfox.native','app_abi':1,'requested_caps':['stdio'],'resource_limits':{'memory':131072}}
+    packages.append(('branchprobe.sfk',pack(branch_manifest,branch_image,2,application_seed)))
     client_manifest = {'app_id':'org.spiritfox.fileclient','version':'0.1.0','runtime_id':'org.spiritfox.native','app_abi':1,'requested_caps':['stdio','namespace.read'],'resource_limits':{'memory':131072}}
     packages.append(('fileclient.sfk',pack(client_manifest,client_image,2,application_seed)))
     pie_shared = objects('pie-common', ['services/start.S','services/memory.c','services/libsf.c','services/arguments.c'], defines=['-fpie'])

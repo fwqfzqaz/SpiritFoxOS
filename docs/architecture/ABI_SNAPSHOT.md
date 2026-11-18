@@ -139,3 +139,10 @@ Persist缓存、卷标识、文件内容摘要及信任状态，不构成停止�
 事务缓存，不新增公开结构布局。它依赖先前108快照及105 STOP的密封拥有者证明；不表示
 候选激活或未来启动许可，详细边界见[Persist terminal](../quality/PERSIST_TERMINAL.md)。
 专项E1/E2与完整宿主通过；完整本地回归及新head托管/发布仍待核对，不以专项代替全绿。
+
+
+2026-11-18 独立分支撤销机制：相对679项目录，仅追加
+`constant.SYS_CAP_REVOKE_BRANCH=45` 至680项。实际编译catalog与check-additions
+逐值证明原679项无删改、无结构/布局变化。仅撤销调用者所持句柄及后代，不按端点
+所有者身份扩大到整端点；旧SYS_CAP_REVOKE语义保持。详见[IPC](IPC.md)。
+E1与实际ABI核对通过，后续E2/完整宿主/新head托管与原始产物独立记录于PROGRESS。
