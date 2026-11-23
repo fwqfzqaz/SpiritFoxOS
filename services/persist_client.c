@@ -7,6 +7,7 @@
 #include "trust_fingerprint.h"
 #include "persist_verify.h"
 #include "storage_reply.h"
+#include "persist_driver_info.h"
 /* sf-init side of the persistence split: every volume operation is a bounded
  * RPC to sf-persist.sfmod. The block driver endpoints are derived here with
  * RIGHT_DELEGATE and transferred once, so the service needs no root-only task
@@ -572,6 +573,7 @@ int sf_persist_candidate_hold(uint64_t token,SfPersistIdleSpawn spawn,void*conte
 }
 int sf_persist_candidate_discard(uint64_t token){
  if(!token||token!=admission_fence.token||token!=idle_candidate.token||token!=terminal_stop.token)return SF_STALE_HANDLE;
+ if(idle_candidate.phase==SF_PERSIST_IDLE_STAGED&&sf_storage_reply_access())return SF_BUSY;
  if((idle_candidate.phase!=SF_PERSIST_IDLE_PREPARED&&idle_candidate.phase!=SF_PERSIST_IDLE_STAGED)||
     (idle_candidate.phase==SF_PERSIST_IDLE_STAGED&&(candidate_caps.phase!=SF_PERSIST_CAPS_READY||
      candidate_caps.token!=token||!candidate_caps.parent[0]||!candidate_caps.parent[1]))||
@@ -727,6 +729,81 @@ int sf_persist_candidate_reply_quarantine(uint64_t token,uint64_t serial,int err
  SfStorageReplyOwner owner;int r=candidate_reply_owned(token,serial,&owner);if(r)return r;
  if(error<SF_VERSION_REJECTED||error>=0)return SF_INVALID;
  return candidate_reply_failed(token,&owner,error);
+}
+
+static SfPersistDriverInfoStatus candidate_driver_info;
+
+static int driver_info_completion(const SfMessage*message,int64_t from){
+ const SfPersistDriverInfoStatus*s=&candidate_driver_info;
+ if(from!=(int64_t)idle_candidate.pid)return SF_STALE_HANDLE;
+ if(message->h.size!=sizeof(SfIpcHeader)||message->h.protocol_major!=1||message->h.protocol_minor||
+    message->h.opcode!=OP_PERSIST_CANDIDATE_DRIVER_INFO||message->h.flags!=idle_candidate.pid||
+    message->h.request_id!=s->nonce||message->h.deadline_ns!=s->deadline||message->h.cap_count||
+    message->h.payload_bytes!=sizeof(*message)-sizeof(SfIpcHeader)||message->handle||message->mode||
+    message->status<SF_VERSION_REJECTED||message->status>0)return SF_BAD_FORMAT;
+ size_t expected=message->status?0:sizeof(SfPersistDriverInfo);
+ if(message->length!=expected||message->offset!=(message->status?0:s->serial))return SF_BAD_FORMAT;
+ for(size_t i=expected;i<sizeof(message->data);i++)if(message->data[i])return SF_BAD_FORMAT;
+ if(message->status)return (int)message->status;
+ SfPersistDriverInfo report;
+ memcpy(&report,message->data,sizeof(report));
+ if(memcmp(&report.binding,&candidate_caps.binding,sizeof(report.binding)))return SF_STALE_HANDLE;
+ if(report.info.sectors!=candidate_caps.binding.capacity/512||
+    report.info.sector_bytes!=512||report.info.readonly)return SF_BAD_FORMAT;
+ candidate_driver_info.sectors=report.info.sectors;
+ return 0;
+}
+
+int sf_persist_candidate_driver_info(uint64_t token){
+ if(candidate_driver_info.token==token&&token)return SF_DRAINING;
+ if(requests>=UINT64_MAX-1)return SF_NO_SPACE;
+ uint64_t serial;
+ int result=sf_persist_candidate_reply_borrow(token,&serial);
+ if(result)return result;
+
+ SfPersistDriverInfoStatus*s=&candidate_driver_info;
+ *s=(SfPersistDriverInfoStatus){.token=token,.serial=serial};
+ uint64_t now;
+ result=terminal_now(&now);
+ if(result)goto quarantine;
+ s->nonce=++requests;
+ s->deadline=now+SF_PERSIST_STAGE_NS;
+ SfMessage message;
+ memset(&message,0,sizeof(message));
+ message.h=(SfIpcHeader){sizeof(SfIpcHeader),1,0,OP_PERSIST_CANDIDATE_DRIVER_INFO,0,
+                        s->nonce,sizeof(message)-sizeof(SfIpcHeader),0,s->deadline};
+ message.offset=serial;
+ message.length=sizeof(candidate_caps.binding);
+ memcpy(message.data,&candidate_caps.binding,sizeof(candidate_caps.binding));
+ s->sent=sf_send(idle_candidate.ep,&message);
+ if(s->sent){result=terminal_error(s->sent);goto quarantine;}
+ s->received=sf_recv(idle_candidate.reply,&message,s->deadline);
+ if(s->received<0){result=terminal_error(s->received);goto quarantine;}
+ if(message.h.cap_count==1)sf_cap_close(message.handle);
+ result=driver_info_completion(&message,s->received);
+ if(result)goto quarantine;
+ uint64_t finished;
+ result=terminal_now(&finished);
+ if(result)goto quarantine;
+ if(finished<now){result=SF_BAD_FORMAT;goto quarantine;}
+ if(finished>=s->deadline){result=SF_TIMEOUT;goto quarantine;}
+ result=sf_persist_candidate_reply_release(token,serial);
+ if(result)goto quarantine;
+ s->released=1;
+ return 0;
+
+quarantine:
+ s->error=result;
+ s->sectors=0;
+ sf_persist_candidate_reply_quarantine(token,serial,result);
+ return result;
+}
+
+int sf_persist_candidate_driver_info_status(uint64_t token,SfPersistDriverInfoStatus*out){
+ if(!out)return SF_INVALID;
+ if(!token||candidate_driver_info.token!=token)return SF_STALE_HANDLE;
+ *out=candidate_driver_info;
+ return 0;
 }
 void sf_persist_driver_down(void){
  if(!ready())return;SfMessage m;sf_message(&m,OP_PERSIST_DRIVER_DOWN,0);pf_call(&m);

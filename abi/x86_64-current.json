@@ -81,6 +81,7 @@
     "constant.OP_OPEN": 10,
     "constant.OP_OPENAT": 19,
     "constant.OP_PERSIST_CANDIDATE_CAPS": 115,
+    "constant.OP_PERSIST_CANDIDATE_DRIVER_INFO": 116,
     "constant.OP_PERSIST_CANDIDATE_DISCARD": 107,
     "constant.OP_PERSIST_CANDIDATE_PROBE": 106,
     "constant.OP_PERSIST_CANDIDATE_VERIFY": 109,

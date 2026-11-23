@@ -27,6 +27,7 @@ int sf_console_identity(const SfConsolePolicy *p,uint32_t *uid,uint32_t *gid,uin
  if(uid)*uid=s->uid;if(gid)*gid=s->gid;if(owner)*owner=sf_session_owner(sf_session_active(&p->sessions));return 0;
 }
 static int administrative(const char *line){
+ if(!strcmp(line,"persist-candidate-driver-info"))return 1;
  if(!strcmp(line,"file-peer-test")||!strcmp(line,"persist-quiescent")||!strcmp(line,"persist-quiescence-test"))return 1;
  if(!strcmp(line,"persist-fence-test")||!strncmp(line,"persist-fence-test ",19))return 1;
  if(!strcmp(line,"persist-terminal-test")||!strncmp(line,"persist-terminal-test ",22)||!strcmp(line,"persist-candidate-discard")||!strcmp(line,"persist-candidate-stage")||!strcmp(line,"persist-reply-owner-test")||!strncmp(line,"persist-reply-owner-test ",sizeof("persist-reply-owner-test ")-1))return 1;
