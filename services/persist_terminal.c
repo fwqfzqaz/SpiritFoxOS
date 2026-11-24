@@ -1,6 +1,7 @@
 #include "libsf.h"
 #include "persist_server.h"
 #include "persist_terminal.h"
+#include "persist_driver_info.h"
 #include "persist_idle.h"
 
 static uint64_t stop_limit(uint64_t now){
@@ -45,14 +46,40 @@ static int verify_channel_now(void*context,uint64_t*out){
 static void verify_channel_close(void*context,uint64_t cap){(void)context;sf_cap_close(cap);}
 static int64_t stage_derive(void*context,uint64_t cap,unsigned rights){(void)context;return sf_cap_derive(cap,rights);}
 static int64_t stage_close(void*context,uint64_t cap){(void)context;return sf_cap_close(cap);}
+static int64_t inquiry_send(void*context,uint32_t cap,SfMessage*message){
+ (void)context;return sf_send(cap,message);
+}
+static int64_t inquiry_receive(void*context,uint32_t cap,SfMessage*message,uint64_t deadline){
+ (void)context;return sf_recv(cap,message,deadline);
+}
 int64_t persist_serve_with_idle(const SfBootArgs*a,int(*ordinary)(SfMessage*),
                               int64_t(*reply_send)(uint32_t,SfMessage*),int(*unbound)(void),SfPersistSnapshotGet snapshot_get,SfPersistVolumeVerify volume_verify){
  if(!a||!a->service||!a->manager||!ordinary||!reply_send)return SF_INVALID;
  SfPersistTerminal terminal={0};
  SfPersistIdle idle={0};SfPersistVerify verification={0};SfPersistStage stage={0};
+ SfPersistDriverInquiry inquiry={0};
  SfPersistSnapshot verified_snapshot={0};int verified=0,ordinary_seen=0;
  for(;;){
   SfMessage m;int64_t from=sf_recv(a->service,&m,0);if(from<0)return from;
+  if(m.h.opcode==OP_PERSIST_CANDIDATE_DRIVER_INFO){
+   uint64_t now;
+   int status=verify_channel_now(0,&now);
+   if(status){
+    if(m.h.cap_count==1)sf_cap_close(m.handle);
+    return status;
+   }
+   SfPersistDriverTransport transport={0,inquiry_send,inquiry_receive,stage_close,verify_channel_now};
+   SfPersistDriverInfo info;
+   if(inquiry.last_nonce<idle.last_nonce)inquiry.last_nonce=idle.last_nonce;
+   int available=!ordinary_seen&&idle.entered&&verified&&unbound&&unbound()==1;
+   status=persist_driver_info_dispatch(&inquiry,&stage,from,&m,now,available,&transport,&info);
+   if(idle.last_nonce<inquiry.last_nonce)idle.last_nonce=inquiry.last_nonce;
+   if(verify_channel_now(0,&now))return SF_BAD_FORMAT;
+   persist_driver_info_reply(&m,status,now,status?0:&info);
+   reply_send(a->manager,&m);
+   if(inquiry.fatal)return SF_BAD_FORMAT;
+   continue;
+  }
   if(m.h.opcode==OP_PERSIST_CANDIDATE_PROBE||m.h.opcode==OP_PERSIST_CANDIDATE_DISCARD||
      m.h.opcode==OP_PERSIST_CANDIDATE_CAPS||idle.entered){
    if(m.h.opcode!=OP_PERSIST_CANDIDATE_CAPS&&m.h.cap_count==1)sf_cap_close(m.handle);

@@ -1065,6 +1065,44 @@ static void persist_candidate_stage_test(void){
 done:
  if(r){sf_log("persist-candidate-stage: refused code=");sf_number(r<0?(uint64_t)-r:(uint64_t)r);sf_log("\n");}
 }
+static void persist_candidate_driver_info_test(void){
+ uint64_t token=held_candidate_token;
+ long root_caps=sf_task_cap_usage(1);
+ int result=token?sf_persist_candidate_driver_info(token):SF_NOT_FOUND;
+ SfPersistDriverInfoStatus report;
+ SfStorageReplyOwner owner;
+ if(!result){
+  if(sf_persist_candidate_driver_info_status(token,&report)||!report.released||!report.sectors||
+     sf_storage_reply_status(&owner)||owner.phase!=SF_STORAGE_REPLY_ROOT||owner.serial!=report.serial||
+     sf_persist_candidate_driver_info(token)!=SF_DRAINING)result=SF_BAD_FORMAT;
+  else{
+   sf_log("PERSIST CANDIDATE DRIVER INFO PASSED sectors=");sf_number(report.sectors);
+   sf_log(" serial=");sf_number(report.serial);sf_log("\n");return;
+  }
+ }else if(root_caps>=4&&token&&!sf_persist_candidate_driver_info_status(token,&report)&&
+          !report.released&&report.error==result&&!report.sectors&&
+          !sf_storage_reply_status(&owner)&&owner.phase==SF_STORAGE_REPLY_TAINTED&&
+          owner.serial==report.serial&&owner.error==result){
+  SfPersistIdleStatus idle;
+  SfPersistCapsStatus caps;
+  uint8_t sector_probe[512];
+  memset(sector_probe,0xa7,sizeof(sector_probe));
+  if(!sf_persist_candidate_status(token,&idle)&&idle.phase==SF_PERSIST_IDLE_FAILED&&
+     !sf_persist_candidate_caps_status(token,&caps)&&caps.phase==SF_PERSIST_CAPS_FAILED&&
+     caps.branches_retired&&!caps.parent[0]&&!caps.parent[1]&&sf_task_cap_usage(1)==root_caps-2&&
+     sf_task_cap_usage(idle.pid)==2&&sf_sys(SYS_TASK_STATUS,caps.binding.driver_pid,0,0)==SF_TASK_RUNNING&&
+     sf_storage_sector_read(0,0,sector_probe)==SF_DRAINING){
+   unsigned i=0;
+   while(i<sizeof(sector_probe)&&sector_probe[i]==0xa7)i++;
+   if(i==sizeof(sector_probe)){
+    sf_log("PERSIST CANDIDATE DRIVER INFO QUARANTINED code=");sf_number((uint64_t)-result);
+    sf_log(" parents-retired=1 candidate-caps=2 driver-alive=1 root-io-blocked=1\n");
+   }
+  }
+ }
+ sf_log("persist-candidate-driver-info: refused code=");
+ sf_number(result<0?(uint64_t)-result:(uint64_t)result);sf_log("\n");
+}
 static void persist_reply_owner_test(int quarantine){
  uint64_t token=held_candidate_token,serial=0,nested=0xa5a5u;int r=SF_NOT_FOUND;
  if(!token)goto failed;
@@ -1657,6 +1695,7 @@ static void command(char*line){
  else if(!strcmp(line,"ipc-revocation-test"))ipc_revocation_test();
  else if(!strcmp(line,"ipc-branch-test"))ipc_branch_test();
  else if(!strcmp(line,"persist-candidate-stage"))persist_candidate_stage_test();
+ else if(!strcmp(line,"persist-candidate-driver-info"))persist_candidate_driver_info_test();
  else if(!strcmp(line,"persist-reply-owner-test"))persist_reply_owner_test(0);
  else if(!strcmp(line,"persist-reply-owner-test taint"))persist_reply_owner_test(1);
  else if(!strcmp(line,"page-limit")||!memcmp(line,"page-limit ",11))page_limit_line(line+10);

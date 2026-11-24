@@ -149,3 +149,6 @@ E1与实际ABI核对通过，后续E2/完整宿主/新head托管与原始产物�
 
 
 2026-11-18候选临时能力切片：仅追加`constant.OP_PERSIST_CANDIDATE_CAPS=115`，实际编译目录681项、旧680项逐值保持。144字节控制绑定是服务私有版本化载荷，尚无普通驱动后端绑定或候选激活。SYS_CAP_REVOKE_BRANCH45保持此前追加值，原CAP_REVOKE所有者整端点语义不变。新head完整验证/发布状态见PROGRESS。
+
+
+2026-11-23 候选驱动查询只追加 `constant.OP_PERSIST_CANDIDATE_DRIVER_INFO=116`，目录共 682 项。既有 681 项逐值保持。请求与回复的详细契约见 [持久化](PERSISTENCE.md)。

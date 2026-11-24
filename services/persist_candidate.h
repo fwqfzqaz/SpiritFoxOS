@@ -70,4 +70,14 @@ int sf_persist_candidate_caps_status(uint64_t token,SfPersistCapsStatus*);
 int sf_persist_candidate_reply_borrow(uint64_t token,uint64_t*serial);
 int sf_persist_candidate_reply_release(uint64_t token,uint64_t serial);
 int sf_persist_candidate_reply_quarantine(uint64_t token,uint64_t serial,int error);
+
+typedef struct {
+ uint64_t token,serial,nonce,deadline,sectors;
+ int64_t sent,received;
+ int released,error;
+} SfPersistDriverInfoStatus;
+
+/* A one-shot inquiry through the staged candidate. The getter copies history. */
+int sf_persist_candidate_driver_info(uint64_t token);
+int sf_persist_candidate_driver_info_status(uint64_t token,SfPersistDriverInfoStatus*);
 #endif

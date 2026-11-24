@@ -89,8 +89,9 @@ host_test('test_update','tests/host/test_update.c','services/update.c','services
 host_test('test_persist_metadata','tests/host/test_persist_metadata.c','services/storage_reply_owner.c','tests/host/persist_volume_fixture.c','services/persist_metadata.c','services/namespace.c','services/txn.c','services/update.c','services/version.c',*build.CRYPTO,no_unused=True)
 host_test('test_persist_write_reply','tests/host/test_persist_write_reply.c','services/storage_reply_owner.c','services/namespace.c',*build.CRYPTO,no_unused=True)
 host_test('test_persist_stage','tests/host/test_persist_stage.c',no_unused=True)
+host_test('test_persist_driver_info','tests/host/test_persist_driver_info.c',no_unused=True,include_services=True)
 host_test('test_storage_reply_owner','tests/host/test_storage_reply_owner.c',include_services=True)
-host_test('test_persist_terminal','tests/host/test_persist_terminal.c','services/persist_metadata.c','services/persist_idle.c','services/persist_snapshot.c','services/persist_verify.c','services/persist_stage.c',no_unused=True)
+host_test('test_persist_terminal','tests/host/test_persist_terminal.c','services/persist_metadata.c','services/persist_idle.c','services/persist_snapshot.c','services/persist_verify.c','services/persist_stage.c', 'services/persist_driver_info.c',no_unused=True)
 host_test('test_persist_idle','tests/host/test_persist_idle.c','services/persist_idle.c',include_services=True)
 host_test('test_persist_snapshot','tests/host/test_persist_snapshot.c',no_unused=True,include_services=True)
 host_test('test_persist_verify','tests/host/test_persist_verify.c',no_unused=True,include_services=True)
@@ -202,6 +203,7 @@ if not args.host_only:
     subprocess.run([sys.executable, 'tests/qemu/qemu_persist_hold_test.py'], check=True)
     subprocess.run([sys.executable, 'tests/qemu/qemu_persist_stage_test.py'], check=True)
     subprocess.run([sys.executable, 'tests/qemu/qemu_storage_reply_owner_test.py'], check=True)
+    subprocess.run([sys.executable, 'tests/qemu/qemu_persist_driver_info_test.py'], check=True)
     subprocess.run([sys.executable, 'tests/qemu/qemu_namespace_recovery_test.py'], check=True)
     subprocess.run([sys.executable, 'tests/qemu/qemu_hardware_test.py'], check=True)
     # USB：xHCI 初始化、HID 枚举、键盘输入、指针注入与热插拔。
@@ -298,6 +300,7 @@ result['persist_idle_qemu'] = {} if args.host_only else json.loads((ROOT/'build/
 result['persist_snapshot_qemu'] = {} if args.host_only else json.loads((ROOT/'build/persist-snapshot-results.json').read_text(encoding='utf-8'))
 result['persist_verify_qemu'] = {} if args.host_only else json.loads((ROOT/'build/persist-verify-results.json').read_text(encoding='utf-8'))
 result['persist_hold_qemu'] = {} if args.host_only else json.loads((ROOT/'build/persist-hold-results.json').read_text(encoding='utf-8'))
+result['persist_driver_info_qemu'] = {} if args.host_only else json.loads((ROOT/'build/persist-driver-info-results.json').read_text(encoding='utf-8'))
 result['persist_stage_qemu'] = {} if args.host_only else json.loads((ROOT/'build/persist-stage-results.json').read_text(encoding='utf-8'))
 result['storage_reply_owner_host'] = {'passed':True,'evidence':'E1-pure-state-and-mocked-Root-integration',
                                       'primitive_checks':24243,'primitive_cases':1003,
