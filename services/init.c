@@ -1074,8 +1074,24 @@ static void persist_candidate_driver_info_test(void){
  if(!result){
   if(sf_persist_candidate_driver_info_status(token,&report)||!report.released||!report.sectors||
      sf_storage_reply_status(&owner)||owner.phase!=SF_STORAGE_REPLY_ROOT||owner.serial!=report.serial||
-     sf_persist_candidate_driver_info(token)!=SF_DRAINING)result=SF_BAD_FORMAT;
-  else{
+     !sf_persist_fenced()||sf_persist_candidate_driver_info(token)!=SF_DRAINING)result=SF_BAD_FORMAT;
+  uint8_t sector[512];
+  if(!result)result=sf_storage_sector_read(0,0,sector);
+  if(!result){
+   uint8_t digest[32];
+   static const char prefix[]="PERSIST CANDIDATE ROOT READBACK sha256=";
+   static const char hex[]="0123456789abcdef";
+   char line[sizeof(prefix)+2*sizeof(digest)+1];
+   memcpy(line,prefix,sizeof(prefix)-1);
+   sf_sha256(digest,sector,sizeof(sector));
+   char*encoded=line+sizeof(prefix)-1;
+   for(unsigned i=0;i<sizeof(digest);i++){
+    encoded[2*i]=hex[digest[i]>>4];
+    encoded[2*i+1]=hex[digest[i]&15];
+   }
+   encoded[2*sizeof(digest)]='\n';
+   encoded[2*sizeof(digest)+1]=0;
+   sf_log(line);
    sf_log("PERSIST CANDIDATE DRIVER INFO PASSED sectors=");sf_number(report.sectors);
    sf_log(" serial=");sf_number(report.serial);sf_log("\n");return;
   }

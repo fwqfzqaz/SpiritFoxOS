@@ -1,5 +1,6 @@
-"""Exercise real driver INFO and both bounded Root quarantine paths."""
+"""Exercise real driver INFO, Root readback, and both quarantine paths."""
 from contextlib import nullcontext
+import hashlib
 import json
 import re
 import subprocess
@@ -22,6 +23,7 @@ def run_case(mode, modern, seed, error=0):
     disk.write_bytes(seed)
     vm = VM(disk, label, iommu=modern)
     clean = False
+    root_sector_readback = False
     try:
         vm.boot('PERSIST READY')
         vm.expect('fox> ', 0)
@@ -44,10 +46,16 @@ def run_case(mode, modern, seed, error=0):
             vm.expect('fox> ', start)
             tag = ('malformed' if mode == 'bad-reply' else 'suppressed') + ' candidate reply'
             assert vm.output[start:].count(('[PERSIST-INFO-FAULT] ' + tag).encode()) == 1
+            assert b'PERSIST CANDIDATE ROOT READBACK' not in vm.output[start:]
             command(vm, 'persist-candidate-discard', 'persist-candidate-discard: refused code=8')
         else:
-            command(vm, 'persist-candidate-driver-info',
-                    f'PERSIST CANDIDATE DRIVER INFO PASSED sectors={len(seed)//512} serial=1')
+            start = vm.send('persist-candidate-driver-info')
+            vm.expect(f'PERSIST CANDIDATE DRIVER INFO PASSED sectors={len(seed)//512} serial=1', start)
+            vm.expect('fox> ', start)
+            readbacks = re.findall(rb'^PERSIST CANDIDATE ROOT READBACK sha256=([0-9a-f]{64})\r?$',
+                                   vm.output[start:], re.M)
+            assert readbacks == [hashlib.sha256(seed[:512]).hexdigest().encode()], 'Root sector readback mismatch'
+            root_sector_readback = True
             command(vm, 'persist-candidate-driver-info', 'persist-candidate-driver-info: refused code=8')
             time.sleep(3.5)
             command(vm, 'persist-candidate-discard',
@@ -61,7 +69,8 @@ def run_case(mode, modern, seed, error=0):
         vm.close(clean)
     assert disk.read_bytes() == seed
     return {'mode': mode, 'transport': transport, 'error': error, 'passed': True,
-            'root_released': not error, 'root_quarantined': bool(error),
+            'root_released': not error, 'root_sector_readback': root_sector_readback,
+            'root_quarantined': bool(error),
             'scoped_caps_retired': True, 'disk_unchanged': True}
 
 
@@ -87,7 +96,7 @@ def run():
               'source_sha256': sources, 'production_sha256': products, 'cases': cases,
               'guest_boots': len(cases), 'production_artifacts_restored': True}
     output.write_text(json.dumps(result, indent=2) + '\n', encoding='utf-8')
-    print('PERSIST DRIVER INFO QEMU PASS: 6 boots; confirmed INFO, malformed and suppressed candidate replies', flush=True)
+    print('PERSIST DRIVER INFO QEMU PASS: 6 boots; INFO and Root readback, malformed and suppressed replies', flush=True)
 
 
 if __name__ == '__main__':
