@@ -289,7 +289,8 @@ def driver_info_case_valid(case):
     if transport not in ('legacy','modern') or type(error) is not int:return False
     return (error==driver_info_expected_errors[mode] and
             all(case.get(k) is True for k in ('passed','scoped_caps_retired','disk_unchanged')) and
-            case.get('root_released') is (error==0) and case.get('root_quarantined') is (error!=0))
+            case.get('root_released') is (error==0) and case.get('root_sector_readback') is (error==0) and
+            case.get('root_quarantined') is (error!=0))
 
 
 if (not isinstance(driver_info_guest,dict) or driver_info_guest.get('passed') is not True or
@@ -304,7 +305,7 @@ if (not isinstance(driver_info_guest,dict) or driver_info_guest.get('passed') is
     not all(driver_info_case_valid(c) for c in driver_info_guest['cases']) or
     {(c['mode'],c['transport']) for c in driver_info_guest['cases']} !=
     {(mode,transport) for mode in driver_info_expected_errors for transport in ('legacy','modern')}):
-    raise SystemExit('Run current candidate driver INFO and malformed/lost ACK guest tests before packaging')
+    raise SystemExit('Run current candidate driver INFO, Root readback and malformed/lost ACK guest tests before packaging')
 
 
 revoke_source_paths = ('kernel/ipc.c','kernel/core.c','kernel/kernel.h','include/sf.h','include/libsf.h','services/init.c','services/console_policy.c','services/revocation_probe.c','tools/build.py','tests/qemu/qemu_ipc_revocation_test.py','tests/qemu/qemu_persist_test.py','tests/qemu/qemu_persist_write_reply_test.py','tests/host/test_ipc.c','tests/host/test_ipc_revocation.c')
