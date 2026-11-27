@@ -36,3 +36,5 @@ python3 tests/qemu/qemu_trust_test.py
 也可以用 `make run`、`make run-persist`、`make qemu-persist`、`make qemu-trust`；`make qemu-list` 列出全部单场景目标。
 
 QEMU 场景共享 `tests/qemu/qemu_test.py` 中的固件探测、启动参数和工作区临时目录。Windows 使用工作区 `.tools/qemu`，Linux 使用系统 `qemu-system-x86_64` 与 OVMF。测试产物和串口日志写入被忽略提交的 `build/`。
+
+默认虚拟硬件对齐当代 x86_64 机器：q35 + UEFI、`-cpu max`、`-smp 2`。块设备默认使用 legacy virtio，因为内核只在 VT-d 隔离驱动时暴露 virtio 1.0 BAR；现代存储路径由 `qemu_hardware_test.py`（AHCI、NVMe、4K LBA）和 `qemu_iommu_test.py`（现代 virtio + VT-d）覆盖。需要复现旧配置时使用 `qemu_test.py --cpu ... --smp ...`。

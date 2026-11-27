@@ -3,7 +3,7 @@
 #include "linux_image.h"
 static unsigned checks;
 #define CHECK(x) do{checks++;if(!(x)){printf("LINUX ELF FAIL line %d: %s\n",__LINE__,#x);return 1;}}while(0)
-#define FIX 0xa000u
+#define FIX 0x12000u
 static uint8_t image[FIX];
 static size_t image_bytes;
 static void w16(uint8_t*p,uint16_t v){p[0]=(uint8_t)v;p[1]=(uint8_t)(v>>8);}
@@ -38,7 +38,7 @@ static void build(void){
  image_bytes=0x2200;
 }
 static int plan_ok(const SfLoadPlan*p){
- if(p->size!=sizeof(*p)||!p->count||p->count>8||!sf_image_base_valid(p->image_base))return 0;
+ if(p->size!=sizeof(*p)||!p->count||p->count>16||!sf_image_base_valid(p->image_base))return 0;
  int entry=0;
  for(unsigned i=0;i<p->count;i++){const SfLoadSegment*s=&p->segments[i];
   if((s->rva&4095)||!s->bytes||s->rva>=SF_IMAGE_MAX||s->bytes>SF_IMAGE_MAX-s->rva)return 0;
@@ -53,6 +53,62 @@ static int plan_ok(const SfLoadPlan*p){
  return entry;
 }
 static void reset(uint32_t type,uint32_t flags){build();set_ph(3,type,flags,0x2000,0x2000,64,64,8);}
+/* ---- S5 多对象动态夹具 ---- */
+static uint8_t libimg[0x1000];
+static void set_ph_at(uint8_t*img,unsigned i,uint32_t type,uint32_t flags,uint64_t off,uint64_t va,uint64_t file,uint64_t mem,uint64_t align){
+ uint8_t*p=img+64+56*i;memset(p,0,56);w32(p,type);w32(p+4,flags);
+ w64(p+8,off);w64(p+16,va);w64(p+32,file);w64(p+40,mem);w64(p+48,align);
+}
+static void set_sym(uint8_t*img,uint64_t off,uint32_t name,uint8_t info,uint16_t shndx,uint64_t value,uint64_t size){
+ memset(img+off,0,24);w32(img+off,name);img[off+4]=info;w16(img+off+6,shndx);w64(img+off+8,value);w64(img+off+16,size);
+}
+static void set_hash(uint8_t*img,uint64_t off,uint32_t nchain){
+ memset(img+off,0,8+4+4*nchain);w32(img+off,1);w32(img+off+4,nchain);w32(img+off+8,nchain>1?1:0);
+}
+static void build_exe(void){
+ memset(image,0,sizeof(image));
+ image[0]=0x7f;image[1]='E';image[2]='L';image[3]='F';image[4]=2;image[5]=1;image[6]=1;
+ w16(image+16,3);w16(image+18,62);w32(image+20,1);w64(image+24,0x200);w64(image+32,64);
+ w16(image+52,64);w16(image+54,56);w16(image+56,5);w16(image+58,64);
+ set_ph(0,1,5,0,0,0x1000,0x1000,0x1000);
+ set_ph(1,1,4,0x1000,0x1000,0x1000,0x1000,0x1000);
+ set_ph(2,1,6,0x2000,0x2000,0x1000,0x1000,0x1000);
+ set_ph(3,2,6,0x2000,0x2000,0x100,0x100,8);
+ set_ph(4,7,4,0x1040,0x1040,4,8,4);
+ image[0x200]=0xc3;
+ memcpy(image+0x1000,"\0liba.so\0liba_fn\0liba_tls\0",27);
+ set_sym(image,0x1100,0,0,0,0,0);
+ set_sym(image,0x1118,9,(1<<4)|2,0,0,0);
+ set_sym(image,0x1130,17,(1<<4)|6,0,0,0);
+ set_hash(image,0x1180,3);
+ static const struct{uint64_t tag,val;} dyn[]={
+  {1,1},{5,0x1000},{10,27},{6,0x1100},{11,24},{4,0x1180},
+  {7,0x2100},{8,96},{9,24},{23,0x2160},{2,24},{20,7},{0,0}};
+ for(unsigned i=0;i<sizeof(dyn)/sizeof(dyn[0]);i++){w64(image+0x2000+i*16,dyn[i].tag);w64(image+0x2008+i*16,dyn[i].val);}
+ w64(image+0x2100,0x2180);w64(image+0x2108,(0ull<<32)|8);w64(image+0x2110,0x21a0);
+ w64(image+0x2118,0x2188);w64(image+0x2120,(2ull<<32)|18);w64(image+0x2128,0);
+ w64(image+0x2130,0x2190);w64(image+0x2138,(2ull<<32)|16);w64(image+0x2140,0);
+ w64(image+0x2148,0x2198);w64(image+0x2150,(2ull<<32)|17);w64(image+0x2158,0);
+ w64(image+0x2160,0x21a0);w64(image+0x2168,(1ull<<32)|7);w64(image+0x2170,0);
+ image_bytes=0x3000;
+}
+static void build_lib(void){
+ memset(libimg,0,sizeof(libimg));
+ libimg[0]=0x7f;libimg[1]='E';libimg[2]='L';libimg[3]='F';libimg[4]=2;libimg[5]=1;libimg[6]=1;
+ w16(libimg+16,3);w16(libimg+18,62);w32(libimg+20,1);w64(libimg+24,0x100);w64(libimg+32,64);
+ w16(libimg+52,64);w16(libimg+54,56);w16(libimg+56,3);w16(libimg+58,64);
+ set_ph_at(libimg,0,1,5,0,0,0x1000,0x1000,0x1000);
+ set_ph_at(libimg,1,2,4,0x300,0x300,0x80,0x80,8);
+ set_ph_at(libimg,2,7,4,0x900,0x900,4,8,4);
+ libimg[0x100]=0xc3;
+ memcpy(libimg+0x180,"\0liba.so\0liba_fn\0liba_tls\0",27);
+ set_sym(libimg,0x200,0,0,0,0,0);
+ set_sym(libimg,0x218,9,(1<<4)|2,1,0x100,0);
+ set_sym(libimg,0x230,17,(1<<4)|6,1,0,0);
+ set_hash(libimg,0x280,3);
+ static const struct{uint64_t tag,val;} dyn[]={{14,1},{5,0x180},{10,27},{6,0x200},{11,24},{4,0x280},{0,0}};
+ for(unsigned i=0;i<sizeof(dyn)/sizeof(dyn[0]);i++){w64(libimg+0x300+i*16,dyn[i].tag);w64(libimg+0x308+i*16,dyn[i].val);}
+}
 static int expect_validate(const char*what,int want){
  SfLinuxInfo info;int r=sf_linux_elf_validate(image,image_bytes,&info);
  checks++;
@@ -110,18 +166,20 @@ int main(void){
  build();w64(phdr(2)+32,0x4000);CHECK(!expect_validate("file_bounds",SF_BAD_FORMAT));
  build();w64(phdr(2)+40,0x801000);CHECK(!expect_validate("image_limit",SF_NO_SPACE));
  build();set_ph(1,1,4,0,0,0x100,0x100,0x1000);CHECK(!expect_validate("overlap",SF_BAD_FORMAT));
- /* 九个不同权限页 → 合并后超过 8 段。 */
+ /* 十七个不同权限页 → 合并后超过 16 段。 */
  memset(image,0,sizeof(image));
  image[0]=0x7f;image[1]='E';image[2]='L';image[3]='F';image[4]=2;image[5]=1;image[6]=1;
- w16(image+16,3);w16(image+18,62);w32(image+20,1);w64(image+24,0x300);w64(image+32,64);
- w16(image+52,64);w16(image+54,56);w16(image+56,9);w16(image+58,64);
- for(unsigned i=0;i<9;i++)set_ph(i,1,i?(i&1?6:4):5,i*0x1000,i*0x1000,i?0x100:0x1000,i?0x100:0x1000,0x1000);
- image[0x300]=0xc3;image_bytes=0x9000;
- CHECK(!expect_validate("segments",SF_NO_SPACE));
+ w16(image+16,3);w16(image+18,62);w32(image+20,1);w64(image+24,0x400);w64(image+32,64);
+ w16(image+52,64);w16(image+54,56);w16(image+56,17);w16(image+58,64);
+ for(unsigned i=0;i<17;i++)set_ph(i,1,i?(i&1?6:4):5,i*0x1000,i*0x1000,i?0x100:0x1000,i?0x100:0x1000,0x1000);
+ image[0x400]=0xc3;image_bytes=0x11000;
+ CHECK(!expect_validate("segments_validate",SF_OK));
+ CHECK(sf_linux_elf_load(image,image_bytes,0x44000000,staging,sizeof(staging),&plan,&info,0)==SF_NO_SPACE);
  /* 动态表与重定位负例。 */
- reset(3,6);CHECK(!expect_validate("interp",SF_DEPENDENCY));
- reset(7,6);CHECK(!expect_validate("tls",SF_DEPENDENCY));
- build();w64(image+0x2000,1);w64(image+0x2008,1);CHECK(!expect_validate("needed",SF_DEPENDENCY));
+ reset(3,6);memcpy(image+0x2000,"/lib/ld-musl-x86_64.so.1",25);
+ CHECK(!expect_validate("interp",SF_OK));
+ reset(7,6);CHECK(!expect_validate("tls",SF_OK));
+ build();w64(image+0x2000,1);w64(image+0x2008,1);CHECK(!expect_validate("needed",SF_BAD_FORMAT));
  build();w64(image+0x2020,17);w64(image+0x2028,24);CHECK(!expect_validate("rel",SF_BAD_FORMAT));
  build();w64(image+0x2020,36);w64(image+0x2028,8);CHECK(!expect_validate("relr",SF_BAD_FORMAT));
  build();w64(image+0x2000,30);w64(image+0x2008,4);CHECK(!expect_validate("textrel_flag",SF_BAD_FORMAT));
@@ -186,6 +244,28 @@ int main(void){
  static char huge[SF_LINUX_STRING_MAX+2];memset(huge,'x',sizeof(huge));huge[sizeof(huge)-1]=0;
  static const char *huge_args[]={huge};
  req.argv=huge_args;CHECK(sf_linux_stack_init(staging,0x2000,top,0x44000000,&info,&req,&stack)==SF_BAD_FORMAT);
+ /* S5 多对象动态链接：主程序 + liba.so，符号/重定位/TLS/PT_TLS 回填。 */
+ static uint8_t staging2[SF_IMAGE_MAX];
+ build_exe();build_lib();
+ SfLinuxObject objs[2]={{0,image,image_bytes,0},{0,libimg,sizeof(libimg),0}};
+ CHECK(sf_linux_elf_validate(image,image_bytes,&info)==SF_DEPENDENCY);
+ CHECK(!sf_linux_elf_validate(libimg,sizeof(libimg),&info));
+ CHECK(!sf_linux_image_load(objs,2,0x44000000,staging2,sizeof(staging2),&plan,&info,0));
+ CHECK(info.object_count==2&&info.tls_size==16&&info.tls_align==4&&plan.entry==0x200);
+ CHECK(plan_ok(&plan));
+ CHECK(r64((uint8_t*)plan.segments[2].data+0x1a0)==0x44000000ull+0x3100);
+ CHECK(r64((uint8_t*)plan.segments[2].data+0x180)==0x44000000ull+0x21a0);
+ CHECK(r64((uint8_t*)plan.segments[2].data+0x188)==(uint64_t)-8);
+ CHECK(r64((uint8_t*)plan.segments[2].data+0x190)==2);
+ CHECK(r64((uint8_t*)plan.segments[2].data+0x198)==8);
+ CHECK(r64((uint8_t*)plan.segments[0].data+0x130)==0x4000);
+ CHECK(sf_linux_image_load(objs,1,0x44000000,staging2,sizeof(staging2),&plan,&info,0)==SF_DEPENDENCY);
+ build_lib();w32(libimg+0x218,25);
+ CHECK(sf_linux_image_load(objs,2,0x44000000,staging2,sizeof(staging2),&plan,&info,0)==SF_DEPENDENCY);
+ build_lib();static const uint8_t zero_digest[32]={0};objs[0].digest32=zero_digest;
+ CHECK(sf_linux_image_load(objs,2,0x44000000,staging2,sizeof(staging2),&plan,&info,0)==SF_BAD_FORMAT);
+ objs[0].digest32=0;
+ build();
  /* 固定种子变异：任何被接受的映像都必须能构造合法计划；失败必须显式返回。 */
  uint64_t seed=0x123456789abcdefull;unsigned accepted=0,rejected=0;
  for(unsigned n=0;n<2000;n++){

@@ -10,6 +10,12 @@ def run():
         # 兼容测试在 boot_splash 之前运行；失败会触发 sf_assert 而无法到达 BOOT TESTS。
         vm.boot()
         vm.expect('LINUX COMPAT HELLO')
+        # S5：动态 musl hello（hello+libc+libm 多对象装载、装入期重定位、printf 经 writev）。
+        vm.expect('dynamic load reports missing library')
+        vm.expect('dynamic load rejects digest mismatch')
+        vm.expect('dynamic musl hello loads')
+        vm.expect('MUSL DYNAMIC OK 42')
+        vm.expect('dynamic musl hello runs')
         vm.expect('LINUX TOOL TRUE OK')
         vm.expect('LINUX TOOL FALSE OK')
         vm.expect('LINUX TOOL ECHO OK')

@@ -1,6 +1,7 @@
 """Authenticated relative records and the actual userspace image preparer."""
 import ctypes as C
 from pathlib import Path
+import json
 import random
 import struct
 import sys
@@ -164,13 +165,16 @@ class Link(unittest.TestCase):
         cls.link=cls.crypto.lib.sf_image_link
         cls.link.argtypes=[C.c_void_p,C.c_size_t,C.c_void_p,C.c_void_p,C.c_size_t,C.c_void_p,
                            C.c_uint64,C.c_void_p,C.c_size_t,C.c_void_p,C.c_size_t]
+        # out 必须至少 sizeof(SfLoadPlan)；从 ABI 快照取当前权威大小，避免段预算增长后
+        # 固定缓冲区过小导致 sf_image_link 误报 SF_INVALID。这也保持 16 段的最上限布局。
+        cls.plan_bytes=json.loads((ROOT/'abi/x86_64-current.json').read_text())['values']['size.SfLoadPlan']
         cls.manifest={'app_id':'org.spiritfox.posixprobe','version':'0.1.0','runtime_id':'org.spiritfox.native',
                       'app_abi':1,'native_profile':'relative-v1','native_library':'org.spiritfox.posix',
                       'requested_caps':['stdio','namespace.read'],'resource_limits':{'memory':131072}}
 
     def run_link(self,app,base=0x44000000):
         image=C.create_string_buffer(65536)
-        out=C.create_string_buffer(1024)
+        out=C.create_string_buffer(self.plan_bytes)
         status=self.link(app,len(app),self.app_pub,self.lib,len(self.lib),self.lib_pub,
                          base,image,len(image),out,len(out))
         return status,image,out

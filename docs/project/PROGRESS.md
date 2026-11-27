@@ -1,6 +1,27 @@
 # SpiritFoxOS 实施进度
 
-更新日期：2026-11-23（Asia/Shanghai）。
+更新日期：2026-11-27（Asia/Shanghai）。
+
+## 通用可写文件系统格式核心 v1（SFRWFS1）
+
+新增自包含的可写文件系统格式核心：[include/sfrw.h](../../include/sfrw.h)、
+[services/sfrw.c](../../services/sfrw.c)、[tests/host/test_sfrw.c](../../tests/host/test_sfrw.c)，
+并在 [tools/test.py](../../tools/test.py) 的 `test_txn_compat` 后注册
+`host_test('test_sfrw', ...)`。块 4096 B，容量 128..65536 块；主/备超级块、1024
+inode、2 块位图、64 块日志（头 + 16 payload）、数据区自块 100 起。写路径为 COW：
+新块先写并刷盘，旧块只在元数据日志原子提交的位图中释放；提交顺序
+payload→flush→已提交头→flush→应用→flush→清头→flush，任一步失败置未挂载并返回
+`SF_COMMIT_UNCERTAIN`。挂载严格校验超级块/备份回退、日志重放、位图与空闲计数；
+`sf_rw_fsck` 宽松加载、BFS 标记可达 inode、清理不可达 inode、重建位图/计数、修正
+链接、删除坏目录项并分批提交。权限按 owner/other 位（v1 不用组位）、目录 `x`、
+父目录 `w|x`、uid 0 绕过；配额支持默认限值与 8 个覆盖项、跟踪 16 个 uid。
+
+宿主测试在 512 块内存设备上覆盖格式化负例、文件/目录/权限/配额/rename/fsck，
+并以 create+write 与 rename 为样本对每个写/刷盘边界 × 3 种故障模式注入，重挂载
+（必要时 fsck）后断言旧/新状态二选一、内容不混合。结果：`SFRW PASS: 9335
+checks`，`-Wall -Wextra -Werror` 零告警，未引入 `<string.h>`。本轮仅格式核心库，
+**未接入** `sf-fs`/`namespace` 服务，未新增 IPC 操作码或 ABI 常量；真实块设备与
+QEMU 集成待续。详见 [WRITABLE_FS](../architecture/WRITABLE_FS.md)。
 
 ## 候选驱动信息查询
 
@@ -321,6 +342,14 @@ E1：`tests/host/test_linux_errno.c` 26 项断言通过。E2：`tests/qemu/qemu_
 `services/linux_compat.c` 把 `clone` 映射为 `SYS_THREAD_CREATE`（子栈顶−256 布置启动块，`_sf_thread_trampoline` 恢复寄存器后以 `rax=0` 返回 syscall 之后），`futex` 相对超时换算为绝对纳秒，`arch_prctl(ARCH_SET_FS)` 转发 `SYS_SET_FSBASE`。`tests/fixtures/linux_thread.c` 提供 pthread 风格垫片并覆盖 TLS 逐线程独立、4×1000 futex 互斥计数、32 线程上限 `EAGAIN`、值不匹配 `EAGAIN`、无等待者 `WAKE=0` 与 20 ms 超时负例。
 
 验证：构建通过；`python3 tools/test.py --skip-build --host-only` 全绿（`THREADS PASS: 372 checks`、`Compat tests passed`），ABI 快照662→673，新增11项且SfThreadRequest大小值24→40（内核同时接受旧/新请求布局）；`tests/qemu/qemu_linux_compat_test.py` 真实启动确认 `LINUX THREAD TLS/MUTEX/LIMIT/FUTEX OK` → `LINUX THREAD TESTS PASSED`，原有 7 个工具、syscall 探针与原生回归不受影响。实施中发现并修复两处旧夹具滞后：S2 `stub/probe` 与 S3 探针需按新 ABI 传翻译器栈顶（`r10`），且 `arch_prctl(SET_FS)` 断言由 `ENOSYS` 改为成功。完整 `python3 tools/test.py` 未跑完即按请求先行推送，完整门禁结果待补。
+
+## Linux 兼容 S5：动态链接与 musl 认证库（E1+E2 通过）
+
+`services/linux_image.c` 扩展为多对象装载：按顺序连续布局，保留各对象内部相对布局，按权限合并相邻页、对象间不跨权限合并，装载期完成全部重定位而不运行 `ld.so`。解析 `PT_INTERP/DT_NEEDED/DT_SONAME`、`GNU_HASH` 符号数推导；共享库 `e_entry=0` 不要求落在 RX 段，主对象入口仍强制 RX；`DT_NEEDED` 在 `DT_STRTAB/DT_STRSZ` 就绪后再校验。段预算 `SF_LINUX_SEGMENT_MAX` 由 8 提到 16（`SfLoadPlan.segments[16]`），对象上限保持 8。
+
+`tools/build_musl.py` 以 `zig cc -target x86_64-linux-musl -fPIC -Os` 真实构建 musl 1.2.5：patch `arch/x86_64/syscall_arch.h` 与 `src/*/x86_64/*.s`，把行首 `syscall` 改为 `int $0x80`；复刻 Makefile 源选择，`-Wl,--strip-all` 后 libc.so 约 857 KiB、嵌入 init 后仍满足 2 MiB 原生镜像预算。`tools/build.py` 把 `libc.so/libm.so/动态 hello` 与 SHA-256 摘要作为 blob 嵌入 `linux_blobs.h`；`services/init.c` 在静态 hello 之后用与 S3 工具相同的端点/命名空间授权启动 3 对象（hello+libc+libm，9 段 + 翻译器 2 段），补 `writev/readv` 以支撑 musl stdio 缓冲。`include/linux_abi.h` 新增 `LX_SYS_READV/WRITEV` 与 `LxIovec`。
+
+验证：构建通过；`LINUX ELF PASS: 5667 checks`（动态夹具含缺库 `SF_DEPENDENCY`、摘要不匹配拒绝、多对象装载）；ABI 快照仍 682 项，仅 `size.SfLoadPlan` 832→1088、`offset.SfLoadPlan.arguments` 304→560、`width.SfLoadPlan.segments` 256→512 三项变化，ABI 九组测试通过。`tests/qemu/qemu_linux_compat_test.py` 真实启动确认 `[PASS] dynamic load reports missing library`、`[PASS] dynamic load rejects digest mismatch`、`[PASS] dynamic musl hello loads`，动态 hello 经 libc `printf` 输出 `MUSL DYNAMIC OK 42` 且退出 0（`dynamic musl hello runs`），原有 7 个工具、syscall 探针、线程/TLS/futex 与原生回归不受影响。调试中定位到根因：动态路径经完整翻译器，`io_init` 需要有效 manager/service，故必须像 S3 工具一样创建回复端点、授权 `fs_ep`、命名空间交接并登记子进程；另一个缺失是翻译器未实现 `writev`，导致 musl stdio 退出刷缓冲丢输出，已补。段预算 8→16 使 `sizeof(SfLoadPlan)` 832→1088，`tests/integration/test_native.py` 的 `out` 固定 1024 字节缓冲因此被 `sf_image_link` 判为 `SF_INVALID`（非环境问题）；已改为按 ABI 快照 `size.SfLoadPlan` 动态分配，保留 16 段最上限布局，8 项全部通过，完整 `--host-only` 全绿。
 
 ## P1 未登记文件对端的附加能力清理（本地完整通过）
 

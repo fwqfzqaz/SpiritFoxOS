@@ -194,7 +194,7 @@ typedef struct {
  uint32_t size,count; uint64_t entry,image_base;
  uint32_t grant_manager,grant_service,service_rights,grant_bundle;
  uint32_t grant_device,device_rights;
- SfLoadSegment segments[8];
+ SfLoadSegment segments[16];
  SfArguments arguments;
 } SfLoadPlan;
 typedef struct {uint64_t rva,memory,offset,bytes;uint32_t flags,reserved;} SfNativeSegment;

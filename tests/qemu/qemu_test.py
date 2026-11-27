@@ -1,4 +1,11 @@
-"""Real UEFI/ring-3 end-to-end tests. Only this workspace's VM is controlled."""
+"""Real UEFI/ring-3 end-to-end tests. Only this workspace's VM is controlled.
+
+The default QEMU profile models a contemporary x86_64 machine: q35/UEFI,
+multiple CPUs and the ``max`` CPU model. Storage uses the legacy virtio
+transport unless VT-d is enabled, because the kernel only exposes the modern
+(virtio 1.0) BAR to isolated drivers. Override with ``--cpu``/``--smp`` when
+reproducing older configurations.
+"""
 import argparse
 import hashlib
 import os
@@ -10,57 +17,101 @@ import subprocess
 import sys
 import threading
 import time
+
 from poll_deadline import PollDeadline
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / 'tools/package'))
+
 # QEMU's vvfat driver creates temporary files through the host temp directory.
 # Keep them inside the workspace so a read-only /var/tmp cannot break boot.
 (ROOT / '.cache').mkdir(exist_ok=True)
 os.environ['TMPDIR'] = os.environ['TEMP'] = os.environ['TMP'] = str(ROOT / '.cache')
-LINUX = hasattr(os, 'uname') and os.uname().sysname == 'Linux'
-if LINUX:
-    import shutil
-    QEMU = shutil.which('qemu-system-x86_64')
-    FIRMWARE = VARS_SRC = None
+
+# Contemporary hardware baseline. CI still runs on TCG; tests that need the old
+# profile pass explicit overrides instead of duplicating the command line.
+DEFAULT_CPU = 'max'
+DEFAULT_SMP = 2
+
+OVMF_LAYOUTS = (
+    ('OVMF_CODE.4m.fd', 'OVMF_VARS.4m.fd'),
+    ('OVMF_CODE_4M.fd', 'OVMF_VARS_4M.fd'),
+    ('OVMF_CODE.fd', 'OVMF_VARS.fd'),
+)
+
+
+def discover_runtime():
+    """Locate QEMU and OVMF, returning ``(qemu, code, vars)``."""
+    if os.name == 'nt':
+        return (str(ROOT / '.tools/qemu/qemu-system-x86_64.exe'),
+                ROOT / '.tools/qemu/share/edk2-x86_64-code.fd',
+                ROOT / '.tools/qemu/share/edk2-i386-vars.fd')
+    qemu = shutil.which('qemu-system-x86_64')
     # OVMF naming differs across distributions: Arch uses OVMF_CODE.4m.fd,
     # Debian/Ubuntu use OVMF_CODE_4M.fd, and older packages use OVMF_CODE.fd.
     for base in ('/usr/share/ovmf/x64', '/usr/share/OVMF', '/usr/share/edk2/x64'):
-        for code_name, vars_name in (('OVMF_CODE.4m.fd', 'OVMF_VARS.4m.fd'),
-                                     ('OVMF_CODE_4M.fd', 'OVMF_VARS_4M.fd'),
-                                     ('OVMF_CODE.fd', 'OVMF_VARS.fd')):
+        for code_name, vars_name in OVMF_LAYOUTS:
             code, vars_ = Path(base) / code_name, Path(base) / vars_name
             if code.exists() and vars_.exists():
-                FIRMWARE, VARS_SRC = code, vars_
-                break
-        if FIRMWARE:
-            break
-else:
-    QEMU = str(ROOT / '.tools/qemu/qemu-system-x86_64.exe')
-    FIRMWARE = ROOT / '.tools/qemu/share/edk2-x86_64-code.fd'
-    VARS_SRC = ROOT / '.tools/qemu/share/edk2-i386-vars.fd'
+                return qemu, code, vars_
+    return qemu, None, None
 
 
-def command(memory=256, disk=None, writable=False, ioerror=False, iommu=False, model='virtio', logical_block_size=0):
-    args = [str(QEMU), '-machine', 'q35', '-accel', 'tcg', '-cpu', 'qemu64,+nx', '-m', str(memory), '-smp', '1', '-drive', 'if=pflash,format=raw,readonly=on,file='+str(FIRMWARE), '-drive', 'if=pflash,format=raw,file='+str(ROOT / 'build/OVMF_VARS.fd'), '-drive', 'format=raw,file=fat:rw:'+str(ROOT / 'build/esp'), '-net', 'none', '-display', 'none', '-serial', 'stdio', '-monitor', 'none', '-no-reboot', '-device', 'isa-debug-exit,iobase=0xf4,iosize=0x04']
+QEMU, FIRMWARE, VARS_SRC = discover_runtime()
+
+
+def storage_device(model, logical_block_size=0, modern=False):
+    """Return the ``-device`` arguments for the requested storage controller."""
+    lbs = ''
+    if logical_block_size:
+        lbs = ',logical_block_size={0},physical_block_size={0}'.format(logical_block_size)
+    if model == 'ahci':
+        return ['-device', 'ich9-ahci,id=hwa',
+                '-device', 'ide-hd,drive=sf-storage,bus=hwa.0,unit=0,rotation_rate=1' + lbs]
+    if model == 'nvme':
+        return ['-device', 'nvme,drive=sf-storage,serial=spiritfox' + lbs]
+    # 非隔离路径只能走 legacy virtio；modern BAR 仅在 VT-d 隔离驱动时可访问，
+    # 因此是否启用 modern 由调用方根据隔离状态显式决定。
+    if modern:
+        flags = 'disable-modern=off,disable-legacy=on,iommu_platform=on'
+    else:
+        flags = 'disable-modern=on,disable-legacy=off'
+    return ['-device', 'virtio-blk-pci,drive=sf-storage,' + flags + ',vectors=0,addr=0x5']
+
+
+def command(memory=256, disk=None, writable=False, ioerror=False, iommu=False,
+            model='virtio', logical_block_size=0, *, smp=DEFAULT_SMP, cpu=DEFAULT_CPU,
+            modern=False, display='none', vga=None, qmp=None, debug_exit=True,
+            devices=()):
+    """Build a QEMU command line for the shared UEFI boot image."""
+    args = [
+        str(QEMU), '-machine', 'q35', '-accel', 'tcg', '-cpu', cpu,
+        '-m', str(memory), '-smp', str(smp),
+        '-drive', 'if=pflash,format=raw,readonly=on,file=' + str(FIRMWARE),
+        '-drive', 'if=pflash,format=raw,file=' + str(ROOT / 'build/OVMF_VARS.fd'),
+        '-drive', 'format=raw,file=fat:rw:' + str(ROOT / 'build/esp'),
+        '-net', 'none', '-display', display, '-serial', 'stdio',
+        '-monitor', 'none', '-no-reboot',
+    ]
+    if vga:
+        args += ['-vga', vga]
+    if qmp:
+        args += ['-qmp', qmp]
+    args += list(devices)
     if iommu:
-        args += ['-device','intel-iommu,intremap=off,caching-mode=on,device-iotlb=off,aw-bits=39']
+        args += ['-device', 'intel-iommu,intremap=off,caching-mode=on,device-iotlb=off,aw-bits=39']
     if disk:
         image = 'blkdebug:build/storage-blkdebug.conf:build/storage.img' if ioerror else str(disk)
-        drive = ['-drive', 'if=none,id=sf-storage,format=raw,readonly='+('off' if writable else 'on')+',file='+image]
-        lbs = (',logical_block_size=' + str(logical_block_size) + ',physical_block_size=' + str(logical_block_size)) if logical_block_size else ''
-        if model == 'ahci':
-            args += drive + ['-device', 'ich9-ahci,id=hwa', '-device', 'ide-hd,drive=sf-storage,bus=hwa.0,unit=0,rotation_rate=1'+lbs]
-        elif model == 'nvme':
-            args += drive + ['-device', 'nvme,drive=sf-storage,serial=spiritfox'+lbs]
-        else:
-            args += drive + ['-device', 'virtio-blk-pci,drive=sf-storage,disable-modern=on,disable-legacy=off,vectors=0,addr=0x5']
-        if iommu and model == 'virtio':
-            args[-1]='virtio-blk-pci,drive=sf-storage,disable-modern=off,disable-legacy=on,iommu_platform=on,vectors=0,addr=0x5'
+        readonly = 'off' if writable else 'on'
+        args += ['-drive', 'if=none,id=sf-storage,format=raw,readonly=' + readonly + ',file=' + image]
+        args += storage_device(model, logical_block_size, modern)
+    if debug_exit:
+        args += ['-device', 'isa-debug-exit,iobase=0xf4,iosize=0x04']
     return args
 
 
-def run(memory=256, interactive=False, storage='normal', persistent=False, iommu=False):
+def run(memory=256, interactive=False, storage='normal', persistent=False, iommu=False,
+        cpu=DEFAULT_CPU, smp=DEFAULT_SMP):
     if not QEMU or not FIRMWARE:
         raise RuntimeError('Linux needs qemu-system-x86_64 and OVMF (ovmf package) installed')
     os.chdir(ROOT)
@@ -72,7 +123,8 @@ def run(memory=256, interactive=False, storage='normal', persistent=False, iommu
         disk = ROOT/'build/user-persistent.img'
         if not disk.exists():
             shutil.copyfile(ROOT/'build/persistent.img', disk)
-        return subprocess.call(command(memory, disk, writable=True, iommu=iommu))
+        return subprocess.call(command(memory, disk, writable=True, iommu=iommu,
+                                       cpu=cpu, smp=smp, modern=iommu))
     disk = None if storage == 'missing' else ROOT / ('build/storage-v2.img' if storage == 'v2' else 'build/storage.img')
     if storage in ('badheader', 'badhash', 'badsignature'):
         data = bytearray(disk.read_bytes())
@@ -98,8 +150,12 @@ def run(memory=256, interactive=False, storage='normal', persistent=False, iommu
         (ROOT / 'build/storage-blkdebug.conf').write_text('[inject-error]\nevent = "read_aio"\nerrno = "5"\n')
     before = hashlib.sha256(disk.read_bytes()).hexdigest() if disk else None
     if interactive:
-        return subprocess.call(command(memory, disk, storage=='writable', storage=='ioerror', iommu))
-    process = subprocess.Popen(command(memory, disk, storage=='writable', storage=='ioerror', iommu), stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, bufsize=0)
+        return subprocess.call(command(memory, disk, storage=='writable', storage=='ioerror',
+                                       iommu, cpu=cpu, smp=smp, modern=iommu))
+    process = subprocess.Popen(command(memory, disk, storage=='writable', storage=='ioerror',
+                                       iommu, cpu=cpu, smp=smp, modern=iommu),
+                               stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                               stderr=subprocess.STDOUT, bufsize=0)
     chunks = queue.Queue()
     def read():
         while True:
@@ -144,11 +200,36 @@ def run(memory=256, interactive=False, storage='normal', persistent=False, iommu
             raise RuntimeError('Unavailable storage was not diagnosed')
         if storage == 'v2':
             expect('[STORAGE] format 2', 60)
-        tests = [('help', 'help | login'), ('modules', 'sf-init ACTIVE pinned'), ('echo', 'echo: ping'), ('run hello.sfk', 'sfexec: exit 0'), ('stop echo', 'echo: STOPPED'), ('start echo', 'echo: ACTIVE'), ('write /tmp/check persistent-in-ram', 'write: OK'), ('cat /tmp/check', 'persistent-in-ram'), ('ls /tmp', 'notes'), ('selftest', 'SELFTEST OK'), ('shutdown', 'SHUTDOWN OK')]
+        tests = [
+            ('help', 'help | login'),
+            ('modules', 'sf-init ACTIVE pinned'),
+            ('echo', 'echo: ping'),
+            ('run hello.sfk', 'sfexec: exit 0'),
+            ('stop echo', 'echo: STOPPED'),
+            ('start echo', 'echo: ACTIVE'),
+            ('write /tmp/check persistent-in-ram', 'write: OK'),
+            ('cat /tmp/check', 'persistent-in-ram'),
+            ('ls /tmp', 'notes'),
+            ('selftest', 'SELFTEST OK'),
+            ('shutdown', 'SHUTDOWN OK'),
+        ]
         if storage in ('normal', 'v2'):
-            tests[-1:-1] = [('cat /disk/etc/readme.txt', 'SpiritFoxOS read-only disk mounted'), ('run /disk/bin/diskhello.sfk', 'sfexec: exit 0'), ('write /disk/etc/readme.txt forbidden', 'write: error'), ('stop disk', 'disk: stop refused'), ('unmount /disk', 'disk: UNMOUNTED'), ('stop disk', 'disk: STOPPED'), ('start disk', 'disk: ACTIVE'), ('mount /disk', 'disk: MOUNTED'), ('run /disk/bin/diskhello.sfk', 'sfexec: exit 0')]
+            tests[-1:-1] = [
+                ('cat /disk/etc/readme.txt', 'SpiritFoxOS read-only disk mounted'),
+                ('run /disk/bin/diskhello.sfk', 'sfexec: exit 0'),
+                ('write /disk/etc/readme.txt forbidden', 'write: error'),
+                ('stop disk', 'disk: stop refused'),
+                ('unmount /disk', 'disk: UNMOUNTED'),
+                ('stop disk', 'disk: STOPPED'),
+                ('start disk', 'disk: ACTIVE'),
+                ('mount /disk', 'disk: MOUNTED'),
+                ('run /disk/bin/diskhello.sfk', 'sfexec: exit 0'),
+            ]
         elif storage == 'badsignature':
-            tests[-1:-1] = [('run /disk/bin/diskhello.sfk', 'sfexec: failed code=4'), ('run hello.sfk', 'sfexec: exit 0')]
+            tests[-1:-1] = [
+                ('run /disk/bin/diskhello.sfk', 'sfexec: failed code=4'),
+                ('run hello.sfk', 'sfexec: exit 0'),
+            ]
         for cmd, marker in tests:
             # A UART has a finite FIFO; emulate a human/baud-paced sender.
             for byte in cmd.encode()+b'\n':
@@ -165,7 +246,7 @@ def run(memory=256, interactive=False, storage='normal', persistent=False, iommu
         code = process.wait(timeout=10)
         if code != 1:
             raise RuntimeError('Unexpected QEMU exit code '+str(code))
-        print('QEMU PASS ('+str(memory)+' MiB, '+storage+')', flush=True)
+        print('QEMU PASS ('+str(memory)+' MiB, '+storage+', smp='+str(smp)+', cpu='+cpu+')', flush=True)
     finally:
         if process.poll() is None:
             process.kill()
@@ -184,5 +265,8 @@ if __name__ == '__main__':
     parser.add_argument('--persistent', action='store_true', help='Interactive writable copy, build/user-persistent.img; kept across runs')
     parser.add_argument('--iommu', action='store_true', help='Q35 Intel VT-d, 39-bit legacy remapping')
     parser.add_argument('--storage', choices=['normal', 'v2', 'missing', 'badheader', 'badhash', 'badsignature', 'writable', 'ioerror'], default='normal')
+    parser.add_argument('--cpu', default=DEFAULT_CPU, help='QEMU CPU model (default: %(default)s)')
+    parser.add_argument('--smp', type=int, default=DEFAULT_SMP, help='CPU count (default: %(default)s)')
     args = parser.parse_args()
-    run(args.memory, args.interactive, args.storage, args.persistent, args.iommu)
+    run(args.memory, args.interactive, args.storage, args.persistent, args.iommu,
+        cpu=args.cpu, smp=args.smp)

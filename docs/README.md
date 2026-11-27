@@ -12,6 +12,7 @@
 ### 内核与运行时
 
 - [实现边界与 ABI](architecture/IMPLEMENTATION.md)：当前实现、限制与未完成项。
+- [与 Linux 的关系与差异](architecture/LINUX-RELATIONSHIP.md)：架构、ABI、文件系统与兼容层的对比，说明本项目不是 Linux 分支。
 - [任务、线程、调度与资源配额](architecture/SCHEDULING.md)：任务/线程选择、SMP、CPU 时间预算、x87/MMX/SSE 上下文隔离、私有池页面配额。
 - [IPC 容量、撤回与计量](architecture/IPC.md)：每任务句柄上限、排队发送撤回、复制字节统计。
 - [生命周期](architecture/LIFECYCLE.md)：依赖代次、租约与有界监督。
@@ -26,6 +27,7 @@
 - [有界图形切片](architecture/GRAPHICS.md)：framebuffer 授权、类 niri 平铺布局、`sf-wm` 合成器与 `gui` 命令。
 - [存储协议与磁盘格式](architecture/STORAGE.md)：SFRFS1/SFRFS2、sf-fs 文件服务、virtio-blk 与只读区域。
 - [事务持久化与应用更新](architecture/PERSISTENCE.md)：双银行事务、A/B 槽、健康确认、失败回退与密钥撤销。
+- [通用可写文件系统 SFRWFS1](architecture/WRITABLE_FS.md)：格式布局、COW 写与日志提交、权限/配额/rename、fsck 与宿主故障注入验证（格式核心 v1，服务集成待续）。
 
 ### 应用、包与信任
 

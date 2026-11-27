@@ -1778,6 +1778,9 @@ extern const uint8_t __sf_linux_wc_start[],__sf_linux_wc_end[];
 extern const uint8_t __sf_linux_ls_start[],__sf_linux_ls_end[];
 extern const uint8_t __sf_linux_sysprobe_start[],__sf_linux_sysprobe_end[];
 extern const uint8_t __sf_linux_thread_start[],__sf_linux_thread_end[];
+extern const uint8_t __sf_linux_musl_hello_start[],__sf_linux_musl_hello_end[];
+extern const uint8_t __sf_linux_musl_libc_start[],__sf_linux_musl_libc_end[];
+extern const uint8_t __sf_linux_musl_libm_start[],__sf_linux_musl_libm_end[];
 static uint64_t lx_stage,lx_stage_bytes;
 static uint8_t lx_data[SF_PAGE] __attribute__((aligned(4096)));
 /* 追加兼容代码段与数据页：代码段紧接 Linux 映像，数据页固定在其后一页。
@@ -1788,7 +1791,7 @@ static int linux_compat_append(SfLoadPlan*plan,const uint8_t*blob,uint64_t text_
  uint64_t span=0;
  for(unsigned i=0;i<plan->count;i++){uint64_t end=plan->segments[i].rva+plan->segments[i].bytes;if(end>span)span=end;}
  uint64_t code=(span+SF_PAGE-1)&~(SF_PAGE-1);
- if(plan->count+2>8||code+data_offset+SF_PAGE>SF_IMAGE_MAX)return SF_NO_SPACE;
+ if(plan->count+2>16||code+data_offset+SF_PAGE>SF_IMAGE_MAX)return SF_NO_SPACE;
  memcpy(lx_data,blob+data_offset,SF_PAGE);
  uint64_t*words=(uint64_t*)lx_data;words[0]=data0;words[1]=data1;
  plan->segments[plan->count++]=(SfLoadSegment){code,text_bytes,(uint64_t)blob,5,0};
@@ -1858,6 +1861,70 @@ static int linux_compat_spawn_tool(const uint8_t*image,size_t image_bytes,const 
  children[slot]=(Child){(uint32_t)pid,(uint32_t)ep,directory,0,uid,gid,{0,0}};
  return (int)pid;
 }
+/* S5：多对象动态装载。装载期完成重定位、不运行 ld.so；musl 已编译为 int 0x80，
+ * 因此无需 SF_LINUX_FLAG_REWRITE_SYSCALLS。 */
+static void linux_dynamic_objects(SfLinuxObject*objs){
+ objs[0]=(SfLinuxObject){"hello",__sf_linux_musl_hello_start,
+   (size_t)(__sf_linux_musl_hello_end-__sf_linux_musl_hello_start),sf_linux_musl_hello_digest};
+ objs[1]=(SfLinuxObject){"libc.so",__sf_linux_musl_libc_start,
+   (size_t)(__sf_linux_musl_libc_end-__sf_linux_musl_libc_start),sf_linux_musl_libc_digest};
+ objs[2]=(SfLinuxObject){"libm.so",__sf_linux_musl_libm_start,
+   (size_t)(__sf_linux_musl_libm_end-__sf_linux_musl_libm_start),sf_linux_musl_libm_digest};
+}
+static int linux_dynamic_load(SfLinuxObject*objs,unsigned count,SfLoadPlan*plan,SfLinuxInfo*info){
+ void*staging=stage_grow(&lx_stage,&lx_stage_bytes,SF_IMAGE_MAX);
+ if(!staging)return SF_NO_SPACE;
+ return sf_linux_image_load(objs,count,SF_PIE_MIN,staging,SF_IMAGE_MAX,plan,info,0);
+}
+/* 以 S3 工具相同的命名空间与端点授权启动已装载计划，并等待退出。翻译器
+ * 的 io_init 要求有效的 manager/service，console 写又经文件 RPC 回到 init，
+ * 因此必须创建回复端点、授权 fs_ep、登记子进程供 serve_once 转发。 */
+static int linux_compat_run_plan(SfLoadPlan*plan,uint64_t entry_abs,const char*label,int expected){
+ int slot=-1;for(unsigned i=0;i<SF_MAX_TASKS;i++)if(!children[i].pid){slot=i;break;}
+ if(slot<0)return SF_NO_SPACE;
+ uint32_t uid,gid,owner;int ir=session_identity(&uid,&gid,&owner);if(ir)return ir;
+ int directory=sf_ns_open_as(ns,owner,"/","/disk",OPEN_READ|OPEN_DIRECTORY,uid,gid);
+ if(directory<0)return directory;
+ long ep=sf_sys(SYS_EP_CREATE,0,0,0);int r=0;
+ if(ep<0)r=(int)ep;
+ if(!r){
+  plan->grant_manager=fs_ep;plan->grant_service=(uint32_t)ep;plan->service_rights=RIGHT_RECV;
+  r=linux_compat_append(plan,__sf_linux_translator_start,SF_LINUX_TRANSLATOR_TEXT_BYTES,
+                        SF_LINUX_TRANSLATOR_DATA_OFFSET,entry_abs,0);
+ }
+ long pid=0;
+ if(!r){pid=sf_sys(SYS_SPAWN,(uint64_t)plan,0,0);if(pid<0)r=(int)pid;}
+ if(!r)r=sf_ns_handoff(ns,owner,directory,(uint32_t)pid);
+ if(r){
+  if(pid>0)sf_sys(SYS_KILL,pid,r,0);
+  if(ep>0)sf_sys(SYS_CAP_REVOKE,(uint64_t)ep,0,0);
+  sf_ns_close(ns,owner,directory);
+  sf_log(label);sf_log(": launch failed code=");sf_number(-r);sf_log("\n");
+  return r;
+ }
+ children[slot]=(Child){(uint32_t)pid,(uint32_t)ep,directory,0,uid,gid,{0,0}};
+ int status=wait_app((int)pid);
+ sf_assert(status==expected,label);
+ return status;
+}
+static void linux_compat_dynamic_tests(int with_disk){
+ SfLinuxObject objs[3];linux_dynamic_objects(objs);
+ SfLoadPlan plan={0};SfLinuxInfo info={0};
+ /* 缺库：仅 hello+libc，libm 缺失。 */
+ int r=linux_dynamic_load(objs,2,&plan,&info);
+ sf_assert(r==SF_DEPENDENCY,"dynamic load reports missing library");
+ /* 摘要不匹配：篡改 libc 摘要后必须拒绝。 */
+ static const uint8_t bad[32]={0};
+ SfLinuxObject tampered[3];linux_dynamic_objects(tampered);tampered[1].digest32=bad;
+ r=linux_dynamic_load(tampered,3,&plan,&info);
+ sf_assert(r==SF_BAD_FORMAT,"dynamic load rejects digest mismatch");
+ /* 正常装载、追加翻译器并启动。 */
+ r=linux_dynamic_load(objs,3,&plan,&info);
+ sf_assert(!r,"dynamic musl hello loads");
+ if(!with_disk){sf_log("linux dynamic musl hello skipped without disk\n");return;}
+ linux_compat_run_plan(&plan,SF_PIE_MIN+info.entry_rva,"dynamic musl hello runs",0);
+ sf_log("linux dynamic musl hello PASSED\n");
+}
 static void linux_compat_tool(const uint8_t*start,const uint8_t*end,const char*label,int expected){
  int pid=linux_compat_spawn_tool(start,(size_t)(end-start),label);
  if(pid<=0||wait_app(pid)!=expected)sf_assert(0,label);
@@ -1879,6 +1946,7 @@ static void linux_compat_tests(int with_disk){
                             __sf_linux_hello_start,
                             (uint64_t)(__sf_linux_hello_end-__sf_linux_hello_start),"linux hello");
  if(pid<=0||wait_app(pid))sf_assert(0,"linux static PIE hello writes and exits 0");
+ linux_compat_dynamic_tests(with_disk);
  /* 跨进程帧页：init 映射两页，把第二页地址交给探针；它在探针地址空间未映射。 */
  long foreign=sf_mmap(0,2*SF_PAGE);
  uint64_t foreign_page=foreign>0?(uint64_t)foreign+SF_PAGE:SF_HEAP+SF_PAGE;

@@ -11,6 +11,17 @@ static uint64_t fb_physical,fb_bytes,fb_width,fb_height,fb_pitch;
 static uint32_t fb_bpp,fb_grant_pid;
 static void kill_process(uint32_t,int);
 static int futex_wake(uint32_t,uint64_t,uint32_t);
+/* 中断向量编号：与 IDT 建立、APIC/IOAPIC 配置和 SMP IPI 约定保持一致。 */
+enum {
+ VEC_PIT_TIMER=32,        /* BSP 上由 8259/IOAPIC 投递的 PIT 滴答 */
+ VEC_SERIAL=36,           /* 串口输入 */
+ VEC_DEVICE_IRQ=0x50,     /* IOAPIC 固定投递的 PCI INTx */
+ VEC_APIC_TIMER=0x70,     /* LAPIC 定时器 */
+ VEC_RESCHEDULE_IPI=0x71, /* SMP 抢占 IPI */
+ VEC_SYSCALL=128,         /* 原生系统调用 */
+ VEC_COMPAT_SYSCALL=0x81, /* Linux 兼容翻译器上行调用 */
+ VEC_SPURIOUS=255,        /* LAPIC 伪中断 */
+};
 /* UEFI 传递的内存描述符（与 boot/efi_stub 的 SfBootInfo.memory_map 对齐）。 */
 typedef struct {uint64_t physical,virtual_address,pages,attribute;uint32_t type,reserved;} BootMemory;
 extern uint8_t kernel_end[];
@@ -25,7 +36,7 @@ static int boot_memory(SfBootInfo*b,uint64_t start,uint64_t bytes){
  * 有父任务时源数据必须位于父任务用户区间；无父任务（bootstrap）时源数据必须
  * 位于 1 GiB 以下的内核保留区。任何越界或重叠都拒绝——这是进程装载的唯一入口。 */
 static int valid_plan(const SfLoadPlan*p,Task*parent){
- if(p->size!=sizeof(*p)||!p->count||p->count>8||!sf_image_base_valid(p->image_base)||sf_arguments_validate(&p->arguments)||p->grant_device>65536||(p->device_rights&~SF_DEVICE_WRITE)||(!p->grant_device&&p->device_rights))return 0;int entry=0;
+ if(p->size!=sizeof(*p)||!p->count||p->count>16||!sf_image_base_valid(p->image_base)||sf_arguments_validate(&p->arguments)||p->grant_device>65536||(p->device_rights&~SF_DEVICE_WRITE)||(!p->grant_device&&p->device_rights))return 0;int entry=0;
  for(unsigned i=0;i<p->count;i++){const SfLoadSegment*s=&p->segments[i];
   if((s->rva&4095)||s->data>UINT64_MAX-s->bytes||!s->bytes||s->bytes>SF_IMAGE_MAX||s->reserved)return 0;
   /* bytes is the complete zero-extended segment, supplied by the loader. */
@@ -364,21 +375,21 @@ static Frame *compat_deny(Task*t){
  * 为 -100-vector）。vector 128 为系统调用。设备轮询与调度收尾。 */
 Frame *interrupt_dispatch(Frame*f){
  kernel_lock_acquire();
- if(f->vector==0x70){
+ if(f->vector==VEC_APIC_TIMER){
   if(f->cs&3){Task*t=&tasks[current];arch_save(t);t->frame=f;}
   cpu_account();apic_eoi();Frame*r=schedule();kernel_lock_release();return r;
  }
- if(f->vector==0x71){uint64_t cr3;__asm__ volatile("mov %%cr3,%0":"=r"(cr3));__asm__ volatile("mov %0,%%cr3"::"r"(cr3):"memory");apic_eoi();kernel_lock_release();return f;}
- if(f->vector==255){apic_eoi();kernel_lock_release();return f;}
+ if(f->vector==VEC_RESCHEDULE_IPI){uint64_t cr3;__asm__ volatile("mov %%cr3,%0":"=r"(cr3));__asm__ volatile("mov %0,%%cr3"::"r"(cr3):"memory");apic_eoi();kernel_lock_release();return f;}
+ if(f->vector==VEC_SPURIOUS){apic_eoi();kernel_lock_release();return f;}
  /* 设备 INTx：IOAPIC 固定投递到 0x50；固件只接 8259 时走 0x20+line，
   * 从片中断还需先经主片级联 0x22 并分别 EOI。PS/2 鼠标的 IRQ12 在两种
   * 拓扑下都可能落在 0x2c / 0x22 / 0x50，统一先排空 i8042 再按路径 EOI。 */
- if(f->vector==0x50){ps2_irq();device_irq_vector();apic_eoi();}
+ if(f->vector==VEC_DEVICE_IRQ){ps2_irq();device_irq_vector();apic_eoi();}
  else if(f->vector==0x2c){ps2_irq();outb(0xa0,0x20);outb(0x20,0x20);}
  else if(f->vector>=0x28&&f->vector<=0x2f){device_irq_vector();outb(0xa0,0x20);outb(0x20,0x20);}
  else if(f->vector==0x22){ps2_irq();outb(0xa0,0x20);outb(0x20,0x20);}
- if(f->vector==32&&cpu_index()==0){ticks++;outb(0x20,0x20);cpu_window_reset();cpu_account();ipc_deadlines();usb_poll();smp_preempt_all();}
- if(f->vector==36)console_irq();
+ if(f->vector==VEC_PIT_TIMER&&cpu_index()==0){ticks++;outb(0x20,0x20);cpu_window_reset();cpu_account();ipc_deadlines();usb_poll();smp_preempt_all();}
+ if(f->vector==VEC_SERIAL)console_irq();
  /* 空闲 CPU 在 ring0 收到中断时 current 为 -1，不能索引任务表；直接返回
   * 让 idle_loop 重新加锁调度即可。 */
  if((f->cs&3)==0){if(f->vector<32){serial("[CORE] kernel exception ");hex(f->vector);serial(" at ");hex(f->rip);panic("kernel exception");}kernel_lock_release();return f;}
@@ -386,13 +397,13 @@ Frame *interrupt_dispatch(Frame*f){
  /* 兼容上行调用：把完整帧写入该线程的帧页供翻译器读取，保存帧另存内核
   * 副本；返回用户 handler 时不经过 schedule，与 0x71 路径同一契约。
   * 帧页与翻译器栈都是每线程的，r10 携带该线程的栈顶。 */
- if(f->vector==128&&t->compat_handler){
+ if(f->vector==VEC_SYSCALL&&t->compat_handler){
   if(t->compat_nested||!sf_compat_frame_valid(f)||copy_out(t,t->compat_frame,f,sizeof(*f)))return compat_deny(t);
   t->compat_saved=*f;t->compat_nested=1;
   f->rip=t->compat_handler;f->rsp=t->compat_stack;f->rdi=t->compat_frame;f->r10=t->compat_stack;
   kernel_lock_release();return f;
  }
- if(f->vector==0x81){
+ if(f->vector==VEC_COMPAT_SYSCALL){
   /* 非兼容任务没有描述符：拒绝本次原生调用，不改变现有任务行为。 */
   if(!t->compat_handler)f->rax=SF_DENIED;
   else if(f->rax==SYS_COMPAT_RET){
@@ -402,26 +413,20 @@ Frame *interrupt_dispatch(Frame*f){
    kernel_lock_release();return f;
   }else f->rax=syscall(f);
  }
- else if(f->vector==128)f->rax=syscall(f);
+ else if(f->vector==VEC_SYSCALL)f->rax=syscall(f);
  else if(f->vector<32){serial("[CORE] isolated user fault pid=");hex(t->pid);serial(" vector=");hex(f->vector);serial("\n");if(t->pid==1)panic("initial task fault");
   __asm__ volatile("mov %0,%%cr3"::"r"(boot_cr3):"memory");kill_process(t->pid,-100-(int)f->vector);}
  Frame*r=schedule();kernel_lock_release();return r;
 }
-/* 内核入口：逐项校验 UEFI 传递的 BootInfo（magic/尺寸/版本/段数、启动包边界、
- * 内存映射描述符、关键对象均有固件预留），再把 init 段转成装载计划创建
- * PID 1（sf-init），最后经 arch_enter 进入第一个调度循环。 */
-void kernel_main(SfBootInfo*b){
- __asm__ volatile("mov %%cr3,%0":"=r"(boot_cr3));
- for(unsigned i=0;i<SF_MAX_CPUS;i++)cpu_currents[i]=-1;
- /* 真机通常没有串口：先把固件 framebuffer 接成文本控制台，后续所有
-  * serial()/panic 输出会同时显示在屏幕上。 */
- if((uint64_t)b<0x40000000ull&&b->magic==0x5f1f0f05)console_fb_init(b->framebuffer_base,b->framebuffer_size,b->width,b->height,b->pitch,b->bpp);
- serial("\nSpiritFoxOS Core 0 / ABI 1\n");
+/* 校验 BootInfo 头、启动包与内存映射边界，并确认关键对象确为固件保留。 */
+static void validate_boot_info(SfBootInfo*b){
  if((uint64_t)b>=0x40000000ull||b->magic!=0x5f1f0f05||b->boot_type!=1||b->size!=sizeof(*b)||b->version!=1||!b->init_segment_count||b->init_segment_count>8)panic("BootInfo rejected");
  if((b->bundle&4095)||!b->bundle_bytes||b->bundle_bytes>4*1024*1024||b->bundle>=0x40000000ull||b->bundle_bytes>0x40000000ull-b->bundle)panic("bundle bounds");
  if(b->memory_map_descriptor_size!=sizeof(BootMemory)||!b->memory_map_entry_count||b->memory_map_entry_count>2048||b->memory_map_size!=b->memory_map_entry_count*sizeof(BootMemory)||b->memory_map>=0x40000000ull||b->memory_map_size>0x40000000ull-b->memory_map)panic("memory map bounds");
  if(!boot_memory(b,(uint64_t)b,sizeof(*b))||!boot_memory(b,b->bundle,b->bundle_bytes))panic("unreserved boot object");
- /* 保存固件 framebuffer 描述；任一约束不满足则视为无图形（不影响串口路径）。 */
+}
+/* 保存固件 framebuffer 描述；任一约束不满足则视为无图形（不影响串口路径）。 */
+static void save_framebuffer(SfBootInfo*b){
  fb_physical=fb_bytes=fb_width=fb_height=fb_pitch=0;fb_bpp=fb_grant_pid=0;
  if(b->framebuffer_base&&!(b->framebuffer_base&4095)&&b->framebuffer_size&&
     b->framebuffer_size<=SF_FB_BYTES&&b->framebuffer_base<=0x000ffffffffff000ull-b->framebuffer_size&&
@@ -431,8 +436,37 @@ void kernel_main(SfBootInfo*b){
   fb_width=b->width;fb_height=b->height;fb_pitch=b->pitch;fb_bpp=b->bpp;
   if(space_fb_init(fb_physical,fb_bytes))console_fb_init(0,0,0,0,0,0);
  }else console_fb_init(0,0,0,0,0,0);
- bundle_phys=b->bundle;bundle_bytes=b->bundle_bytes;arch_init();ps2_mouse_init((uint32_t)fb_width,(uint32_t)fb_height);device_init(b);smp_init(b);device_irq_init();usb_init();SfLoadPlan p={0};p.size=sizeof(p);p.count=b->init_segment_count;p.entry=b->init_entry;
- for(unsigned i=0;i<p.count;i++){SfBootSegment*s=&b->init_segments[i];if(s->reserved||s->file_bytes>s->memory_bytes||(s->physical&4095)||!boot_memory(b,s->physical,(s->memory_bytes+4095)&~4095ull))panic("boot segment");if(s->physical<b->bundle+b->bundle_bytes&&b->bundle<s->physical+s->memory_bytes)panic("boot segment overlaps bundle");for(unsigned j=0;j<i;j++){SfBootSegment*t=&b->init_segments[j];if(s->physical<t->physical+t->memory_bytes&&t->physical<s->physical+s->memory_bytes)panic("overlapping boot segments");}p.segments[i]=(SfLoadSegment){s->rva,s->memory_bytes,s->physical,s->flags,0};}
+}
+/* 把固件预装的 init 段转换为内核装载计划，拒绝越界、越权与重叠的段。 */
+static void build_init_plan(SfBootInfo*b,SfLoadPlan*p){
+ p->size=sizeof(*p);p->count=b->init_segment_count;p->entry=b->init_entry;
+ for(unsigned i=0;i<p->count;i++){
+  SfBootSegment*s=&b->init_segments[i];
+  if(s->reserved||s->file_bytes>s->memory_bytes||(s->physical&4095)||!boot_memory(b,s->physical,(s->memory_bytes+4095)&~4095ull))panic("boot segment");
+  if(s->physical<b->bundle+b->bundle_bytes&&b->bundle<s->physical+s->memory_bytes)panic("boot segment overlaps bundle");
+  for(unsigned j=0;j<i;j++){
+   SfBootSegment*prev=&b->init_segments[j];
+   if(s->physical<prev->physical+prev->memory_bytes&&prev->physical<s->physical+s->memory_bytes)panic("overlapping boot segments");
+  }
+  p->segments[i]=(SfLoadSegment){s->rva,s->memory_bytes,s->physical,s->flags,0};
+ }
+}
+/* 内核入口：逐项校验 UEFI 传递的 BootInfo，再把 init 段转成装载计划创建
+ * PID 1（sf-init），最后经 arch_enter 进入第一个调度循环。 */
+void kernel_main(SfBootInfo*b){
+ __asm__ volatile("mov %%cr3,%0":"=r"(boot_cr3));
+ for(unsigned i=0;i<SF_MAX_CPUS;i++)cpu_currents[i]=-1;
+ /* 真机通常没有串口：先把固件 framebuffer 接成文本控制台，后续所有
+  * serial()/panic 输出会同时显示在屏幕上。 */
+ if((uint64_t)b<0x40000000ull&&b->magic==0x5f1f0f05)console_fb_init(b->framebuffer_base,b->framebuffer_size,b->width,b->height,b->pitch,b->bpp);
+ serial("\nSpiritFoxOS Core 0 / ABI 1\n");
+ validate_boot_info(b);
+ save_framebuffer(b);
+ bundle_phys=b->bundle;bundle_bytes=b->bundle_bytes;
+ arch_init();ps2_mouse_init((uint32_t)fb_width,(uint32_t)fb_height);
+ device_init(b);smp_init(b);device_irq_init();usb_init();
+ SfLoadPlan p={0};
+ build_init_plan(b,&p);
  if(task_new(&p,1)!=1)panic("bootstrap plan rejected");serial("[CORE] entering isolated sf-init.sfmod, timer=100Hz\n");
  kernel_lock_acquire();Frame*f=schedule();kernel_lock_release();arch_enter(f);
 }

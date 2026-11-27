@@ -280,6 +280,33 @@ static int64_t lx_write(int fd,const void *buffer,uint64_t count){
  return(int64_t)done;
 }
 
+/* musl 的 stdio 缓冲写与部分工具使用 writev/readv；逐段复用单次读写实现。 */
+static int64_t lx_writev(int fd,const LxIovec *iov,uint64_t count){
+ if(count>LX_IOV_MAX)return-LX_EINVAL;
+ int64_t total=0;
+ for(uint64_t i=0;i<count;i++){
+  if(!iov[i].len)continue;
+  int64_t r=lx_write(fd,(const void*)(uintptr_t)iov[i].base,iov[i].len);
+  if(r<0)return total?total:r;
+  total+=r;
+  if((uint64_t)r<iov[i].len)break;
+ }
+ return total;
+}
+
+static int64_t lx_readv(int fd,const LxIovec *iov,uint64_t count){
+ if(count>LX_IOV_MAX)return-LX_EINVAL;
+ int64_t total=0;
+ for(uint64_t i=0;i<count;i++){
+  if(!iov[i].len)continue;
+  int64_t r=lx_read(fd,(void*)(uintptr_t)iov[i].base,iov[i].len);
+  if(r<0)return total?total:r;
+  total+=r;
+  if((uint64_t)r<iov[i].len)break;
+ }
+ return total;
+}
+
 static int64_t lx_lseek(int fd,int64_t offset,int whence){
  if(!fd_valid(fd))return-LX_EBADF;
  LxFd *e=&fds[fd];
@@ -678,6 +705,8 @@ int64_t sf_linux_dispatch(LxFrame *frame){
  switch(number){
   case LX_SYS_READ:result=lx_read((int)a,(void*)(uintptr_t)b,(uint64_t)c);break;
   case LX_SYS_WRITE:result=lx_write((int)a,(const void*)(uintptr_t)b,(uint64_t)c);break;
+  case LX_SYS_READV:result=lx_readv((int)a,(const LxIovec*)(uintptr_t)b,(uint64_t)c);break;
+  case LX_SYS_WRITEV:result=lx_writev((int)a,(const LxIovec*)(uintptr_t)b,(uint64_t)c);break;
   case LX_SYS_OPEN:result=lx_openat(LX_AT_FDCWD,(const char*)(uintptr_t)a,b,c);break;
   case LX_SYS_OPENAT:result=lx_openat(a,(const char*)(uintptr_t)b,c,d);break;
   case LX_SYS_CLOSE:result=fd_close((int)a);break;

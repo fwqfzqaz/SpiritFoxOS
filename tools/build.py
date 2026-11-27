@@ -10,11 +10,13 @@ import sys
 import shutil
 from rust_archive import stack_probe_member
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / 'tools'))
 sys.path.insert(0, str(ROOT / 'tools' / 'package'))
 from sfpack import Crypto, pack, bundle
 from mkreadfs import create as create_readfs
 from mkpersist import create as create_persist
 import trust_policy
+import build_musl
 
 os.chdir(ROOT)
 (ROOT / 'build').mkdir(exist_ok=True)
@@ -232,11 +234,16 @@ def build_linux_compat_blobs():
     fixtures['thread'] = build_linux_fixture('tool-thread',
                                              ['tests/fixtures/linux_thread.c'], [])
 
+    # S5：真实 musl 动态产物。装载器在装载期完成重定位，不运行 ld.so。
+    musl = build_musl.build(ZIG)
     blobs = [('hello', 'build/linux_hello.elf'),
              ('stub', 'build/linux_compat_stub.bin'),
              ('probe', 'build/linux_compat_probe.bin'),
              ('translator', blob)]
     blobs += [(name, fixtures[name]) for name in fixtures]
+    blobs += [('musl_hello', musl['hello']['path']),
+              ('musl_libc', musl['libc']['path']),
+              ('musl_libm', musl['libm']['path'])]
     # Zig 的编译缓存只按源文件内容做键；incbin 的外部文件变化不会使缓存失效。
     # 把嵌入内容的摘要写进源文件，确保 blob/夹具更新后一定重新汇编。
     (ROOT / 'build' / 'linux_blobs.S').write_text(linux_blob_source(blobs))
@@ -245,7 +252,18 @@ def build_linux_compat_blobs():
               f'#define SF_LINUX_PROBE_TEXT_BYTES {texts["probe"]}u',
               f'#define SF_LINUX_TRANSLATOR_TEXT_BYTES {data_offset}u',
               f'#define SF_LINUX_TRANSLATOR_DATA_OFFSET {data_offset}u',
-              '#endif']
+              f'#define SF_LINUX_MUSL_HELLO_BYTES {musl["hello"]["bytes"]}u',
+              f'#define SF_LINUX_MUSL_LIBC_BYTES {musl["libc"]["bytes"]}u',
+              f'#define SF_LINUX_MUSL_LIBM_BYTES {musl["libm"]["bytes"]}u']
+
+    def digest_array(name, data):
+        return ('static const uint8_t ' + name + '[32] = {' +
+                ','.join(str(b) for b in data) + '};')
+
+    header.append(digest_array('sf_linux_musl_hello_digest', musl['hello']['sha256']))
+    header.append(digest_array('sf_linux_musl_libc_digest', musl['libc']['sha256']))
+    header.append(digest_array('sf_linux_musl_libm_digest', musl['libm']['sha256']))
+    header.append('#endif')
     (ROOT / 'build' / 'linux_blobs.h').write_text('\n'.join(header) + '\n')
 
 

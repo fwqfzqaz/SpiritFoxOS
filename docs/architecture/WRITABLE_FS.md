@@ -1,0 +1,165 @@
+# 通用可写文件系统 SFRWFS1（格式核心 v1）
+
+2026-11-27。SFRWFS1 是仓库内第一个通用可写文件系统格式，实现于
+[include/sfrw.h](../../include/sfrw.h) 与 [services/sfrw.c](../../services/sfrw.c)，
+由宿主 [test_sfrw.c](../../tests/host/test_sfrw.c) 在内存设备上验证。本轮只交付
+格式核心库，**不接入** `sf-fs`/`namespace` 服务进程，也不新增 IPC 操作码或 ABI
+常量；服务集成、真实块设备与 QEMU 集成留待后续切片。已有的 SFRFS1/SFRFS2 只读
+格式与双银行事务卷见 [STORAGE](STORAGE.md) 与 [PERSISTENCE](PERSISTENCE.md)。
+
+设计原则与本仓库其余部分一致：容量有界、错误显式、失败关闭；每个写/刷盘边界都
+可注入故障，验证崩溃后只能观察到旧状态或新状态之一。
+
+## 布局
+
+块大小固定 4096 B，设备按块读写。格式化容量 `block_count ∈ [128, 65536]`，
+即 512 KiB 至 256 MiB。
+
+| 区域 | 块 | 说明 |
+| --- | --- | --- |
+| 主超级块 | 0 | 4064 B 内容 + 32 B sha256 |
+| 备份超级块 | 1 | 内容与块 0 相同 |
+| inode 表 | 2..33 | 32 块 × 32 inode × 128 B = 1024 inode |
+| 块位图 | 34..35 | 2 块，共 65536 位 |
+| 日志 | 36..99 | 头块 36，payload 从块 37 起最多 16 个 |
+| 数据区 | 100.. | 目录块、文件数据、间接块 |
+
+所有整数小端。超级块字段：`magic "SFRWFS1\0" @0`、`version=1 @8`、
+`block_bytes=4096 @12`、`block_count @16`、`max_inodes=1024 @20`、
+`inode_table_block=2 @24`、`bitmap_block=34 @28`、`journal_block=36 @32`、
+`journal_blocks=64 @36`、`data_block=100 @40`、`generation u64 @44`、
+`root_inode=1 @52`、`free_blocks @56`、`free_inodes @60`、
+`default_quota_blocks @64`、`default_quota_inodes @68`、`quota_count @72`、
+保留 @76、`quota[8]{uid,blocks,inodes,reserved} @80..207`，其余清零，
+`sha256(前 4064 B) @4064`。
+
+inode 128 B：`mode u16 @0`（`0x4000` 目录 / `0x8000` 文件，低 12 位权限）、
+`links u16 @2`、`uid @4`、`gid @8`、`size u64 @12`、`flags @20`、
+`direct[12] @24`、`indirect @72`、保留 52 B。inode 0 保留，inode 1 为根目录。
+
+目录项 128 B：`inode u32 @0`、`name_len u8 @4`、`type u8 @5`（1 文件 / 2 目录）、
+保留 u16、`name[120] @8`；`inode==0` 表示空槽。名字长度 1..95，仅可打印 ASCII，
+禁止 `/`、`\`、`.`、`..`。根目录含 `.`/`..` 且都指向 inode 1；目录大小按整块计，
+`dir_add` 在现有目录块填满时分配新块。
+
+日志头块 36：`magic "SFRWJ1\0\0" @0`、`version=1 @8`、`state=1 @12`（已提交）、
+`seq u64 @16`、`count u32 @24`、保留 @28、`targets[16] u32 @32`、
+`lengths[16] u32 @96`（固定 4096）、`payload_sha256[16][32] @160..671`，
+其余清零，`sha256(前 4064 B) @4064`；payload 依槽位存放于块 37 起。
+
+## 限额
+
+| 项 | 上限 |
+| --- | --- |
+| 卷容量 | 65536 块（256 MiB） |
+| inode | 1024（inode 0 保留，inode 1 为根） |
+| 单文件大小 | 1036 块 = 4 243 456 B（12 直接 + 1024 间接） |
+| 名字长度 | 95 B |
+| 路径长度 | 255 B |
+| 单次提交日志目标 | 16 |
+| 配额覆盖项 | 8 |
+| 跟踪 uid 数 | 16 |
+
+## 写路径与提交协议
+
+**COW 写**：写文件时，对每个被触及的逻辑块分配新块并写入内容（部分块先读旧内容
+再覆盖）；inode 与间接块改指向新块，旧块只在同一提交的位图中释放。数据块先写并
+`flush`，随后只提交元数据，因此崩溃后只可能看到旧指针或新指针，不会出现半写数据。
+`truncate` 只改元数据并释放块，扩展产生稀疏洞（读到零）。
+
+**日志提交**（[services/sfrw.c](../../services/sfrw.c) 的 `commit`）：被修改的
+位图块、inode 表块、超级块（块 0/1）都作为日志目标写入 payload；提交顺序为
+
+1. 若磁盘日志头尚未清空，先写零头并刷盘；
+2. 写 payload 到日志槽，记录目标、长度与 sha256；
+3. `flush`（payload 先于头落盘）；
+4. 写已提交日志头（`state=1`、`seq=generation`），`flush`；
+5. 逐目标读回 payload 并写到目标块，`flush`；
+6. 写零头，`flush`。
+
+恢复时若日志头 magic 与校验和有效且 `state==1`，逐项校验目标（不得落入日志区）、
+长度与 payload 哈希后幂等重放并清头；撕裂或校验不符的头被忽略。任一步设备失败即
+置 `mounted=0`、返回 `SF_COMMIT_UNCERTAIN`，不再接受后续操作。`generation` 每次
+提交 +1，主/备超级块同步更新。
+
+## 挂载校验
+
+`sf_rw_mount` 首选块 0，校验和失败时回退块 1；两块都坏返回 `SF_BAD_FORMAT`。
+校验 magic、版本、块大小、几何常量（inode 表/位图/日志/数据区起始块、根 inode、
+保留字段、配额项）与容量范围；重放有效日志；再校验位图保留位、`free_blocks`/
+`free_inodes` 与位图及 inode 实际一致、inode 字段与块指针合法。严格校验失败一律
+返回 `SF_BAD_FORMAT`，交给 fsck 修复。挂载扫描全部 inode 统计每 uid 占用，超出
+16 个 uid 返回 `SF_NO_SPACE`。
+
+## 路径、权限与目录
+
+- 路径必须为绝对路径，总长 ≤255，无空段、`.`、`..`、反斜线、尾随 `/`，各段
+  名字合法；`name_ok`/`path_ok` 统一裁决。
+- 逐级解析目录需 `x`；在父目录创建/删除/改名需 `w|x`；读文件需读位，写/截断需
+  写位。uid 0 绕过全部权限。
+- v1 只比较 owner 位与 other 位（**不使用组位与 gid 语义**），owner 匹配用 owner
+  位，否则用 other 位。
+- `mkdir` 初始化 `.`/`..` 并更新父目录链接计数；`rmdir` 只允许空目录（仅含
+  `.`/`..`）；`unlink`/`rmdir` 释放 inode 并在提交中维护 `free_inodes`。
+- `rename` 在一次提交内暂存源/目标目录块、相关 inode、位图与超级块；支持同目录
+  改名、跨目录、替换已存在文件、替换空目录；移动目录时更新其 `..` 与双方链接
+  计数；拒绝把目录移入自身子树、拒绝替换非空目录。
+
+## 配额
+
+默认配额（块/inode）由 `SfrwFormatOptions` 指定，另有最多 8 个 uid 覆盖项。
+uid 0 豁免。创建 inode 时检查 inode 配额，分配块时按 COW 净增减检查块配额，超限
+返回 `SF_NO_SPACE`；`sf_rw_set_quota` 仅 uid 0 可调用。
+
+## fsck
+
+`sf_rw_fsck` 先宽松加载并重放日志，然后：
+
+1. 从根目录 BFS 标记可达 inode，删除坏目录项，统计子目录数；
+2. 只为可达 inode 建立引用位图，检测重复块（低 inode 优先；对重复的文件 inode
+   清除其直接/间接指针以便修复，目录重复块只报告不清除指针）；
+3. 清理不可达 inode、重建位图与 `free_blocks`/`free_inodes` 及配额占用、修正
+   目录链接计数；
+4. 按每批 ≤16 个日志目标分批提交，操作幂等。
+
+报告 `SfckReport` 含 `checked_inodes`、`used_inodes`、`used_blocks`、`free_blocks`、
+`free_inodes`、`lost_inodes`、`unreachable_blocks`、`duplicate_blocks`、
+`bad_entries`、`fixed_links`、`repaired`。fsck 以严格 `super_load` 加载超级块，若
+超级块计数已严重越界（如 `free_blocks` 超过数据区容量）则无法修复，需重新格式化。
+
+## 实现结构
+
+`Sfrw`（约 40 KiB）含设备 vtable、几何/计数、`bitmap[8192]`、4 KiB 读写缓冲、
+日志暂存表、`usage[16]`、COW 的 `old_block/new_block[1036]`，以及 fsck 用的
+`ref[8192]`、`reach[128]`、`refs/subdirs/queue[1024]`。仅依赖 `sf.h`/`package.h`
+声明（`memcpy/memset/strlen/strcmp`、`sf_sha256`），不引入 `<string.h>`。
+
+## 验证边界
+
+宿主 [test_sfrw.c](../../tests/host/test_sfrw.c) 使用 512 块（2 MiB）内存设备，
+故障模型与 [test_txn.c](../../tests/host/test_txn.c) 相同：`stable/cache/baseline`
+三镜像 + dirty 位图，`fail_at` 指定第几次写/刷盘失败，`mode 0/1/2` 表示不落盘、
+半块撕裂落盘、完整落盘。覆盖：
+
+- 格式化参数负例、挂载、根目录 `.`/`..`、坏主超级块回退备份、双坏拒绝；
+- create/write/read、跨 12 直接块与间接块、稀疏洞读零、truncate 缩/扩、
+  单文件上限与卷容量上限；
+- 目录嵌套、readdir、rmdir 非空失败、unlink、重复创建、缺失路径、非法名字/路径；
+- 权限 owner/other、目录 `x`、父目录 `w|x`、uid 0 绕过；
+- 配额 inode/块超限返回 `SF_NO_SPACE`、uid 0 不受限、非 root 不能 `set_quota`；
+- rename 同目录/跨目录/替换文件/替换空目录/移动目录 `..` 正确/拒绝移入子树/
+  拒绝覆盖非空目录；
+- fsck 干净卷零修复，以及坏指针/重复块/不可达 inode/坏目录项注入后修复；
+- 崩溃一致性：以 create+write 与 rename 为样本，对每个写/刷盘边界 × 3 种故障
+  模式注入，重挂载（必要时 fsck）后断言“旧状态或新状态”之一，内容不得混合；
+  日志已提交后中途失败必须重放为新状态。
+
+测试以 `SFRW PASS: N checks, ...` 输出，并由 [tools/test.py](../../tools/test.py)
+的 `host_test('test_sfrw', ...)` 纳入宿主回归。
+
+## 非目标（v1）
+
+- 不接入 `sf-fs`/`namespace` 服务、不新增 IPC 操作码或 ABI 常量、不改 `build.py`
+  的 `sf-fs` 镜像组成。
+- 不提供并发/多线程挂载、崩溃后自动 fsck、扩展属性、硬链接、组权限与 ACL。
+- 格式核心 v1 仅通过宿主故障注入验证；真实块设备与 QEMU 集成留待后续切片。

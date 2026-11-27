@@ -85,6 +85,7 @@ host_test('test_resize_txn','tests/host/test_resize_txn.c','services/txn.c',no_u
 host_test('test_storage','tests/host/test_storage.c','services/namespace.c',no_unused=True)
 host_test('test_txn','tests/host/test_txn.c','services/txn.c',no_unused=True)
 host_test('test_txn_compat','tests/host/test_txn_compat.c','services/txn.c',no_unused=True)
+host_test('test_sfrw','tests/host/test_sfrw.c','services/sfrw.c',no_unused=True)
 host_test('test_update','tests/host/test_update.c','services/update.c','services/txn.c',no_unused=True)
 host_test('test_persist_metadata','tests/host/test_persist_metadata.c','services/storage_reply_owner.c','tests/host/persist_volume_fixture.c','services/persist_metadata.c','services/namespace.c','services/txn.c','services/update.c','services/version.c',*build.CRYPTO,no_unused=True)
 host_test('test_persist_write_reply','tests/host/test_persist_write_reply.c','services/storage_reply_owner.c','services/namespace.c',*build.CRYPTO,no_unused=True)
@@ -121,109 +122,144 @@ host_test('test_sfk','tests/host/test_sfk.c','services/sfk.c')
 for name,source in [('ipc','kernel/ipc.c'),('memory','kernel/memory.c')]:
     host_test('test_'+name,'tests/host/test_'+name+'.c',source,no_unused=True)
 host_test('test_trust','tests/host/test_trust.c',*build.CRYPTO)
-subprocess.run([sys.executable,'tests/integration/test_packages.py'],check=True)
-subprocess.run([sys.executable,'tests/integration/test_trust.py'],check=True)
-subprocess.run([sys.executable,'tests/integration/test_readfs.py'],check=True)
-subprocess.run([sys.executable,'tests/integration/test_native.py'],check=True)
-subprocess.run([sys.executable,'tests/integration/test_linux_elf.py'],check=True)
-subprocess.run([sys.executable,'tests/integration/test_manifest_profile.py'],check=True)
+def run_script(script, *extra):
+    subprocess.run([sys.executable, script, *extra], check=True)
+
+
+# 集成测试按固定顺序执行；新增用例只需加入列表。
+INTEGRATION_TESTS = [
+    'tests/integration/test_packages.py',
+    'tests/integration/test_trust.py',
+    'tests/integration/test_readfs.py',
+    'tests/integration/test_native.py',
+    'tests/integration/test_linux_elf.py',
+    'tests/integration/test_manifest_profile.py',
+    'tests/integration/test_abi_snapshot.py',
+    'tests/integration/test_rust_archive.py',
+    'tests/integration/test_poll_deadline.py',
+    'tests/integration/test_namespace_boundary.py',
+    'tests/integration/test_namespace_ownership.py',
+    'tests/integration/test_policy_boundary.py',
+    'tests/integration/test_trust_boundary.py',
+    'tests/integration/test_block_reply.py',
+    'tests/integration/test_persist_quiescence.py',
+    'tests/integration/test_persist_fence_evidence.py',
+    'tests/integration/test_persist_terminal_evidence.py',
+    'tests/integration/test_persist_idle_evidence.py',
+    'tests/integration/test_persist_snapshot_evidence.py',
+    'tests/integration/test_persist_verify_evidence.py',
+    'tests/integration/test_persist_hold_evidence.py',
+    'tests/integration/test_persist_stage_evidence.py',
+    'tests/integration/test_storage_reply_owner_evidence.py',
+    'tests/integration/test_ipc_revocation_evidence.py',
+    'tests/integration/test_ipc_branch_evidence.py',
+    'tests/integration/test_persist_candidate_image.py',
+    'tests/integration/test_trust_fingerprint.py',
+    'tests/integration/test_persist_snapshot_volume.py',
+    'tests/integration/test_file_ingress.py',
+    'tests/integration/test_linux_blob_assembly.py',
+]
+for _script in INTEGRATION_TESTS:
+    run_script(_script)
 manifest_schema_sha256 = hashlib.sha256((ROOT/'schemas/native-source-v1.schema.json').read_bytes()).hexdigest()
-subprocess.run([sys.executable,'tests/integration/test_abi_snapshot.py'],check=True)
-subprocess.run([sys.executable,'tests/integration/test_rust_archive.py'],check=True)
-subprocess.run([sys.executable,'tests/integration/test_poll_deadline.py'],check=True)
-subprocess.run([sys.executable,'tests/integration/test_namespace_boundary.py'],check=True)
-subprocess.run([sys.executable,'tests/integration/test_namespace_ownership.py'],check=True)
-subprocess.run([sys.executable,'tests/integration/test_policy_boundary.py'],check=True)
-subprocess.run([sys.executable,'tests/integration/test_trust_boundary.py'],check=True)
-subprocess.run([sys.executable,'tests/integration/test_block_reply.py'],check=True)
-subprocess.run([sys.executable,'tests/integration/test_persist_quiescence.py'],check=True)
-subprocess.run([sys.executable,'tests/integration/test_persist_fence_evidence.py'],check=True)
-subprocess.run([sys.executable,'tests/integration/test_persist_terminal_evidence.py'],check=True)
-subprocess.run([sys.executable,'tests/integration/test_persist_idle_evidence.py'],check=True)
-subprocess.run([sys.executable,'tests/integration/test_persist_snapshot_evidence.py'],check=True)
-subprocess.run([sys.executable,'tests/integration/test_persist_verify_evidence.py'],check=True)
-subprocess.run([sys.executable,'tests/integration/test_persist_hold_evidence.py'],check=True)
-subprocess.run([sys.executable,'tests/integration/test_persist_stage_evidence.py'],check=True)
-subprocess.run([sys.executable,'tests/integration/test_storage_reply_owner_evidence.py'],check=True)
-subprocess.run([sys.executable,'tests/integration/test_ipc_revocation_evidence.py'],check=True)
-subprocess.run([sys.executable,'tests/integration/test_ipc_branch_evidence.py'],check=True)
-subprocess.run([sys.executable,'tests/integration/test_persist_candidate_image.py'],check=True)
-subprocess.run([sys.executable,'tests/integration/test_trust_fingerprint.py'],check=True)
-subprocess.run([sys.executable,'tests/integration/test_persist_snapshot_volume.py'],check=True)
-subprocess.run([sys.executable,'tests/integration/test_file_ingress.py'],check=True)
-subprocess.run([sys.executable,'tests/integration/test_linux_blob_assembly.py'],check=True)
 abi_reference_sha256 = hashlib.sha256((ROOT/'abi/x86_64-current.json').read_bytes()).hexdigest()
 abi_capture_sha256 = hashlib.sha256((ROOT/'build/abi-current.json').read_bytes()).hexdigest()
+
+# QEMU 场景按固定顺序执行。基础能力与文件语义先跑，再跑内存/存储矩阵，
+# 最后跑持久化、图形、SMP 与 Linux 兼容等重场景。
+QEMU_BASELINE = [
+    'qemu_capability_test.py',
+    'qemu_fpu_test.py',
+    'qemu_priority_test.py',
+    'qemu_cap_limit_test.py',
+    'qemu_page_quota_test.py',
+    'qemu_ipc_cancel_test.py',
+    'qemu_ipc_revocation_test.py',
+    'qemu_ipc_branch_test.py',
+    'qemu_ipc_stats_test.py',
+    'qemu_file_client_test.py',
+    'qemu_rmdir_test.py',
+    'qemu_stat_test.py',
+    'qemu_projection_test.py',
+    'qemu_unlink_test.py',
+    'qemu_invocation_preflight_test.py',
+    'qemu_native_supervision_test.py',
+    'qemu_echo_health_test.py',
+    'qemu_supervision_test.py',
+    'qemu_launch_kind_test.py',
+    'qemu_echo_channel_test.py',
+    'qemu_block_channel_test.py',
+    'qemu_file_rpc_test.py',
+    'qemu_file_peer_test.py',
+    'qemu_native_test.py',
+    'qemu_posix_test.py',
+    'qemu_environment_test.py',
+    'qemu_arguments_test.py',
+    'qemu_trust_policy_test.py',
+]
+QEMU_MEMORY_SIZES = (128, 256, 512)
+QEMU_STORAGE_CASES = ('missing', 'badheader', 'badhash', 'badsignature', 'writable', 'ioerror')
+QEMU_PERSISTENCE = [
+    'qemu_persist_test.py',
+    'qemu_persist_metadata_test.py',
+    'qemu_persist_quiescence_test.py',
+    'qemu_persist_chunk_test.py',
+    'qemu_trust_sync_test.py',
+    'qemu_block_reply_test.py',
+    'qemu_revoke_failure_test.py',
+    'qemu_persist_write_reply_test.py',
+    'qemu_persist_fence_test.py',
+    'qemu_persist_terminal_test.py',
+    'qemu_persist_idle_test.py',
+    'qemu_persist_snapshot_test.py',
+    'qemu_persist_verify_test.py',
+    'qemu_persist_hold_test.py',
+    'qemu_persist_stage_test.py',
+    'qemu_storage_reply_owner_test.py',
+    'qemu_persist_driver_info_test.py',
+    'qemu_namespace_recovery_test.py',
+]
+# 设备与现代硬件路径：AHCI/NVMe、xHCI USB、网络、图形与 VT-d。
+QEMU_DEVICES = [
+    ('qemu_hardware_test.py',),
+    ('qemu_usb_test.py',),
+    ('qemu_net_test.py',),
+    ('qemu_net_test.py', '--disk'),
+    ('qemu_gui_test.py',),
+    ('qemu_gui_screenshot_test.py',),
+    ('qemu_iommu_test.py',),
+]
+QEMU_SYSTEM = [
+    'qemu_smp_test.py',
+    'qemu_security_test.py',
+    'qemu_openat_test.py',
+    'qemu_user_test.py',
+    'qemu_truncate_test.py',
+    'qemu_trust_test.py',
+    'qemu_txn_compat_test.py',
+    'qemu_linux_compat_test.py',
+]
+
 if not args.host_only:
-    subprocess.run([sys.executable, 'tests/qemu/qemu_capability_test.py'], check=True)
-    subprocess.run([sys.executable, 'tests/qemu/qemu_fpu_test.py'], check=True)
-    subprocess.run([sys.executable, 'tests/qemu/qemu_priority_test.py'], check=True)
-    subprocess.run([sys.executable, 'tests/qemu/qemu_cap_limit_test.py'], check=True)
-    subprocess.run([sys.executable, 'tests/qemu/qemu_page_quota_test.py'], check=True)
-    subprocess.run([sys.executable, 'tests/qemu/qemu_ipc_cancel_test.py'], check=True)
-    subprocess.run([sys.executable, 'tests/qemu/qemu_ipc_revocation_test.py'], check=True)
-    subprocess.run([sys.executable, 'tests/qemu/qemu_ipc_branch_test.py'], check=True)
-    subprocess.run([sys.executable, 'tests/qemu/qemu_ipc_stats_test.py'], check=True)
-    subprocess.run([sys.executable, 'tests/qemu/qemu_file_client_test.py'], check=True)
-    subprocess.run([sys.executable, 'tests/qemu/qemu_rmdir_test.py'], check=True)
-    subprocess.run([sys.executable, 'tests/qemu/qemu_stat_test.py'], check=True)
-    subprocess.run([sys.executable, 'tests/qemu/qemu_projection_test.py'], check=True)
-    subprocess.run([sys.executable, 'tests/qemu/qemu_unlink_test.py'], check=True)
-    subprocess.run([sys.executable, 'tests/qemu/qemu_invocation_preflight_test.py'], check=True)
-    subprocess.run([sys.executable, 'tests/qemu/qemu_native_supervision_test.py'], check=True)
-    subprocess.run([sys.executable, 'tests/qemu/qemu_echo_health_test.py'], check=True)
-    subprocess.run([sys.executable, 'tests/qemu/qemu_supervision_test.py'], check=True)
-    subprocess.run([sys.executable, 'tests/qemu/qemu_launch_kind_test.py'], check=True)
-    subprocess.run([sys.executable, 'tests/qemu/qemu_echo_channel_test.py'], check=True)
-    subprocess.run([sys.executable, 'tests/qemu/qemu_block_channel_test.py'], check=True)
-    subprocess.run([sys.executable, 'tests/qemu/qemu_file_rpc_test.py'], check=True)
-    subprocess.run([sys.executable, 'tests/qemu/qemu_file_peer_test.py'], check=True)
-    subprocess.run([sys.executable, 'tests/qemu/qemu_native_test.py'], check=True)
-    subprocess.run([sys.executable, 'tests/qemu/qemu_posix_test.py'], check=True)
-    subprocess.run([sys.executable, 'tests/qemu/qemu_environment_test.py'], check=True)
-    subprocess.run([sys.executable, 'tests/qemu/qemu_arguments_test.py'], check=True)
-    subprocess.run([sys.executable, 'tests/qemu/qemu_trust_policy_test.py'], check=True)
-    for memory in [128, 256, 512]:
-        subprocess.run([sys.executable, 'tests/qemu/qemu_test.py', '--memory', str(memory)], check=True)
-    for case in ['missing', 'badheader', 'badhash', 'badsignature', 'writable', 'ioerror']:
-        subprocess.run([sys.executable, 'tests/qemu/qemu_test.py', '--storage', case], check=True)
-    subprocess.run([sys.executable, 'tests/qemu/qemu_persist_test.py'], check=True)
-    subprocess.run([sys.executable, 'tests/qemu/qemu_persist_metadata_test.py'], check=True)
-    subprocess.run([sys.executable, 'tests/qemu/qemu_persist_quiescence_test.py'], check=True)
-    subprocess.run([sys.executable, 'tests/qemu/qemu_persist_chunk_test.py'], check=True)
-    subprocess.run([sys.executable, 'tests/qemu/qemu_trust_sync_test.py'], check=True)
-    subprocess.run([sys.executable, 'tests/qemu/qemu_block_reply_test.py'], check=True)
-    subprocess.run([sys.executable, 'tests/qemu/qemu_revoke_failure_test.py'], check=True)
-    subprocess.run([sys.executable, 'tests/qemu/qemu_persist_write_reply_test.py'], check=True)
-    subprocess.run([sys.executable, 'tests/qemu/qemu_persist_fence_test.py'], check=True)
-    subprocess.run([sys.executable, 'tests/qemu/qemu_persist_terminal_test.py'], check=True)
-    subprocess.run([sys.executable, 'tests/qemu/qemu_persist_idle_test.py'], check=True)
-    subprocess.run([sys.executable, 'tests/qemu/qemu_persist_snapshot_test.py'], check=True)
-    subprocess.run([sys.executable, 'tests/qemu/qemu_persist_verify_test.py'], check=True)
-    subprocess.run([sys.executable, 'tests/qemu/qemu_persist_hold_test.py'], check=True)
-    subprocess.run([sys.executable, 'tests/qemu/qemu_persist_stage_test.py'], check=True)
-    subprocess.run([sys.executable, 'tests/qemu/qemu_storage_reply_owner_test.py'], check=True)
-    subprocess.run([sys.executable, 'tests/qemu/qemu_persist_driver_info_test.py'], check=True)
-    subprocess.run([sys.executable, 'tests/qemu/qemu_namespace_recovery_test.py'], check=True)
-    subprocess.run([sys.executable, 'tests/qemu/qemu_hardware_test.py'], check=True)
-    # USB：xHCI 初始化、HID 枚举、键盘输入、指针注入与热插拔。
-    subprocess.run([sys.executable, 'tests/qemu/qemu_usb_test.py'], check=True)
-    subprocess.run([sys.executable, 'tests/qemu/qemu_net_test.py'], check=True)
-    subprocess.run([sys.executable, 'tests/qemu/qemu_net_test.py', '--disk'], check=True)
-    # 类 niri 合成器：framebuffer 映射、布局与串口输入转发。
-    subprocess.run([sys.executable, 'tests/qemu/qemu_gui_test.py'], check=True)
-    # 真实扫描输出：QMP screendump + PPM 像素断言（窗口/页签/背景色）。
-    subprocess.run([sys.executable, 'tests/qemu/qemu_gui_screenshot_test.py'], check=True)
-    subprocess.run([sys.executable, 'tests/qemu/qemu_iommu_test.py'], check=True)
-    subprocess.run([sys.executable, 'tests/qemu/qemu_smp_test.py'], check=True)
-    subprocess.run([sys.executable, 'tests/qemu/qemu_security_test.py'], check=True)
-    subprocess.run([sys.executable, 'tests/qemu/qemu_openat_test.py'], check=True)
-    subprocess.run([sys.executable, 'tests/qemu/qemu_user_test.py'], check=True)
-    subprocess.run([sys.executable, 'tests/qemu/qemu_truncate_test.py'], check=True)
-    subprocess.run([sys.executable, 'tests/qemu/qemu_trust_test.py'], check=True)
-    subprocess.run([sys.executable, 'tests/qemu/qemu_txn_compat_test.py'], check=True)
-    subprocess.run([sys.executable, 'tests/qemu/qemu_linux_compat_test.py'], check=True)
+    for _scenario in QEMU_BASELINE:
+        run_script('tests/qemu/' + _scenario)
+    for _memory in QEMU_MEMORY_SIZES:
+        run_script('tests/qemu/qemu_test.py', '--memory', str(_memory))
+    for _case in QEMU_STORAGE_CASES:
+        run_script('tests/qemu/qemu_test.py', '--storage', _case)
+    for _scenario in QEMU_PERSISTENCE:
+        run_script('tests/qemu/' + _scenario)
+    for _scenario, *_extra in QEMU_DEVICES:
+        run_script('tests/qemu/' + _scenario, *_extra)
+    for _scenario in QEMU_SYSTEM:
+        run_script('tests/qemu/' + _scenario)
 result = {'passed': True, 'elapsed_seconds': round(time.time()-started, 2), 'service_assertions': 116, 'storage_assertions': 83, 'package_tests': 'passed (11 groups, including 1500 seeded mutations)', 'readfs_tests': 'passed (5 groups, including 500 seeded metadata mutations)', 'qemu_memory_mib': [] if args.host_only else [128, 256, 512], 'storage_failure_cases': [] if args.host_only else ['missing', 'badheader', 'badhash', 'badsignature', 'writable', 'ioerror']}
+# 当代硬件基线：QEMU 默认使用多核与 max CPU 模型；现代存储由硬件/VT-d
+# 专项覆盖。旧配置仍可通过 qemu_test.py --cpu/--smp 复现。
+if not args.host_only:
+    result['qemu_cpu_model'] = 'max'
+    result['qemu_smp'] = 2
+    result['qemu_virtio_blk'] = 'legacy (modern under VT-d)'
 result['txn_fault_boundaries'] = 261
 result['txn_fault_modes'] = 3
 result['persistence_qemu'] = not args.host_only

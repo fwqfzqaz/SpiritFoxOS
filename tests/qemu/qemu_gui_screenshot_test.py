@@ -13,25 +13,8 @@ import time
 from qmp import QmpListener
 
 ROOT = Path(__file__).resolve().parents[2]
+import qemu_test
 os.environ['TMPDIR'] = os.environ['TEMP'] = os.environ['TMP'] = str(ROOT / '.cache')
-LINUX = hasattr(os, 'uname') and os.uname().sysname == 'Linux'
-if LINUX:
-    QEMU = shutil.which('qemu-system-x86_64')
-    FIRMWARE = VARS_SRC = None
-    for base in ('/usr/share/ovmf/x64', '/usr/share/OVMF', '/usr/share/edk2/x64'):
-        for code_name, vars_name in (('OVMF_CODE.4m.fd', 'OVMF_VARS.4m.fd'),
-                                     ('OVMF_CODE_4M.fd', 'OVMF_VARS_4M.fd'),
-                                     ('OVMF_CODE.fd', 'OVMF_VARS.fd')):
-            code, vars_ = Path(base) / code_name, Path(base) / vars_name
-            if code.exists() and vars_.exists():
-                FIRMWARE, VARS_SRC = code, vars_
-                break
-        if FIRMWARE:
-            break
-else:
-    QEMU = str(ROOT / '.tools/qemu/qemu-system-x86_64.exe')
-    FIRMWARE = ROOT / '.tools/qemu/share/edk2-x86_64-code.fd'
-    VARS_SRC = ROOT / '.tools/qemu/share/edk2-i386-vars.fd'
 
 
 # 与 services/sf_wm.c 中的颜色常量保持一致。
@@ -54,14 +37,7 @@ BLACK = (0x00, 0x00, 0x00)
 def command(qmp_endpoint):
     # 显式 std VGA 让固件建立 GOP framebuffer；-display none 不打开窗口，
     # 但设备仍在扫描输出，screendump 可读到真实像素。
-    return [str(QEMU), '-machine', 'q35', '-accel', 'tcg', '-cpu', 'qemu64,+nx',
-            '-m', '256', '-smp', '1',
-            '-drive', 'if=pflash,format=raw,readonly=on,file='+str(FIRMWARE),
-            '-drive', 'if=pflash,format=raw,file='+str(ROOT / 'build/OVMF_VARS.fd'),
-            '-drive', 'format=raw,file=fat:rw:'+str(ROOT / 'build/esp'),
-            '-net', 'none', '-display', 'none', '-vga', 'std',
-            '-serial', 'stdio', '-monitor', 'none', '-no-reboot',
-            '-qmp', qmp_endpoint.argument()]
+    return qemu_test.command(vga='std', qmp=qmp_endpoint.argument(), debug_exit=False)
 
 
 def read_ppm(path):
@@ -118,10 +94,10 @@ def save_png(ppm_path):
 
 
 def main():
-    if not QEMU or not FIRMWARE:
+    if not qemu_test.QEMU or not qemu_test.FIRMWARE:
         raise RuntimeError('Linux needs qemu-system-x86_64 and OVMF (ovmf package) installed')
     os.chdir(ROOT)
-    shutil.copyfile(VARS_SRC, ROOT / 'build/OVMF_VARS.fd')
+    shutil.copyfile(qemu_test.VARS_SRC, ROOT / 'build/OVMF_VARS.fd')
     qmp_endpoint = QmpListener()
     try:
         process = subprocess.Popen(command(qmp_endpoint), stdin=subprocess.PIPE, stdout=subprocess.PIPE,

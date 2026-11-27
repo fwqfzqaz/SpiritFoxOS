@@ -196,6 +196,7 @@ Core 0
 - 交付：`sf-linux` 的 `PT_INTERP` 与 `DT_NEEDED` 解析、符号解析（全局/局部范围、无版本）、`RELATIVE/GLOB_DAT/JUMP_SLOT/TPOFF/DTPMOD`、最多 8 个对象；musl 适配层（替换 `syscall_arch.h`，保留 malloc/TLS/stdio 实现）。
 - 验收（E1+E2）：动态 musl hello + `libc.so` + `libm.so`；缺失库返回 `SF_DEPENDENCY`；摘要不匹配的库拒绝；符号缺失在装载期失败而非运行期崩溃。
 - 回退：动态路径独立于静态路径；静态 L1 不受影响。
+- 实现（2026-11-27）：`services/linux_image.c` 支持多对象装载——按顺序连续布局、保留对象内部相对布局、按权限合并相邻页且不跨权限合并，装载期完成全部重定位（不运行 `ld.so`）；`LSB DT_NEEDED/SONAME` 校验、GNU_HASH 符号数推导、共享库 `e_entry=0` 不要求落在 RX 段、主对象入口仍强制 RX。段预算由 `SF_LINUX_SEGMENT_MAX` 8 提到 16（`SfLoadPlan.segments[16]`，ABI 快照同步），对象数上限保持 8。`tools/build_musl.py` 以 `zig cc -target x86_64-linux-musl -fPIC -Os` 真实构建 musl 1.2.5：patch `arch/x86_64/syscall_arch.h` 与 `src/*/x86_64/*.s` 把 `syscall` 改为 `int $0x80`，复刻 Makefile 选源，`-Wl,--strip-all` 后嵌入 `libc.so`(≈857 KiB)/`libm.so`/动态 hello 并附 SHA-256 摘要；`services/init.c` 在静态 hello 之后以 S3 工具的端点/命名空间授权启动 hello+libc+libm（3 对象 9 段+翻译器 2 段）。翻译器补 `writev/readv` 以支撑 musl stdio 缓冲。负例在装载期断言：缺 `libm` 返回 `SF_DEPENDENCY`、篡改 libc 摘要返回 `SF_BAD_FORMAT`、符号缺失在装载期失败。QEMU 动态 hello 经 libc `printf` 输出 `MUSL DYNAMIC OK 42` 并以 0 退出。
 
 ### S6 文件系统与设备（依赖 GOALS G1）
 

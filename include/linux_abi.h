@@ -21,6 +21,8 @@
 #define LX_SYS_BRK 12u
 #define LX_SYS_IOCTL 16u
 #define LX_SYS_PREAD64 17u
+#define LX_SYS_READV 19u
+#define LX_SYS_WRITEV 20u
 #define LX_SYS_SCHED_YIELD 24u
 #define LX_SYS_DUP 32u
 #define LX_SYS_DUP2 33u
@@ -200,6 +202,9 @@
 typedef struct { uint64_t tv_sec,tv_nsec; } LxTimespec;
 typedef struct { uint64_t tv_sec,tv_usec; } LxTimeval;
 typedef struct { int32_t tv_sec,tv_usec; } LxTimeval32;
+typedef struct { uint64_t base,len; } LxIovec;
+_Static_assert(sizeof(LxIovec)==16,"iovec layout");
+#define LX_IOV_MAX 1024u
 typedef struct { int32_t fd; int16_t events,revents; } LxPollfd;
 _Static_assert(sizeof(LxPollfd)==8,"pollfd layout");
 typedef struct { uint16_t ws_row,ws_col,ws_xpixel,ws_ypixel; } LxWinsize;

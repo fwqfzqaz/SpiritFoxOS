@@ -1,5 +1,7 @@
 # 当前能力与剩余工作
 
+2026-11-27 SFRWFS1格式核心v1：新增自包含可写文件系统库（include/sfrw.h、services/sfrw.c）与宿主故障注入测试，覆盖布局、挂载/日志重放、COW写、目录、rename、权限、配额与fsck；宿主9335项检查通过，-Wall -Wextra -Werror零告警。仅格式核心库，未接入sf-fs/namespace、未新增IPC操作码或ABI常量，真实块设备与QEMU集成待续，详见[WRITABLE_FS](../architecture/WRITABLE_FS.md)与PROGRESS。
+
 2026-11-18回复流所有权前置：Root私有ROOT/BORROWED/TAINTED门禁已接入真实块call，借用/隔离时先拒绝传输，精确seal/单调serial约束已知归还，未知/漂移保持隔离并撤销候选父权限。最终初始构建全宿主219.38秒、20次实际相关访客与三组实际门通过（批次588.77秒），ABI681保持。无候选driver RPC、真实驱动超时注入、普通后端或激活；完整新headCI/原始审计独立见PROGRESS。
 
 
