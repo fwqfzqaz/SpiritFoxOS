@@ -25,6 +25,11 @@
 #include "linux_blobs.h"
 #include "txn.h"
 #include "emergency_console.h"
+/* 启动自检（生命周期、对象、运行时、存储、磁盘包、Linux 兼容）属于测试构建
+ * 的覆盖手段，不进入产品启动路径。测试构建由 tools/test.py 打开。 */
+#ifndef SF_BOOT_SELFTEST
+#define SF_BOOT_SELFTEST 1
+#endif
 static const SfBootArgs*boot;
 static uint32_t manager_ep,fs_ep,manager_reply;static SfManager manager;static SfNamespace*ns;
 static int runtime_slot,echo_slot;static uint32_t runtime_pid,runtime_ep,runtime_reply,echo_pid,echo_ep;
@@ -434,6 +439,21 @@ static int channel_test(int echo_check){
 }
 static int echo_request(uint32_t ep,uint32_t pid,unsigned timeout_ms){if(manager.modules[echo_slot].state!=MOD_ACTIVE)return SF_DRAINING;EchoPeer*p=echo_peer(pid);if(!p||p->service!=ep)return SF_STALE_HANDLE;if(sf_sys(SYS_TASK_STATUS,pid,0,0)!=SF_TASK_RUNNING)return SF_DEVICE_GONE;SfMessage m;sf_message(&m,OP_ECHO,++requests);memcpy(m.data,"ping",4);m.length=4;int r=sf_send(ep,&m);if(r)return r;long from=sf_recv(p->reply,&m,sf_deadline(timeout_ms));return from==pid&&m.h.request_id==requests&&m.h.opcode==OP_ECHO&&!m.status&&m.length==4&&!memcmp(m.data,"ping",4)?0:SF_INVALID;}
 static int echo_call(uint32_t ep,uint32_t pid){return echo_request(ep,pid,1000);}
+/* U0 度量：guest 内 IPC 往返（SEND+RECV 与两次调度）。tick 精度为 10 ms，
+ * 用批量往返把量化误差压到 1% 以下；仅报告数字，失败不中断外壳。 */
+static void ipc_bench(void){
+ if(manager.modules[echo_slot].state!=MOD_ACTIVE||!echo_peer(echo_pid)){sf_log("IPC ROUNDTRIP unavailable\n");return;}
+ uint64_t start=sf_ticks();unsigned iters=0;
+ while(iters<500000){
+  for(unsigned batch=0;batch<1000;batch++,iters++)if(echo_request(echo_ep,echo_pid,1000)){sf_log("IPC ROUNDTRIP failed\n");return;}
+  if(sf_ticks()-start>=200)break;
+ }
+ uint64_t ticks=sf_ticks()-start;
+ if(!ticks||!iters){sf_log("IPC ROUNDTRIP failed\n");return;}
+ sf_log("IPC ROUNDTRIP ns_per_round=");sf_number(ticks*10000000ull/iters);
+ sf_log(" iterations=");sf_number(iters);
+ sf_log(" ticks=");sf_number(ticks);sf_log("\n");
+}
 static void echo_capacity_test(void){
  sf_assert(!echo_stop_service(),"echo capacity test stops current instance");int held[64],used=0,r=0;
  while(used<64&&(r=sf_sys(SYS_EP_CREATE,0,0,0))>0)held[used++]=r;
@@ -759,6 +779,13 @@ static void namespace_mutate_line(char*line,int directory){
   }
  }
  sf_log(directory==2?"rmdir: ":directory?"mkdir: ":"rm: ");if(!r)sf_log("OK\n");else{sf_log("failed code=");sf_number(-r);sf_log("\n");}
+}
+static void namespace_rename_line(char*line){
+ char*words[2];int count=sf_arguments_split(line,words,2),r=SF_INVALID;uint32_t uid,gid,owner;
+ if(session_identity(&uid,&gid,&owner))r=SF_DENIED;
+ else if(count==2&&words[0][0]=='/'&&words[1][0]=='/'&&strlen(words[0])<=95&&strlen(words[1])<=95)
+  r=sf_ns_rename_as(ns,owner,words[0],words[1],uid,gid);
+ sf_log("mv: ");if(!r)sf_log("OK\n");else{sf_log("failed code=");sf_number(-r);sf_log("\n");}
 }
 static void namespace_stat_line(char*line){
  char*words[1];int count=sf_arguments_split(line,words,1),r=SF_INVALID;SfFileStat info;uint32_t uid,gid,owner;
@@ -1523,10 +1550,10 @@ static void prompt(void){
  else{sf_log(s->name);sf_log("@fox> ");}
 }
 static void help_text(void){
- sf_log("help | login <user> [password] | logout | whoami | users | sessions | ls [path] | cat <path> | write <path> <text> | truncate <path> <bytes> | stat <path> | rm <path> | mkdir <path> | rmdir <path>\n");
+ sf_log("help | login <user> [password] | logout | whoami | users | sessions | ls [path] | cat <path> | write <path> <text> | truncate <path> <bytes> | stat <path> | rm <path> | mkdir <path> | rmdir <path> | mv <from> <to>\n");
  sf_log("run <app or installed> [args] | runat <read-only-dir> <app> [args]\nrunenv [NAME=VALUE ...] -- <app> [args] | runenvat <dir> [NAME=VALUE ...] -- <app> [args]\n");
  sf_log("Administrator only: priority <pid> [0..3] | cap-limit <pid> [0..32] | page-limit <pid> [0..4096] | threads <pid> [1..8] | cpu-budget <pid> [0..100] | ipc-stats-test | trust | revoke-key /disk/pkg\n");
- sf_log("install /disk/bin/app.sfk | persist | namespace-status | namespace-crash | namespace-recover | stop echo | start echo | echo-status | echo-crash | echo-hang | echo-bad-reply | echo-bad-op | mkfs /disk | mount /disk | unmount /disk | stop disk | start disk | gui | selftest | shutdown\n");
+ sf_log("install /disk/bin/app.sfk | persist | namespace-status | namespace-crash | namespace-recover | stop echo | start echo | echo-status | echo-crash | echo-hang | echo-bad-reply | echo-bad-op | mkfs /disk | mount /disk | unmount /disk | stop disk | start disk | gui | selftest | bench | shutdown\n");
  sf_log("ifconfig | dhcp | ping <ip> | udp <ip> <port> <text> | tcp <ip> <port> <text> | open <ip> <port> | send <handle> <text> | recv <handle> | close <handle> | conns | stop native | start native | native-status | native-crash | native-hang | native-bad-reply | native-bad-op\n");
 }
 static void login_attempt(const char*name,const char*password){
@@ -1663,6 +1690,7 @@ static void command(char*line){
  if(!strcmp(line,"rm")||!memcmp(line,"rm ",3))namespace_mutate_line(line+2,0);
  else if(!strcmp(line,"mkdir")||!memcmp(line,"mkdir ",6))namespace_mutate_line(line+5,1);
  else if(!strcmp(line,"rmdir")||!memcmp(line,"rmdir ",6))namespace_mutate_line(line+5,2);
+ else if(!strcmp(line,"mv")||!memcmp(line,"mv ",3))namespace_rename_line(line+2);
  else if(!strcmp(line,"stat")||!memcmp(line,"stat ",5))namespace_stat_line(line+4);
  else if(!strcmp(line,"namespace-recovery-test"))namespace_recovery_test();
  else if(!strcmp(line,"persist-quiescence-test"))persist_quiescence_test();
@@ -1760,6 +1788,7 @@ static void command(char*line){
   if(ir)sf_log("write: error\n");else if(*text){*text++=0;int h=shell_open(p,2);if(h==SF_NOT_FOUND){sf_ns_create_owned(ns,p,NODE_FILE,0,uid,gid,0644);h=shell_open(p,2);}long n=h<0?h:sf_ns_write(ns,owner,h,text,strlen(text));sf_log(n>=0?"write: OK\n":"write: error\n");if(h>=0)sf_ns_close(ns,owner,h);}else sf_log("write: expected path and text\n");}
  else if(!strcmp(line,"gui")){gui_line();}
  else if(!strcmp(line,"selftest")){if(!sf_ns_client_healthy()){sf_log("namespace: unavailable; use namespace-recover\n");return;}object_tests();sf_assert(!echo_call(echo_ep,echo_pid),"shell echo health");sf_log("SELFTEST OK\n");}
+ else if(!strcmp(line,"bench")){ipc_bench();}
  else if(!strcmp(line,"shutdown")){sf_log("SHUTDOWN OK\n");sf_sys(SYS_SHUTDOWN,0,0,0);}
  else if(*line)sf_log("unknown command; type help\n");
 }
@@ -1986,7 +2015,7 @@ static const char*const boot_logo[]={
 0};
 static void boot_splash(void){
  for(unsigned i=0;boot_logo[i];i++){sf_log(boot_logo[i]);sf_log("\n");}
- uint64_t until=sf_ticks()+200;while(sf_ticks()<until)sf_yield();
+ uint64_t until=sf_ticks()+10;while(sf_ticks()<until)sf_yield();
 }
 long sf_main(const SfBootArgs*a,size_t size){
  boot=a;if(size!=sizeof(*a)||a->abi_major!=1||!a->bundle)return SF_INVALID;
@@ -1994,17 +2023,17 @@ long sf_main(const SfBootArgs*a,size_t size){
  sf_log("[INIT] sf-init.sfmod in ring 3; services live outside Core 0\n");manager_ep=sf_sys(SYS_EP_CREATE,0,0,0);fs_ep=sf_sys(SYS_EP_CREATE,0,0,0);manager_reply=sf_sys(SYS_EP_CREATE,0,0,0);sf_assert(manager_ep>0&&fs_ep>0&&manager_reply>0,"manager, file service and lifecycle reply channels allocated");
  int init=sfmod_add(&manager,"org.spiritfox.init",0,1);sfmod_start(&manager,init);runtime_slot=sfmod_add(&manager,"org.spiritfox.native",0,0);
  echo_slot=sfmod_add(&manager,"org.spiritfox.echo",0,0);sfmod_start(&manager,echo_slot);echo_ep=sf_sys(SYS_EP_CREATE,0,0,0);echo_pid=spawn_echo("echo.sfmod",echo_ep,RIGHT_RECV);sf_assert((int)echo_pid>0,"verified echo.sfmod staged in private address space");
- lifecycle_rpc_test();
- lifecycle_tests();sf_storage_init(&manager,sf_ns_default(),spawn_storage_package);sf_assert(!namespace_setup(),"namespace service and volatile tree initialized");identity_setup();object_tests();sf_assert(!native_start_service(),"native runtime module active");sf_assert((int)runtime_reply>0,"runtime replies have an isolated endpoint");runtime_tests();
+ if(SF_BOOT_SELFTEST){lifecycle_rpc_test();lifecycle_tests();}
+ sf_storage_init(&manager,sf_ns_default(),spawn_storage_package);sf_assert(!namespace_setup(),"namespace service and volatile tree initialized");identity_setup();if(SF_BOOT_SELFTEST)object_tests();sf_assert(!native_start_service(),"native runtime module active");sf_assert((int)runtime_reply>0,"runtime replies have an isolated endpoint");if(SF_BOOT_SELFTEST)runtime_tests();
  int storage=sf_storage_start();if(!storage)for(;;){storage=sf_storage_mount();if(!storage)break;int next=sf_storage_restart_next();if(next){storage=next;break;}storage=0;}
  if(storage){sf_log("STORAGE UNAVAILABLE code=");sf_number(-storage);sf_log("\n");}
- else if(!sf_storage_sfrw()){sf_storage_tests();if(sf_storage_writable()){int r=sf_persist_start(spawn_storage_package);if(r){sf_log("PERSIST SPAWN FAILED code=");sf_number(-r);sf_log("\n");}r=sf_persist_mount(ns);if(r){sf_log("PERSIST UNAVAILABLE code=");sf_number(-r);sf_log("\n");}else sf_storage_write_tests();}int ep=sf_sys(SYS_EP_CREATE,0,0,0);int disk_module=spawn_echo("/disk/modules/disk-echo.sfmod",ep,RIGHT_RECV);
+ else if(!sf_storage_sfrw()){if(SF_BOOT_SELFTEST)sf_storage_tests();if(sf_storage_writable()){int r=sf_persist_start(spawn_storage_package);if(r){sf_log("PERSIST SPAWN FAILED code=");sf_number(-r);sf_log("\n");}r=sf_persist_mount(ns);if(r){sf_log("PERSIST UNAVAILABLE code=");sf_number(-r);sf_log("\n");}else if(SF_BOOT_SELFTEST)sf_storage_write_tests();}if(SF_BOOT_SELFTEST){int ep=sf_sys(SYS_EP_CREATE,0,0,0);int disk_module=spawn_echo("/disk/modules/disk-echo.sfmod",ep,RIGHT_RECV);
   if(disk_module>0){int slot=sfmod_add(&manager,"org.spiritfox.disk-echo",0,0);sf_assert(slot>=0&&!sfmod_start(&manager,slot)&&!echo_call(ep,disk_module),"signed sfmod loaded from disk without bundle fallback");sfmod_prepare(&manager,slot);sfmod_stop(&manager,slot);sf_sys(SYS_KILL,disk_module,0,0);echo_forget(disk_module);sfmod_unload(&manager,slot);}else{sf_log("DISK PACKAGE REJECTED module code=");sf_number(-disk_module);sf_log("\n");}sf_sys(SYS_CAP_REVOKE,ep,0,0);
-  int app=launch_app("/disk/bin/diskhello.sfk");if(app>0)sf_assert(wait_app(app)==0,"signed disk application runs through native runtime");else{sf_log("DISK PACKAGE REJECTED app code=");sf_number(-app);sf_log("\n");}}
+  int app=launch_app("/disk/bin/diskhello.sfk");if(app>0)sf_assert(wait_app(app)==0,"signed disk application runs through native runtime");else{sf_log("DISK PACKAGE REJECTED app code=");sf_number(-app);sf_log("\n");}}}
  {int net=net_start();if(!net)sf_log("net: READY\n");else if(net!=SF_NOT_FOUND){sf_log("NET UNAVAILABLE code=");sf_number(-net);sf_log("\n");}}
  sf_assert(!sf_supervisor_init(&echo_watch,3,25,1000),"echo restart policy configured");sf_supervisor_enable(&echo_watch,sf_ticks(),1);echo_health_at=echo_after(sf_ticks(),100);
  sf_assert(!sf_supervisor_init(&native_watch,3,25,1000),"native restart policy configured");sf_supervisor_enable(&native_watch,sf_ticks(),1);native_health_at=echo_after(sf_ticks(),100);
- linux_compat_tests(storage==0&&!sf_storage_sfrw());
+ if(SF_BOOT_SELFTEST)linux_compat_tests(storage==0&&!sf_storage_sfrw());
  boot_splash();
  sf_log("BOOT TESTS PASSED\nSpiritFoxOS ready. Type help.\n");prompt();char line[192]={0};unsigned used=0;
  for(;;){echo_supervise();native_supervise();manager_serve();long c=sf_sys(SYS_CONSOLE_READ,0,0,0);

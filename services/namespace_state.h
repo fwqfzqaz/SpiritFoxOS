@@ -8,5 +8,5 @@ typedef struct {char path[96];uint8_t type,readonly,reserved;uint16_t mode,write
 typedef struct {uint32_t node,offset,mode,refs;} SfDescription;
 typedef struct {uint32_t owner,generation,description;} SfFileHandle;
 
-struct SfNamespace {SfNode nodes[SF_NS_NODE_MAX];SfDescription descriptions[SF_NS_DESCRIPTION_MAX];SfFileHandle handles[SF_NS_HANDLE_MAX];long(*console)(const void*,size_t);long(*external_read)(unsigned,uint64_t,void*,size_t);long(*external_write)(unsigned,uint64_t,const void*,size_t);int(*external_truncate)(unsigned,uint64_t);int(*mount_open)(unsigned);void(*mount_close)(unsigned);long(*projection_read)(unsigned,uint64_t,void*,size_t);};
+struct SfNamespace {SfNode nodes[SF_NS_NODE_MAX];SfDescription descriptions[SF_NS_DESCRIPTION_MAX];SfFileHandle handles[SF_NS_HANDLE_MAX];long(*console)(const void*,size_t);long(*external_read)(unsigned,uint64_t,void*,size_t);long(*external_write)(unsigned,uint64_t,const void*,size_t);int(*external_truncate)(unsigned,uint64_t);int(*mount_open)(unsigned);void(*mount_close)(unsigned);long(*projection_read)(unsigned,uint64_t,void*,size_t);int(*dir_create)(void*,const char*,int,uint32_t,unsigned,uint32_t*);int(*dir_remove)(void*,const char*,int,uint32_t);int(*dir_rename)(void*,const char*,const char*,uint32_t);void*dir_context;};
 #endif

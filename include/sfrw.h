@@ -36,6 +36,10 @@
 #define SF_RW_ROOT 1u
 #define SF_RW_QUOTA_MAX 8u
 #define SF_RW_UID_TRACK 16u
+/* 写回窗口：数据块直接落到最终位置，元数据在日志暂存区累积；累计写入该
+ * 块数、日志目标接近上限、显式 fsync 或元数据操作时原子提交。崩溃只会
+ * 丢失上次提交之后的写入，文件系统仍保持一致。 */
+#define SF_RW_COMMIT_BLOCKS 128u
 
 /* inode mode: type bits plus low 12 permission bits. */
 #define SF_RW_TYPE_DIR 0x4000u
@@ -90,7 +94,7 @@ typedef struct {
  uint16_t refs[SF_RW_MAX_INODES];
  uint16_t subdirs[SF_RW_MAX_INODES];
  uint32_t queue[SF_RW_MAX_INODES];
- uint32_t mounted, dirty;
+ uint32_t mounted, dirty, pending_blocks;
 } Sfrw;
 
 int sf_rw_format(Sfrw*,SfrwDev,const SfrwFormatOptions*);

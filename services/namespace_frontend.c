@@ -54,6 +54,11 @@ int sf_ns_unlink_as(SfNamespace*n,uint32_t owner,uint32_t h,const char*p,uint32_
 int sf_ns_unlink(SfNamespace*n,uint32_t owner,uint32_t h,const char*p){return sf_ns_unlink_as(n,owner,h,p,0,0);}
 int sf_ns_rmdir_as(SfNamespace*n,uint32_t owner,uint32_t h,const char*p,uint32_t uid,uint32_t gid){return sf_nsc_remove(&n->client,owner,h,p,uid,gid,1);}
 int sf_ns_rmdir(SfNamespace*n,uint32_t owner,uint32_t h,const char*p){return sf_ns_rmdir_as(n,owner,h,p,0,0);}
+int sf_ns_rename_as(SfNamespace*n,uint32_t owner,const char*a,const char*b,uint32_t uid,uint32_t gid){
+ if(sf_persist_fenced())return SF_DRAINING;
+ return sf_nsc_rename(&n->client,owner,a,b,uid,gid);
+}
+int sf_ns_rename(SfNamespace*n,uint32_t owner,const char*a,const char*b){return sf_ns_rename_as(n,owner,a,b,0,0);}
 int sf_ns_stat(SfNamespace*n,uint32_t owner,uint32_t h,SfFileStat*out){return sf_nsc_stat(&n->client,owner,h,out);}
 int sf_ns_dup(SfNamespace*n,uint32_t owner,uint32_t h){return sf_nsc_dup(&n->client,owner,h);}
 int sf_ns_close(SfNamespace*n,uint32_t owner,uint32_t h){return sf_nsc_close(&n->client,owner,h);}

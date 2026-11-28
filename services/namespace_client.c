@@ -81,6 +81,11 @@ int sf_nsc_remove(SfNsClient*c,uint32_t owner,uint64_t h,const char*a,uint32_t u
  SfMessage m;message(&m,directory?OP_NS_RMDIR:OP_NS_UNLINK);m.handle=remote;r=path(&m,owner,uid,gid,0,a,0);
  return r?r:(int)call(c,&m);
 }
+int sf_nsc_rename(SfNsClient*c,uint32_t owner,const char*a,const char*b,uint32_t uid,uint32_t gid){
+ if(!c||!owner||!a||!b)return SF_INVALID;
+ SfMessage m;message(&m,OP_NS_RENAME);
+ int r=path(&m,owner,uid,gid,0,a,b);return r?r:(int)call(c,&m);
+}
 static int handle_message(SfNsClient*c,SfMessage*m,unsigned op,uint32_t owner,uint64_t h){
  if(!c)return SF_INVALID;uint32_t remote;int r=sf_nsh_lookup(&c->map,owner,h,&remote);if(r)return r;
  message(m,op);m->mode=owner;m->handle=remote;return 0;

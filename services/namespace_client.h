@@ -27,6 +27,7 @@ int sf_nsc_mount_publish(SfNsClient*,const SfMountEntry*,unsigned,unsigned);
 int sf_nsc_open(SfNsClient*,uint32_t,const char*,const char*,unsigned,uint32_t,uint32_t);
 int sf_nsc_openat(SfNsClient*,uint32_t,uint64_t,const char*,unsigned,uint32_t,uint32_t);
 int sf_nsc_remove(SfNsClient*,uint32_t,uint64_t,const char*,uint32_t,uint32_t,int);
+int sf_nsc_rename(SfNsClient*,uint32_t,const char*,const char*,uint32_t,uint32_t);
 int sf_nsc_stat(SfNsClient*,uint32_t,uint64_t,SfFileStat*);
 int sf_nsc_dup(SfNsClient*,uint32_t,uint64_t);
 int sf_nsc_close(SfNsClient*,uint32_t,uint64_t);

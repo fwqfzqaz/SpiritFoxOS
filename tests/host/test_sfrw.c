@@ -79,6 +79,7 @@ static void make_file(Sfrw*v,const char*path,uint32_t uid,const char*text){
  CHECK(!sf_rw_create(v,path,uid,0644));
  CHECK(!sf_rw_open(v,path,uid,SF_RW_WRITE,&ino));
  if(n)CHECK(sf_rw_write(v,ino,uid,0,text,n)==(long)n);
+ CHECK(!sf_rw_fsync(v));
 }
 static void file_text(Sfrw*v,const char*path,const char*want){
  char buf[64];
@@ -515,6 +516,7 @@ static void fsck_beyond_size(void){
  CHECK(!sf_rw_create(&vol,"/g",0,0644));
  CHECK(!sf_rw_open(&vol,"/g",0,SF_RW_WRITE,&g));
  CHECK(sf_rw_write(&vol,g,0,0,"GGGG",4)==4);
+ CHECK(!sf_rw_fsync(&vol));
  uint32_t gb=raw_u32(raw_inode(g)+24);
  CHECK(gb>=SF_RW_DATA_BLOCK);
  /* /f 的第二个直接块超出 size，且与 /g 重复；fsck 应先清除而不计重复占用。 */

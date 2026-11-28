@@ -2,6 +2,7 @@
 import argparse
 import hashlib
 import json
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -19,7 +20,9 @@ started = time.time()
 if not args.skip_build:
     # Keep Crypto()/sfcrypto.dll out of this long-lived parent process: on
     # Windows a loaded DLL blocks the trust-policy tests from rebuilding it.
-    subprocess.run([sys.executable, str(ROOT / 'tools' / 'build.py')], check=True)
+    # 完整测试门禁使用测试构建：启动自检随镜像编译，产品构建默认关闭。
+    env = dict(os.environ, SPIRITFOX_BOOT_SELFTEST='1')
+    subprocess.run([sys.executable, str(ROOT / 'tools' / 'build.py')], check=True, env=env)
 def host_test(name,*sources,no_unused=False,include_services=False):
     flags=['-target',build.HOST,'-g0','-O2','-Wall','-Wextra','-Werror','-DSF_HOST_TEST']
     if no_unused: flags.append('-Wno-unused-parameter')
@@ -63,6 +66,8 @@ host_test('test_namespace_restart','tests/host/test_namespace_restart.c','servic
 host_test('test_namespace_control','tests/host/test_namespace_control.c','services/namespace_client.c','services/namespace_handles.c','services/namespace_control.c','services/namespace.c',include_services=True)
 host_test('test_namespace_frontend','tests/host/test_namespace_frontend.c','services/namespace_client.c','services/namespace_handles.c','services/namespace_frontend.c',include_services=True)
 host_test('test_namespace_runtime','tests/host/test_namespace_runtime.c','services/namespace_client.c','services/namespace_handles.c','services/namespace_runtime.c','services/namespace_control.c','services/namespace.c','services/sfrw.c',include_services=True)
+host_test('test_namespace_mutations','tests/host/test_namespace_mutations.c','services/namespace.c',include_services=True)
+host_test('test_namespace_rw','tests/host/test_namespace_rw.c','services/namespace_client.c','services/namespace_handles.c','services/namespace_runtime.c','services/namespace_control.c','services/namespace.c','services/sfrw.c',include_services=True)
 host_test('test_namespace_process','tests/host/test_namespace_process.c','services/namespace_client.c','services/namespace_handles.c','services/namespace_runtime.c','services/namespace_control.c','services/namespace.c','services/fs_format.c','services/readfs.c','services/sfrw.c',*build.CRYPTO,include_services=True)
 host_test('test_namespace_transport','tests/host/test_namespace_transport.c','services/namespace_transport.c',include_services=True)
 host_test('test_emergency_console','tests/host/test_emergency_console.c','services/emergency_console.c',include_services=True)

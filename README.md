@@ -75,6 +75,7 @@ python3 tools/test.py --skip-build     # 复用已有镜像
 make build          # 构建 EFI、模块、应用与测试盘
 make image          # 构建并生成可启动系统镜像 build/spiritfoxos.img
 make test           # 完整测试
+make limits         # 测量系统上限基线（宿主 + QEMU 启动）
 make run            # 交互启动
 make run-persist    # 可写持久盘
 make run-iommu      # 启用 VT-d

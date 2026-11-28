@@ -69,6 +69,13 @@ inode 128 B：`mode u16 @0`（`0x4000` 目录 / `0x8000` 文件，低 12 位权�
 `flush`，随后只提交元数据，因此崩溃后只可能看到旧指针或新指针，不会出现半写数据。
 `truncate` 只改元数据并释放块，扩展产生稀疏洞（读到零）。
 
+**有界写回窗口（v1.2）**：`sf_rw_write` 不再每次调用都提交。数据块仍直接写到最终
+位置，元数据在日志暂存区累积；累计写入达到 `SF_RW_COMMIT_BLOCKS`（128 块）或暂存
+目标接近 16 槽上限时自动提交。`sf_rw_fsync`、卷停止以及任何元数据操作
+（`create`/`mkdir`/`unlink`/`rmdir`/`rename`/`link`/`truncate`/`chmod`/`chown`）
+都会先原子提交，保证元数据立即可见。进程或电源崩溃最多丢失上次提交之后的写入
+（≤128 块），文件系统保持旧的一致状态，fsck 回收未被引用的已写数据块。
+
 **日志提交**（[services/sfrw.c](../../services/sfrw.c) 的 `commit`）：被修改的
 位图块、inode 表块、超级块（块 0/1）都作为日志目标写入 payload；提交顺序为
 
@@ -178,9 +185,10 @@ uid 0 豁免。创建 inode 时检查 inode 配额，分配块时按 COW 净增�
 测试以 `SFRW PASS: N checks, ...` 输出，并由 [tools/test.py](../../tools/test.py)
 的 `host_test('test_sfrw', ...)` 纳入宿主回归。
 
-## sf-fs 集成（Phase 1）
+## sf-fs 集成（Phase 1/2）
 
-集成切片只覆盖“挂载 + 已有文件读写”，目录创建/删除/改名不在范围内。
+Phase 1 覆盖“挂载 + 已有文件读写”；Phase 2 把目录创建/删除/改名与目录内建文件
+打通到 namespace 树，`/disk` 成为真正可写的挂载点。
 
 - **IPC**：`include/sf.h` 追加 `OP_FS_BLOCK_WRITE=117`、`OP_FS_BLOCK_FLUSH=118`、
   `OP_FS_FORMAT=119`；`include/fs_format.h` 新增 `SF_FS_FORMAT_SFRWFS1=3`。ABI 快照
@@ -196,17 +204,35 @@ uid 0 豁免。创建 inode 时检查 inode 配额，分配块时按 COW 净增�
 - **namespace**：[namespace_runtime.c](../../services/namespace_runtime.c) 以
   `0x80000000|inode` 识别 SFRWFS1 节点（显式排除 `UINT32_MAX` 旧 broker 哨兵），
   后端以 uid 0 调 `sf_rw_read/write/truncate`；`sf_nsv_publish_rw` 以 BFS 发布
-  `/disk` 树，文件 `readonly=writable?0:1`、目录恒只读。根前台只声明读后端，因此
-  挂载可写卷时由运行时直接安装自身的读/写/截断后端。
+  `/disk` 树，根（inode 1）与所有目录/文件均带该标记，`readonly=writable?0:1`。
+  根前台只声明读后端，因此挂载可写卷时由运行时直接安装自身的读/写/截断后端。
+- **目录变更**：[namespace.c](../../services/namespace.c) 通过 `SfNsDirBackend`
+  钩子把 `mkdir/create/rmdir/unlink/rename` 转发到同进程的 `Sfrw`，先落盘再改
+  内存树：`sf_ns_create_owned` 预留节点槽后调用 `sf_rw_mkdir/sf_rw_create` 取回
+  inode；`remove_node_as` 在句柄占用、类型与非空检查通过后调用
+  `sf_rw_rmdir/sf_rw_unlink`；`sf_ns_rename_as` 校验两条路径同挂载、拒绝把目录
+  移入自身子树，提交 `sf_rw_rename` 后再搬移节点及全部后代路径。非空目录在
+  namespace 层返回 `SF_BUSY`，后端仍以 `SF_INVALID` 兜底；只读挂载在
+  `rw_ready` 处返回 `SF_READ_ONLY`，不会产生仅存在于内存的“改名”。
+- **协议**：`OP_NS_RENAME=229` 追加在 `OP_NS_ENUMERATE_AT` 之后，携带
+  owner/uid/gid 与两条绝对路径；`fs_main.c` 的 namespace 路由与
+  `storage.c` 的持久化闸门同步纳入该操作码，避免落入块后端而返回
+  `SF_BAD_FORMAT`。`sf_nsv_detach_rw` 先 `sf_ns_unmount(tag=1)` 再清空卷，
+  同一启动内可重新 `mount /disk`。
 - **storage**：[storage.c](../../services/storage.c) 的 broker 仅接受来自 `fs_pid`
   的写/刷盘请求，要求 `write_grant && driver_pid`；写请求校验 512 B 对齐、
   `length==256`、半块偏移与容量边界后组装驱动 `OP_BLOCK_WRITE`。SFRWFS1 盘跳过节
   2048 的 `SFTXN1` 校验并把写范围设为整盘；`sf_storage_format()` 供 `mkfs` 调用。
-- **init**：新增 `mkfs /disk`；SFRWFS1 盘跳过 persist attach、存储写测试与 Linux
-  兼容库断言（空白卷无这些库），避免误判。
+- **init**：新增 `mkfs /disk` 与 `mv <from> <to>`；SFRWFS1 盘跳过 persist attach、
+  存储写测试与 Linux 兼容库断言（空白卷无这些库），避免误判。
 - **QEMU**：[qemu_sfrwfs_test.py](../../tests/qemu/qemu_sfrwfs_test.py) 以 4 MiB
-  空白可写盘启动，`mkfs` → `cat` 种子 → `write` 修改 → `unmount`，同镜像重启自动
-  挂载后读回新内容，并断言镜像哈希变化。
+  空白可写盘启动，`mkfs` → `cat` 种子 → `write` 修改 → `mkdir /disk/docs` →
+  `write /disk/docs/note.txt` → `mv` 改名 → 拒绝非空 `rmdir` 与移入子树 →
+  `unmount`；同镜像重启读回改名后的内容，再跨启动删除目录并在最终启动断言
+  `stat /disk/docs` 为 `SF_NOT_FOUND`，全过程断言镜像哈希变化。
+- **宿主覆盖**：[test_namespace_rw.c](../../tests/host/test_namespace_rw.c) 以真实
+  格式化卷驱动客户端 → runtime → namespace 全链路，覆盖建目录/建文件、读写落盘、
+  改名、非空目录拒绝、移入子树拒绝、只读挂载拒绝与重挂载可见性。
 
 挂载时的 inode 校验按 inode 表块批读：每 32 个 inode 只读一次 4 KiB 块，语义与逐个
 `inode_read` 相同，但在 QEMU/TCG 下把 1024 次块读降为 32 次。

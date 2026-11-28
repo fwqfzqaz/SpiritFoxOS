@@ -71,6 +71,7 @@
     "constant.OP_NS_PROTECT": 205,
     "constant.OP_NS_READ": 218,
     "constant.OP_NS_REAP": 226,
+    "constant.OP_NS_RENAME": 229,
     "constant.OP_NS_RMDIR": 214,
     "constant.OP_NS_SEEK": 222,
     "constant.OP_NS_STAT": 215,

@@ -53,6 +53,9 @@ static int64_t dispatch(SfNsControl*s,SfMessage*m){
  case OP_NS_ASSIGN:
   if(m->handle||m->offset||m->mode||path(m,1,v,&a,&b)||v[0])return SF_INVALID;
   return sf_ns_assign(s->ns,a,v[1],v[2],v[3]);
+ case OP_NS_RENAME:
+  if(m->handle||m->offset||m->mode||path(m,2,v,&a,&b)||!v[0]||v[3])return SF_INVALID;
+  return sf_ns_rename_as(s->ns,v[0],a,b,v[1],v[2]);
  case OP_NS_PROJECT:
  case OP_NS_PROTECT:
  case OP_NS_MOUNT_CHECK:

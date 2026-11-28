@@ -2,6 +2,39 @@
 
 更新日期：2026-11-28（Asia/Shanghai）。
 
+## 上限度量基线（U0）
+
+把路线图 U0 的首要缺口“无统一基准脚本”落地为可重复测量：
+
+- 新增 [tools/limits.py](../../tools/limits.py) 与 `make limits`：先编译并运行
+  [limits_probe.c](../../tests/host/limits_probe.c) 从源码常量生成声明上限，
+  再运行 [bench_ipc.c](../../tests/host/bench_ipc.c)（宿主内核 IPC 往返）与
+  [bench_sfrw.c](../../tests/host/bench_sfrw.c)（32 MiB 内存设备上的 SFRWFS1
+  顺序写/读与元数据操作），最后按需启动 QEMU 记录启动标记墙钟时间；结果写入
+  `build/limits-baseline.json`，串口输出写入 `build/qemu-baseline.log`。
+- 本机实测（2026-11-28）：IPC 往返 392.0 ns（4096 B 正文，E1）；SFRWFS1 顺序写
+  72.2 MiB/s（54 µs/块）、写后 fsync 0.2 ms、顺序读 6198 MiB/s、
+  create/rename 4352/4608 ops/s、fsck 0.5 ms（E1）；目录基准
+  mkdir/dir-rename/rmdir 3637/4143/4208 ops/s、readdir 899 项 1.70 M entry/s；
+  QEMU 256 MiB/q35/2 核 TCG 下产品构建加电到系统就绪 5.49 s，shell
+  `SELFTEST OK` 5.55 s（E2）。
+- 启动收敛：启动自检（生命周期、对象、运行时、存储驱动恢复、磁盘包、Linux 兼容）
+  改为测试构建专属，`services/init.c` 用 `SF_BOOT_SELFTEST` 编译期开关控制；
+  `tools/test.py` 以 `SPIRITFOX_BOOT_SELFTEST=1` 构建测试镜像，产品 `make build`
+  默认关闭。splash 固定等待从 200 tick 降到 10 tick。17.49 s→5.49 s。
+- 存储吞吐：`sf_rw_write` 改为 128 块有界写回窗口，数据块直接落最终位置、
+  元数据在日志暂存区累积；达到窗口/日志槽压力、`sf_rw_fsync`、卷停止或任何
+  元数据操作时原子提交。4 KiB 顺序写 18.7→71.9 MiB/s；崩溃最多丢失最近
+  128 块未提交写入，仍只会看到旧状态或新状态。`test_sfrw` 在需要检查原始
+  inode 的地方补 `sf_rw_fsync`，`make_file` 结束时提交。
+- guest 内延迟：shell 新增 `bench` 命令，用 echo 服务做 SEND+RECV 往返；
+  `tools/limits.py` 在 `SELFTEST OK` 后自动执行并记录 `IPC ROUNDTRIP`。
+  QEMU 256 MiB/q35/2 核 TCG 下 373.3 µs/round（含系统调用、调度与跨 vCPU
+  唤醒，E2），与宿主 E1 数字不可直接比较。
+- 回归：`python3 tools/test.py --host-only` 全通过；`tests/qemu/qemu_test.py`
+  与 `tests/qemu/qemu_sfrwfs_test.py` 通过（后者覆盖 SFRWFS1 写入后重启持久化）。
+  完整 QEMU 场景矩阵未跑完（人工中止以节省时间），托管门禁需补跑。
+
 ## SFRWFS1 接入 sf-fs（Phase 1）
 
 将格式核心接入 `sf-fs` 服务进程，专用可写盘以 `/disk` 挂载并支持已有文件读写：
@@ -15,8 +48,8 @@
   `OP_FS_STOP` 先 `fsync` 再解除发布。`mkfs /disk` 经 `OP_FS_FORMAT` 格式化空白盘
   并写入 `/etc/readme.txt` 种子。
 - namespace 以 `0x80000000|inode`（排除 `UINT32_MAX`）路由 SFRWFS1 节点，BFS 发布
-  `/disk` 树；目录只读，文件按可写标志发布。根前台未声明写后端，挂载可写卷时由
-  运行时安装自身读/写/截断后端。
+  `/disk` 树；Phase 1 目录只读、文件按可写标志发布（Phase 2 已放开，见下）。根前台
+  未声明写后端，挂载可写卷时由运行时安装自身读/写/截断后端。
 - storage broker 增加写/刷盘转发并校验 `fs_pid`、`write_grant`、对齐与半块边界；
   SFRWFS1 盘跳过 `SFTXN1` 校验、写范围为整盘。`init` 在 SFRWFS1 时跳过 persist
   attach 与依赖库的兼容测试。
@@ -26,6 +59,31 @@
   `qemu_sfrwfs_test.py`（mkfs → 写 → 卸载 → 重启读回，断言镜像哈希变化）。宿主
   全量回归与 ABI 快照通过，sf-fs 载入 299,008 B / 1,280 KiB 预算内，QEMU 用例
   `SFRWFS PASS`。详见 [WRITABLE_FS](../architecture/WRITABLE_FS.md)。
+
+## SFRWFS1 目录操作接入（Phase 2）
+
+把格式核心已有的 `sf_rw_mkdir/rmdir/rename` 接到 namespace 树与 shell，使 `/disk`
+上的目录创建、删除、改名和目录内建文件全部落盘：
+
+- namespace 核心新增 `SfNsDirBackend` 钩子；`sf_ns_create_owned` 对可写卷节点先预留
+  槽位，再经 `sf_rw_mkdir/sf_rw_create` 取回 inode；`remove_node_as` 在句柄、类型与
+  非空检查后调用 `sf_rw_rmdir/sf_rw_unlink`；新增 `sf_ns_rename_as`，拒绝移入自身
+  子树，先 `sf_rw_rename` 再搬移节点与后代路径。只读挂载由后端返回
+  `SF_READ_ONLY`，不会产生仅内存的改名。
+- `sf_nsv_publish_rw` 的根与目录同样带 `0x80000000|inode` 且
+  `readonly=writable?0:1`；`sf_nsv_detach_rw` 先 `sf_ns_unmount(1)`，同一启动内可
+  重新 `mount /disk`。
+- 追加 namespace 协议 `OP_NS_RENAME=229`（owner/uid/gid + 两条绝对路径），
+  `fs_main.c` 的路由与 `storage.c` 的持久化闸门同步纳入，ABI 快照 683 项。
+- shell 新增 `mv <from> <to>`；`mkdir/rmdir` 在 `/disk` 直接生效。
+- 新增宿主 [test_namespace_rw.c](../../tests/host/test_namespace_rw.c)（40 项断言，
+  真实格式化卷 + 客户端/runtime 全链路）并扩展
+  [qemu_sfrwfs_test.py](../../tests/qemu/qemu_sfrwfs_test.py)：建目录 → 建文件 →
+  改名 → 非空删除与移入子树失败 → 跨四次启动读回/清理。`python3 tools/build.py`、
+  宿主全量、ABI 快照与 `SFRWFS PASS` 均通过。
+- `bench_sfrw.c` 增加目录基准：128 个目录 × 4 个文件，覆盖 mkdir、跨目录 readdir、
+  目录改名与 rmdir；`tools/limits.py` 摘要表新增四行，实测
+  mkdir 3637 ops/s、readdir 1.70 M entry/s、目录改名 4143 ops/s、rmdir 4208 ops/s。
 
 ## SFRWFS1 v1.1 加固与能力补齐
 

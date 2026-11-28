@@ -135,7 +135,7 @@ static int commit(Sfrw*s){
  }
  if(s->dev.flush(s->dev.context))goto uncertain;
  if(s->dev.write(s->dev.context,SF_RW_JOURNAL_BLOCK,zeros)||s->dev.flush(s->dev.context))goto uncertain;
- s->generation=generation;s->journal_count=0;s->journal_clean=1;s->dirty=0;return 0;
+ s->generation=generation;s->journal_count=0;s->journal_clean=1;s->dirty=0;s->pending_blocks=0;return 0;
 uncertain:
  s->mounted=0;return SF_COMMIT_UNCERTAIN;
 }
@@ -501,6 +501,8 @@ int sf_rw_mount(Sfrw*s,SfrwDev dev){
 
 int sf_rw_fsync(Sfrw*s){
  if(!s||!s->mounted)return SF_DEVICE_GONE;
+ int r=commit(s);
+ if(r)return r;
  if(s->dev.flush(s->dev.context)){s->mounted=0;return SF_COMMIT_UNCERTAIN;}
  return 0;
 }
@@ -652,6 +654,8 @@ long sf_rw_write(Sfrw*s,uint32_t ino,uint32_t uid,uint64_t offset,const void*dat
  if((ip.mode&SF_RW_TYPE_MASK)!=SF_RW_TYPE_FILE)return SF_INVALID;
  if(!allowed(&ip,uid,2))return SF_DENIED;
  if(!len)return 0;
+ /* 暂存区接近上限时先提交上一窗口，避免 inode/间接块目标溢出。 */
+ if(s->journal_count+8>SF_RW_JOURNAL_MAX){r=commit(s);if(r)return r;}
  if(offset>SF_RW_FILE_MAX||(uint64_t)len>SF_RW_FILE_MAX-offset)return SF_NO_SPACE;
  uint32_t first=(uint32_t)(offset/SF_RW_BLOCK_BYTES);
  uint32_t last=(uint32_t)((offset+(uint64_t)len-1)/SF_RW_BLOCK_BYTES);
@@ -716,8 +720,9 @@ long sf_rw_write(Sfrw*s,uint32_t ino,uint32_t uid,uint64_t offset,const void*dat
  if(offset+(uint64_t)len>ip.size)ip.size=offset+(uint64_t)len;
  r=inode_write(s,ino,&ip);
  if(r){s->mounted=0;return SF_COMMIT_UNCERTAIN;}
- r=commit(s);
- return r?r:(long)len;
+ s->pending_blocks+=count;
+ if(s->pending_blocks>=SF_RW_COMMIT_BLOCKS){r=commit(s);return r?r:(long)len;}
+ return (long)len;
 }
 int sf_rw_truncate(Sfrw*s,uint32_t ino,uint32_t uid,uint64_t bytes){
  if(!s||!s->mounted)return SF_DEVICE_GONE;

@@ -124,7 +124,7 @@ int64_t sf_storage_namespace_exchange(void*context,SfMessage*m){
    if(m->mode!=NODE_FILE&&m->mode!=NODE_DIR&&m->mode!=NODE_PIPE&&m->mode!=NODE_CONSOLE)return SF_DRAINING;
    break;
   case OP_NS_MOUNT_CHECK:case OP_NS_OPEN:case OP_NS_OPENAT:
-  case OP_NS_UNLINK:case OP_NS_RMDIR:case OP_NS_STAT:case OP_NS_DUP:case OP_NS_CLOSE:
+  case OP_NS_UNLINK:case OP_NS_RMDIR:case OP_NS_RENAME:case OP_NS_STAT:case OP_NS_DUP:case OP_NS_CLOSE:
   case OP_NS_READ:case OP_NS_PREAD:case OP_NS_WRITE:case OP_NS_TRUNCATE:case OP_NS_SEEK:
   case OP_NS_POLL:case OP_NS_ENUMERATE:case OP_NS_ENUMERATE_AT:case OP_NS_HANDOFF:case OP_NS_REAP:
    break;

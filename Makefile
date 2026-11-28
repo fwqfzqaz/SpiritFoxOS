@@ -14,12 +14,13 @@ TRUST_POLICY ?=
 PACKAGE ?= build/hello.sfk
 IMAGE ?= $(BUILD_DIR)/spiritfoxos.img
 TEST_ARGS ?=
+LIMITS_ARGS ?=
 QEMU_ARGS ?=
 
 BUILD_ARGS := $(if $(strip $(TRUST_POLICY)),--trust-policy "$(TRUST_POLICY)")
 
 .PHONY: help all bootstrap setup build image test test-host test-reuse \
-        run run-persist run-iommu qemu-test qemu-list \
+        run run-persist run-iommu qemu-test qemu-list limits \
         release dist inspect show-trust \
         check-build check-toolchain clean distclean clean-tools
 
@@ -53,6 +54,9 @@ test-host: check-toolchain ## 构建并只运行宿主与集成测试（不含 Q
 
 test-reuse: check-toolchain ## 复用已有镜像重跑宿主、集成与 QEMU 测试（--skip-build）
 	$(PYTHON) tools/test.py --skip-build $(TEST_ARGS)
+
+limits: check-build ## 测量系统上限基线（宿主基准 + QEMU 启动耗时）
+	$(PYTHON) tools/limits.py $(LIMITS_ARGS)
 
 run: check-build ## 交互启动：只读测试盘，默认 256 MiB
 	$(PYTHON) tests/qemu/qemu_test.py --interactive $(QEMU_ARGS)

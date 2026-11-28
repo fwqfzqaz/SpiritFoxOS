@@ -1,6 +1,16 @@
 #include "namespace_state.h"
+#include "sfrw.h"
 static SfNamespace service_namespace;
 SfNamespace*sf_ns_default(void){return &service_namespace;}
+/* Formatted-volume nodes carry SF_NS_RW_BIT in external. UINT32_MAX stays the
+ * legacy broker sentinel and is never a formatted-volume index. */
+static int rw_node(const SfNode*x){return x&&x->mount_tag&&x->external!=UINT32_MAX&&(x->external&SF_NS_RW_BIT);}
+static int rw_dir(const SfNode*x){return x&&x->type==NODE_DIR&&rw_node(x);}
+void sf_ns_dir_backend(SfNamespace*n,const SfNsDirBackend*b){
+ if(!n)return;
+ n->dir_create=b?b->create:0;n->dir_remove=b?b->remove:0;n->dir_rename=b?b->rename:0;
+ n->dir_context=b?b->context:0;
+}
 static int path_utf8(const uint8_t*p){while(*p){uint32_t c=*p++;if(c<32)return 0;if(c<128)continue;unsigned k;uint32_t min;if(c>=0xc2&&c<=0xdf){k=1;c&=31;min=128;}else if(c>=0xe0&&c<=0xef){k=2;c&=15;min=2048;}else if(c>=0xf0&&c<=0xf4){k=3;c&=7;min=65536;}else return 0;while(k--){if((*p&192)!=128)return 0;c=(c<<6)|(*p++&63);}if(c<min||c>0x10ffff||(c>=0xd800&&c<=0xdfff))return 0;}return 1;}
 static int path_ok(const char*p){size_t len=strlen(p);if(*p!='/'||len>95||(len>1&&p[len-1]=='/')||!path_utf8((const uint8_t*)p))return 0;for(const char*s=p;*s;){if(*s++=='/'){const char*b=s;while(*s&&*s!='/')s++;size_t n=s-b;if((!n&&*s)||(n==1&&*b=='.')||(n==2&&b[0]=='.'&&b[1]=='.'))return 0;}}return 1;}
 static int node_find(SfNamespace*n,const char*path){for(unsigned i=0;i<SF_NS_NODE_MAX;i++)if(n->nodes[i].type&&!strcmp(n->nodes[i].path,path))return i;return SF_NOT_FOUND;}
@@ -81,10 +91,33 @@ int sf_ns_mount_publish(SfNamespace*n,const SfMountEntry*entries,unsigned count,
 int sf_ns_create(SfNamespace*n,const char*p,unsigned type,int ro){return sf_ns_create_owned(n,p,type,ro,0,0,default_mode(type));}
 int sf_ns_create_owned(SfNamespace*n,const char*p,unsigned type,int ro,uint32_t uid,uint32_t gid,unsigned mode){
  if(!path_ok(p)||type<1||type>NODE_PROJECTION||mode>0777)return SF_INVALID;if(node_find(n,p)>=0)return SF_BUSY;
+ unsigned slot=SF_NS_NODE_MAX;uint32_t tag=0,external=0;int backed=0;
  if(strcmp(p,"/")){char parent[96];int r=parent_path(p,parent);if(r)return r;
-  int i=node_find(n,parent);if(i<0||n->nodes[i].type!=NODE_DIR)return SF_NOT_FOUND;if(n->nodes[i].readonly)return SF_READ_ONLY;
-  r=dirs_ok(n,"/",p,uid,gid);if(r)return r;r=parent_write_ok(n,p,uid,gid);if(r)return r;}
- for(unsigned i=0;i<SF_NS_NODE_MAX;i++)if(!n->nodes[i].type){SfNode*x=&n->nodes[i];memset(x,0,sizeof(*x));memcpy(x->path,p,strlen(p)+1);x->type=type;x->readonly=ro;x->mode=(uint16_t)(mode&0777);x->owner_uid=uid;x->owner_gid=gid;return 0;}return SF_NO_SPACE;
+  int i=node_find(n,parent);if(i<0||n->nodes[i].type!=NODE_DIR)return SF_NOT_FOUND;
+  SfNode*pi=&n->nodes[i];backed=rw_dir(pi);
+  if(pi->readonly&&!backed)return SF_READ_ONLY;
+  r=dirs_ok(n,"/",p,uid,gid);if(r)return r;r=parent_write_ok(n,p,uid,gid);if(r)return r;
+  tag=pi->mount_tag;
+ }
+ /* Reserve the namespace slot before touching the volume so a full table can
+  * never leave a committed directory with no visible node. */
+ for(unsigned i=0;i<SF_NS_NODE_MAX;i++)if(!n->nodes[i].type){slot=i;break;}
+ if(slot==SF_NS_NODE_MAX)return SF_NO_SPACE;
+ if(backed){
+  /* Only ordinary files and directories are materialised on the volume;
+   * pipes, consoles and projections have no on-disk representation. */
+  if(!n->dir_create)return SF_READ_ONLY;
+  if(type!=NODE_FILE&&type!=NODE_DIR)return SF_INVALID;
+  uint32_t inode=0;int r=n->dir_create(n->dir_context,p,type==NODE_DIR,uid,mode,&inode);
+  if(r)return r;
+  if(!inode||inode>=SF_RW_MAX_INODES)return SF_BAD_FORMAT;
+  external=SF_NS_RW_BIT|inode;
+ }
+ SfNode*x=&n->nodes[slot];memset(x,0,sizeof(*x));memcpy(x->path,p,strlen(p)+1);
+ if(backed){x->type=(uint8_t)(type==NODE_DIR?NODE_DIR:NODE_DISK);x->external=external;x->mount_tag=tag;}
+ else x->type=(uint8_t)type;
+ x->readonly=(uint8_t)ro;x->mode=(uint16_t)(mode&0777);x->owner_uid=uid;x->owner_gid=gid;
+ return 0;
 }
 int sf_ns_assign(SfNamespace*n,const char*path,uint32_t uid,uint32_t gid,unsigned mode){
  if(!path_ok(path)||mode>0777)return SF_INVALID;int i=node_find(n,path);if(i<0)return i;
@@ -140,25 +173,35 @@ static int remove_node_as(SfNamespace*n,uint32_t owner,uint32_t directory,const 
  SfNode*base=&n->nodes[d->node];if(base->type!=NODE_DIR)return SF_INVALID;
  if(!(d->mode&OPEN_WRITE))return SF_DENIED;
  char path[96];int r=relative_path(base,relative,path);if(r)return r;
- if(base->readonly||base->mount_tag)return SF_READ_ONLY;
+ /* A formatted-volume directory is the only mounted directory that accepts
+  * mutation; its nodes are mirrored from the on-disk tree by the backend. */
+ int backed=rw_dir(base);
+ if(!backed&&(base->readonly||base->mount_tag))return SF_READ_ONLY;
  if(!access_ok(base,uid,gid,3))return SF_DENIED;
  /* Recheck every current parent, including intermediate directories reached
   * from a wider capability. A mount or read-only subtree cannot be bypassed. */
  for(size_t i=strlen(base->path);path[i];i++)if(path[i]=='/'){
   path[i]=0;int parent=node_find(n,path);path[i]='/';
   if(parent<0||n->nodes[parent].type!=NODE_DIR)return SF_NOT_FOUND;
-  if(n->nodes[parent].readonly||n->nodes[parent].mount_tag)return SF_READ_ONLY;
+  if(!rw_dir(&n->nodes[parent])&&(n->nodes[parent].readonly||n->nodes[parent].mount_tag))return SF_READ_ONLY;
   if(!access_ok(&n->nodes[parent],uid,gid,1))return SF_DENIED;
  }
  if(uid){char parent[96];int r=parent_path(path,parent);if(r)return r;int p=node_find(n,parent);
   if(p<0||n->nodes[p].type!=NODE_DIR)return SF_NOT_FOUND;if(!access_ok(&n->nodes[p],uid,gid,3))return SF_DENIED;}
  int target=node_find(n,path);if(target<0)return target;SfNode*x=&n->nodes[target];
- if(x->readonly||x->mount_tag)return SF_READ_ONLY;if(x->type!=kind)return SF_INVALID;
+ if(x->readonly||(x->mount_tag&&!rw_node(x)))return SF_READ_ONLY;
+ if(x->type!=kind&&!(rw_node(x)&&kind==NODE_FILE&&x->type==NODE_DISK))return SF_INVALID;
  /* This service serializes mutation and opening. Keeping open files busy
   * prevents an old description from ever aliasing a reused node slot. */
  for(unsigned i=0;i<SF_NS_DESCRIPTION_MAX;i++)if(n->descriptions[i].refs&&n->descriptions[i].node==(unsigned)target)return SF_BUSY;
  if(kind==NODE_DIR){size_t length=strlen(path);
   for(unsigned i=0;i<SF_NS_NODE_MAX;i++)if(n->nodes[i].type&&strlen(n->nodes[i].path)>length&&!memcmp(n->nodes[i].path,path,length)&&n->nodes[i].path[length]=='/')return SF_BUSY;
+ }
+ /* Commit the durable removal before dropping the namespace node; a backend
+  * failure leaves the tree untouched and the caller sees the real error. */
+ if(rw_node(x)){
+  if(!n->dir_remove)return SF_READ_ONLY;
+  r=n->dir_remove(n->dir_context,path,kind==NODE_DIR,uid);if(r)return r;
  }
  memset(x,0,sizeof(*x));return 0;
 }
@@ -166,6 +209,62 @@ int sf_ns_unlink(SfNamespace*n,uint32_t owner,uint32_t directory,const char*rela
 int sf_ns_unlink_as(SfNamespace*n,uint32_t owner,uint32_t directory,const char*relative,uint32_t uid,uint32_t gid){return remove_node_as(n,owner,directory,relative,NODE_FILE,uid,gid);}
 int sf_ns_rmdir(SfNamespace*n,uint32_t owner,uint32_t directory,const char*relative){return remove_node_as(n,owner,directory,relative,NODE_DIR,0,0);}
 int sf_ns_rmdir_as(SfNamespace*n,uint32_t owner,uint32_t directory,const char*relative,uint32_t uid,uint32_t gid){return remove_node_as(n,owner,directory,relative,NODE_DIR,uid,gid);}
+/* Rename an on-volume file or directory. Both parents must belong to the same
+ * writable formatted mount; the backend commits first, then the published
+ * tree is rewritten so a failure never invents an in-memory-only rename. */
+int sf_ns_rename_as(SfNamespace*n,uint32_t owner,const char*from,const char*to,uint32_t uid,uint32_t gid){
+ if(!n||!owner||!path_ok(from)||!path_ok(to)||!strcmp(from,"/")||!strcmp(to,"/"))return SF_INVALID;
+ int src=node_find(n,from);if(src<0)return src;
+ SfNode*s=&n->nodes[src];
+ if(!rw_node(s)||s->readonly)return SF_READ_ONLY;
+ if(!n->dir_rename)return SF_READ_ONLY;
+ char fromparent[96],toparent[96];int r=parent_path(from,fromparent);if(r)return r;
+ r=parent_path(to,toparent);if(r)return r;
+ int fp=node_find(n,fromparent),tp=node_find(n,toparent);
+ if(fp<0||n->nodes[fp].type!=NODE_DIR)return SF_NOT_FOUND;
+ if(tp<0||n->nodes[tp].type!=NODE_DIR)return SF_NOT_FOUND;
+ if(!rw_dir(&n->nodes[fp])||!rw_dir(&n->nodes[tp]))return SF_READ_ONLY;
+ if(n->nodes[fp].readonly||n->nodes[tp].readonly)return SF_READ_ONLY;
+ if(n->nodes[fp].mount_tag!=s->mount_tag||n->nodes[tp].mount_tag!=s->mount_tag)return SF_DENIED;
+ if(uid){
+  r=dirs_ok(n,"/",from,uid,gid);if(r)return r;
+  r=dirs_ok(n,"/",to,uid,gid);if(r)return r;
+  if(!access_ok(&n->nodes[fp],uid,gid,3)||!access_ok(&n->nodes[tp],uid,gid,3))return SF_DENIED;
+ }
+ if(!strcmp(from,to))return 0;
+ size_t flen=strlen(from),tlen=strlen(to);
+ /* Moving a directory below itself would detach the whole subtree. */
+ if(!strncmp(to,from,flen)&&to[flen]=='/')return SF_INVALID;
+ int dst=node_find(n,to);
+ if(dst>=0){
+  if(dst==src)return 0;
+  SfNode*t=&n->nodes[dst];
+  if(!rw_node(t)||t->readonly)return SF_READ_ONLY;
+  if(s->type==NODE_DIR){
+   if(t->type!=NODE_DIR)return SF_INVALID;
+   for(unsigned i=0;i<SF_NS_NODE_MAX;i++)if(n->nodes[i].type&&beneath(to,n->nodes[i].path)&&strcmp(to,n->nodes[i].path))return SF_BUSY;
+  }else if(t->type!=NODE_FILE&&t->type!=NODE_DISK)return SF_INVALID;
+  for(unsigned i=0;i<SF_NS_DESCRIPTION_MAX;i++)if(n->descriptions[i].refs&&n->descriptions[i].node==(unsigned)dst)return SF_BUSY;
+ }
+ /* Preflight rewritten lengths before committing anything to the volume. */
+ for(unsigned i=0;i<SF_NS_NODE_MAX;i++){
+  const char*path=n->nodes[i].path;
+  if(!n->nodes[i].type)continue;
+  if(strcmp(path,from)&&!beneath(from,path))continue;
+  if(tlen+strlen(path)-flen>95)return SF_INVALID;
+ }
+ r=n->dir_rename(n->dir_context,from,to,uid);if(r)return r;
+ if(dst>=0)memset(&n->nodes[dst],0,sizeof(n->nodes[dst]));
+ for(unsigned i=0;i<SF_NS_NODE_MAX;i++){
+  SfNode*x=&n->nodes[i];
+  if(!x->type||(strcmp(x->path,from)&&!beneath(from,x->path)))continue;
+  size_t tail=strlen(x->path)-flen;char path[96];
+  memcpy(path,to,tlen);memcpy(path+tlen,x->path+flen,tail+1);
+  memcpy(x->path,path,tlen+tail+1);
+ }
+ return 0;
+}
+int sf_ns_rename(SfNamespace*n,uint32_t owner,const char*from,const char*to){return sf_ns_rename_as(n,owner,from,to,0,0);}
 int sf_ns_dup(SfNamespace*n,uint32_t owner,uint32_t h){SfDescription*d=description(n,owner,h);return d?handle_new(n,owner,d-n->descriptions):SF_STALE_HANDLE;}
 int sf_ns_close(SfNamespace*n,uint32_t owner,uint32_t h){SfDescription*d=description(n,owner,h);if(!d)return SF_STALE_HANDLE;if(!--d->refs){SfNode*x=&n->nodes[d->node];if(x->type==NODE_PIPE&&(d->mode&OPEN_WRITE))x->writers--;if(x->mount_tag&&n->mount_close)n->mount_close(x->mount_tag);}n->handles[(h&255)-1].description=0;return 0;}
 long sf_ns_read(SfNamespace*n,uint32_t owner,uint32_t h,void*out,size_t bytes){SfDescription*d=description(n,owner,h);if(!d)return SF_STALE_HANDLE;if(!(d->mode&OPEN_READ))return SF_DENIED;SfNode*x=&n->nodes[d->node];if(x->type==NODE_DIR)return SF_INVALID;if(!bytes)return 0;if(x->type==NODE_CONSOLE)return SF_WOULD_BLOCK;
@@ -219,4 +318,4 @@ long sf_ns_enumerate_at(SfNamespace*n,uint32_t owner,uint32_t h,uint32_t index,c
  return 0;
 }
 void sf_ns_reap(SfNamespace*n,uint32_t owner){for(unsigned i=0;i<SF_NS_HANDLE_MAX;i++)if(n->handles[i].description&&n->handles[i].owner==owner)sf_ns_close(n,owner,(n->handles[i].generation<<8)|(i+1));}
-int sf_ns_unmount(SfNamespace*n,unsigned tag){if(!tag)return SF_INVALID;for(unsigned i=0;i<SF_NS_DESCRIPTION_MAX;i++)if(n->descriptions[i].refs&&n->nodes[n->descriptions[i].node].mount_tag==tag)return SF_BUSY;for(unsigned i=0;i<SF_NS_NODE_MAX;i++)if(n->nodes[i].mount_tag==tag){if(!strcmp(n->nodes[i].path,"/disk")){n->nodes[i].mount_tag=0;n->nodes[i].readonly=0;}else memset(&n->nodes[i],0,sizeof(n->nodes[i]));}return 0;}
+int sf_ns_unmount(SfNamespace*n,unsigned tag){if(!tag)return SF_INVALID;for(unsigned i=0;i<SF_NS_DESCRIPTION_MAX;i++)if(n->descriptions[i].refs&&n->nodes[n->descriptions[i].node].mount_tag==tag)return SF_BUSY;for(unsigned i=0;i<SF_NS_NODE_MAX;i++)if(n->nodes[i].mount_tag==tag){if(!strcmp(n->nodes[i].path,"/disk")){n->nodes[i].mount_tag=0;n->nodes[i].readonly=0;n->nodes[i].external=0;}else memset(&n->nodes[i],0,sizeof(n->nodes[i]));}return 0;}

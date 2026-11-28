@@ -32,6 +32,15 @@ def run():
         vm.command('cat /disk/etc/readme.txt', 'SpiritFoxOS SFRWFS1 volume')
         vm.command('write /disk/etc/readme.txt hello-sfrw', 'write: OK')
         vm.command('cat /disk/etc/readme.txt', 'hello-sfrw')
+        # 目录创建、目录内建文件、改名与非法删除都要经过真实磁盘。
+        vm.command('mkdir /disk/docs', 'mkdir: OK')
+        vm.command('write /disk/docs/note.txt hello-dir', 'write: OK')
+        vm.command('cat /disk/docs/note.txt', 'hello-dir')
+        vm.command('mkdir /disk/docs/sub', 'mkdir: OK')
+        vm.command('mv /disk/docs/note.txt /disk/docs/renamed.txt', 'mv: OK')
+        vm.command('cat /disk/docs/renamed.txt', 'hello-dir')
+        vm.command('mv /disk/docs /disk/docs/sub/deep', 'failed code=1')
+        vm.command('rmdir /disk/docs', 'failed code=7')
         vm.command('unmount /disk', 'disk: UNMOUNTED')
     finally:
         vm.close(True)
@@ -41,9 +50,29 @@ def run():
     try:
         boot(reboot)
         reboot.command('cat /disk/etc/readme.txt', 'hello-sfrw')
+        reboot.command('cat /disk/docs/renamed.txt', 'hello-dir')
+        reboot.command('mv /disk/docs/renamed.txt /disk/docs/moved.txt', 'mv: OK')
+        reboot.command('unmount /disk', 'disk: UNMOUNTED')
     finally:
         reboot.close(True)
-    print('SFRWFS PASS: mkfs, write and reboot persistence', flush=True)
+    cleanup = VM(DISK, 'sfrwfs-cleanup', writable=True, memory=256)
+    try:
+        boot(cleanup)
+        cleanup.command('cat /disk/docs/moved.txt', 'hello-dir')
+        cleanup.command('rm /disk/docs/moved.txt', 'rm: OK')
+        cleanup.command('rmdir /disk/docs/sub', 'rmdir: OK')
+        cleanup.command('rmdir /disk/docs', 'rmdir: OK')
+        cleanup.command('unmount /disk', 'disk: UNMOUNTED')
+    finally:
+        cleanup.close(True)
+    final = VM(DISK, 'sfrwfs-final', writable=True, memory=256)
+    try:
+        boot(final)
+        final.command('stat /disk/docs', 'failed code=16')
+        final.command('cat /disk/etc/readme.txt', 'hello-sfrw')
+    finally:
+        final.close(True)
+    print('SFRWFS PASS: mkfs, directories, rename and reboot persistence', flush=True)
 
 
 if __name__ == '__main__':
