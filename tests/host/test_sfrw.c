@@ -91,6 +91,8 @@ static uint16_t links_of(Sfrw*v,const char*path){
  CHECK(!sf_rw_stat(v,ino,&st));
  return (uint16_t)st.links;
 }
+static uint32_t rng_state;
+static uint32_t rng_next(void){rng_state=rng_state*1664525u+1013904223u;return rng_state>>16;}
 
 /* ---------------- 格式与挂载 ---------------- */
 static void test_format_mount(void){
@@ -312,6 +314,88 @@ static void test_rename(void){
  CHECK(sf_rw_rename(&vol,"/m/b","/missing/x",0)==SF_NOT_FOUND);
 }
 
+/* ---------------- 硬链接 ---------------- */
+static void test_link(void){
+ uint32_t ino;SfrwStat st;
+ format_blank();
+ make_file(&vol,"/a",0,"LINK");
+ CHECK(links_of(&vol,"/a")==1);
+ CHECK(!sf_rw_link(&vol,"/a","/b",0));
+ CHECK(links_of(&vol,"/a")==2&&links_of(&vol,"/b")==2);
+ file_text(&vol,"/b","LINK");
+ /* 删除一个名字只递减计数，数据仍可经另一名字访问。 */
+ CHECK(!sf_rw_unlink(&vol,"/a",0));
+ CHECK(links_of(&vol,"/b")==1);
+ file_text(&vol,"/b","LINK");
+ CHECK(sf_rw_open(&vol,"/a",0,SF_RW_READ,&ino)==SF_NOT_FOUND);
+ /* 跨目录链接与目标已存在拒绝。 */
+ CHECK(!sf_rw_mkdir(&vol,"/d",0,0755));
+ CHECK(!sf_rw_link(&vol,"/b","/d/b2",0));
+ CHECK(links_of(&vol,"/b")==2);
+ file_text(&vol,"/d/b2","LINK");
+ CHECK(sf_rw_link(&vol,"/b","/d/b2",0)==SF_INVALID);
+ /* 目录不能作为链接源。 */
+ CHECK(sf_rw_link(&vol,"/d","/d2",0)==SF_INVALID);
+ CHECK(sf_rw_link(&vol,"/missing","/x",0)==SF_NOT_FOUND);
+ /* 非属主在无写权限目录中创建链接被拒绝。 */
+ CHECK(sf_rw_link(&vol,"/b","/d/denied",8)==SF_DENIED);
+ /* 链接计数持久化。 */
+ boot(&vol);
+ CHECK(links_of(&vol,"/b")==2&&links_of(&vol,"/d/b2")==2);
+ CHECK(!sf_rw_open(&vol,"/b",0,SF_RW_READ,&ino));
+ CHECK(!sf_rw_stat(&vol,ino,&st));
+ CHECK(st.blocks==1&&st.size==4);
+ CHECK(!sf_rw_unlink(&vol,"/b",0));
+ CHECK(!sf_rw_unlink(&vol,"/d/b2",0));
+ CHECK(sf_rw_open(&vol,"/b",0,SF_RW_READ,&ino)==SF_NOT_FOUND);
+}
+
+/* ---------------- chmod / chown ---------------- */
+static void test_chmod(void){
+ uint32_t ino,g;SfrwStat st;
+ format_blank();
+ make_file(&vol,"/f",0,"X");
+ CHECK(!sf_rw_open(&vol,"/f",0,SF_RW_READ,&ino));
+ CHECK(!sf_rw_chmod(&vol,ino,0,0600));
+ CHECK(!sf_rw_stat(&vol,ino,&st));
+ CHECK((st.mode&SF_RW_PERM_MASK)==0600);
+ CHECK((st.mode&SF_RW_TYPE_MASK)==SF_RW_TYPE_FILE);
+ /* 拒绝类型位/超出权限位。 */
+ CHECK(sf_rw_chmod(&vol,ino,0,(uint16_t)(SF_RW_TYPE_DIR|0644))==SF_INVALID);
+ /* 非属主不能修改；uid 0 与属主可以。 */
+ CHECK(sf_rw_chmod(&vol,ino,8,0644)==SF_DENIED);
+ CHECK(!sf_rw_chmod(&vol,ino,0,0644));
+ CHECK(!sf_rw_mkdir(&vol,"/u",0,0777));
+ CHECK(!sf_rw_create(&vol,"/u/g",7,0644));
+ CHECK(!sf_rw_open(&vol,"/u/g",7,SF_RW_READ,&g));
+ CHECK(!sf_rw_chmod(&vol,g,7,0600));
+ CHECK(!sf_rw_stat(&vol,g,&st));CHECK((st.mode&SF_RW_PERM_MASK)==0600);
+ /* 收紧后其他 uid 读取被拒绝。 */
+ CHECK(sf_rw_open(&vol,"/u/g",8,SF_RW_READ,&g)==SF_DENIED);
+}
+static void test_chown(void){
+ uint32_t ino,b;SfrwStat st;
+ format_blank();
+ make_file(&vol,"/f",0,"OWN");
+ CHECK(!sf_rw_open(&vol,"/f",0,SF_RW_READ,&ino));
+ /* 仅 uid 0 可 chown。 */
+ CHECK(sf_rw_chown(&vol,ino,7,7,7)==SF_DENIED);
+ CHECK(!sf_rw_chown(&vol,ino,0,7,7));
+ CHECK(!sf_rw_stat(&vol,ino,&st));CHECK(st.uid==7&&st.gid==7);
+ CHECK(!sf_rw_open(&vol,"/f",8,SF_RW_READ,&ino));
+ CHECK(sf_rw_open(&vol,"/f",8,SF_RW_WRITE,&ino)==SF_DENIED);
+ /* 目标 uid 配额不足时失败且原属主不变。 */
+ CHECK(!sf_rw_mkdir(&vol,"/q",0,0777));
+ CHECK(!sf_rw_set_quota(&vol,0,9,100,1));
+ CHECK(!sf_rw_create(&vol,"/q/a",9,0644));
+ CHECK(!sf_rw_create(&vol,"/q/b",0,0644));
+ CHECK(!sf_rw_open(&vol,"/q/b",0,SF_RW_READ,&b));
+ CHECK(sf_rw_chown(&vol,b,0,9,9)==SF_NO_SPACE);
+ CHECK(!sf_rw_stat(&vol,b,&st));CHECK(st.uid==0);
+ /* 不存在的 inode 与非 root 调用。 */
+ CHECK(sf_rw_chown(&vol,600,0,1,1)==SF_NOT_FOUND);
+}
+
 /* ---------------- fsck ---------------- */
 static uint8_t* raw_inode(uint32_t ino){
  return cache+(size_t)(SF_RW_INODE_TABLE_BLOCK+ino/SF_RW_INODES_PER_BLOCK)*SF_RW_BLOCK_BYTES
@@ -403,12 +487,55 @@ static void fsck_bad_entry(void){
  file_text(&rec,"/keep","KEEP");
  CHECK(read_text(&rec,"/gone",0,buf,sizeof(buf))==SF_NOT_FOUND);
 }
+static void fsck_dir_metadata(void){
+ SfckReport r;uint32_t d,e;uint8_t t;char name[SF_RW_NAME_MAX+1];
+ format_blank();
+ make_file(&vol,"/keep",0,"KEEP");
+ CHECK(!sf_rw_mkdir(&vol,"/d",0,0755));
+ CHECK(!sf_rw_open(&vol,"/d",0,SF_RW_READ,&d));
+ CHECK(raw_u32(raw_inode(d)+24)>=SF_RW_DATA_BLOCK);
+ /* 目录块指针指向 inode 表块：严格挂载失败，fsck 不得读写该元数据块。 */
+ raw_set32(raw_inode(d)+24,3);
+ CHECK(sf_rw_mount(&rec,device())==SF_BAD_FORMAT);
+ memset(&r,0,sizeof(r));
+ CHECK(!sf_rw_fsck(&rec,device(),&r));
+ CHECK(r.bad_entries>=1&&r.repaired>=1);
+ for(size_t i=0;i<SF_RW_BLOCK_BYTES;i++)CHECK(cache[(size_t)3*SF_RW_BLOCK_BYTES+i]==0);
+ CHECK(!sf_rw_mount(&rec,device()));
+ file_text(&rec,"/keep","KEEP");
+ CHECK(!sf_rw_open(&rec,"/d",0,SF_RW_READ,&d));
+ CHECK(!sf_rw_readdir(&rec,d,0,0,name,&e,&t));
+ CHECK(!strcmp(name,".")&&e==d);
+}
+static void fsck_beyond_size(void){
+ SfckReport r;SfrwStat st;uint32_t f,g;char buf[8];
+ format_blank();
+ make_file(&vol,"/f",0,"ABC");
+ CHECK(!sf_rw_open(&vol,"/f",0,SF_RW_READ,&f));
+ CHECK(!sf_rw_create(&vol,"/g",0,0644));
+ CHECK(!sf_rw_open(&vol,"/g",0,SF_RW_WRITE,&g));
+ CHECK(sf_rw_write(&vol,g,0,0,"GGGG",4)==4);
+ uint32_t gb=raw_u32(raw_inode(g)+24);
+ CHECK(gb>=SF_RW_DATA_BLOCK);
+ /* /f 的第二个直接块超出 size，且与 /g 重复；fsck 应先清除而不计重复占用。 */
+ raw_set32(raw_inode(f)+24+4,gb);
+ CHECK(sf_rw_mount(&rec,device())==SF_BAD_FORMAT);
+ memset(&r,0,sizeof(r));
+ CHECK(!sf_rw_fsck(&rec,device(),&r));
+ CHECK(r.repaired>=1&&r.duplicate_blocks==0);
+ CHECK(!sf_rw_mount(&rec,device()));
+ CHECK(!sf_rw_stat(&rec,f,&st));CHECK(st.size==3&&st.blocks==1);
+ CHECK(read_text(&rec,"/f",0,buf,sizeof(buf))==3&&!memcmp(buf,"ABC",3));
+ file_text(&rec,"/g","GGGG");
+}
 static void test_fsck(void){
  fsck_clean();
  fsck_bad_pointer();
  fsck_duplicate();
  fsck_lost_inode();
  fsck_bad_entry();
+ fsck_dir_metadata();
+ fsck_beyond_size();
 }
 
 /* ---------------- 崩溃一致性 ---------------- */
@@ -500,6 +627,67 @@ static void crash_rename(void){
  fail_at=0;mode=0;
 }
 
+/* ---------------- 随机掉电注入 ---------------- */
+static void crash_random(void){
+ static const char A[]="from-data";
+ static const char B[]="to-data";
+ int total;uint32_t ino;
+ /* 场景 1：create+write，固定种子伪随机选取写/刷盘边界与故障模式。 */
+ format_blank();
+ make_file(&vol,"/seed",0,seed);
+ memcpy(baseline,stable,BYTES);
+ boot(&vol);
+ operations=0;fail_at=0;mode=0;
+ CHECK(!sf_rw_create(&vol,"/crash",0,0644));
+ CHECK(!sf_rw_open(&vol,"/crash",0,SF_RW_WRITE,&ino));
+ CHECK(sf_rw_write(&vol,ino,0,0,payload,sizeof(payload))==(long)sizeof(payload));
+ total=operations;CHECK(total>0);
+ rng_state=0x20261128u;
+ for(int i=0;i<256;i++){
+  long w=0;int r;
+  memcpy(stable,baseline,BYTES);
+  boot(&vol);
+  operations=0;fail_at=1+(int)(rng_next()%(uint32_t)total);mode=(int)(rng_next()%3u);
+  r=sf_rw_create(&vol,"/crash",0,0644);
+  if(!r){
+   uint32_t ci;
+   if(!sf_rw_open(&vol,"/crash",0,SF_RW_WRITE,&ci))w=sf_rw_write(&vol,ci,0,0,payload,sizeof(payload));
+   else w=SF_DEVICE_GONE;
+  }
+  CHECK(r!=0||w!=(long)sizeof(payload));
+  fail_at=0;mode=0;operations=0;
+  recover();
+  check_crash_state(&rec);
+ }
+ fail_at=0;mode=0;
+ /* 场景 2：rename 覆盖。 */
+ format_blank();
+ make_file(&vol,"/from",0,A);
+ make_file(&vol,"/to",0,B);
+ memcpy(baseline,stable,BYTES);
+ boot(&vol);
+ operations=0;fail_at=0;mode=0;
+ CHECK(!sf_rw_rename(&vol,"/from","/to",0));
+ total=operations;CHECK(total>0);
+ rng_state=0x7f4a1234u;
+ for(int i=0;i<256;i++){
+  char fb[32],tb[32];int fn,tn,oldstate,newstate;
+  memcpy(stable,baseline,BYTES);
+  boot(&vol);
+  operations=0;fail_at=1+(int)(rng_next()%(uint32_t)total);mode=(int)(rng_next()%3u);
+  CHECK(sf_rw_rename(&vol,"/from","/to",0)!=0);
+  fail_at=0;mode=0;operations=0;
+  recover();
+  fn=read_text(&rec,"/from",0,fb,sizeof(fb));
+  tn=read_text(&rec,"/to",0,tb,sizeof(tb));
+  oldstate=fn==(int)strlen(A)&&!memcmp(fb,A,strlen(A))&&
+           tn==(int)strlen(B)&&!memcmp(tb,B,strlen(B));
+  newstate=fn==SF_NOT_FOUND&&tn==(int)strlen(A)&&!memcmp(tb,A,strlen(A));
+  CHECK(oldstate||newstate);
+ }
+ fail_at=0;mode=0;
+}
+
 int main(void){
  for(size_t i=0;i<sizeof(payload);i++)payload[i]=(uint8_t)(i*13u+5u);
  for(size_t i=0;i<sizeof(pattern);i++)pattern[i]=(uint8_t)(i*7u+3u);
@@ -509,9 +697,13 @@ int main(void){
  test_permissions();
  test_quota();
  test_rename();
+ test_link();
+ test_chmod();
+ test_chown();
  test_fsck();
  crash_create_write();
  crash_rename();
- printf("SFRW PASS: %d checks, %u blocks, crash boundaries for create+write and rename x 3 fault modes\n",checks,BLOCKS);
+ crash_random();
+ printf("SFRW PASS: %d checks, %u blocks, crash boundaries incl. 256x2 seeded random samples\n",checks,BLOCKS);
  return 0;
 }

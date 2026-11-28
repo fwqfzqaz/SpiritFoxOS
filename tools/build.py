@@ -511,7 +511,7 @@ def main(policy_path=None):
     packages.append(('sf-persist.sfmod', pack({'module_id': 'org.spiritfox.persist', 'version': '0.1.0', 'category': 'service', 'requested_caps': [], 'resource_limits': {'memory': 524288}}, image, 1, seed)))
     # sf-fs：通用磁盘格式层（SFRFS1/SFRFS2 探测与解析）+ 文件读取服务。
     # 块请求由 sf-init 的 broker 转发，模块自身不持有 virtio-blk 端点。
-    image = link_elf('sf-fs', shared + objects('fs', ['services/fs_main.c', 'services/namespace_runtime.c', 'services/namespace_control.c', 'services/namespace.c', 'services/fs_format.c', 'services/readfs.c', *CRYPTO], extra=USER_SECTIONS), 'services/user.ld')
+    image = link_elf('sf-fs', shared + objects('fs', ['services/fs_main.c', 'services/namespace_runtime.c', 'services/namespace_control.c', 'services/namespace.c', 'services/fs_format.c', 'services/readfs.c', 'services/sfrw.c', *CRYPTO], extra=USER_SECTIONS), 'services/user.ld')
     packages.append(('sf-fs.sfmod', pack({'module_id': 'org.spiritfox.fs.disk', 'version': '0.1.0', 'category': 'service', 'requested_caps': [], 'resource_limits': {'memory': 2097152}}, image, 1, seed)))
     # sf-wm：有界类 niri 平铺合成器；framebuffer 由 PID1 经 SYS_FB_GRANT 授权。
     image = link_elf('sf-wm', shared + objects('wm', ['services/sf_wm.c', 'services/tiling.c', 'services/launcher.c', 'services/sfk.c']), 'services/user.ld')
@@ -522,6 +522,8 @@ def main(policy_path=None):
     Path('build/storage.img').write_bytes(create_readfs(disk_files))
     Path('build/storage-v2.img').write_bytes(create_readfs(disk_files, format=2))
     Path('build/persistent.img').write_bytes(create_persist(disk_files))
+    # 空白可写盘：QEMU 测试以 mkfs /disk 现场格式化 SFRWFS1（4 MiB = 1024 块）。
+    Path('build/storage-rw.img').write_bytes(bytes(4*1024*1024))
     for name, data in packages:
         Path('build/'+name).write_bytes(data)
     Path('build/bundle.bin').write_bytes(bundle(packages))

@@ -107,6 +107,9 @@ int sf_rw_truncate(Sfrw*,uint32_t,uint32_t,uint64_t);
 int sf_rw_unlink(Sfrw*,const char*,uint32_t);
 int sf_rw_rmdir(Sfrw*,const char*,uint32_t);
 int sf_rw_rename(Sfrw*,const char*,const char*,uint32_t);
+int sf_rw_link(Sfrw*,const char*,const char*,uint32_t);
+int sf_rw_chmod(Sfrw*,uint32_t,uint32_t,uint16_t);
+int sf_rw_chown(Sfrw*,uint32_t,uint32_t,uint32_t,uint32_t);
 int sf_rw_fsync(Sfrw*);
 int sf_rw_set_quota(Sfrw*,uint32_t,uint32_t,uint32_t,uint32_t);
 #endif

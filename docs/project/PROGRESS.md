@@ -1,6 +1,52 @@
 # SpiritFoxOS 实施进度
 
-更新日期：2026-11-27（Asia/Shanghai）。
+更新日期：2026-11-28（Asia/Shanghai）。
+
+## SFRWFS1 接入 sf-fs（Phase 1）
+
+将格式核心接入 `sf-fs` 服务进程，专用可写盘以 `/disk` 挂载并支持已有文件读写：
+
+- 新增 IPC `OP_FS_BLOCK_WRITE/FLUSH/FORMAT`（117/118/119）与
+  `SF_FS_FORMAT_SFRWFS1=3`；ABI 快照不含这些操作码，参考 JSON 未变。
+- [fs_rw.h](../../services/fs_rw.h) 提供 4096 B↔512 B 适配；sf-fs 常驻只保存 `Sfrw`
+  卷状态，只读镜像的整文件校验缓冲按最大文件临时 `sf_mmap`/`sf_munmap`，进程载入
+  从约 1.2 MiB 降到约 292 KiB。
+- `OP_FS_MOUNT` 探测 `SFRWFS1\0` 后挂载并以 `handle` 传递可写标志、回复 `mode=3`；
+  `OP_FS_STOP` 先 `fsync` 再解除发布。`mkfs /disk` 经 `OP_FS_FORMAT` 格式化空白盘
+  并写入 `/etc/readme.txt` 种子。
+- namespace 以 `0x80000000|inode`（排除 `UINT32_MAX`）路由 SFRWFS1 节点，BFS 发布
+  `/disk` 树；目录只读，文件按可写标志发布。根前台未声明写后端，挂载可写卷时由
+  运行时安装自身读/写/截断后端。
+- storage broker 增加写/刷盘转发并校验 `fs_pid`、`write_grant`、对齐与半块边界；
+  SFRWFS1 盘跳过 `SFTXN1` 校验、写范围为整盘。`init` 在 SFRWFS1 时跳过 persist
+  attach 与依赖库的兼容测试。
+- 挂载扫描改为每个 inode 表块只读一次（每块 32 个 inode），在 QEMU/TCG 下把 1024
+  次块读降为 32 次。
+- 新增宿主 `test_fs_rw`（适配器、格式化/挂载/读写/截断、只读设备与写失败不变）与
+  `qemu_sfrwfs_test.py`（mkfs → 写 → 卸载 → 重启读回，断言镜像哈希变化）。宿主
+  全量回归与 ABI 快照通过，sf-fs 载入 299,008 B / 1,280 KiB 预算内，QEMU 用例
+  `SFRWFS PASS`。详见 [WRITABLE_FS](../architecture/WRITABLE_FS.md)。
+
+## SFRWFS1 v1.1 加固与能力补齐
+
+在不改变 SFRWFS1 磁盘布局与既有 API 语义的前提下，修复通读代码发现的缺陷并补齐
+最小可用元数据操作；仍未接入 `sf-fs`/`namespace`，未新增 IPC 操作码或 ABI 常量：
+
+- fsck 目录块指针越界（含指向 inode 表/位图等元数据区）只计入 `bad_entries` 并跳过，
+  绝不读写元数据块；直接块用新分配的数据块替换并写回，保持卷可挂载。
+- fsck 将 inode `size` 之外的 direct/间接指针清零且不计引用，避免不可达块被永久占用。
+- 提交目标集溢出（`journal_count+4>16`）改为失败关闭：置未挂载并返回
+  `SF_COMMIT_UNCERTAIN`，重挂载得到旧状态，不再以未提交内存状态继续。
+- 新增 `sf_rw_link`/`sf_rw_chmod`/`sf_rw_chown`；`unlink` 与 `rename` 替换目标时按
+  链接计数仅在最后一个链接释放数据块与 inode。
+- 宿主 [test_sfrw.c](../../tests/host/test_sfrw.c) 新增硬链接、chmod/chown、两类 fsck
+  负例，并在确定性边界之外加入固定种子 256×2 随机掉电采样。
+
+`test_sfrw`：15809 项检查（v1 为 9335），`-Wall -Wextra -Werror` 零告警，仍仅依赖
+`sf.h`/`package.h` 声明、不引入 `<string.h>`。`python3 tools/test.py --host-only`
+全量宿主回归通过（exit 0，QEMU 字段按 host-only 保持未运行）。仍未接入
+`sf-fs`/`namespace`、未新增 IPC/ABI，真实块设备与 QEMU 集成待续。详见
+[WRITABLE_FS](../architecture/WRITABLE_FS.md)。
 
 ## 通用可写文件系统格式核心 v1（SFRWFS1）
 

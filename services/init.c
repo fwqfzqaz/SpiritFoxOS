@@ -1526,7 +1526,7 @@ static void help_text(void){
  sf_log("help | login <user> [password] | logout | whoami | users | sessions | ls [path] | cat <path> | write <path> <text> | truncate <path> <bytes> | stat <path> | rm <path> | mkdir <path> | rmdir <path>\n");
  sf_log("run <app or installed> [args] | runat <read-only-dir> <app> [args]\nrunenv [NAME=VALUE ...] -- <app> [args] | runenvat <dir> [NAME=VALUE ...] -- <app> [args]\n");
  sf_log("Administrator only: priority <pid> [0..3] | cap-limit <pid> [0..32] | page-limit <pid> [0..4096] | threads <pid> [1..8] | cpu-budget <pid> [0..100] | ipc-stats-test | trust | revoke-key /disk/pkg\n");
- sf_log("install /disk/bin/app.sfk | persist | namespace-status | namespace-crash | namespace-recover | stop echo | start echo | echo-status | echo-crash | echo-hang | echo-bad-reply | echo-bad-op | mount /disk | unmount /disk | stop disk | start disk | gui | selftest | shutdown\n");
+ sf_log("install /disk/bin/app.sfk | persist | namespace-status | namespace-crash | namespace-recover | stop echo | start echo | echo-status | echo-crash | echo-hang | echo-bad-reply | echo-bad-op | mkfs /disk | mount /disk | unmount /disk | stop disk | start disk | gui | selftest | shutdown\n");
  sf_log("ifconfig | dhcp | ping <ip> | udp <ip> <port> <text> | tcp <ip> <port> <text> | open <ip> <port> | send <handle> <text> | recv <handle> | close <handle> | conns | stop native | start native | native-status | native-crash | native-hang | native-bad-reply | native-bad-op\n");
 }
 static void login_attempt(const char*name,const char*password){
@@ -1722,7 +1722,8 @@ static void command(char*line){
   else if(*text){*text++=0;r=parse_size(text,&bytes);if(!r){int h=shell_open(path,OPEN_WRITE);r=h<0?h:sf_ns_truncate(ns,owner,h,bytes);if(h>=0)sf_ns_close(ns,owner,h);}}
   if(!r)sf_log("truncate: OK\n");else{sf_log("truncate: failed code=");sf_number(-r);sf_log("\n");}}
  else if(!strcmp(line,"unmount /disk")){int r=sf_storage_unmount();sf_log(!r?"disk: UNMOUNTED\n":"disk: unmount refused\n");}
- else if(!strcmp(line,"mount /disk")){int r=sf_storage_mount();if(!r&&sf_storage_writable()){sf_persist_attach();r=sf_persist_mount(ns);}sf_log(!r?"disk: MOUNTED\n":"disk: mount refused\n");}
+ else if(!strcmp(line,"mkfs /disk")){int r=sf_storage_format();if(!r)r=sf_storage_mount();if(!r)sf_log("mkfs: OK\ndisk: MOUNTED\n");else{sf_log("mkfs: failed code=");sf_number(-r);sf_log("\n");}}
+ else if(!strcmp(line,"mount /disk")){int r=sf_storage_mount();if(!r&&!sf_storage_sfrw()&&sf_storage_writable()){sf_persist_attach();r=sf_persist_mount(ns);}sf_log(!r?"disk: MOUNTED\n":"disk: mount refused\n");}
  else if(!strcmp(line,"stop disk")){int r=sf_storage_stop();sf_log(!r?"disk: STOPPED\n":"disk: stop refused\n");}
  else if(!strcmp(line,"start disk")){int r=sf_storage_start();if(!r)sf_persist_attach();sf_log(!r?"disk: ACTIVE\n":"disk: start refused\n");}
  else if(!strcmp(line,"channel-test")){channel_test(0);}
@@ -1997,13 +1998,13 @@ long sf_main(const SfBootArgs*a,size_t size){
  lifecycle_tests();sf_storage_init(&manager,sf_ns_default(),spawn_storage_package);sf_assert(!namespace_setup(),"namespace service and volatile tree initialized");identity_setup();object_tests();sf_assert(!native_start_service(),"native runtime module active");sf_assert((int)runtime_reply>0,"runtime replies have an isolated endpoint");runtime_tests();
  int storage=sf_storage_start();if(!storage)for(;;){storage=sf_storage_mount();if(!storage)break;int next=sf_storage_restart_next();if(next){storage=next;break;}storage=0;}
  if(storage){sf_log("STORAGE UNAVAILABLE code=");sf_number(-storage);sf_log("\n");}
- else{sf_storage_tests();if(sf_storage_writable()){int r=sf_persist_start(spawn_storage_package);if(r){sf_log("PERSIST SPAWN FAILED code=");sf_number(-r);sf_log("\n");}r=sf_persist_mount(ns);if(r){sf_log("PERSIST UNAVAILABLE code=");sf_number(-r);sf_log("\n");}else sf_storage_write_tests();}int ep=sf_sys(SYS_EP_CREATE,0,0,0);int disk_module=spawn_echo("/disk/modules/disk-echo.sfmod",ep,RIGHT_RECV);
+ else if(!sf_storage_sfrw()){sf_storage_tests();if(sf_storage_writable()){int r=sf_persist_start(spawn_storage_package);if(r){sf_log("PERSIST SPAWN FAILED code=");sf_number(-r);sf_log("\n");}r=sf_persist_mount(ns);if(r){sf_log("PERSIST UNAVAILABLE code=");sf_number(-r);sf_log("\n");}else sf_storage_write_tests();}int ep=sf_sys(SYS_EP_CREATE,0,0,0);int disk_module=spawn_echo("/disk/modules/disk-echo.sfmod",ep,RIGHT_RECV);
   if(disk_module>0){int slot=sfmod_add(&manager,"org.spiritfox.disk-echo",0,0);sf_assert(slot>=0&&!sfmod_start(&manager,slot)&&!echo_call(ep,disk_module),"signed sfmod loaded from disk without bundle fallback");sfmod_prepare(&manager,slot);sfmod_stop(&manager,slot);sf_sys(SYS_KILL,disk_module,0,0);echo_forget(disk_module);sfmod_unload(&manager,slot);}else{sf_log("DISK PACKAGE REJECTED module code=");sf_number(-disk_module);sf_log("\n");}sf_sys(SYS_CAP_REVOKE,ep,0,0);
   int app=launch_app("/disk/bin/diskhello.sfk");if(app>0)sf_assert(wait_app(app)==0,"signed disk application runs through native runtime");else{sf_log("DISK PACKAGE REJECTED app code=");sf_number(-app);sf_log("\n");}}
  {int net=net_start();if(!net)sf_log("net: READY\n");else if(net!=SF_NOT_FOUND){sf_log("NET UNAVAILABLE code=");sf_number(-net);sf_log("\n");}}
  sf_assert(!sf_supervisor_init(&echo_watch,3,25,1000),"echo restart policy configured");sf_supervisor_enable(&echo_watch,sf_ticks(),1);echo_health_at=echo_after(sf_ticks(),100);
  sf_assert(!sf_supervisor_init(&native_watch,3,25,1000),"native restart policy configured");sf_supervisor_enable(&native_watch,sf_ticks(),1);native_health_at=echo_after(sf_ticks(),100);
- linux_compat_tests(storage==0);
+ linux_compat_tests(storage==0&&!sf_storage_sfrw());
  boot_splash();
  sf_log("BOOT TESTS PASSED\nSpiritFoxOS ready. Type help.\n");prompt();char line[192]={0};unsigned used=0;
  for(;;){echo_supervise();native_supervise();manager_serve();long c=sf_sys(SYS_CONSOLE_READ,0,0,0);

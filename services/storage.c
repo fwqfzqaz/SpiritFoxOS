@@ -17,7 +17,7 @@ static SfNamespace*ns;
 static SfModuleSpawn spawn;
 static uint32_t driver_reply,driver_ep,driver_pid,granted_device;
 static uint32_t fs_service_ep,fs_service_reply,fs_broker_ep,fs_broker_reply,fs_pid;
-static int driver_slot=-1,fs_slot=-1,mounted,fs_format_id,driver_kind=-1;
+static int driver_slot=-1,fs_slot=-1,mounted,fs_format_id,driver_kind=-1,disk_sfrw;
 /* 真实硬件：按 PCI class code 选择存储驱动。virtio 优先（开发/回归环境），
  * 其次 SATA AHCI，最后 NVMe。启动时逐个候选控制器尝试，直到挂载成功。 */
 enum {DRV_VIRTIO,DRV_AHCI,DRV_NVME};
@@ -81,12 +81,28 @@ int sf_storage_broker(unsigned timeout_ms){
  if(m.h.cap_count==1)sf_cap_close(m.handle);
  if(from!=(long)fs_pid)return SF_DENIED;
  if(m.h.opcode>=OP_NS_CB_CONSOLE&&m.h.opcode<=OP_NS_CB_STORAGE_LIVE)sf_ns_client_callback((uint32_t)from,&m);
- else if(m.h.flags!=fs_pid||m.h.size!=40||m.h.protocol_major!=1||m.h.protocol_minor||m.h.payload_bytes!=sizeof(m)-40||m.h.cap_count||
-         m.h.opcode!=OP_FS_BLOCK_READ||m.length!=256||(m.mode!=0&&m.mode!=256)||(m.offset&511)){m.status=SF_INVALID;m.length=0;}
- else{
-  uint8_t data[512];int r=sector(0,m.offset/512,data);m.status=r;
-  if(!r){memcpy(m.data,data+m.mode,256);m.length=256;}else m.length=0;
+ else if(m.h.flags!=fs_pid||m.h.size!=40||m.h.protocol_major!=1||m.h.protocol_minor||m.h.payload_bytes!=sizeof(m)-40||m.h.cap_count){m.status=SF_INVALID;m.length=0;}
+ else if(m.h.opcode==OP_FS_BLOCK_READ){
+  if(m.length!=256||(m.mode!=0&&m.mode!=256)||(m.offset&511)){m.status=SF_INVALID;m.length=0;}
+  else{uint8_t data[512];int r=sector(0,m.offset/512,data);m.status=r;
+   if(!r){memcpy(m.data,data+m.mode,256);m.length=256;}else m.length=0;}
  }
+ else if(m.h.opcode==OP_FS_BLOCK_WRITE){
+  uint32_t length=m.length;m.length=0;
+  if(!driver_pid||sf_sys(SYS_TASK_STATUS,driver_pid,0,0)!=SF_TASK_RUNNING)m.status=SF_DEVICE_GONE;
+  else if(!write_grant)m.status=SF_READ_ONLY;
+  else if(length!=256||(m.mode!=0&&m.mode!=256)||(m.offset&511)||!capacity||m.offset/512>=capacity/512)m.status=SF_INVALID;
+  else{SfMessage q;sf_message(&q,OP_BLOCK_WRITE,0);q.offset=m.offset;q.mode=m.mode;q.length=256;
+   memcpy(q.data,m.data,256);m.status=call(&q);}
+ }
+ else if(m.h.opcode==OP_FS_BLOCK_FLUSH){
+  uint32_t length=m.length;m.length=0;
+  if(!driver_pid||sf_sys(SYS_TASK_STATUS,driver_pid,0,0)!=SF_TASK_RUNNING)m.status=SF_DEVICE_GONE;
+  else if(!write_grant)m.status=SF_READ_ONLY;
+  else if(length||m.mode||m.offset)m.status=SF_INVALID;
+  else{SfMessage q;sf_message(&q,OP_BLOCK_FLUSH,0);m.status=call(&q);}
+ }
+ else{m.status=SF_INVALID;m.length=0;}
  m.h.cap_count=0;m.h.deadline_ns=0;
  int r=sf_send(fs_broker_reply,&m);return r?r:1;
 }
@@ -312,16 +328,24 @@ static long external_read(unsigned index,uint64_t offset,void*out,size_t bytes){
 }
 void sf_storage_init(SfManager*m,SfNamespace*n,SfModuleSpawn callback){if(sf_persist_fenced())return;manager=m;ns=n;spawn=callback;build_candidates();}
 void sf_storage_namespace_bind(SfNamespace*n){if(sf_persist_fenced())return;sf_ns_external(n,external_read,0,0);sf_ns_mount_hooks(n,mount_open,mount_close);}
+static int disk_is_sfrw(void){
+ uint8_t head[512];if(!capacity||sector(0,0,head))return 0;
+ return !memcmp(head,"SFRWFS1\0",8);
+}
 static int mount_disk_view(void){
  if(sf_persist_fenced())return SF_DRAINING;
  int r=fs_start();if(r)return r;r=fs_attach();if(r)return r;
+ int sfrw=disk_is_sfrw();
  if(write_grant){
-  uint8_t header[512],hash[32];r=sector(0,SF_TXN_HEADER,header);if(r)return r;sf_sha256(hash,header,480);
-  if(capacity!=SF_TXN_SECTORS*512ull||memcmp(header,"SFTXN1\0",8)||sf_u32(header+8)!=1||sf_u32(header+12)!=SF_TXN_SECTORS||memcmp(hash,header+480,32))return SF_BAD_FORMAT;
+  if(sfrw){r=sf_storage_write_range(0,capacity/512);if(r)return r;}
+  else{
+   uint8_t header[512],hash[32];r=sector(0,SF_TXN_HEADER,header);if(r)return r;sf_sha256(hash,header,480);
+   if(capacity!=SF_TXN_SECTORS*512ull||memcmp(header,"SFTXN1\0",8)||sf_u32(header+8)!=1||sf_u32(header+12)!=SF_TXN_SECTORS||memcmp(hash,header+480,32))return SF_BAD_FORMAT;
+  }
  }
- SfMessage m;sf_message(&m,OP_FS_MOUNT,0);m.offset=write_grant?SF_TXN_HEADER*512ull:0;r=fs_call(&m);if(r)return r;
- if(m.mode<SF_FS_FORMAT_SFRFS1||m.mode>SF_FS_FORMAT_SFRFS2||m.handle>SF_READFS_MAX_ENTRIES){sf_ns_peer_lost();return SF_BAD_FORMAT;}
- fs_format_id=(int)m.mode;return 0;
+ SfMessage m;sf_message(&m,OP_FS_MOUNT,0);m.offset=(write_grant&&!sfrw)?SF_TXN_HEADER*512ull:0;m.handle=write_grant?1:0;r=fs_call(&m);if(r)return r;
+ if(m.mode<SF_FS_FORMAT_SFRFS1||m.mode>SF_FS_FORMAT_SFRWFS1||m.handle>SF_READFS_MAX_ENTRIES){sf_ns_peer_lost();return SF_BAD_FORMAT;}
+ disk_sfrw=m.mode==SF_FS_FORMAT_SFRWFS1;fs_format_id=(int)m.mode;return 0;
 }
 int sf_storage_namespace_restore(void){
  if(sf_persist_fenced())return SF_DRAINING;
@@ -341,7 +365,7 @@ static int start_candidate(unsigned index,unsigned rights){
  int r=sfmod_start(manager,driver_slot);if(r)return r;driver_reply=sf_sys(SYS_EP_CREATE,0,0,0);if((int)driver_reply<0){r=(int)driver_reply;driver_reply=0;goto fail;}driver_ep=sf_sys(SYS_EP_CREATE,0,0,0);if((int)driver_ep<0){r=(int)driver_ep;goto fail;}
  int pid=spawn(driver_package(kind),driver_ep,RIGHT_RECV,device,rights,driver_reply);if(pid<0){r=pid;goto fail;}driver_pid=pid;granted_device=device;
  SfMessage message;sf_message(&message,OP_BLOCK_INFO,0);r=call(&message);if(r)goto fail;
- if(message.length!=sizeof(SfBlockInfo)){sf_log("[STORAGE] info length=");sf_number(message.length);sf_log("\n");r=SF_BAD_FORMAT;goto fail;}SfBlockInfo info;memcpy(&info,message.data,sizeof(info));if(info.sector_bytes!=512||info.readonly!=(rights?0u:1u)||!info.sectors||info.sectors>UINT64_MAX/512){sf_log("[STORAGE] info sectors=");sf_number(info.sectors);sf_log(" bytes=");sf_number(info.sector_bytes);sf_log(" ro=");sf_number(info.readonly);sf_log(" rights=");sf_number(rights);sf_log("\n");r=SF_BAD_FORMAT;goto fail;}capacity=info.sectors*512;write_grant=rights!=0;writable=0;
+ if(message.length!=sizeof(SfBlockInfo)){sf_log("[STORAGE] info length=");sf_number(message.length);sf_log("\n");r=SF_BAD_FORMAT;goto fail;}SfBlockInfo info;memcpy(&info,message.data,sizeof(info));if(info.sector_bytes!=512||info.readonly!=(rights?0u:1u)||!info.sectors||info.sectors>UINT64_MAX/512){sf_log("[STORAGE] info sectors=");sf_number(info.sectors);sf_log(" bytes=");sf_number(info.sector_bytes);sf_log(" ro=");sf_number(info.readonly);sf_log(" rights=");sf_number(rights);sf_log("\n");r=SF_BAD_FORMAT;goto fail;}capacity=info.sectors*512;write_grant=rights!=0;writable=0;disk_sfrw=0;
  sfmod_acquire(manager,driver_slot,RES_DMA);return 0;
 fail:
  if(driver_pid)sf_sys(SYS_KILL,driver_pid,SF_DEVICE_GONE,0);driver_pid=0;if((int)driver_ep>0)sf_sys(SYS_CAP_REVOKE,driver_ep,0,0);driver_ep=0;if(driver_reply)sf_sys(SYS_CAP_REVOKE,driver_reply,0,0);driver_reply=0;
@@ -366,6 +390,20 @@ int sf_storage_restart_next(void){
  if(candidate_next+1>=candidate_count){candidate_next=0;return SF_NOT_FOUND;}
  candidate_next++;return sf_storage_start();
 }
+int sf_storage_format(void){
+ if(sf_persist_fenced())return SF_DRAINING;
+ if(mounted)return SF_BUSY;
+ int r=0;
+ if(!driver_pid){r=sf_storage_start();if(r)return r;}
+ if(!write_grant)return SF_READ_ONLY;
+ if(!capacity||capacity%512)return SF_INVALID;
+ r=fs_start();if(r)return r;r=fs_attach();if(r)return r;
+ r=sf_storage_write_range(0,capacity/512);if(r)return r;
+ SfMessage m;sf_message(&m,OP_FS_FORMAT,0);r=fs_call(&m);if(r)return r;
+ if(m.mode!=SF_FS_FORMAT_SFRWFS1||m.handle)return SF_BAD_FORMAT;
+ return 0;
+}
+int sf_storage_sfrw(void){return disk_sfrw;}
 int sf_storage_mount(void){
  if(sf_persist_fenced())return SF_DRAINING;
  if(mounted)return SF_BUSY;if(!driver_pid)return SF_DEVICE_GONE;
@@ -382,7 +420,7 @@ int sf_storage_unmount(void){
  int r=sf_ns_unmount(ns,1);if(r){mount_admission=1;return r;}
  SfMessage m;sf_message(&m,OP_FS_STOP,0);r=fs_call(&m);if(r){sf_ns_peer_lost();return r;}
  if(mount_driver_lease){r=sfmod_release(manager,driver_slot,RES_LEASE);if(r)return r;mount_driver_lease=0;}
- mounted=0;writable=0;sf_persist_driver_down();return 0;
+ mounted=0;writable=0;disk_sfrw=0;sf_persist_driver_down();return 0;
 }
 int sf_storage_stop(void){
  if(sf_persist_fenced())return SF_DRAINING;
@@ -394,7 +432,7 @@ int sf_storage_stop(void){
   * device cleanup before recycling that slot; its quarantine still gates grants. */
  if(r==SF_NOT_FOUND)r=0;
  if(r){manager->modules[driver_slot].state=MOD_QUARANTINED;return r;}
- sfmod_release(manager,driver_slot,RES_DMA);r=sfmod_stop(manager,driver_slot);if(r)return r;sf_sys(SYS_KILL,driver_pid,0,0);sf_sys(SYS_CAP_REVOKE,driver_ep,0,0);sf_sys(SYS_CAP_REVOKE,driver_reply,0,0);driver_pid=driver_ep=driver_reply=0;mounted=0;writable=0;sf_persist_driver_down();return 0;
+ sfmod_release(manager,driver_slot,RES_DMA);r=sfmod_stop(manager,driver_slot);if(r)return r;sf_sys(SYS_KILL,driver_pid,0,0);sf_sys(SYS_CAP_REVOKE,driver_ep,0,0);sf_sys(SYS_CAP_REVOKE,driver_reply,0,0);driver_pid=driver_ep=driver_reply=0;mounted=0;writable=0;disk_sfrw=0;sf_persist_driver_down();return 0;
 }
 long sf_storage_load(const char*path,void*out,size_t capacity_bytes){
  if(sf_persist_fenced())return SF_DRAINING;

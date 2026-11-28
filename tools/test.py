@@ -62,8 +62,8 @@ host_test('test_namespace_handles','tests/host/test_namespace_handles.c','servic
 host_test('test_namespace_restart','tests/host/test_namespace_restart.c','services/namespace_handles.c','services/namespace.c')
 host_test('test_namespace_control','tests/host/test_namespace_control.c','services/namespace_client.c','services/namespace_handles.c','services/namespace_control.c','services/namespace.c',include_services=True)
 host_test('test_namespace_frontend','tests/host/test_namespace_frontend.c','services/namespace_client.c','services/namespace_handles.c','services/namespace_frontend.c',include_services=True)
-host_test('test_namespace_runtime','tests/host/test_namespace_runtime.c','services/namespace_client.c','services/namespace_handles.c','services/namespace_runtime.c','services/namespace_control.c','services/namespace.c',include_services=True)
-host_test('test_namespace_process','tests/host/test_namespace_process.c','services/namespace_client.c','services/namespace_handles.c','services/namespace_runtime.c','services/namespace_control.c','services/namespace.c','services/fs_format.c','services/readfs.c',*build.CRYPTO,include_services=True)
+host_test('test_namespace_runtime','tests/host/test_namespace_runtime.c','services/namespace_client.c','services/namespace_handles.c','services/namespace_runtime.c','services/namespace_control.c','services/namespace.c','services/sfrw.c',include_services=True)
+host_test('test_namespace_process','tests/host/test_namespace_process.c','services/namespace_client.c','services/namespace_handles.c','services/namespace_runtime.c','services/namespace_control.c','services/namespace.c','services/fs_format.c','services/readfs.c','services/sfrw.c',*build.CRYPTO,include_services=True)
 host_test('test_namespace_transport','tests/host/test_namespace_transport.c','services/namespace_transport.c',include_services=True)
 host_test('test_emergency_console','tests/host/test_emergency_console.c','services/emergency_console.c',include_services=True)
 host_test('test_accounts','tests/host/test_accounts.c','services/accounts.c')
@@ -86,6 +86,7 @@ host_test('test_storage','tests/host/test_storage.c','services/namespace.c',no_u
 host_test('test_txn','tests/host/test_txn.c','services/txn.c',no_unused=True)
 host_test('test_txn_compat','tests/host/test_txn_compat.c','services/txn.c',no_unused=True)
 host_test('test_sfrw','tests/host/test_sfrw.c','services/sfrw.c',no_unused=True)
+host_test('test_fs_rw','tests/host/test_fs_rw.c','services/sfrw.c',no_unused=True,include_services=True)
 host_test('test_update','tests/host/test_update.c','services/update.c','services/txn.c',no_unused=True)
 host_test('test_persist_metadata','tests/host/test_persist_metadata.c','services/storage_reply_owner.c','tests/host/persist_volume_fixture.c','services/persist_metadata.c','services/namespace.c','services/txn.c','services/update.c','services/version.c',*build.CRYPTO,no_unused=True)
 host_test('test_persist_write_reply','tests/host/test_persist_write_reply.c','services/storage_reply_owner.c','services/namespace.c',*build.CRYPTO,no_unused=True)
@@ -190,6 +191,7 @@ QEMU_BASELINE = [
     'qemu_echo_channel_test.py',
     'qemu_block_channel_test.py',
     'qemu_file_rpc_test.py',
+    'qemu_sfrwfs_test.py',
     'qemu_file_peer_test.py',
     'qemu_native_test.py',
     'qemu_posix_test.py',

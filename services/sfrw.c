@@ -110,7 +110,8 @@ static int meta_write(Sfrw*s,uint32_t target,const uint8_t*data){
 static int commit(Sfrw*s){
  if(!s->mounted)return SF_DEVICE_GONE;
  if(!s->dirty&&!s->journal_count)return 0;
- if(s->journal_count+4>SF_RW_JOURNAL_MAX)return SF_NO_SPACE;
+ /* 目标集溢出时不得继续以未提交内存状态运行：失败关闭，重挂载得到旧状态。 */
+ if(s->journal_count+4>SF_RW_JOURNAL_MAX){s->mounted=0;return SF_COMMIT_UNCERTAIN;}
  uint64_t generation=s->generation+1;
  super_build(s,s->aux,generation);
  int r=meta_write(s,SF_RW_BITMAP_BLOCK,s->bitmap);
@@ -477,12 +478,20 @@ int sf_rw_mount(Sfrw*s,SfrwDev dev){
  for(uint32_t i=s->block_count;i<SF_RW_MAX_BLOCKS;i++)if(bit_get(s,i))return SF_BAD_FORMAT;
  if(bitmap_free(s)!=s->free_blocks)return SF_BAD_FORMAT;
  uint32_t free_inodes=0;
- for(uint32_t ino=1;ino<SF_RW_MAX_INODES;ino++){
-  Inode ip;r=inode_read(s,ino,&ip);if(r)return r;
-  if(!ip.mode){free_inodes++;continue;}
-  r=validate_inode(s,ino,&ip);if(r)return r;
-  uint32_t n;r=inode_block_count(s,&ip,&n);if(r)return r;
-  r=usage_add(s,ip.uid,n,1);if(r)return r;
+ /* One block read per 32 inodes: identical verification to inode_read() in a
+  * loop, but avoids re-reading the same table block for every inode. */
+ for(uint32_t blk=0;blk<SF_RW_INODE_TABLE_BLOCKS;blk++){
+  r=meta_read(s,SF_RW_INODE_TABLE_BLOCK+blk,s->aux);if(r)return r;
+  for(uint32_t slot=0;slot<SF_RW_INODES_PER_BLOCK;slot++){
+   uint32_t ino=blk*SF_RW_INODES_PER_BLOCK+slot;
+   if(!ino)continue;
+   if(ino>=SF_RW_MAX_INODES)break;
+   Inode ip;inode_decode(s->aux+slot*SF_RW_INODE_BYTES,&ip);
+   if(!ip.mode){free_inodes++;continue;}
+   r=validate_inode(s,ino,&ip);if(r)return r;
+   uint32_t n;r=inode_block_count(s,&ip,&n);if(r)return r;
+   r=usage_add(s,ip.uid,n,1);if(r)return r;
+  }
  }
  if(free_inodes!=s->free_inodes)return SF_BAD_FORMAT;
  Inode root;r=inode_read(s,SF_RW_ROOT,&root);if(r)return r;
@@ -756,6 +765,15 @@ int sf_rw_unlink(Sfrw*s,const char*path,uint32_t uid){
  if(type==SF_RW_ENTRY_DIR)return SF_INVALID;
  Inode ip;r=inode_read(s,ino,&ip);if(r)return r;
  if((ip.mode&SF_RW_TYPE_MASK)!=SF_RW_TYPE_FILE)return SF_INVALID;
+ /* 硬链接：仅最后一个链接释放数据块与 inode。 */
+ if(ip.links>1){
+  ip.links--;
+  r=inode_write(s,ino,&ip);
+  if(r){s->mounted=0;return SF_COMMIT_UNCERTAIN;}
+  r=dir_remove(s,pino,name);
+  if(r){s->mounted=0;return SF_COMMIT_UNCERTAIN;}
+  return commit(s);
+ }
  uint32_t owner=ip.uid;
  r=free_inode_blocks(s,&ip);
  if(r){s->mounted=0;return SF_COMMIT_UNCERTAIN;}
@@ -858,12 +876,18 @@ int sf_rw_rename(Sfrw*s,const char*from,const char*to,uint32_t uid){
  if(dst_exists){
   r=dir_remove(s,tpino,tn);if(r)return r;
   Inode dip;r=inode_read(s,dst,&dip);if(r)goto fatal;
-  uint32_t downer=dip.uid;
-  r=free_inode_blocks(s,&dip);if(r)goto fatal;
-  Inode empty;memset(&empty,0,sizeof(empty));
-  r=inode_write(s,dst,&empty);if(r)goto fatal;
-  s->free_inodes++;
-  usage_release(s,downer,0,1);
+  if(!dst_dir&&dip.links>1){
+   /* 被替换文件仍有其他硬链接：只递减链接计数。 */
+   dip.links--;
+   r=inode_write(s,dst,&dip);if(r)goto fatal;
+  }else{
+   uint32_t downer=dip.uid;
+   r=free_inode_blocks(s,&dip);if(r)goto fatal;
+   Inode empty;memset(&empty,0,sizeof(empty));
+   r=inode_write(s,dst,&empty);if(r)goto fatal;
+   s->free_inodes++;
+   usage_release(s,downer,0,1);
+  }
  }
  r=dir_add(s,tpino,tn,src,src_dir?SF_RW_ENTRY_DIR:SF_RW_ENTRY_FILE);
  if(r)goto fatal;
@@ -895,6 +919,64 @@ int sf_rw_rename(Sfrw*s,const char*from,const char*to,uint32_t uid){
  return commit(s);
 fatal:
  s->mounted=0;return SF_COMMIT_UNCERTAIN;
+}
+int sf_rw_link(Sfrw*s,const char*existing,const char*newpath,uint32_t uid){
+ if(!s||!s->mounted)return SF_DEVICE_GONE;
+ if(!existing||!newpath||!path_ok(existing)||!path_ok(newpath))return SF_INVALID;
+ char xn[SF_RW_NAME_MAX+1],nn[SF_RW_NAME_MAX+1];
+ uint32_t xpino,npino;
+ int r=resolve_parent(s,existing,uid,&xpino,xn);if(r)return r;
+ r=resolve_parent(s,newpath,uid,&npino,nn);if(r)return r;
+ Inode ndp;r=inode_read(s,npino,&ndp);if(r)return r;
+ if(!allowed(&ndp,uid,3))return SF_DENIED;
+ uint32_t src;uint8_t stype;
+ r=dir_find(s,xpino,xn,&src,&stype,0,0);if(r)return r;
+ if(stype!=SF_RW_ENTRY_FILE)return SF_INVALID;
+ Inode ip;r=inode_read(s,src,&ip);if(r)return r;
+ if((ip.mode&SF_RW_TYPE_MASK)!=SF_RW_TYPE_FILE)return SF_INVALID;
+ r=dir_find(s,npino,nn,0,0,0,0);
+ if(r==0)return SF_INVALID;
+ if(r!=SF_NOT_FOUND)return r;
+ uint32_t grow;r=dir_can_add(s,npino,&grow);if(r)return r;
+ if(s->free_blocks<grow)return SF_NO_SPACE;
+ r=dir_add(s,npino,nn,src,SF_RW_ENTRY_FILE);
+ if(r)return fail_after(s,r);
+ ip.links++;
+ r=inode_write(s,src,&ip);
+ if(r){s->mounted=0;return SF_COMMIT_UNCERTAIN;}
+ return commit(s);
+}
+int sf_rw_chmod(Sfrw*s,uint32_t ino,uint32_t uid,uint16_t mode){
+ if(!s||!s->mounted)return SF_DEVICE_GONE;
+ if(mode&~SF_RW_PERM_MASK)return SF_INVALID;
+ Inode ip;int r=inode_read(s,ino,&ip);if(r)return r;
+ if(!ip.mode)return SF_NOT_FOUND;
+ if(uid!=0&&ip.uid!=uid)return SF_DENIED;
+ if((ip.mode&SF_RW_PERM_MASK)==mode)return 0;
+ ip.mode=(uint16_t)((ip.mode&SF_RW_TYPE_MASK)|mode);
+ r=inode_write(s,ino,&ip);
+ if(r){s->mounted=0;return SF_COMMIT_UNCERTAIN;}
+ return commit(s);
+}
+int sf_rw_chown(Sfrw*s,uint32_t ino,uint32_t uid,uint32_t new_uid,uint32_t new_gid){
+ if(!s||!s->mounted)return SF_DEVICE_GONE;
+ if(uid!=0)return SF_DENIED;
+ Inode ip;int r=inode_read(s,ino,&ip);if(r)return r;
+ if(!ip.mode)return SF_NOT_FOUND;
+ if(ip.uid==new_uid&&ip.gid==new_gid)return 0;
+ if(new_uid!=ip.uid){
+  uint32_t n;r=inode_block_count(s,&ip,&n);if(r)return r;
+  /* 先按目标 uid 校验配额并确认可跟踪，再迁移占用。 */
+  r=usage_check(s,new_uid,n,1);if(r)return r;
+  SfrwUsage*nu=usage_slot(s,new_uid,1);if(!nu)return SF_NO_SPACE;
+  usage_release(s,ip.uid,n,1);
+  nu->blocks+=n;nu->inodes+=1;
+  ip.uid=new_uid;
+ }
+ ip.gid=new_gid;
+ r=inode_write(s,ino,&ip);
+ if(r){s->mounted=0;return SF_COMMIT_UNCERTAIN;}
+ return commit(s);
 }
 int sf_rw_set_quota(Sfrw*s,uint32_t uid,uint32_t target,uint32_t blocks,uint32_t inodes){
  if(!s||!s->mounted)return SF_DEVICE_GONE;
@@ -965,6 +1047,24 @@ int sf_rw_fsck(Sfrw*s,SfrwDev dev,SfckReport*report){
    uint32_t blk;
    r=block_map(s,&ip,lb,&blk);
    if(r||!blk)continue;
+   /* 目录块指针必须落在数据区，坏指针只报告不读写元数据区。 */
+   if(blk<SF_RW_DATA_BLOCK||blk>=s->block_count){
+    /* 坏目录块：绝不读写元数据区；直接块可用新数据块替换后写回 inode。 */
+    report->bad_entries++;
+    if(lb<SF_RW_DIRECT_BLOCKS){
+     uint32_t fresh=block_alloc(s);
+     if(fresh){
+      memset(s->block,0,SF_RW_BLOCK_BYTES);
+      p32(s->block,dir);s->block[4]=1;s->block[5]=SF_RW_ENTRY_DIR;s->block[8]='.';
+      p32(s->block+128,SF_RW_ROOT);s->block[132]=2;s->block[133]=SF_RW_ENTRY_DIR;s->block[136]='.';s->block[137]='.';
+      r=fsck_meta(s,fresh,s->block);if(r)goto failed;
+      ip.direct[lb]=fresh;
+      r=inode_write(s,dir,&ip);if(r)goto failed;
+      report->repaired++;
+     }
+    }
+    continue;
+   }
    r=meta_read(s,blk,s->block);if(r)goto failed;
    int modified=0;
    for(uint32_t i=0;i<SF_RW_BLOCK_BYTES/128;i++){
@@ -1025,10 +1125,13 @@ int sf_rw_fsck(Sfrw*s,SfrwDev dev,SfckReport*report){
   r=inode_read(s,ino,&ip);if(r)goto failed;
   if(!ip.mode)continue;
   report->used_inodes++;
+  uint32_t need=ip.size?(uint32_t)((ip.size+SF_RW_BLOCK_BYTES-1)/SF_RW_BLOCK_BYTES):0;
   uint32_t used=0;int changed=0;
   int file_inode=(ip.mode&SF_RW_TYPE_MASK)==SF_RW_TYPE_FILE;
   for(uint32_t i=0;i<SF_RW_DIRECT_BLOCKS;i++){
    uint32_t b=ip.direct[i];if(!b)continue;
+   /* size 之外（或目录块数之外）的指针清零，不加入引用位图，随位图重建回收。 */
+   if(i>=need){ip.direct[i]=0;changed=1;report->repaired++;continue;}
    if(b<SF_RW_DATA_BLOCK||b>=s->block_count){ip.direct[i]=0;changed=1;report->repaired++;continue;}
    if(ref_get(s,b)){
     report->duplicate_blocks++;
@@ -1038,24 +1141,30 @@ int sf_rw_fsck(Sfrw*s,SfrwDev dev,SfckReport*report){
    ref_set(s,b);used++;
   }
   if(ip.indirect){
-   uint32_t b=ip.indirect;
-   if(b<SF_RW_DATA_BLOCK||b>=s->block_count){
+   if(need<=SF_RW_DIRECT_BLOCKS){
+    /* 不需要间接块：间接块本体与表项都不再引用。 */
     ip.indirect=0;changed=1;report->repaired++;
    }else{
-    if(ref_get(s,b))report->duplicate_blocks++;else{ref_set(s,b);used++;}
-    r=meta_read(s,b,s->indirect);if(r)goto failed;
-    int im=0;
-    for(uint32_t i=0;i<SF_RW_INDIRECT_ENTRIES;i++){
-     uint32_t e=g32(s->indirect+4*i);if(!e)continue;
-     if(e<SF_RW_DATA_BLOCK||e>=s->block_count){p32(s->indirect+4*i,0);im=1;report->repaired++;continue;}
-     if(ref_get(s,e)){
-      report->duplicate_blocks++;
-      if(file_inode){p32(s->indirect+4*i,0);im=1;report->repaired++;}
-      continue;
+    uint32_t b=ip.indirect;
+    if(b<SF_RW_DATA_BLOCK||b>=s->block_count){
+     ip.indirect=0;changed=1;report->repaired++;
+    }else{
+     if(ref_get(s,b))report->duplicate_blocks++;else{ref_set(s,b);used++;}
+     r=meta_read(s,b,s->indirect);if(r)goto failed;
+     int im=0;
+     for(uint32_t i=0;i<SF_RW_INDIRECT_ENTRIES;i++){
+      uint32_t e=g32(s->indirect+4*i);if(!e)continue;
+      if(SF_RW_DIRECT_BLOCKS+i>=need){p32(s->indirect+4*i,0);im=1;report->repaired++;continue;}
+      if(e<SF_RW_DATA_BLOCK||e>=s->block_count){p32(s->indirect+4*i,0);im=1;report->repaired++;continue;}
+      if(ref_get(s,e)){
+       report->duplicate_blocks++;
+       if(file_inode){p32(s->indirect+4*i,0);im=1;report->repaired++;}
+       continue;
+      }
+      ref_set(s,e);used++;
      }
-     ref_set(s,e);used++;
+     if(im){r=fsck_meta(s,b,s->indirect);if(r)goto failed;}
     }
-    if(im){r=fsck_meta(s,b,s->indirect);if(r)goto failed;}
    }
   }
   uint32_t expected=(ip.mode&SF_RW_TYPE_MASK)==SF_RW_TYPE_DIR?2u+s->subdirs[ino]:s->refs[ino];

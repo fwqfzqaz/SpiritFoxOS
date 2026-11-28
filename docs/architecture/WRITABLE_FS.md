@@ -1,11 +1,13 @@
-# 通用可写文件系统 SFRWFS1（格式核心 v1）
+# 通用可写文件系统 SFRWFS1（格式核心 v1 + sf-fs 集成）
 
 2026-11-27。SFRWFS1 是仓库内第一个通用可写文件系统格式，实现于
 [include/sfrw.h](../../include/sfrw.h) 与 [services/sfrw.c](../../services/sfrw.c)，
-由宿主 [test_sfrw.c](../../tests/host/test_sfrw.c) 在内存设备上验证。本轮只交付
-格式核心库，**不接入** `sf-fs`/`namespace` 服务进程，也不新增 IPC 操作码或 ABI
-常量；服务集成、真实块设备与 QEMU 集成留待后续切片。已有的 SFRFS1/SFRFS2 只读
-格式与双银行事务卷见 [STORAGE](STORAGE.md) 与 [PERSISTENCE](PERSISTENCE.md)。
+由宿主 [test_sfrw.c](../../tests/host/test_sfrw.c) 在内存设备上验证。v1 交付格式
+核心库；v1.1 在不改变磁盘格式与既有 API 语义的前提下修复 fsck/提交缺陷，并补齐
+`link`/`chmod`/`chown`。2026-11-28 完成 **Phase 1 sf-fs 集成**：专用可写盘的
+SFRWFS1 卷以 `/disk` 挂载，可读写已有文件，`mkfs /disk` 格式化空白盘，并在 QEMU
+中验证重启后持久化。已有的 SFRFS1/SFRFS2 只读格式与双银行事务卷见
+[STORAGE](STORAGE.md) 与 [PERSISTENCE](PERSISTENCE.md)。
 
 设计原则与本仓库其余部分一致：容量有界、错误显式、失败关闭；每个写/刷盘边界都
 可注入故障，验证崩溃后只能观察到旧状态或新状态之一。
@@ -77,6 +79,9 @@ inode 128 B：`mode u16 @0`（`0x4000` 目录 / `0x8000` 文件，低 12 位权�
 5. 逐目标读回 payload 并写到目标块，`flush`；
 6. 写零头，`flush`。
 
+若提交目标集将超过 16 槽（`journal_count+4>16`），立即置未挂载并返回
+`SF_COMMIT_UNCERTAIN`，不接受后续操作，重挂载得到旧状态，不以未提交内存状态继续。
+
 恢复时若日志头 magic 与校验和有效且 `state==1`，逐项校验目标（不得落入日志区）、
 长度与 payload 哈希后幂等重放并清头；撕裂或校验不符的头被忽略。任一步设备失败即
 置 `mounted=0`、返回 `SF_COMMIT_UNCERTAIN`，不再接受后续操作。`generation` 每次
@@ -104,6 +109,14 @@ inode 128 B：`mode u16 @0`（`0x4000` 目录 / `0x8000` 文件，低 12 位权�
 - `rename` 在一次提交内暂存源/目标目录块、相关 inode、位图与超级块；支持同目录
   改名、跨目录、替换已存在文件、替换空目录；移动目录时更新其 `..` 与双方链接
   计数；拒绝把目录移入自身子树、拒绝替换非空目录。
+- `sf_rw_link(existing,newpath,uid)` 为普通文件创建硬链接：要求目标父目录 `w|x`、
+  目标名不存在、链接源为普通文件，单次提交内 `dir_add` 并 `links++`。
+  `unlink` 与 `rename` 替换目标时按链接计数处理：仅最后一个链接释放数据块与
+  inode，其余只递减计数。
+- `sf_rw_chmod(ino,uid,mode)` 仅接受低 9 位权限位，拒绝设置类型位；uid 0 或文件
+  所有者可调用。`sf_rw_chown(ino,uid,new_uid,new_gid)` 仅 uid 0；变更所有者前按
+  目标 uid 校验配额并确认可跟踪，再迁移 `usage`，配额不足返回 `SF_NO_SPACE` 且
+  不改动 inode。
 
 ## 配额
 
@@ -115,11 +128,14 @@ uid 0 豁免。创建 inode 时检查 inode 配额，分配块时按 COW 净增�
 
 `sf_rw_fsck` 先宽松加载并重放日志，然后：
 
-1. 从根目录 BFS 标记可达 inode，删除坏目录项，统计子目录数；
+1. 从根目录 BFS 标记可达 inode，删除坏目录项，统计子目录数；目录块指针必须落在
+   数据区，越界或指向元数据区的块只报告并跳过，绝不读写元数据块；直接块可用新
+   分配的数据块替换并写回 inode；
 2. 只为可达 inode 建立引用位图，检测重复块（低 inode 优先；对重复的文件 inode
-   清除其直接/间接指针以便修复，目录重复块只报告不清除指针）；
+   清除其直接/间接指针以便修复，目录重复块只报告不清除指针）；`size` 之外的
+   direct/间接指针先清零且不计引用，避免不可达块被永久占用；
 3. 清理不可达 inode、重建位图与 `free_blocks`/`free_inodes` 及配额占用、修正
-   目录链接计数；
+   目录链接计数（按目录项计数，天然支持硬链接多引用）；
 4. 按每批 ≤16 个日志目标分批提交，操作幂等。
 
 报告 `SfckReport` 含 `checked_inodes`、`used_inodes`、`used_blocks`、`free_blocks`、
@@ -150,16 +166,53 @@ uid 0 豁免。创建 inode 时检查 inode 配额，分配块时按 COW 净增�
 - rename 同目录/跨目录/替换文件/替换空目录/移动目录 `..` 正确/拒绝移入子树/
   拒绝覆盖非空目录；
 - fsck 干净卷零修复，以及坏指针/重复块/不可达 inode/坏目录项注入后修复；
+- 硬链接（同/跨目录创建、目标已存在、目录源、非属主拒绝、计数持久化与最后一个
+  链接释放）、`chmod` 权限与类型位/非属主拒绝、`chown` 仅 uid 0、配额不足失败且
+  不改动；
+- fsck 坏目录块指向 inode 表时不改写元数据、可替换修复；`size` 之外指针清零且不
+  计入重复块；
 - 崩溃一致性：以 create+write 与 rename 为样本，对每个写/刷盘边界 × 3 种故障
-  模式注入，重挂载（必要时 fsck）后断言“旧状态或新状态”之一，内容不得混合；
-  日志已提交后中途失败必须重放为新状态。
+  模式注入，另以固定种子伪随机采样 256 边界 × 2 场景；重挂载（必要时 fsck）后
+  断言“旧状态或新状态”之一，内容不得混合；日志已提交后中途失败必须重放为新状态。
 
 测试以 `SFRW PASS: N checks, ...` 输出，并由 [tools/test.py](../../tools/test.py)
 的 `host_test('test_sfrw', ...)` 纳入宿主回归。
 
-## 非目标（v1）
+## sf-fs 集成（Phase 1）
 
-- 不接入 `sf-fs`/`namespace` 服务、不新增 IPC 操作码或 ABI 常量、不改 `build.py`
-  的 `sf-fs` 镜像组成。
-- 不提供并发/多线程挂载、崩溃后自动 fsck、扩展属性、硬链接、组权限与 ACL。
-- 格式核心 v1 仅通过宿主故障注入验证；真实块设备与 QEMU 集成留待后续切片。
+集成切片只覆盖“挂载 + 已有文件读写”，目录创建/删除/改名不在范围内。
+
+- **IPC**：`include/sf.h` 追加 `OP_FS_BLOCK_WRITE=117`、`OP_FS_BLOCK_FLUSH=118`、
+  `OP_FS_FORMAT=119`；`include/fs_format.h` 新增 `SF_FS_FORMAT_SFRWFS1=3`。ABI 快照
+  工具不收录这些操作码，`abi/x86_64-current.json` 保持不变。
+- **块适配**：[services/fs_rw.h](../../services/fs_rw.h) 提供 4096 B↔512 B 适配，
+  每块按 8 个 512 B 扇区转换，扇区再拆为两次 256 B 半块请求（`mode∈{0,256}`）。
+- **sf-fs**：[fs_main.c](../../services/fs_main.c) 常驻只保存 `Sfrw` 卷状态；只读镜像
+  的整文件校验缓冲按挂载时的最大文件 `sf_mmap`/`sf_munmap` 临时映射，避免为 SFRWFS1
+  常驻 1 MiB，进程载入从约 1.2 MiB 降到约 292 KiB。`OP_FS_MOUNT` 先探测扇区 0 的
+  `SFRWFS1\0`，命中则挂载并发布，请求 `handle` 承载可写标志，回复 `mode=3`、
+  `handle=0`；`OP_FS_FORMAT` 要求未挂载、4096 B 对齐、块数在 128..65536、扇区 0
+  全零，格式化后写入 `/etc/readme.txt` 种子；`OP_FS_STOP` 先 `fsync` 再解除发布。
+- **namespace**：[namespace_runtime.c](../../services/namespace_runtime.c) 以
+  `0x80000000|inode` 识别 SFRWFS1 节点（显式排除 `UINT32_MAX` 旧 broker 哨兵），
+  后端以 uid 0 调 `sf_rw_read/write/truncate`；`sf_nsv_publish_rw` 以 BFS 发布
+  `/disk` 树，文件 `readonly=writable?0:1`、目录恒只读。根前台只声明读后端，因此
+  挂载可写卷时由运行时直接安装自身的读/写/截断后端。
+- **storage**：[storage.c](../../services/storage.c) 的 broker 仅接受来自 `fs_pid`
+  的写/刷盘请求，要求 `write_grant && driver_pid`；写请求校验 512 B 对齐、
+  `length==256`、半块偏移与容量边界后组装驱动 `OP_BLOCK_WRITE`。SFRWFS1 盘跳过节
+  2048 的 `SFTXN1` 校验并把写范围设为整盘；`sf_storage_format()` 供 `mkfs` 调用。
+- **init**：新增 `mkfs /disk`；SFRWFS1 盘跳过 persist attach、存储写测试与 Linux
+  兼容库断言（空白卷无这些库），避免误判。
+- **QEMU**：[qemu_sfrwfs_test.py](../../tests/qemu/qemu_sfrwfs_test.py) 以 4 MiB
+  空白可写盘启动，`mkfs` → `cat` 种子 → `write` 修改 → `unmount`，同镜像重启自动
+  挂载后读回新内容，并断言镜像哈希变化。
+
+挂载时的 inode 校验按 inode 表块批读：每 32 个 inode 只读一次 4 KiB 块，语义与逐个
+`inode_read` 相同，但在 QEMU/TCG 下把 1024 次块读降为 32 次。
+
+## 非目标
+
+- Phase 1 不实现 SFRWFS1 上的目录创建/删除/改名、符号链接、并发/多线程挂载、
+  扩展属性与 ACL；目录条目发布为只读。
+- 格式核心不提供崩溃后自动 fsck；`sf-fs` 挂载失败时显式 `sf_rw_fsck` 后重试一次。

@@ -8,6 +8,15 @@ static long sf_cap_close(uint64_t);
 static uint64_t sf_deadline(unsigned ms){return 10000000ull+(uint64_t)ms*1000000;}
 static void sf_message(SfMessage*m,unsigned op,uint64_t id){memset(m,0,sizeof(*m));m->h.size=40;m->h.protocol_major=1;m->h.opcode=op;m->h.request_id=id;m->h.payload_bytes=sizeof(*m)-40;m->h.deadline_ns=sf_deadline(3000);}
 static void sf_log(const char*s){(void)s;}
+/* fs_main checks a read-only image through a bounded staging mapping. */
+static uint8_t mount_verify[1024*1024];
+static long sf_mmap(uint64_t addr,uint64_t bytes){
+ if(addr||!bytes||bytes>sizeof(mount_verify))return SF_INVALID;
+ memset(mount_verify,0,sizeof(mount_verify));return(long)(uintptr_t)mount_verify;
+}
+static long sf_munmap(uint64_t addr,uint64_t bytes){
+ return addr==(uint64_t)(uintptr_t)mount_verify&&bytes<=sizeof(mount_verify)?0:SF_INVALID;
+}
 #include "fs_main.c"
 #include "namespace_client.h"
 static SfNsClient client;

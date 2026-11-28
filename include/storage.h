@@ -14,6 +14,10 @@ int sf_storage_namespace_crash(void);
 int sf_storage_start(void);
 int sf_storage_restart_next(void);
 int sf_storage_mount(void);
+/* mkfs the attached writable device as SFRWFS1; only accepts a blank disk. */
+int sf_storage_format(void);
+/* Nonzero once the mounted volume is SFRWFS1 rather than a read-only SFRFS*. */
+int sf_storage_sfrw(void);
 int sf_storage_unmount(void);
 int sf_storage_stop(void);
 long sf_storage_load(const char*,void*,size_t);
