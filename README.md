@@ -3,12 +3,12 @@
 [![Linux](https://github.com/fwqfzqaz/SpiritFoxOS/actions/workflows/linux.yml/badge.svg?branch=main)](https://github.com/fwqfzqaz/SpiritFoxOS/actions/workflows/linux.yml)
 [![Windows](https://github.com/fwqfzqaz/SpiritFoxOS/actions/workflows/windows.yml/badge.svg?branch=main)](https://github.com/fwqfzqaz/SpiritFoxOS/actions/workflows/windows.yml)
 [![Design](https://img.shields.io/badge/design-v0.2-blue)](docs/design/DESIGN-v0.2.md)
-[![Status](https://img.shields.io/badge/status-v0.3%20modularization-orange)](docs/project/ROADMAP.md)
+[![Status](https://img.shields.io/badge/status-v0.3%20ceiling-raising-orange)](docs/project/ROADMAP.md)
 [![License](https://img.shields.io/badge/license-GPL--3.0--only-blue)](LICENSE)
 
-面向 x86_64 UEFI 的**微内核操作系统原型**。Core 0 只保留内存、IPC、设备与 ACPI/VT-d；文件系统、持久化、驱动、native 运行时和网络协议运行在 ring-3 的 `.sfmod` 中；应用以签名 `.sfk` 包从只读磁盘验证后装载。
+面向 x86_64 UEFI 的**微内核操作系统原型**。**只有一个核心：极简的 Core 0**；文件系统、持久化、驱动、native 运行时和网络协议全部是 ring-3 `.sfmod` 模块；应用以签名 `.sfk` 包交付，**依托模块提供的运行时与服务运行**。
 
-> 当前仍是研究型原型，不是生产系统。项目的最终目标是**实用级操作系统**：可在真实 x86_64 UEFI 机器上安装、日常使用、持续升级并在故障后恢复；目标定义、验收矩阵与 v0.4–v1.0 阶段见[目标纲要](docs/project/GOALS.md)。M0–M7 纵向切片已交付，当前为 `v0.3` 模块化收尾与运行时加固，执行拆解见[路线图](docs/project/ROADMAP.md)；完整边界见[实现说明](docs/architecture/IMPLEMENTATION.md)。
+> 当前仍是研究型原型，不是生产系统。开发方向是**提高系统上限**：抬升容量、存储、硬件、性能与可靠性上限，而不是继续增加演示切片。阶段拆解见[路线图](docs/project/ROADMAP.md)，分层模型与当前硬上限见[系统分层](docs/architecture/OVERVIEW.md)，最终目标与验收矩阵见[目标纲要](docs/project/GOALS.md)。M0–M7 纵向切片已交付，当前为 `v0.3` 模块化收尾与上限度量；完整边界见[实现说明](docs/architecture/IMPLEMENTATION.md)。
 
 ## 亮点
 
